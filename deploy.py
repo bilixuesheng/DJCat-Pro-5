@@ -14,6 +14,16 @@ from app.common.config import VERSION, YEAR, AUTHOR, APP_NAME
 
 def build_args() -> list[str]:
     nuitka_command = f'"{sys.executable}" -m nuitka'
+    
+    # 1. 修正检查路径
+    # logo.png 在根目录，home.png 在 app/view/ 目录
+    data_files_to_check = ["app/view/home.png", "logo.png"]
+    missing_files = [f for f in data_files_to_check if not Path(f).exists()]
+    
+    if missing_files:
+        print(f"\n[ERROR] Missing required files: {missing_files}")
+        print("Please ensure these files are committed to Git.")
+        sys.exit(1)
 
     return [
         nuitka_command,
@@ -27,8 +37,8 @@ def build_args() -> list[str]:
         '--include-package=requests',
         '--include-package=loguru',
         
-        # Data files
-        '--include-data-file=home.png=home.png',
+        # 2. 修正数据文件打包路径格式: <源路径>=<目标相对路径>
+        '--include-data-file=app/view/home.png=app/view/home.png',
         '--include-data-file=logo.png=logo.png',
         
         # Metadata
@@ -43,6 +53,7 @@ def build_args() -> list[str]:
         '--output-dir=dist',
         'djcat.py',
     ]
+
 
 def main() -> int:
     if sys.platform != "win32":
