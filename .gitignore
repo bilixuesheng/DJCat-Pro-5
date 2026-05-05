@@ -1,0 +1,7 @@
+venv/
+.venv/
+__pycache__/
+*.log
+*.pyc
+DJCat_Pro_5.egg-info/
+*.DS_Store

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "DJCat-Pro-5"
+version = "5.0.0"
+description = "电教猫 Pro 5 - 基于 PySide6 和 Fluent Widgets 重构"
+authors = [
+    {name = "电教猫"}
+]
+requires-python = "==3.12.8"
+dependencies = [
+    "PySide6==6.10.0",
+    "PySide6-Fluent-Widgets>=1.6.0",
+    "requests>=2.28.0",
+    "loguru",
+    "markdown"
+]
