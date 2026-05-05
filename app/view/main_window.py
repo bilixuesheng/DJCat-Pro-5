@@ -80,7 +80,7 @@ class MainWindow(MSFluentWindow):
     def initWindow(self):
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(QIcon('logo.png'))
-        self.setMinimumSize(800, 400)
+        self.setMinimumSize(850, 450)
         self.resize(800, 400)
         desktop = QApplication.primaryScreen().availableGeometry()
         w, h = desktop.width(), desktop.height()
@@ -167,7 +167,7 @@ class MainWindow(MSFluentWindow):
         )
         infoBar.widgetLayout.addSpacing(10)
         downloadButton = PrimaryPushButton(FIF.DOWNLOAD, "下载更新")
-        downloadButton.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://djcatpro.top/download.html")))
+        downloadButton.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(DOWNLOAD_URL)))
         infoBar.addWidget(downloadButton)
         detailButton = PushButton(FIF.DOCUMENT, "更新日志")
         detailButton.clicked.connect(lambda: self._showUpdateLog(latest_version, note))
@@ -177,8 +177,11 @@ class MainWindow(MSFluentWindow):
 
     def _showUpdateLog(self, version, note):
         w = UpdateDialog(version, note, self)
-        if w.exec(): QDesktopServices.openUrl(QUrl("https://djcatpro.top/download.html"))
+        if w.exec(): QDesktopServices.openUrl(QUrl(DOWNLOAD_URL))
 
     def closeEvent(self, event):
         event.ignore()
         self.hide()
+
+#DOWNLOAD_URL = "https://djcatpro.top/download.html"
+DOWNLOAD_URL = "https://github.com/bilixuesheng/DJCat-Pro-5/releases/latest" # beta版更新链接
