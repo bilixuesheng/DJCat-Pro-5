@@ -90,7 +90,12 @@ class SystemTrayIcon(QSystemTrayIcon):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.setIcon(QIcon("logo.png"))
-        self.setToolTip('电教猫 Pro 5 🥰')
+        
+        # 初始化托盘文本
+        self.setToolTip(cfg.trayTooltip.value)
+        
+        # 监听配置变化，实时更新托盘文本
+        cfg.trayTooltip.valueChanged.connect(self.setToolTip)
 
         self.menu = AcrylicMenu(parent=parent)
         

@@ -4,7 +4,8 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QButtonGroup, QFileDialog
 from qfluentwidgets import (SettingCardGroup, ComboBoxSettingCard, SwitchSettingCard, 
                             PrimaryPushSettingCard, HyperlinkCard, RangeSettingCard, PushSettingCard,
-                            ExpandSettingCard, BodyLabel, RadioButton, ColorDialog, setThemeColor)
+                            ExpandSettingCard, BodyLabel, RadioButton, ColorDialog, setThemeColor, 
+                            SettingCard, LineEdit)
 from qfluentwidgets import FluentIcon as FIF
 
 if sys.platform != "darwin":
@@ -13,6 +14,30 @@ else:
     from qfluentwidgets import ScrollArea
 
 from app.common.config import cfg, AUTHOR_URL, AUTHOR, YEAR, VERSION
+
+class LineEditSettingCard(SettingCard):
+    """ 支持输入文字的设置项卡片 """
+    def __init__(self, configItem, icon, title, content=None, parent=None):
+        super().__init__(icon, title, content, parent)
+        self.configItem = configItem
+        self.lineEdit = LineEdit(self)
+        
+        # 将输入框添加到卡片右侧布局中
+        self.lineEdit.setFixedWidth(250)
+        self.hBoxLayout.addWidget(self.lineEdit, 0, Qt.AlignmentFlag.AlignRight)
+        self.hBoxLayout.addSpacing(16)
+        
+        # 初始化值
+        self.lineEdit.setText(configItem.value)
+        self.lineEdit.setPlaceholderText("请输入内容")
+        
+        # 信号连接：输入变化时保存配置
+        self.lineEdit.textChanged.connect(self._onTextChanged)
+        # 信号连接：配置变化时更新界面（防止外部修改配置后界面不刷新）
+        configItem.valueChanged.connect(self.lineEdit.setText)
+    def _onTextChanged(self, text):
+        cfg.set(self.configItem, text)
+
 
 class ThemeColorSettingCard(ExpandSettingCard):
     """ 自定义主题色选择卡片 (完美还原下拉展开样式) """
@@ -93,10 +118,23 @@ class SettingPage(ScrollArea):
         self.enableTransparentBackground()
 
     def initCards(self):
+        # 1. 应用主题
         self.themeCard = ComboBoxSettingCard(cfg.customThemeMode, FIF.BRUSH, "应用主题", "更改应用程序的外观", texts=["浅色", "深色", "跟随系统设置"], parent=self.personalGroup)
+        
+        # 2. 自定义托盘文本 (现在可以正常工作了)
+        self.trayTooltipCard = LineEditSettingCard(
+            cfg.trayTooltip, 
+            FIF.INFO, 
+            "自定义托盘文本", 
+            "设置鼠标悬停在系统托盘图标上时显示的文字", 
+            parent=self.personalGroup
+        )
+        
         self.themeColorCard = ThemeColorSettingCard(self.personalGroup)
-        self.btnPosCard = ComboBoxSettingCard(cfg.actionButtonPosition, FIF.LAYOUT, "操作按钮位置", "当全屏投送、倒计时等全屏任务时下方操作按钮的放置位置", texts=["左下角", "右下角"], parent=self.personalGroup)
+        self.btnPosCard = ComboBoxSettingCard(cfg.actionButtonPosition, FIF.LAYOUT, "操作按钮位置", "当全屏投送等全屏任务时下方操作按钮的放置位置", texts=["左下角", "右下角"], parent=self.personalGroup)
+        
         self.personalGroup.addSettingCard(self.themeCard)
+        self.personalGroup.addSettingCard(self.trayTooltipCard) # 添加进去
         self.personalGroup.addSettingCard(self.themeColorCard)
         self.personalGroup.addSettingCard(self.btnPosCard)
         

@@ -23,6 +23,7 @@ class Config(QConfig):
     customThemeMode = OptionsConfigItem("Personalization", "ThemeMode", "System", OptionsValidator(["Light", "Dark", "System"]))
     themeColorPreset = OptionsConfigItem("Personalization", "ThemeColorPreset", "树人绿", OptionsValidator(["树人绿", "系统蓝", "自定义"]))
     customThemeColor = ColorConfigItem("Personalization", "CustomThemeColor", QColor(49, 101, 49))
+    trayTooltip = ConfigItem("Personalization", "TrayTooltip", "电教猫 Pro 5") 
     actionButtonPosition = OptionsConfigItem("Personalization", "ActionButtonPosition", "右下角", OptionsValidator(["左下角", "右下角"]))
     
     # 横幅设置
@@ -47,6 +48,6 @@ YEAR = 2026
 AUTHOR = "XUESHENG"
 VERSION = "5.0.0"
 AUTHOR_URL = "https://space.bilibili.com/1956850051"
-UPDATE_API = "https://api.djcatpro.top"
+UPDATE_API = "https://api.djcatpro.top/beta"
 
 cfg = Config()
