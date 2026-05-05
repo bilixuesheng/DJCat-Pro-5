@@ -43,7 +43,7 @@ class Config(QConfig):
     checkUpdateAtStartUp = ConfigItem("Software", "CheckUpdateAtStartUp", True, BoolValidator())
     geometry = ConfigItem("Software", "Geometry", QRect(0, 0, 0, 0), GeometryValidator(), GeometrySerializer())
 
-APP_NAME = "电教猫 Pro 5"
+APP_NAME = "电教猫 Pro 5 Beta"
 YEAR = 2026
 AUTHOR = "XUESHENG"
 VERSION = "5.0.0"

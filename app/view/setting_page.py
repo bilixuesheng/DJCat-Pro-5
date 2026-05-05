@@ -164,7 +164,7 @@ class SettingPage(ScrollArea):
         self.softwareGroup.addSettingCard(self.autoRunCard)
 
         self.authorCard = HyperlinkCard(AUTHOR_URL, "打开作者的个人空间", FIF.PROJECTOR, "了解作者", f"发现更多 {AUTHOR} 的作品", self.aboutGroup)
-        self.aboutCard = PrimaryPushSettingCard("检查更新", FIF.INFO, "关于", "© " + "Copyright" + f" {YEAR}, {AUTHOR}. " + f"Version {VERSION}", self.aboutGroup)
+        self.aboutCard = PrimaryPushSettingCard("检查更新", FIF.INFO, "关于", "© " + "Copyright" + f" {YEAR}, {AUTHOR}. " + f"Version {VERSION}" + " Beta 版仅接收 Beta 通道的更新", self.aboutGroup)
         self.aboutCard.clicked.connect(self._onAboutCardClicked)
         self.aboutGroup.addSettingCard(self.authorCard)
         self.aboutGroup.addSettingCard(self.aboutCard)

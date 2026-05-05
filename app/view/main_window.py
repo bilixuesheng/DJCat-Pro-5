@@ -9,7 +9,7 @@ from qfluentwidgets import (MSFluentWindow, NavigationItemPosition, FluentIcon a
                             PrimaryPushButton, PushButton, MessageBoxBase, SubtitleLabel, 
                             TextEdit, setThemeColor)
 
-from app.common.config import cfg, APP_NAME, UPDATE_API
+from app.common.config import cfg, APP_NAME, UPDATE_API, VERSION
 from app.common.signal_bus import signalBus
 from app.view.home_page import HomePage
 from app.view.setting_page import SettingPage
@@ -142,7 +142,17 @@ class MainWindow(MSFluentWindow):
             if manual: InfoBar.error("检查更新失败", "无法获取最新版本信息", duration=3000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
             return
 
-        version = data.get("latest_version", "未知")
+        latest_version = data.get("latest_version", "未知")
+        
+        # 新增：版本对比逻辑
+        if latest_version == VERSION:
+            # 如果是手动点击检查更新，提示已经是最新版
+            if manual: 
+                InfoBar.success("已是最新版本", f"当前运行的 v{VERSION} 已经是最新版本啦", duration=3000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
+            # 如果是开机自启检查，直接 return，不打扰用户
+            return
+
+        # 如果版本号不同，则继续执行原本的新版本提示逻辑
         note = str(data.get("update_note", ""))
         if "\\u" in note:
             try: note = note.encode('utf-8').decode('unicode_escape')
@@ -151,7 +161,7 @@ class MainWindow(MSFluentWindow):
         note = re.sub(r'\n+', '\n\n', note)
             
         infoBar = InfoBar(
-            icon=FIF.UPDATE, title=f"检测到新版本: v{version}",
+            icon=FIF.UPDATE, title=f"检测到新版本: v{latest_version}",
             content="请及时下载更新以体验最新功能", orient=Qt.Orientation.Horizontal,
             isClosable=True, duration=-1, position=InfoBarPosition.BOTTOM_RIGHT, parent=self
         )
@@ -160,9 +170,10 @@ class MainWindow(MSFluentWindow):
         downloadButton.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://djcatpro.top/download.html")))
         infoBar.addWidget(downloadButton)
         detailButton = PushButton(FIF.DOCUMENT, "更新日志")
-        detailButton.clicked.connect(lambda: self._showUpdateLog(version, note))
+        detailButton.clicked.connect(lambda: self._showUpdateLog(latest_version, note))
         infoBar.addWidget(detailButton)
         infoBar.show()
+
 
     def _showUpdateLog(self, version, note):
         w = UpdateDialog(version, note, self)
