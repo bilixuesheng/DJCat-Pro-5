@@ -9,7 +9,6 @@ permissions:
   contents: write
 
 env:
-  # 关键：强制 Python 在整个环境中开启 UTF-8 模式，彻底解决编码问题
   PYTHONUTF8: 1
 
 jobs:
@@ -29,7 +28,8 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install Nuitka
+          # 添加了 imageio，让 Nuitka 能把 logo.png 转为 ico
+          pip install Nuitka imageio
           pip install .
 
       - name: Extract Version (Safe PowerShell Way)
@@ -55,7 +55,6 @@ jobs:
         run: |
           $distPath = "dist/djcat.dist"
           $zipFile = "DJCat-Pro-v${{ env.VERSION }}-Windows-x86_64.zip"
-          # 使用 7z 压缩打包好的 dist 目录
           7z a -tzip -mx=9 -m0=LZMA $zipFile "./$distPath/*"
 
       - name: Upload Artifacts (For Manual Run)
