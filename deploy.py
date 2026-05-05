@@ -1,8 +1,14 @@
 import subprocess
 import sys
+import os
 from pathlib import Path
 
-# 将项目根目录加入 sys.path，以便导入 app.common.config
+# Fix encoding for Windows CI
+if sys.platform == "win32":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+# Ensure we can import app.common.config
 sys.path.append(str(Path(__file__).resolve().parent))
 from app.common.config import VERSION, YEAR, AUTHOR, APP_NAME
 
@@ -12,21 +18,21 @@ def build_args() -> list[str]:
     return [
         nuitka_command,
         '--standalone',
-        '--windows-console-mode=disable',  # 禁用控制台窗口
-        '--plugin-enable=pyside6',         # 启用 pyside6 插件
-        '--assume-yes-for-downloads',      # 自动同意下载缺失的依赖(如依赖树解析器)
-        '--msvc=latest',                   # 使用最新的 MSVC 编译器
+        '--windows-console-mode=disable',
+        '--plugin-enable=pyside6',
+        '--assume-yes-for-downloads',
+        '--msvc=latest',
         
-        # 显式包含依赖包，防止 Nuitka 漏打包
+        # Dependencies
         '--include-package=requests',
         '--include-package=loguru',
         
-        # 包含必要的数据文件 (源文件=目标文件)
+        # Data files
         '--include-data-file=home.png=home.png',
         '--include-data-file=logo.png=logo.png',
         
-        # Windows 应用元数据
-        '--windows-icon-from-ico=logo.png', # Nuitka 支持直接使用 png 作为图标
+        # Metadata
+        '--windows-icon-from-ico=logo.png',
         f'--company-name="{AUTHOR}"',
         f'--product-name="{APP_NAME}"',
         f'--file-version={VERSION}',
@@ -35,26 +41,30 @@ def build_args() -> list[str]:
         f'--copyright="Copyright(C) {YEAR} {AUTHOR}"',
         
         '--output-dir=dist',
-        'djcat.py', # 入口文件
+        'djcat.py',
     ]
 
 def main() -> int:
     if sys.platform != "win32":
-        print("此打包脚本仅支持 Windows")
+        print("Error: This script is for Windows only.")
         return 1
 
     args = build_args()
     command = ' '.join(args)
 
-    print(f"执行 Nuitka 打包命令:\n{command}\n")
+    print(f"Build Version: {VERSION}")
+    print(f"Execution Command: {command}\n")
+    
+    # Execute Nuitka
     result = subprocess.run(command, shell=True)
     
     if result.returncode == 0:
-        print("\n✅ 打包成功！产物位于 dist/djcat.dist 目录。")
+        print("\n[SUCCESS] Build finished. Output: dist/djcat.dist")
     else:
-        print(f"\n❌ 打包失败，退出码: {result.returncode}")
+        print(f"\n[ERROR] Build failed with exit code: {result.returncode}")
         
     return result.returncode
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # Use standard GD entry pattern
+    sys.exit(main())
