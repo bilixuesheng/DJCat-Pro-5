@@ -17,10 +17,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python 3.12.8
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12.8'
+          python-version: '3.12.8' # 更新为你需要的版本
 
       - name: Install Dependencies
         run: |
@@ -28,11 +28,13 @@ jobs:
           pip install Nuitka
           pip install .
 
-      - name: Extract Version
+      - name: Extract Version (Safe Method)
         shell: pwsh
         run: |
-          # 提取 config.py 中的版本号，写入 GitHub 环境变量
-          python -c "from app.common.config import VERSION; print(f'VERSION={VERSION}')" >> $env:GITHUB_ENV
+          # 使用 Python 读取文件文本而不导入模块，避开 qfluentwidgets 的打印信息
+          $VERSION = python -c "import re; content = open('app/common/config.py', encoding='utf-8').read(); print(re.search(r'VERSION = \"(.*?)\"', content).group(1))"
+          echo "VERSION=$VERSION" >> $env:GITHUB_ENV
+          Write-Host "Detected Version: $VERSION"
 
       - name: Build with Nuitka
         run: |
@@ -43,10 +45,7 @@ jobs:
         run: |
           $distPath = "dist/djcat.dist"
           $zipFile = "DJCat-Pro-v${{ env.VERSION }}-Windows-x86_64.zip"
-          
-          Write-Output "正在将 $distPath 的内容压缩到 $zipFile ..."
           7z a -tzip -mx=9 -m0=LZMA $zipFile dist/djcat.dist/*
-          Write-Output "压缩完成！"
 
       - name: Upload Artifacts (For Manual Run)
         if: ${{ github.event_name == 'workflow_dispatch' }}
