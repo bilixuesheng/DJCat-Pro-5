@@ -28,17 +28,27 @@ jobs:
           pip install Nuitka
           pip install .
 
-      - name: Extract Version (Safe Method)
+      - name: Extract Version (Safe PowerShell Way)
         shell: pwsh
         run: |
-          # 使用 Python 读取文件文本而不导入模块，避开 qfluentwidgets 的打印信息
-          $VERSION = python -c "import re; content = open('app/common/config.py', encoding='utf-8').read(); print(re.search(r'VERSION = \"(.*?)\"', content).group(1))"
-          echo "VERSION=$VERSION" >> $env:GITHUB_ENV
-          Write-Host "Detected Version: $VERSION"
+          # 直接读取文件内容
+          $configPath = "app/common/config.py"
+          $content = Get-Content $configPath -Raw
+          
+          # 使用正则匹配 VERSION = "x.x.x"
+          if ($content -match 'VERSION\s*=\s*"([^"]+)"') {
+              $VERSION = $Matches[1]
+              "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+              Write-Host "✅ 成功提取版本号: $VERSION"
+          } else {
+              Write-Error "❌ 无法在 $configPath 中找到 VERSION 定义"
+              exit 1
+          }
 
       - name: Build with Nuitka
         run: |
           python deploy.py
+
 
       - name: Create Zip Archive
         shell: pwsh
