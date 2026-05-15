@@ -7,6 +7,9 @@ from qfluentwidgets import (SettingCardGroup, ComboBoxSettingCard, SwitchSetting
                             ExpandSettingCard, BodyLabel, RadioButton, ColorDialog, setThemeColor, 
                             SettingCard, LineEdit)
 from qfluentwidgets import FluentIcon as FIF
+import winreg
+from loguru import logger
+from app.common.signal_bus import SignalBus
 
 if sys.platform != "darwin":
     from qfluentwidgets import SmoothScrollArea as ScrollArea
@@ -164,6 +167,7 @@ class SettingPage(ScrollArea):
         self.autoRunCard = SwitchSettingCard(FIF.VPN, "开机启动", "在系统启动时静默运行", configItem=cfg.autoRun, parent=self.softwareGroup)
         self.softwareGroup.addSettingCard(self.updateOnStartUpCard)
         self.softwareGroup.addSettingCard(self.autoRunCard)
+        cfg.autoRun.valueChanged.connect(self._onAutoRunChanged)
 
         self.authorCard = HyperlinkCard(AUTHOR_URL, "打开作者的个人空间", FIF.PROJECTOR, "了解作者", f"发现更多 {AUTHOR} 的作品", self.aboutGroup)
         self.aboutCard = PrimaryPushSettingCard("检查更新", FIF.INFO, "关于", "© " + "Copyright" + f" {YEAR}, {AUTHOR}. " + f"Version {VERSION}" + " Beta 版仅接收 Beta 通道的更新", self.aboutGroup)
@@ -187,3 +191,37 @@ class SettingPage(ScrollArea):
 
     def _onAboutCardClicked(self):
         self.window().checkForUpdates(manual=True)
+    
+    def _onAutoRunChanged(self, is_auto_run: bool):
+        if sys.platform != "win32":
+            return
+            
+        # 获取当前运行的 exe 路径
+        exec_path = sys.executable 
+        key_name = "DJCatPro5"
+        
+        try:
+            # 打开 Windows 当前用户的自启注册表目录
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Run",
+                0, winreg.KEY_ALL_ACCESS
+            )
+            
+            if is_auto_run:
+                # 写入注册表，路径前后加上双引号防止空格报错
+                winreg.SetValueEx(key, key_name, 0, winreg.REG_SZ, f'"{exec_path}"')
+            else:
+                # 删除注册表
+                try:
+                    winreg.DeleteValue(key, key_name)
+                except FileNotFoundError:
+                    pass
+                    
+            winreg.CloseKey(key)
+        except Exception as e:
+            # 1. 写入本地日志文件，包含完整的报错堆栈
+            logger.exception("修改注册表设置开机启动失败")
+            # 2. 发送信号给 MainWindow，弹出 InfoBar
+            SignalBus.catchException.emit(str(e))
+
