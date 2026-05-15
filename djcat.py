@@ -30,9 +30,9 @@ def exceptionHook(exc_type, exc_value, exc_traceback):
 
 
 def main():
-    # === 配置日志 ===
-    # 保存在程序根目录，格式为 djcatpro日志_年-月-日.log，每天按时间滚动分割，最多保留 7 天
-    logger.add("djcatpro日志_{time:YYYY-MM-DD}.log", rotation="00:00", retention="7 days", enqueue=True, encoding="utf-8")
+    # 修改日志路径，加上 "Log/" 文件夹前缀。
+    # retention="7 days" 会在每次启动或按天切割时，自动帮你把7天前的文件删掉。
+    logger.add("Log/djcatpro日志_{time:YYYY-MM-DD}.log", rotation="00:00", retention="7 days", enqueue=True, encoding="utf-8")
     sys.excepthook = exceptionHook
 
     app = QApplication(sys.argv)
