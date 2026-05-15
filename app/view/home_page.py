@@ -2,7 +2,7 @@ import os
 import sys
 from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QPixmap, QPainter, QColor, QPainterPath, QLinearGradient
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScroller
 from qfluentwidgets import (CardWidget, TitleLabel, BodyLabel, FlowLayout, IconWidget, qconfig)
 from qfluentwidgets import FluentIcon as FIF
 
@@ -214,6 +214,8 @@ class HomePage(ScrollArea):
         
         self.enableTransparentBackground()
         self.container.setStyleSheet("QWidget{background: transparent;}")
+
+        QScroller.grabGesture(self.viewport(), QScroller.ScrollerGestureType.LeftMouseButtonGesture)
 
     def updateBannerVisibility(self):
         if cfg.showBanner.value:

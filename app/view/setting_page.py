@@ -1,7 +1,7 @@
 import sys
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QButtonGroup, QFileDialog
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QButtonGroup, QFileDialog, QScroller
 from qfluentwidgets import (SettingCardGroup, ComboBoxSettingCard, SwitchSettingCard, 
                             PrimaryPushSettingCard, HyperlinkCard, RangeSettingCard, PushSettingCard,
                             ExpandSettingCard, BodyLabel, RadioButton, ColorDialog, setThemeColor, 
@@ -116,6 +116,8 @@ class SettingPage(ScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setObjectName("SettingPage")
         self.enableTransparentBackground()
+
+        QScroller.grabGesture(self.viewport(), QScroller.ScrollerGestureType.LeftMouseButtonGesture)
 
     def initCards(self):
         # 1. 应用主题
