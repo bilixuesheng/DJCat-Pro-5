@@ -25,21 +25,25 @@ class LineEditSettingCard(SettingCard):
         self.configItem = configItem
         self.lineEdit = LineEdit(self)
         
-        # 将输入框添加到卡片右侧布局中
         self.lineEdit.setFixedWidth(250)
         self.hBoxLayout.addWidget(self.lineEdit, 0, Qt.AlignmentFlag.AlignRight)
         self.hBoxLayout.addSpacing(16)
         
-        # 初始化值
         self.lineEdit.setText(configItem.value)
         self.lineEdit.setPlaceholderText("请输入内容")
         
-        # 信号连接：输入变化时保存配置
         self.lineEdit.textChanged.connect(self._onTextChanged)
-        # 信号连接：配置变化时更新界面（防止外部修改配置后界面不刷新）
-        configItem.valueChanged.connect(self.lineEdit.setText)
+        # 修复光标乱跳：不要直接连到 setText，而是连到自定义方法
+        configItem.valueChanged.connect(self._onConfigChanged)
+
     def _onTextChanged(self, text):
         cfg.set(self.configItem, text)
+
+    def _onConfigChanged(self, value):
+        # 只有在外部修改配置（如重置默认值）时，才重新setText，避免打字时光标跳到末尾
+        if self.lineEdit.text() != value:
+            self.lineEdit.setText(value)
+
 
 
 class ThemeColorSettingCard(ExpandSettingCard):
