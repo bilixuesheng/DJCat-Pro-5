@@ -80,11 +80,19 @@ class MainWindow(MSFluentWindow):
     def initWindow(self):
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(QIcon('logo.png'))
-        self.setMinimumSize(850, 450)
-        self.resize(800, 400)
-        desktop = QApplication.primaryScreen().availableGeometry()
-        w, h = desktop.width(), desktop.height()
-        self.move(w // 2 - self.width() // 2, h // 2 - self.height() // 2)
+        self.setMinimumSize(800, 400)
+        
+        geometry = cfg.geometry.value
+        if geometry.isEmpty() or geometry.width() <= 0:
+            # 如果是第一次打开，没有记录，则居中显示
+            self.resize(800, 400)
+            desktop = QApplication.primaryScreen().availableGeometry()
+            w, h = desktop.width(), desktop.height()
+            self.move(w // 2 - self.width() // 2, h // 2 - self.height() // 2)
+        else:
+            # === 修改：拆分为显式设定大小和位置 ===
+            self.resize(geometry.width(), geometry.height())
+            self.move(geometry.x(), geometry.y())
 
     def initSplashScreen(self):
         self.splashScreen = CustomSplashScreen(self.windowIcon(), self, enableShadow=False)
@@ -180,6 +188,7 @@ class MainWindow(MSFluentWindow):
         if w.exec(): QDesktopServices.openUrl(QUrl(DOWNLOAD_URL))
 
     def closeEvent(self, event):
+        cfg.set(cfg.geometry, self.geometry())
         event.ignore()
         self.hide()
 
