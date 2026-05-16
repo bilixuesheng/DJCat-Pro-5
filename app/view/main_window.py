@@ -113,8 +113,7 @@ class MainWindow(MSFluentWindow):
         self.stackedWidget.addWidget(self.broadcastEditPage)
         
         # 拦截点击并跳转
-        broadcast_card = self.homePage.cardsWidget.layout().itemAt(0).widget()
-        broadcast_card.clicked.connect(self._navToBroadcast)
+        self.homePage.all_cards["全屏投送"].clicked.connect(self._navToBroadcast)
         self.broadcastEditPage.backSignal.connect(self._navToHome)
 
     def _navToBroadcast(self):

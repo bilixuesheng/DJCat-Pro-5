@@ -2,8 +2,8 @@ import os
 import sys
 from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QPixmap, QPainter, QColor, QPainterPath, QLinearGradient
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScroller
-from qfluentwidgets import (CardWidget, TitleLabel, BodyLabel, FlowLayout, IconWidget, qconfig)
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScroller, QListWidget, QAbstractItemView, QListWidgetItem
+from qfluentwidgets import (CardWidget, TitleLabel, BodyLabel, FlowLayout, IconWidget, qconfig, SubtitleLabel, ToolButton, MessageBoxBase)
 from qfluentwidgets import FluentIcon as FIF
 
 if sys.platform != "darwin":
@@ -177,7 +177,6 @@ class HomePage(ScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.setObjectName("HomePage")
-        
         self.container = QWidget()
         self.vBoxLayout = QVBoxLayout(self.container)
         self.vBoxLayout.setContentsMargins(0, 0, 0, 36)
@@ -189,33 +188,76 @@ class HomePage(ScrollArea):
         self.normalTitle = TitleLabel("主页", self.titleWidget)
         self.titleLayout.addWidget(self.normalTitle)
         self.vBoxLayout.addWidget(self.titleWidget)
-
         self.banner = BannerWidget(self.container)
         self.vBoxLayout.addWidget(self.banner)
         
         cfg.showBanner.valueChanged.connect(self.updateBannerVisibility)
         self.updateBannerVisibility()
         
+        # === 新增：卡片区域标题和排序按钮 ===
+        self.headerLayout = QHBoxLayout()
+        self.headerLayout.setContentsMargins(30, 0, 30, 0)
+        self.subTitle = SubtitleLabel("常用功能", self.container)
+        self.sortBtn = ToolButton(FIF.EDIT, self.container)
+        self.sortBtn.setToolTip("调整卡片顺序")
+        self.sortBtn.clicked.connect(self._showSortDialog)
+        self.headerLayout.addWidget(self.subTitle)
+        self.headerLayout.addStretch(1)
+        self.headerLayout.addWidget(self.sortBtn)
+        self.vBoxLayout.addLayout(self.headerLayout)
+        
         self.cardsWidget = QWidget(self.container)
         self.flowLayout = FlowLayout(self.cardsWidget)
-        self.flowLayout.setContentsMargins(20, 20, 20, 20)
+        self.flowLayout.setContentsMargins(20, 10, 20, 20)
         self.cardsWidget.setStyleSheet("background: transparent;")
-        
-        self.flowLayout.addWidget(ActionCard(FIF.FULL_SCREEN, "全屏投送", "将信息以大号字体全屏显示", self.cardsWidget))
-        self.flowLayout.addWidget(ActionCard(FIF.CALENDAR, "考试倒计时", "设定考试时间并在屏幕上显示倒计时（敬请期待）", self.cardsWidget))
-        self.flowLayout.addWidget(ActionCard(FIF.POWER_BUTTON, "定时关机", "设置指定时间自动弹出提示关闭计算机（敬请期待）", self.cardsWidget))
-
         self.vBoxLayout.addWidget(self.cardsWidget)
+        
+        # === 新增：初始化所有卡片数据，并按配置排序加载 ===
+        self.all_cards = {
+            "全屏投送": ActionCard(FIF.FULL_SCREEN, "全屏投送", "将当前画面全屏投送到目标设备"),
+            "考试倒计时": ActionCard(FIF.CALENDAR, "考试倒计时", "设定考试时间并在屏幕上显示倒计时"),
+            "定时关机": ActionCard(FIF.POWER_BUTTON, "定时关机", "设置指定时间自动关闭计算机")
+        }
+        self._renderCards()
         self.vBoxLayout.addStretch(1)
-
         self.setWidget(self.container)
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        
         self.enableTransparentBackground()
         self.container.setStyleSheet("QWidget{background: transparent;}")
-
         QScroller.grabGesture(self.viewport(), QScroller.ScrollerGestureType.LeftMouseButtonGesture)
+
+    def _renderCards(self):
+        # 安全地清空当前布局中的卡片
+        for card in self.all_cards.values():
+            self.flowLayout.removeWidget(card)
+            card.hide()
+                
+        # 按照配置文件里的顺序重新加载卡片
+        current_order = cfg.homeCardOrder.value
+        
+        # 防呆设计：如果增加了新卡片但配置文件里没有，自动补在最后
+        for name in self.all_cards.keys():
+            if name not in current_order:
+                current_order.append(name)
+                
+        # 重新添加并显示
+        for name in current_order:
+            if name in self.all_cards:
+                card = self.all_cards[name]
+                self.flowLayout.addWidget(card)
+                card.show()
+
+                
+    def _showSortDialog(self):
+        current_order = cfg.homeCardOrder.value
+        # 弹出排序对话框
+        w = CardSortDialog(current_order, self.window())
+        if w.exec():
+            # 保存新顺序并重新渲染
+            new_order = w.get_new_order()
+            cfg.set(cfg.homeCardOrder, new_order)
+            self._renderCards()
 
     def updateBannerVisibility(self):
         if cfg.showBanner.value:
@@ -224,3 +266,25 @@ class HomePage(ScrollArea):
         else:
             self.banner.hide()
             self.titleWidget.show()
+
+class CardSortDialog(MessageBoxBase):
+    """ 卡片拖拽排序弹窗 """
+    def __init__(self, current_order, parent=None):
+        super().__init__(parent)
+        self.titleLabel = SubtitleLabel("调整卡片顺序", self)
+        
+        # 使用 QListWidget 实现拖拽排序
+        self.listWidget = QListWidget(self)
+        self.listWidget.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove) # 开启内部拖拽
+        self.listWidget.setStyleSheet("QListWidget { border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; background: transparent; } QListWidget::item { padding: 10px; border-bottom: 1px solid rgba(0,0,0,0.05); }")
+        
+        for item_name in current_order:
+            QListWidgetItem(item_name, self.listWidget)
+            
+        self.viewLayout.addWidget(self.titleLabel)
+        self.viewLayout.addSpacing(12)
+        self.viewLayout.addWidget(self.listWidget)
+        self.widget.setMinimumSize(350, 300)
+
+    def get_new_order(self):
+        return [self.listWidget.item(i).text() for i in range(self.listWidget.count())]

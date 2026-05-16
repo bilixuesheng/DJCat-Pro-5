@@ -43,6 +43,9 @@ class Config(QConfig):
     checkUpdateAtStartUp = ConfigItem("Software", "CheckUpdateAtStartUp", True, BoolValidator())
     geometry = ConfigItem("Software", "Geometry", QRect(0, 0, 0, 0), GeometryValidator(), GeometrySerializer())
 
+    # 主页卡片
+    homeCardOrder = ConfigItem("HomePage", "CardOrder", ["全屏投送", "考试倒计时", "定时关机"])
+
 APP_NAME = "电教猫 Pro 5 Beta"
 YEAR = 2026
 AUTHOR = "XUESHENG"

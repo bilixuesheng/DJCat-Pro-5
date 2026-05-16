@@ -4,7 +4,7 @@ from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QToolButton, QApplication
 from qfluentwidgets import (LineEdit, TextEdit, PrimaryPushButton, PushButton, 
                             TitleLabel, ToolButton, MessageBox, Action, RoundMenu,
-                            isDarkTheme, qconfig, CheckBox) # 导入 CheckBox
+                            isDarkTheme, qconfig, CheckBox) 
 from qfluentwidgets import FluentIcon as FIF
 from qframelesswindow import FramelessWindow
 
