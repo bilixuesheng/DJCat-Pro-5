@@ -49,7 +49,7 @@ class Config(QConfig):
 APP_NAME = "电教猫 Pro 5 Beta"
 YEAR = 2026
 AUTHOR = "XUESHENG"
-VERSION = "5.0.0-pre.10"
+VERSION = "5.0.0-pre.9"
 AUTHOR_URL = "https://space.bilibili.com/1956850051"
 UPDATE_API = "https://api.djcatpro.top/beta"
 
