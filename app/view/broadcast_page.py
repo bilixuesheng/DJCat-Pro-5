@@ -349,7 +349,7 @@ class BroadcastEditPage(QWidget):
         self.titleInput.setText("今日晚辅导作业")
         if self.markdownCheckBox.isChecked():
             # Markdown 模式
-            self.contentInput.setText("**【语文】**\n- \n\n**【数学】**\n- \n\n**【英语】**\n- ")
+            self.contentInput.setText("**【语文】**\n- \n\n**【英语】**\n- \n\n**【物理】**\n- ")
         else:
             # 普通文本模式
             self.contentInput.setText("【语文】\n  -\n\n【英语】\n  -\n\n【物理】\n  -")
