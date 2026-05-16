@@ -72,6 +72,7 @@ class BroadcastWindow(FramelessWindow):
         self._isTracking = False
         
         self.vBoxLayout = QVBoxLayout(self)
+        # 将底部边距改小，让正文填满底部
         self.vBoxLayout.setContentsMargins(40, 20, 40, 20)
         
         self.titleLabel = TitleLabel(self)
@@ -87,8 +88,11 @@ class BroadcastWindow(FramelessWindow):
         self.vBoxLayout.addWidget(self.titleLabel, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.vBoxLayout.addWidget(self.contentEdit, 1)
         
-        self.btnLayout = QHBoxLayout()
-        self.vBoxLayout.addLayout(self.btnLayout)
+        # === 修改：创建一个独立的悬浮容器存放按钮，不再放入 vBoxLayout ===
+        self.btnContainer = QWidget(self)
+        self.btnLayout = QHBoxLayout(self.btnContainer)
+        self.btnLayout.setContentsMargins(0, 0, 0, 0)
+        self.btnLayout.setSpacing(12) # 按钮之间的间距设定为 12
         
         self.is_windowed = False
         self.miniWindow = FloatingMiniWindow()
@@ -103,6 +107,7 @@ class BroadcastWindow(FramelessWindow):
         self.btn_min.clicked.connect(self.minimizeToMini)
         self.btn_win.clicked.connect(self.toggleWindowMode)
         self.btn_close.clicked.connect(self.close)
+
 
     def eventFilter(self, obj, event):
         if obj == self.contentEdit.viewport():
@@ -150,11 +155,31 @@ class BroadcastWindow(FramelessWindow):
         widgets = [self.btn_edit, self.btn_min, self.btn_win, self.btn_close]
         if cfg.actionButtonPosition.value == "左下角":
             widgets.reverse()
-            self.btnLayout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        else:
-            self.btnLayout.setAlignment(Qt.AlignmentFlag.AlignRight)
             
         for w in widgets: self.btnLayout.addWidget(w)
+        
+        # === 新增：让容器自适应按钮大小，并更新位置 ===
+        self.btnContainer.adjustSize()
+        self._updateBtnPosition()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._updateBtnPosition()
+
+    def _updateBtnPosition(self):
+        # 按钮距离屏幕底边和侧边的距离，设定为等于按钮间距（12）
+        margin = self.btnLayout.spacing() 
+        
+        # 根据设置动态计算悬浮坐标
+        if cfg.actionButtonPosition.value == "左下角":
+            target_x = margin
+        else:
+            target_x = self.width() - self.btnContainer.width() - margin
+            
+        target_y = self.height() - self.btnContainer.height() - margin
+        
+        self.btnContainer.move(target_x, target_y)
+        self.btnContainer.raise_() # 确保按钮图层永远在正文的最上方
 
     def startBroadcast(self):
         self.is_windowed = False
@@ -173,6 +198,10 @@ class BroadcastWindow(FramelessWindow):
         self.btn_win.setWindowed(self.is_windowed)
         self.btn_close.setWindowed(self.is_windowed)
         self.btn_win.setIcon(FIF.FULL_SCREEN.icon() if self.is_windowed else FIF.COPY.icon())
+        
+        # === 新增：让悬浮容器重新收缩贴合小尺寸按钮，并更新位置 ===
+        self.btnContainer.adjustSize()
+        self._updateBtnPosition()
 
     def _applyWindowState(self):
         is_top = cfg.topmostInWindowed.value if self.is_windowed else cfg.topmostInFullscreen.value
