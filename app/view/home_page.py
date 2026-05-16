@@ -214,9 +214,9 @@ class HomePage(ScrollArea):
         
         # === 新增：初始化所有卡片数据，并按配置排序加载 ===
         self.all_cards = {
-            "全屏投送": ActionCard(FIF.FULL_SCREEN, "全屏投送", "将当前画面全屏投送到目标设备"),
-            "考试倒计时": ActionCard(FIF.CALENDAR, "考试倒计时", "设定考试时间并在屏幕上显示倒计时"),
-            "定时关机": ActionCard(FIF.POWER_BUTTON, "定时关机", "设置指定时间自动关闭计算机")
+            "全屏投送": ActionCard(FIF.FULL_SCREEN, "全屏投送", "将信息以大字全屏展示"),
+            "考试倒计时": ActionCard(FIF.CALENDAR, "考试倒计时", "设定考试时间并在屏幕上显示倒计时（敬请期待）"),
+            "定时关机": ActionCard(FIF.POWER_BUTTON, "定时关机", "设置指定时间弹出提示自动关闭计算机（敬请期待）")
         }
         self._renderCards()
         self.vBoxLayout.addStretch(1)
