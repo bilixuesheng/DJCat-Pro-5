@@ -192,4 +192,4 @@ class MainWindow(MSFluentWindow):
         self.hide()
 
 #DOWNLOAD_URL = "https://djcatpro.top/download.html"
-DOWNLOAD_URL = "https://github.com/bilixuesheng/DJCat-Pro-5/releases/latest" # beta版更新链接
+DOWNLOAD_URL = "https://pan.xueshg.top/s/AMCo" # beta版更新链接
