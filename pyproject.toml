@@ -16,5 +16,6 @@ dependencies = [
     "requests>=2.28.0",
     "loguru",
     "markdown",
-    "nuitka"
+    "nuitka",
+    "imageio"
 ]
