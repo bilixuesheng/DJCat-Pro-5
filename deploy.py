@@ -2,6 +2,7 @@ import subprocess
 import sys
 import os
 from pathlib import Path
+import re
 
 # Fix encoding for Windows CI
 if sys.platform == "win32":
@@ -25,6 +26,8 @@ def build_args() -> list[str]:
         print("Please ensure these files are committed to Git.")
         sys.exit(1)
 
+    match = re.match(r'^(\d+\.\d+\.\d+(?:\.\d+)?)', VERSION)
+    clean_version = match.group(1) if match else "1.0.0"
     return [
         nuitka_command,
         '--standalone',
@@ -37,7 +40,7 @@ def build_args() -> list[str]:
         '--include-package=requests',
         '--include-package=loguru',
         
-        # 2. 修正数据文件打包路径格式: <源路径>=<目标相对路径>
+        # Data files
         '--include-data-file=app/view/home.png=app/view/home.png',
         '--include-data-file=logo.png=logo.png',
         
@@ -45,8 +48,11 @@ def build_args() -> list[str]:
         '--windows-icon-from-ico=logo.png',
         f'--company-name="{AUTHOR}"',
         f'--product-name="{APP_NAME}"',
-        f'--file-version={VERSION}',
-        f'--product-version={VERSION}',
+        
+        # === 修改：使用过滤后的纯数字版本号 ===
+        f'--file-version={clean_version}',
+        f'--product-version={clean_version}',
+        
         f'--file-description="{APP_NAME}"',
         f'--copyright="Copyright(C) {YEAR} {AUTHOR}"',
         
