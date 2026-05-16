@@ -80,7 +80,7 @@ class MainWindow(MSFluentWindow):
     def initWindow(self):
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(QIcon('logo.png'))
-        self.setMinimumSize(800, 400)
+        self.setMinimumSize(500, 350)
         
         geometry = cfg.geometry.value
         if geometry.isEmpty() or geometry.width() <= 0:
