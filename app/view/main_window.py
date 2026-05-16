@@ -80,12 +80,12 @@ class MainWindow(MSFluentWindow):
     def initWindow(self):
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(QIcon('logo.png'))
-        self.setMinimumSize(500, 350)
+        self.setMinimumSize(700, 400)
         
         geometry = cfg.geometry.value
         if geometry.isEmpty() or geometry.width() <= 0:
             # 如果是第一次打开，没有记录，则居中显示
-            self.resize(800, 400)
+            self.resize(800, 450)
             desktop = QApplication.primaryScreen().availableGeometry()
             w, h = desktop.width(), desktop.height()
             self.move(w // 2 - self.width() // 2, h // 2 - self.height() // 2)
