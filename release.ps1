@@ -108,7 +108,7 @@ if ($commitsBetween -eq 0) {
     # 如果用户选择继续，跳过日志生成和提交 CHANGELOG，直接打标签推送
 } else {
     Write-Host "[STEP] Generating CHANGELOG ($prevVersion..HEAD)..." -ForegroundColor Cyan
-    $output = git cliff $prevVersion..HEAD 2>&1
+    $output = git cliff "$prevVersion..HEAD" 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] git cliff failed: $output" -ForegroundColor Red
         if ($stash) { git stash pop }
