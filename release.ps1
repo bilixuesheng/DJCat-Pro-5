@@ -1,14 +1,6 @@
 <#
 .SYNOPSIS
     交互式生成 git-cliff 日志，打标签，推送，并自动创建 GitHub Release。
-.DESCRIPTION
-    1. 询问新版本号（如 v5.0.0-pre.10）
-    2. 询问是否为预发布版本
-    3. 自动获取上一个 Git 标签（获取不到则手动输入）
-    4. 使用 git cliff 生成两个版本间的 CHANGELOG 并插入到文件顶部
-    5. 打上新标签，提交 CHANGELOG.md 变更
-    6. 推送标签和当前分支到远程 origin
-    7. 使用 gh CLI 创建 GitHub Release（如果可用）
 #>
 
 # ------------------------------ 前置检查 ------------------------------
@@ -38,23 +30,36 @@ $isPreReleaseInput = Read-Host "Is this a pre-release? (y/N)"
 $isPreRelease = ($isPreReleaseInput -eq 'y' -or $isPreReleaseInput -eq 'Y')
 $preReleaseLabel = if ($isPreRelease) { "[Pre-release]" } else { "[Release]" }
 
-# 自动获取上一个版本标签
-$latestTag = (git tag --sort=-version:refname | Select-Object -First 1) -as [string]
+# 获取所有标签并按版本倒序，排除即将创建的新版本号
+$allTags = @(git tag --sort=-version:refname)
+$latestTag = $null
+foreach ($t in $allTags) {
+    if ($t -ne $newVersion) {
+        $latestTag = $t
+        break
+    }
+}
 
-if ([string]::IsNullOrWhiteSpace($latestTag)) {
-    $prevVersion = Read-Host "No tags found. Enter previous version (e.g. v5.0.0-pre.9)"
+if (-not $latestTag) {
+    $prevVersion = Read-Host "No previous tags found. Enter previous version (e.g. v5.0.0-pre.9)"
     if ([string]::IsNullOrWhiteSpace($prevVersion)) {
         Write-Host "[ERROR] Previous version cannot be empty." -ForegroundColor Red
         exit 1
     }
 } else {
-    Write-Host "Detected previous tag: $latestTag" -ForegroundColor Cyan
+    Write-Host "Detected previous tag (ignoring same as new): $latestTag" -ForegroundColor Cyan
     $useAuto = Read-Host "Press Enter to use this tag, or type another version to override"
     if ([string]::IsNullOrWhiteSpace($useAuto)) {
         $prevVersion = $latestTag
     } else {
         $prevVersion = $useAuto
     }
+}
+
+# 验证上一个版本标签是否存在
+if (-not (git rev-parse --quiet --verify "$prevVersion^{tag}" 2>$null)) {
+    Write-Host "[ERROR] Tag '$prevVersion' does not exist locally." -ForegroundColor Red
+    exit 1
 }
 
 Write-Host ""
@@ -87,35 +92,52 @@ if ($status) {
 
 # ------------------------------ 生成日志 ------------------------------
 Write-Host ""
-Write-Host "[STEP] Generating CHANGELOG ($prevVersion..HEAD)..." -ForegroundColor Cyan
-$output = git cliff $prevVersion..HEAD 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] git cliff failed: $output" -ForegroundColor Red
-    if ($stash) { git stash pop }
-    exit 1
-}
+Write-Host "[STEP] Checking range $prevVersion..HEAD..." -ForegroundColor Cyan
 
-# 插入到现有文件顶部
-if (Test-Path "CHANGELOG.md") {
-    $existing = Get-Content "CHANGELOG.md" -Raw
-    $newContent = $output + "`n" + $existing
-    Set-Content "CHANGELOG.md" -Value $newContent -NoNewline
-    Write-Host "[OK] CHANGELOG.md updated (prepended)." -ForegroundColor Green
+# 检查两个引用之间是否有提交
+$commitsBetween = git rev-list --count "$prevVersion..HEAD"
+if ($commitsBetween -eq 0) {
+    Write-Host "[SKIP] No new commits since $prevVersion. Nothing to generate." -ForegroundColor Yellow
+    # 不生成日志，但后续是否仍需要打标签和推送？可以询问用户
+    $skipLog = Read-Host "Do you still want to create the tag $newVersion and push? (y/N)"
+    if ($skipLog -ne "y" -and $skipLog -ne "Y") {
+        Write-Host "Cancelled." -ForegroundColor Gray
+        if ($stash) { git stash pop }
+        exit 0
+    }
+    # 如果用户选择继续，跳过日志生成和提交 CHANGELOG，直接打标签推送
 } else {
-    $output | Out-File "CHANGELOG.md" -Encoding utf8
-    Write-Host "[OK] CHANGELOG.md created." -ForegroundColor Green
+    Write-Host "[STEP] Generating CHANGELOG ($prevVersion..HEAD)..." -ForegroundColor Cyan
+    $output = git cliff $prevVersion..HEAD 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] git cliff failed: $output" -ForegroundColor Red
+        if ($stash) { git stash pop }
+        exit 1
+    }
+
+    # 插入到现有文件顶部
+    if (Test-Path "CHANGELOG.md") {
+        $existing = Get-Content "CHANGELOG.md" -Raw
+        $newContent = $output + "`n" + $existing
+        Set-Content "CHANGELOG.md" -Value $newContent -NoNewline
+        Write-Host "[OK] CHANGELOG.md updated (prepended)." -ForegroundColor Green
+    } else {
+        $output | Out-File "CHANGELOG.md" -Encoding utf8
+        Write-Host "[OK] CHANGELOG.md created." -ForegroundColor Green
+    }
+
+    # 提交 CHANGELOG
+    Write-Host "[STEP] Committing CHANGELOG.md..." -ForegroundColor Cyan
+    git add CHANGELOG.md
+    git commit -m "chore(release): update CHANGELOG for $newVersion" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] git commit failed." -ForegroundColor Red
+        if ($stash) { git stash pop }
+        exit 1
+    }
 }
 
-# ------------------------------ 提交变更并打标签 ------------------------------
-Write-Host "[STEP] Committing CHANGELOG.md..." -ForegroundColor Cyan
-git add CHANGELOG.md
-git commit -m "chore(release): update CHANGELOG for $newVersion" 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] git commit failed." -ForegroundColor Red
-    if ($stash) { git stash pop }
-    exit 1
-}
-
+# ------------------------------ 打标签 ------------------------------
 Write-Host "[STEP] Creating tag $newVersion ..." -ForegroundColor Cyan
 $tagMsg = if ($isPreRelease) { "Prerelease: $newVersion" } else { "Release: $newVersion" }
 git tag -a $newVersion -m $tagMsg
@@ -140,29 +162,33 @@ if ($LASTEXITCODE -ne 0) {
 # ------------------------------ GitHub Release ------------------------------
 Write-Host ""
 Write-Host "[STEP] Creating GitHub Release..." -ForegroundColor Cyan
-
 $ghAvailable = Get-Command "gh" -ErrorAction SilentlyContinue
 if (-not $ghAvailable) {
-    Write-Host "[WARN] GitHub CLI (gh) not found. Skipping Release creation." -ForegroundColor Yellow
+    Write-Host "[WARN] GitHub CLI (gh) not found. Skipping." -ForegroundColor Yellow
     Write-Host "       Install: winget install --id GitHub.cli  or  scoop install gh" -ForegroundColor Yellow
 } else {
     $ghAuth = gh auth status 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[WARN] gh not authenticated. Run 'gh auth login' first." -ForegroundColor Yellow
     } else {
-        $releaseName = Read-Host "Enter Release title (leave empty to use version $newVersion)"
+        $releaseName = Read-Host "Enter Release title (leave empty to use $newVersion)"
         if ([string]::IsNullOrWhiteSpace($releaseName)) {
             $releaseName = $newVersion
         }
 
-        $tempNotes = [System.IO.Path]::GetTempFileName()
-        $output | Out-File $tempNotes -Encoding utf8
+        # 如果没有生成日志，body 可以为空
+        if (Test-Path variable:output) {
+            $tempNotes = [System.IO.Path]::GetTempFileName()
+            $output | Out-File $tempNotes -Encoding utf8
+            $notesFileParam = @("--notes-file", $tempNotes)
+        } else {
+            $notesFileParam = @("--notes", "No changes")
+        }
 
         $ghArgs = @(
             "release", "create", $newVersion,
-            "--title", $releaseName,
-            "--notes-file", $tempNotes
-        )
+            "--title", $releaseName
+        ) + $notesFileParam
         if ($isPreRelease) {
             $ghArgs += "--prerelease"
         }
@@ -171,7 +197,7 @@ if (-not $ghAvailable) {
         & gh $ghArgs
         $ghExit = $LASTEXITCODE
 
-        Remove-Item $tempNotes -Force
+        if (Test-Path variable:tempNotes) { Remove-Item $tempNotes -Force }
 
         if ($ghExit -eq 0) {
             Write-Host "[OK] GitHub Release created." -ForegroundColor Green
