@@ -11,11 +11,11 @@ from qframelesswindow import FramelessWindow
 from app.common.config import cfg
 
 class VerticalButton(QToolButton):
-    def __init__(self, icon, text, primary=False, parent=None):
+    def __init__(self, icon_enum, text, primary=False, parent=None):
         super().__init__(parent)
         self.primary = primary
+        self.icon_enum = icon_enum  # 保存图标枚举，方便变色
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-        self.setIcon(icon.icon())
         self.setText(text)
         self.setIconSize(QSize(20, 20))
         self.setFixedSize(80, 65)
@@ -24,13 +24,17 @@ class VerticalButton(QToolButton):
     def updateStyle(self):
         theme_color = qconfig.themeColor.value.name()
         is_dark = isDarkTheme() if cfg.customThemeMode.value == "System" else cfg.customThemeMode.value == "Dark"
+        
         if self.primary:
+            # 无论是浅色还是深色，主按钮的背景是主题色，字体和图标强制为白色
             self.setStyleSheet(f"QToolButton {{ background-color: {theme_color}; color: white; border-radius: 8px; border: none; font-size: 13px; padding-top: 6px; padding-bottom: 4px;}} QToolButton:hover {{ opacity: 0.8; }}")
+            self.setIcon(self.icon_enum.icon(color=QColor("white")))
         else:
             bg = "rgba(255,255,255,0.1)" if is_dark else "rgba(0,0,0,0.05)"
             hover_bg = "rgba(255,255,255,0.15)" if is_dark else "rgba(0,0,0,0.1)"
-            color = "white" if is_dark else "black"
-            self.setStyleSheet(f"QToolButton {{ background-color: {bg}; color: {color}; border-radius: 8px; border: none; font-size: 13px; padding-top: 6px; padding-bottom: 4px;}} QToolButton:hover {{ background-color: {hover_bg}; }}")
+            color_str = "white" if is_dark else "black"
+            self.setStyleSheet(f"QToolButton {{ background-color: {bg}; color: {color_str}; border-radius: 8px; border: none; font-size: 13px; padding-top: 6px; padding-bottom: 4px;}} QToolButton:hover {{ background-color: {hover_bg}; }}")
+            self.setIcon(self.icon_enum.icon(color=QColor(color_str)))
             
     def setWindowed(self, windowed: bool):
         if windowed:
@@ -46,19 +50,69 @@ class FloatingMiniWindow(QWidget):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        layout = QHBoxLayout(self)
-        self.btn = VerticalButton(FIF.FULL_SCREEN, "回到全屏投送", primary=True, parent=self)
-        self.btn.clicked.connect(self.restoreSignal.emit)
-        layout.addWidget(self.btn)
+        
+        # 将悬浮窗固定为正方形
+        self.setFixedSize(60, 60)
+        
+        # 使用 QToolButton 创建正圆形按钮
+        self.btn = QToolButton(self)
+        self.btn.setFixedSize(60, 60)
+        self.btn.setIconSize(QSize(24, 24))
+        
+        # 拦截鼠标事件，处理平滑拖拽与防误触
+        self.btn.installEventFilter(self)
+        
         self.setWindowOpacity(0.5)
         self._dragPos = QPoint()
+        self._isDragging = False
+        
+        self._updateStyle()
+        qconfig.themeColor.valueChanged.connect(self._updateStyle)
 
-    def enterEvent(self, event): self.setWindowOpacity(1.0)
-    def leaveEvent(self, event): self.setWindowOpacity(0.5)
-    def mousePressEvent(self, event): self._dragPos = event.globalPosition().toPoint() - self.pos()
-    def mouseMoveEvent(self, event):
-        if event.buttons() == Qt.MouseButton.LeftButton:
-            self.move(event.globalPosition().toPoint() - self._dragPos)
+    def _updateStyle(self):
+        theme_color = qconfig.themeColor.value.name()
+        # 渲染成完美的圆形 (border-radius = 宽度的一半)
+        self.btn.setStyleSheet(f"""
+            QToolButton {{
+                background-color: {theme_color};
+                border-radius: 30px; 
+                border: none;
+            }}
+            QToolButton:hover {{
+                background-color: {theme_color};
+            }}
+        """)
+        # 强制图标为白色
+        self.btn.setIcon(FIF.FULL_SCREEN.icon(color=QColor("white")))
+
+    def eventFilter(self, obj, event):
+        if obj == self.btn:
+            if event.type() == QEvent.Type.Enter:
+                self.setWindowOpacity(1.0)
+                return False
+            elif event.type() == QEvent.Type.Leave:
+                self.setWindowOpacity(0.5)
+                return False
+            elif event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                self._isDragging = False
+                # 记录点击位置相对窗口左上角的偏移量，修复跳跃问题
+                self._dragPos = event.globalPosition().toPoint() - self.pos()
+                return True # 拦截事件，避免直接触发点击
+            elif event.type() == QEvent.Type.MouseMove and event.buttons() == Qt.MouseButton.LeftButton:
+                if not self._dragPos.isNull():
+                    # 移动距离超过 3 像素才判定为拖拽 (防手抖误触)
+                    if (event.globalPosition().toPoint() - self.pos() - self._dragPos).manhattanLength() > 3:
+                        self._isDragging = True
+                    self.move(event.globalPosition().toPoint() - self._dragPos)
+                return True
+            elif event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+                # 只有在没有发生拖动的情况下，才判定为有效的“点击”并返回全屏投送
+                if not self._isDragging:
+                    self.restoreSignal.emit()
+                self._isDragging = False
+                self._dragPos = QPoint()
+                return True
+        return super().eventFilter(obj, event)
 
 class BroadcastWindow(FramelessWindow):
     editClicked = Signal()
@@ -72,7 +126,6 @@ class BroadcastWindow(FramelessWindow):
         self._isTracking = False
         
         self.vBoxLayout = QVBoxLayout(self)
-        # 将底部边距改小，让正文填满底部
         self.vBoxLayout.setContentsMargins(40, 20, 40, 20)
         
         self.titleLabel = TitleLabel(self)
@@ -88,11 +141,10 @@ class BroadcastWindow(FramelessWindow):
         self.vBoxLayout.addWidget(self.titleLabel, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.vBoxLayout.addWidget(self.contentEdit, 1)
         
-        # === 修改：创建一个独立的悬浮容器存放按钮，不再放入 vBoxLayout ===
         self.btnContainer = QWidget(self)
         self.btnLayout = QHBoxLayout(self.btnContainer)
         self.btnLayout.setContentsMargins(0, 0, 0, 0)
-        self.btnLayout.setSpacing(12) # 按钮之间的间距设定为 12
+        self.btnLayout.setSpacing(12)
         
         self.is_windowed = False
         self.miniWindow = FloatingMiniWindow()
@@ -107,7 +159,6 @@ class BroadcastWindow(FramelessWindow):
         self.btn_min.clicked.connect(self.minimizeToMini)
         self.btn_win.clicked.connect(self.toggleWindowMode)
         self.btn_close.clicked.connect(self.close)
-
 
     def eventFilter(self, obj, event):
         if obj == self.contentEdit.viewport():
@@ -138,7 +189,6 @@ class BroadcastWindow(FramelessWindow):
         self.titleLabel.setText(title)
         self.titleLabel.setStyleSheet(f"color: {qconfig.themeColor.value.name()};")
         
-        # 根据开关状态决定渲染方式
         if is_markdown:
             self.contentEdit.setMarkdown(text)
         else:
@@ -158,7 +208,6 @@ class BroadcastWindow(FramelessWindow):
             
         for w in widgets: self.btnLayout.addWidget(w)
         
-        # === 新增：让容器自适应按钮大小，并更新位置 ===
         self.btnContainer.adjustSize()
         self._updateBtnPosition()
 
@@ -167,19 +216,15 @@ class BroadcastWindow(FramelessWindow):
         self._updateBtnPosition()
 
     def _updateBtnPosition(self):
-        # 按钮距离屏幕底边和侧边的距离，设定为等于按钮间距（12）
         margin = self.btnLayout.spacing() 
-        
-        # 根据设置动态计算悬浮坐标
         if cfg.actionButtonPosition.value == "左下角":
             target_x = margin
         else:
             target_x = self.width() - self.btnContainer.width() - margin
             
         target_y = self.height() - self.btnContainer.height() - margin
-        
         self.btnContainer.move(target_x, target_y)
-        self.btnContainer.raise_() # 确保按钮图层永远在正文的最上方
+        self.btnContainer.raise_()
 
     def startBroadcast(self):
         self.is_windowed = False
@@ -197,9 +242,11 @@ class BroadcastWindow(FramelessWindow):
         self.btn_min.setWindowed(self.is_windowed)
         self.btn_win.setWindowed(self.is_windowed)
         self.btn_close.setWindowed(self.is_windowed)
-        self.btn_win.setIcon(FIF.FULL_SCREEN.icon() if self.is_windowed else FIF.COPY.icon())
         
-        # === 新增：让悬浮容器重新收缩贴合小尺寸按钮，并更新位置 ===
+        # 动态更新窗口化按钮的图标和颜色样式
+        self.btn_win.icon_enum = FIF.FULL_SCREEN if self.is_windowed else FIF.COPY
+        self.btn_win.updateStyle()
+        
         self.btnContainer.adjustSize()
         self._updateBtnPosition()
 
@@ -227,7 +274,7 @@ class BroadcastWindow(FramelessWindow):
 
     def minimizeToMini(self):
         self.hide()
-        self.miniWindow.btn.updateStyle()
+        self.miniWindow._updateStyle()
         self.miniWindow.show()
         rect = self.screen().availableGeometry()
         if cfg.actionButtonPosition.value == "右下角":
@@ -280,7 +327,6 @@ class BroadcastEditPage(QWidget):
         self.backBtn.clicked.connect(self._onBack)
         self.pageTitle = TitleLabel("全屏投送编辑器", self)
         
-        # 新增 Markdown 选项
         self.markdownCheckBox = CheckBox("使用 Markdown 语法", self)
         self.markdownCheckBox.setChecked(False)
         self.markdownCheckBox.stateChanged.connect(self._onMarkdownStateChanged)
@@ -298,7 +344,6 @@ class BroadcastEditPage(QWidget):
         self.vBoxLayout.addWidget(self.titleInput)
         
         self.contentInput = TextEdit(self)
-        # 初始化占位符
         self.contentInput.setPlaceholderText("在此输入要投送的正文")
         self.vBoxLayout.addWidget(self.contentInput)
         
@@ -324,7 +369,6 @@ class BroadcastEditPage(QWidget):
         self.broadcastWin.closeClicked.connect(self._onReturnToHome)
 
     def _onMarkdownStateChanged(self, state):
-        # 切换占位符提示内容
         if self.markdownCheckBox.isChecked():
             self.contentInput.setPlaceholderText("支持Markdown语法（注意，在该模式下换行要换两次）")
         else:
@@ -339,24 +383,19 @@ class BroadcastEditPage(QWidget):
     def _useNoonTemplate(self):
         self.titleInput.setText("今日中午作业")
         if self.markdownCheckBox.isChecked():
-            # Markdown 模式
             self.contentInput.setText("**【数学】**\n- \n---\n**⚠️请值日人员到卫生区打扫⚠️**")
         else:
-            # 普通文本模式
             self.contentInput.setText("【数学】\n  -\n\n【 ⚠️请值日人员到卫生区打扫⚠️ 】")
 
     def _useNightTemplate(self):
         self.titleInput.setText("今日晚辅导作业")
         if self.markdownCheckBox.isChecked():
-            # Markdown 模式
             self.contentInput.setText("**【语文】**\n- \n\n**【英语】**\n- \n\n**【物理】**\n- ")
         else:
-            # 普通文本模式
             self.contentInput.setText("【语文】\n  -\n\n【英语】\n  -\n\n【物理】\n  -")
 
     def _onBroadcast(self):
         QApplication.instance().setQuitOnLastWindowClosed(False)
-        # 将 CheckBox 状态传入窗口
         self.broadcastWin.setContent(
             self.titleInput.text(), 
             self.contentInput.toPlainText(), 
