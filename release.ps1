@@ -128,7 +128,7 @@ if ($commitsBetween -eq 0) {
 
     # 提交 CHANGELOG
     Write-Host "[STEP] Committing CHANGELOG.md..." -ForegroundColor Cyan
-    git add CHANGELOG.md
+    git add -f CHANGELOG.md
     git commit -m "chore(release): update CHANGELOG for $newVersion" 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] git commit failed." -ForegroundColor Red
