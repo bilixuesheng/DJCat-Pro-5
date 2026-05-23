@@ -44,7 +44,10 @@ class Config(QConfig):
     geometry = ConfigItem("Software", "Geometry", QRect(0, 0, 0, 0), GeometryValidator(), GeometrySerializer())
 
     # 主页卡片
-    homeCardOrder = ConfigItem("HomePage", "CardOrder", ["全屏投送", "考试倒计时", "定时关机"])
+    homeCardOrder = ConfigItem("HomePage", "CardOrder", ["全屏投送", "考试倒计时", "定时播报", "定时关机"])
+
+    # 新增：定时播报任务列表保存 (存为 JSON 格式的字典列表)
+    broadcastTasks = ConfigItem("Schedule", "Tasks", [])
 
 APP_NAME = "电教猫 Pro 5 Beta"
 YEAR = 2026

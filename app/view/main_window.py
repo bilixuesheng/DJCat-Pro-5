@@ -1,9 +1,12 @@
+import os
 import threading
 import re
 import requests
-from PySide6.QtCore import Qt, Signal, QObject, QUrl, QPropertyAnimation
+from PySide6.QtCore import Qt, Signal, QObject, QUrl, QPropertyAnimation, QTimer, QDate, QTime
 from PySide6.QtGui import QIcon, QDesktopServices
 from PySide6.QtWidgets import QApplication, QGraphicsOpacityEffect
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtTextToSpeech import QTextToSpeech  # 新增 TTS 引擎
 from qfluentwidgets import (MSFluentWindow, NavigationItemPosition, FluentIcon as FIF, 
                             setTheme, Theme, SplashScreen, InfoBar, InfoBarPosition, 
                             PrimaryPushButton, PushButton, MessageBoxBase, SubtitleLabel, 
@@ -15,6 +18,7 @@ from app.view.home_page import HomePage
 from app.view.setting_page import SettingPage
 from app.view.broadcast_page import BroadcastEditPage
 from app.view.components.tray import SystemTrayIcon
+from app.view.schedule_page import SchedulePage
 
 class CustomSplashScreen(SplashScreen):
     def finish(self):
@@ -84,15 +88,83 @@ class MainWindow(MSFluentWindow):
         
         geometry = cfg.geometry.value
         if geometry.isEmpty() or geometry.width() <= 0:
-            # 如果是第一次打开，没有记录，则居中显示
             self.resize(800, 450)
             desktop = QApplication.primaryScreen().availableGeometry()
             w, h = desktop.width(), desktop.height()
             self.move(w // 2 - self.width() // 2, h // 2 - self.height() // 2)
         else:
-            # === 修改：拆分为显式设定大小和位置 ===
             self.resize(geometry.width(), geometry.height())
             self.move(geometry.x(), geometry.y())
+            
+        # === 音频播放器与循环控制 ===
+        self.player = QMediaPlayer(self)
+        self.audioOutput = QAudioOutput(self)
+        self.audioOutput.setVolume(1.0)
+        self.player.setAudioOutput(self.audioOutput)
+        self.current_play_repeats = 0
+        self.player.mediaStatusChanged.connect(self._onMediaStatusChanged)
+        
+        # === TTS 引擎 ===
+        self.tts = QTextToSpeech(self)
+        
+        signalBus.testAudio.connect(self._playAudioTask)
+        
+        # 定时器：每秒触发一次检查
+        self.scheduleTimer = QTimer(self)
+        self.scheduleTimer.timeout.connect(self._checkSchedule)
+        self.scheduleTimer.start(1000)
+        self.last_triggered_time = ""
+
+    def _playAudioTask(self, task_data):
+        """ 执行真实的音频播放或 TTS 播报 """
+        t = task_data["type"]
+        repeat_count = task_data.get("repeat", 1)
+        
+        # 1. 拦截并处理 TTS (将文本根据 repeat_count 复制拼接，利用句号停顿)
+        if "TTS" in t:
+            content = task_data.get("content", "")
+            if content:
+                full_text = "。".join([content] * repeat_count)
+                self.tts.say(full_text)
+            return
+
+        # 2. 处理本地/预设音频
+        base_path = os.path.dirname(__file__) 
+        path = ""
+        if t == "预设: 12:30报时": path = os.path.join(base_path, "1230.mp3")
+        elif t == "预设: 18:25报时": path = os.path.join(base_path, "1825.mp3")
+        elif t == "预设: 上课铃": path = os.path.join(base_path, "class.mp3")
+        elif t == "本地音频": path = task_data.get("file", "")
+        
+        if path and os.path.exists(path):
+            self.current_play_repeats = repeat_count - 1 # 减去当前马上要播放的这一次
+            self.player.setSource(QUrl.fromLocalFile(path))
+            self.player.play()
+
+    def _onMediaStatusChanged(self, status):
+        """ 监听音频播放状态，实现真实的循环播放 """
+        if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            if self.current_play_repeats > 0:
+                self.current_play_repeats -= 1
+                self.player.setPosition(0) # 回到开头
+                self.player.play()
+
+    def _checkSchedule(self):
+        """ 定时检测核心 """
+        now_time = QTime.currentTime().toString("HH:mm:ss")
+        if now_time == self.last_triggered_time:
+            return 
+            
+        today_week = QDate.currentDate().dayOfWeek() - 1 
+        
+        for task in cfg.broadcastTasks.value:
+            if not task.get("enabled", False): continue
+            
+            # 由于 TimePicker 强制存为 HH:mm:00，所以任务永远会在秒数为00时精准触发
+            if today_week in task["weeks"] and task["time"] == now_time:
+                self.last_triggered_time = now_time
+                self._playAudioTask(task)
+                break 
 
     def initSplashScreen(self):
         self.splashScreen = CustomSplashScreen(self.windowIcon(), self, enableShadow=False)
@@ -105,20 +177,29 @@ class MainWindow(MSFluentWindow):
         self.broadcastEditPage = BroadcastEditPage(self)
         self.broadcastEditPage.setObjectName("BroadcastEditPage")
         
-        # 依次添加页面到主窗口系统
+        self.schedulePage = SchedulePage(self)
+        self.schedulePage.setObjectName("SchedulePage")
+        
         self.addSubInterface(self.homePage, FIF.HOME, "主页")
         self.addSubInterface(self.settingPage, FIF.SETTING, "设置", position=NavigationItemPosition.BOTTOM)
         
-        # 将投送页隐式添加到页面栈中 (自带正确的进入动画)
         self.stackedWidget.addWidget(self.broadcastEditPage)
+        self.stackedWidget.addWidget(self.schedulePage)
         
-        # 拦截点击并跳转
-        self.homePage.all_cards["全屏投送"].clicked.connect(self._navToBroadcast)
+        if "全屏投送" in self.homePage.all_cards:
+            self.homePage.all_cards["全屏投送"].clicked.connect(self._navToBroadcast)
+        if "定时播报" in self.homePage.all_cards:
+            self.homePage.all_cards["定时播报"].clicked.connect(self._navToSchedule)
+        
         self.broadcastEditPage.backSignal.connect(self._navToHome)
+        self.schedulePage.backSignal.connect(self._navToHome) 
 
     def _navToBroadcast(self):
-        # 【关键修复】使用原生切换接口播放正确的载入动画，并清除左侧选中状态
         self.switchTo(self.broadcastEditPage)
+        self.navigationInterface.setCurrentItem(None)
+        
+    def _navToSchedule(self):
+        self.switchTo(self.schedulePage)
         self.navigationInterface.setCurrentItem(None)
         
     def _navToHome(self):
@@ -151,15 +232,11 @@ class MainWindow(MSFluentWindow):
 
         latest_version = data.get("latest_version", "未知")
         
-        # 新增：版本对比逻辑
         if latest_version == VERSION:
-            # 如果是手动点击检查更新，提示已经是最新版
             if manual: 
                 InfoBar.success("已是最新版本", f"当前运行的 v{VERSION} 已经是最新版本啦", duration=3000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
-            # 如果是开机自启检查，直接 return，不打扰用户
             return
 
-        # 如果版本号不同，则继续执行原本的新版本提示逻辑
         note = str(data.get("update_note", ""))
         if "\\u" in note:
             try: note = note.encode('utf-8').decode('unicode_escape')
@@ -180,7 +257,6 @@ class MainWindow(MSFluentWindow):
         detailButton.clicked.connect(lambda: self._showUpdateLog(latest_version, note))
         infoBar.addWidget(detailButton)
         infoBar.show()
-
 
     def _showUpdateLog(self, version, note):
         w = UpdateDialog(version, note, self)

@@ -216,6 +216,7 @@ class HomePage(ScrollArea):
         self.all_cards = {
             "全屏投送": ActionCard(FIF.FULL_SCREEN, "全屏投送", "将信息以大字全屏展示"),
             "考试倒计时": ActionCard(FIF.CALENDAR, "考试倒计时", "设定考试时间并在屏幕上显示倒计时（敬请期待）"),
+            "定时播报": ActionCard(FIF.MEGAPHONE, "定时播报", "设置每日定点语音播报时间或播放音频"),
             "定时关机": ActionCard(FIF.POWER_BUTTON, "定时关机", "设置指定时间弹出提示自动关闭计算机（敬请期待）")
         }
         self._renderCards()
