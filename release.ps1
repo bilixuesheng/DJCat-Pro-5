@@ -56,9 +56,9 @@ if (-not $latestTag) {
     }
 }
 
-# 验证上一个版本标签是否存在
-if (-not (git rev-parse --quiet --verify "$prevVersion^{tag}" 2>$null)) {
-    Write-Host "[ERROR] Tag '$prevVersion' does not exist locally." -ForegroundColor Red
+# 验证标签是否存在（兼容轻量/标注标签）
+if (-not (git tag --list $prevVersion)) {
+    Write-Host "[ERROR] Tag '$prevVersion' does not exist." -ForegroundColor Red
     exit 1
 }
 
