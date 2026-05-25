@@ -39,10 +39,15 @@ def build_args() -> list[str]:
         # Dependencies
         '--include-package=requests',
         '--include-package=loguru',
+        '--include-package=PySide6.QtMultimedia',
+        '--include-package=PySide6.QtTextToSpeech',       
         
         # Data files
         '--include-data-file=app/view/home.png=app/view/home.png',
         '--include-data-file=logo.png=logo.png',
+        '--include-data-file=app/view/1230.mp3=app/view/1230.mp3',
+        '--include-data-file=app/view/1825.mp3=app/view/1825.mp3',
+        '--include-data-file=app/view/class.mp3=app/view/class.mp3',
         
         # Metadata
         '--windows-icon-from-ico=logo.png',
