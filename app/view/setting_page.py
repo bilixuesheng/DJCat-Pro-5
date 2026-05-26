@@ -213,8 +213,8 @@ class SettingPage(ScrollArea):
             )
             
             if is_auto_run:
-                # 写入注册表，路径前后加上双引号防止空格报错
-                winreg.SetValueEx(key, key_name, 0, winreg.REG_SZ, f'"{exec_path}"')
+                # 修改：和 GD 一样，加上 --silence 参数
+                winreg.SetValueEx(key, key_name, 0, winreg.REG_SZ, f'"{exec_path}" --silence')
             else:
                 # 删除注册表
                 try:

@@ -1,3 +1,4 @@
+import os
 import sys
 import traceback
 from loguru import logger
@@ -30,6 +31,11 @@ def exceptionHook(exc_type, exc_value, exc_traceback):
 
 
 def main():
+        # === 新增：完美替代 QRC 资源包的路径纠正法 ===
+    if getattr(sys, 'frozen', False) or '__compiled__' in globals():
+        os.chdir(os.path.dirname(sys.executable))
+    else:
+        os.chdir(os.path.dirname(os.path.abspath(__file__)))
     # 修改日志路径，加上 "Log/" 文件夹前缀。
     # retention="7 days" 会在每次启动或按天切割时，自动帮你把7天前的文件删掉。
     logger.add("Log/djcatpro日志_{time:YYYY-MM-DD}.log", rotation="00:00", retention="7 days", enqueue=True, encoding="utf-8")

@@ -1,4 +1,5 @@
 import os
+import sys
 import threading
 import re
 import requests
@@ -169,7 +170,15 @@ class MainWindow(MSFluentWindow):
     def initSplashScreen(self):
         self.splashScreen = CustomSplashScreen(self.windowIcon(), self, enableShadow=False)
         self.splashScreen.raise_()
-        self.show()
+        
+        # === 核心：像 GD 一样拦截静默启动 ===
+        is_silently = "--silence" in sys.argv
+        if not is_silently:
+            # 只有手动点击打开时，才显示主窗口
+            self.show()
+        else:
+            # 如果是自启，直接把闪屏动画结束掉，不调用 self.show()
+            self.splashScreen.finish()
 
     def initNavigation(self):
         self.homePage = HomePage(self)
