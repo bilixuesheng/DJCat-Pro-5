@@ -35,6 +35,8 @@ def build_args() -> list[str]:
         '--plugin-enable=pyside6',
         '--assume-yes-for-downloads',
         '--msvc=latest',
+
+        '--include-qt-plugins=multimedia,texttospeech',
         
         # Dependencies
         '--include-package=requests',
