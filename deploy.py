@@ -38,9 +38,7 @@ def build_args() -> list[str]:
         
         # Dependencies
         '--include-package=requests',
-        '--include-package=loguru',
-        '--include-package=PySide6.QtMultimedia',
-        '--include-package=PySide6.QtTextToSpeech',       
+        '--include-package=loguru',     
         
         # Data files
         '--include-data-file=app/view/home.png=app/view/home.png',
