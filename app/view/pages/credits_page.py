@@ -159,7 +159,7 @@ class CreditEntry(QWidget):
         textLayout.addWidget(descriptionLabel)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(0, 4, 0, 4)
         layout.setSpacing(8)
         layout.addWidget(avatarLabel, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(textLayout, 1)
@@ -169,8 +169,7 @@ class CreditEntry(QWidget):
         buttonLayout.setSpacing(2)
         for text, icon, url in links:
             button = HyperlinkButton(icon, url, text, self)
-            width = button.fontMetrics().horizontalAdvance(text) + 36
-            button.setFixedWidth(max(68, width))
+            button.setFixedWidth(button.sizeHint().width())
             buttonLayout.addWidget(button)
         layout.addLayout(buttonLayout)
 
@@ -224,7 +223,7 @@ class CreditsPage(ScrollArea):
 
         container = QWidget(self)
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(20, 30, 20, 36)
+        layout.setContentsMargins(8, 30, 8, 36)
         layout.setSpacing(16)
         layout.addWidget(TitleLabel("特别鸣谢", container))
 
