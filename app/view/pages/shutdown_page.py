@@ -435,9 +435,9 @@ class ShutdownPromptDialog(MessageBoxBase):
         self.cancelButton.setText("等我 1 分钟")
         self.buttonLayout.removeWidget(self.yesButton)
         self.buttonLayout.removeWidget(self.cancelButton)
+        self.buttonLayout.addWidget(self.yesButton)
         self.buttonLayout.addWidget(self.countdownLabel, 1)
         self.buttonLayout.addWidget(self.cancelButton)
-        self.buttonLayout.addWidget(self.yesButton)
 
         self.skipButton = None
         if task.get("allowSkip", True):
