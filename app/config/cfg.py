@@ -95,6 +95,16 @@ class Config(QConfig):
         "Broadcast", "TopmostInWindowed", True, BoolValidator()
     )
 
+    showTaskbarInCountdown = ConfigItem(
+        "Countdown", "ShowTaskbar", True, BoolValidator()
+    )
+    countdownTopmostInFullscreen = ConfigItem(
+        "Countdown", "TopmostInFullscreen", False, BoolValidator()
+    )
+    countdownTopmostInWindowed = ConfigItem(
+        "Countdown", "TopmostInWindowed", True, BoolValidator()
+    )
+
     autoRun = ConfigItem("Software", "AutoRun", False, BoolValidator())
     checkUpdateAtStartUp = ConfigItem(
         "Software", "CheckUpdateAtStartUp", True, BoolValidator()

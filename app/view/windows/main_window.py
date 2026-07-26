@@ -47,6 +47,7 @@ from app.config.constants import (
 from app.config.paths import ASSET_DIR
 from app.signal_bus import signalBus
 from app.view.pages.broadcast_page import BroadcastEditPage
+from app.view.pages.countdown_page import CountdownEditPage
 from app.view.pages.credits_page import CreditsPage
 from app.view.pages.home_page import HomePage
 from app.view.pages.schedule_page import SchedulePage
@@ -287,6 +288,8 @@ class MainWindow(MSFluentWindow):
         self.stackedWidget.currentChanged.connect(self._updateSearchEdit)
         self.broadcastEditPage = BroadcastEditPage(self)
         self.broadcastEditPage.setObjectName("BroadcastEditPage")
+        self.countdownPage = CountdownEditPage(self)
+        self.countdownPage.setObjectName("CountdownPage")
 
         self.schedulePage = SchedulePage(self)
         self.schedulePage.setObjectName("SchedulePage")
@@ -308,17 +311,21 @@ class MainWindow(MSFluentWindow):
         )
 
         self.stackedWidget.addWidget(self.broadcastEditPage)
+        self.stackedWidget.addWidget(self.countdownPage)
         self.stackedWidget.addWidget(self.schedulePage)
         self.stackedWidget.addWidget(self.shutdownPage)
 
         if "全屏投送" in self.homePage.all_cards:
             self.homePage.all_cards["全屏投送"].clicked.connect(self._navToBroadcast)
+        if "考试倒计时" in self.homePage.all_cards:
+            self.homePage.all_cards["考试倒计时"].clicked.connect(self._navToCountdown)
         if "定时播报" in self.homePage.all_cards:
             self.homePage.all_cards["定时播报"].clicked.connect(self._navToSchedule)
         if "定时关机" in self.homePage.all_cards:
             self.homePage.all_cards["定时关机"].clicked.connect(self._navToShutdown)
 
         self.broadcastEditPage.backSignal.connect(self._navToHome)
+        self.countdownPage.backSignal.connect(self._navToHome)
         self.schedulePage.backSignal.connect(self._navToHome)
         self.shutdownPage.backSignal.connect(self._navToHome)
         self._updateSearchEdit()
@@ -341,6 +348,10 @@ class MainWindow(MSFluentWindow):
 
     def _navToBroadcast(self):
         self.switchTo(self.broadcastEditPage)
+        self.navigationInterface.setCurrentItem(None)
+
+    def _navToCountdown(self):
+        self.switchTo(self.countdownPage)
         self.navigationInterface.setCurrentItem(None)
 
     def _navToSchedule(self):

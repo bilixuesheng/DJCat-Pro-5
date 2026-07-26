@@ -167,6 +167,9 @@ class SettingPage(ScrollArea):
         self.broadcastGroup = CollapsibleSettingCardGroup(
             "全屏投送设置", "broadcast", self.container
         )
+        self.countdownGroup = CollapsibleSettingCardGroup(
+            "考试倒计时设置", "countdown", self.container
+        )
         self.softwareGroup = CollapsibleSettingCardGroup(
             "应用", "software", self.container
         )
@@ -277,6 +280,29 @@ class SettingPage(ScrollArea):
             ]
         )
 
+        self.countdownGroup.addSettingCards(
+            [
+                SwitchSettingCard(
+                    FluentIcon.APPLICATION,
+                    "显示任务栏",
+                    "全屏倒计时时显示任务栏，方便切换应用并避免 Windows 进入免打扰模式",
+                    cfg.showTaskbarInCountdown,
+                ),
+                SwitchSettingCard(
+                    FluentIcon.PIN,
+                    "全屏时置顶",
+                    "全屏倒计时窗口始终显示在最顶层",
+                    cfg.countdownTopmostInFullscreen,
+                ),
+                SwitchSettingCard(
+                    FluentIcon.PIN,
+                    "窗口化时置顶",
+                    "倒计时界面窗口化时始终显示在最顶层",
+                    cfg.countdownTopmostInWindowed,
+                ),
+            ]
+        )
+
         self.autoRunCard = SwitchSettingCard(
             FluentIcon.VPN,
             "开机启动",
@@ -318,6 +344,7 @@ class SettingPage(ScrollArea):
         self.addSettingGroup(self.personalGroup)
         self.addSettingGroup(self.bannerGroup)
         self.addSettingGroup(self.broadcastGroup)
+        self.addSettingGroup(self.countdownGroup)
         self.addSettingGroup(self.softwareGroup)
         self.addSettingGroup(self.aboutGroup)
 
