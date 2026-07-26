@@ -296,10 +296,11 @@ class CountdownWindow(FramelessWindow):
         if self.is_windowed:
             self.showNormal()
             rect = self.screen().availableGeometry()
-            self.vBoxLayout.setContentsMargins(16, 12, 16, 12)
+            # 底部留出角落小操作按钮的高度，避免与暂停/加减秒按钮重叠
+            self.vBoxLayout.setContentsMargins(16, 12, 16, 56)
             # 先按目标高度缩小字体，否则旧字体的最小尺寸会钳制 resize
-            self._applyFonts(240)
-            self.setFixedSize(420, 240)
+            self._applyFonts(300)
+            self.setFixedSize(500, 300)
             self.move(rect.center() - self.rect().center())
         else:
             self.vBoxLayout.setContentsMargins(40, 20, 40, 20)
@@ -321,7 +322,7 @@ class CountdownWindow(FramelessWindow):
         font.setBold(True)
         self.titleLabel.setFont(font)
         font = self.timeLabel.font()
-        size = max(32, h // (2 if self.is_windowed else 5))
+        size = max(32, h * 2 // 5 if self.is_windowed else h // 5)
         font.setPixelSize(size)
         font.setBold(True)
         # 窗口化宽度固定，超宽时按比例缩小字号到刚好放得下
