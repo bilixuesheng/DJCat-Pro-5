@@ -1,12 +1,23 @@
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter
-from PySide6.QtWidgets import QApplication, QMenu, QHBoxLayout, QSystemTrayIcon, QProxyStyle, QStyle, QStyleFactory
-from qfluentwidgets import RoundMenu, FluentStyleSheet, isDarkTheme, Action, FluentIcon as FIF
+from PySide6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QMenu,
+    QProxyStyle,
+    QStyle,
+    QStyleFactory,
+    QSystemTrayIcon,
+)
+from qfluentwidgets import Action, FluentStyleSheet, RoundMenu, isDarkTheme
+from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets.common.screen import getCurrentScreenGeometry
 from qfluentwidgets.components.widgets.menu import MenuActionListWidget
 from qframelesswindow import WindowEffect
 
-from app.common.config import cfg
+from app.config.cfg import cfg
+from app.config.paths import ASSET_DIR
+
 
 class CustomMenuStyle(QProxyStyle):
     def __init__(self, iconSize=14):
@@ -35,7 +46,7 @@ class AcrylicMenu(RoundMenu):
         self.lastHoverSubMenuItem = None
         self.isHideBySystem = True
         self.itemHeight = 28
-        
+
         self.hBoxLayout = QHBoxLayout(self)
         self.view = MenuActionListWidget(self)
         self.windowEffect = WindowEffect(self)
@@ -44,7 +55,7 @@ class AcrylicMenu(RoundMenu):
 
     def __initWidgets(self):
         self.setWindowFlags(
-            Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint | 
+            Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.NoDropShadowWindowHint | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -55,8 +66,7 @@ class AcrylicMenu(RoundMenu):
         self.hBoxLayout.setContentsMargins(0, 0, 0, 0)
         FluentStyleSheet.MENU.apply(self)
         self.view.setProperty("transparent", True)
-        
-        # 【修复点】恢复事件绑定，解决点击无反应的问题
+
         self.view.itemClicked.connect(self._onItemClicked)
         self.view.itemEntered.connect(self._onItemEntered)
 
@@ -89,16 +99,14 @@ class AcrylicMenu(RoundMenu):
 class SystemTrayIcon(QSystemTrayIcon):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
-        self.setIcon(QIcon("logo.png"))
-        
-        # 初始化托盘文本
+        self.setIcon(QIcon(str(ASSET_DIR / "logo.png")))
+
         self.setToolTip(cfg.trayTooltip.value)
-        
-        # 监听配置变化，实时更新托盘文本
+
         cfg.trayTooltip.valueChanged.connect(self.setToolTip)
 
         self.menu = AcrylicMenu(parent=parent)
-        
+
         self.showAction = Action(FIF.HOME, '显示主界面', self.menu)
         self.showAction.triggered.connect(self._onShowActionTriggered)
         self.menu.addAction(self.showAction)
@@ -118,7 +126,7 @@ class SystemTrayIcon(QSystemTrayIcon):
 
     def _onQuitActionTriggered(self):
         if self.parent():
-            from app.common.config import cfg
+            from app.config.cfg import cfg
             cfg.set(cfg.geometry, self.parent().geometry())
         QApplication.quit()
 
