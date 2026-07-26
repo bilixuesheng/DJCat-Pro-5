@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter
 from PySide6.QtWidgets import (
@@ -107,11 +109,23 @@ class SystemTrayIcon(QSystemTrayIcon):
 
         self.menu = AcrylicMenu(parent=parent)
 
-        self.showAction = Action(FIF.HOME, '显示主界面', self.menu)
+        self.showAction = Action(
+            QIcon(str(ASSET_DIR / "logo_cat.png")),
+            "主页",
+            self.menu,
+        )
         self.showAction.triggered.connect(self._onShowActionTriggered)
         self.menu.addAction(self.showAction)
 
-        self.quitAction = Action(FIF.CLOSE, '退出程序', self.menu)
+        self.broadcastAction = Action(FIF.PLAY, "", self.menu)
+        self.broadcastAction.triggered.connect(self._onBroadcastActionTriggered)
+        self.menu.addAction(self.broadcastAction)
+        cfg.broadcastTasks.valueChanged.connect(self._refreshBroadcastAction)
+        self._refreshBroadcastAction()
+
+        self.menu.addSeparator()
+
+        self.quitAction = Action(FIF.CLOSE, "退出程序", self.menu)
         self.quitAction.triggered.connect(self._onQuitActionTriggered)
         self.menu.addAction(self.quitAction)
 
@@ -123,6 +137,22 @@ class SystemTrayIcon(QSystemTrayIcon):
             self.parent().show()
             self.parent().raise_()
             self.parent().activateWindow()
+
+    def _refreshBroadcastAction(self):
+        tasks = cfg.broadcastTasks.value
+        hasEnabledTask = any(task.get("enabled", False) for task in tasks)
+        self.broadcastAction.setText(
+            "关闭所有播报" if hasEnabledTask else "开启所有播报"
+        )
+        self.broadcastAction.setIcon(FIF.PAUSE if hasEnabledTask else FIF.PLAY)
+        self.broadcastAction.setEnabled(bool(tasks))
+
+    def _onBroadcastActionTriggered(self):
+        tasks = deepcopy(cfg.broadcastTasks.value)
+        enabled = not any(task.get("enabled", False) for task in tasks)
+        for task in tasks:
+            task["enabled"] = enabled
+        cfg.set(cfg.broadcastTasks, tasks)
 
     def _onQuitActionTriggered(self):
         if self.parent():

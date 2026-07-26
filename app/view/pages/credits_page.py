@@ -62,7 +62,8 @@ _GROUPS = (
             (
                 "Gemini",
                 "gemini.png",
-                "辅助参与了 电教猫 Pro 5 Beta Pre.11 以前的版本",
+                "辅助参与了 电教猫 Pro 5 Beta Pre.11 以前的版本，"
+                "并开发了 电教猫 Pro 4 及之前的官网",
                 (("官网", FIF.GLOBE, "https://gemini.google.com/"),),
             ),
             (
