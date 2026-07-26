@@ -1,5 +1,4 @@
 import os
-import sys
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPixmap
@@ -9,7 +8,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QScroller,
     QVBoxLayout,
     QWidget,
 )
@@ -26,13 +24,9 @@ from qfluentwidgets import (
 )
 from qfluentwidgets import FluentIcon as FIF
 
-if sys.platform != "darwin":
-    from qfluentwidgets import SmoothScrollArea as ScrollArea
-else:
-    from qfluentwidgets import ScrollArea
-
 from app.config.cfg import cfg
 from app.config.paths import ASSET_DIR
+from app.view.components.scroll_area import ScrollArea
 
 
 class ActionCard(CardWidget):
@@ -220,7 +214,11 @@ class HomePage(ScrollArea):
             "全屏投送": ActionCard(FIF.FULL_SCREEN, "全屏投送", "将信息以大字全屏展示"),
             "考试倒计时": ActionCard(FIF.CALENDAR, "考试倒计时", "设定考试时间并在屏幕上显示倒计时（敬请期待）"),
             "定时播报": ActionCard(FIF.MEGAPHONE, "定时播报", "设置每日定点语音播报时间或播放音频"),
-            "定时关机": ActionCard(FIF.POWER_BUTTON, "定时关机", "设置指定时间弹出提示自动关闭计算机（敬请期待）")
+            "定时关机": ActionCard(
+                FIF.POWER_BUTTON,
+                "定时关机",
+                "设置指定时间提示或自动关闭计算机",
+            )
         }
         self._renderCards()
         self.vBoxLayout.addStretch(1)
@@ -229,7 +227,6 @@ class HomePage(ScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.enableTransparentBackground()
         self.container.setStyleSheet("QWidget{background: transparent;}")
-        QScroller.grabGesture(self.viewport(), QScroller.ScrollerGestureType.LeftMouseButtonGesture)
 
     def _renderCards(self):
         for card in self.all_cards.values():

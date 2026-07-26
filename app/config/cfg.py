@@ -13,6 +13,8 @@ from qfluentwidgets import (
     RangeValidator,
 )
 
+from app.config.paths import CONFIG_PATH
+
 THEME_COLOR_PRESETS = (
     ("树人绿", (49, 101, 49)),
     ("系统蓝", (76, 194, 255)),
@@ -110,9 +112,11 @@ class Config(QConfig):
     )
 
     broadcastTasks = ConfigItem("Schedule", "Tasks", [])
+    shutdownTasks = ConfigItem("Schedule", "ShutdownTasks", [])
 
     expandedSettingGroups = ConfigItem("UI", "ExpandedSettingGroups", [])
     settingGroupOrder = ConfigItem("UI", "SettingGroupOrder", [])
 
 
 cfg = Config()
+cfg.file = CONFIG_PATH

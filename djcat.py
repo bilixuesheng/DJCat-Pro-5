@@ -3,12 +3,12 @@ import sys
 import traceback
 
 from loguru import logger
-from PySide6.QtCore import QStandardPaths
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import qconfig, setThemeColor
 
 from app.config.cfg import cfg
+from app.config.paths import CONFIG_PATH
 from app.signal_bus import signalBus
 from app.view.windows.main_window import MainWindow
 
@@ -47,11 +47,7 @@ def main():
     sys.excepthook = exceptionHook
 
     app = QApplication(sys.argv)
-    appLocalDataLocation = QStandardPaths.writableLocation(
-        QStandardPaths.StandardLocation.GenericDataLocation
-    )
-    configPath = f"{appLocalDataLocation}/DJCatPro/UserConfig.json"
-    qconfig.load(configPath, cfg)
+    qconfig.load(CONFIG_PATH, cfg)
     setThemeColor(QColor(49, 101, 49))
 
     app.window = startApp(isSilent="--silence" in sys.argv)

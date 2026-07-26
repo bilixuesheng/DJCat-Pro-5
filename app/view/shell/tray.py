@@ -118,10 +118,48 @@ class SystemTrayIcon(QSystemTrayIcon):
         self.menu.addAction(self.showAction)
 
         self.broadcastAction = Action(FIF.PLAY, "", self.menu)
-        self.broadcastAction.triggered.connect(self._onBroadcastActionTriggered)
+        self.broadcastAction.triggered.connect(
+            lambda: self._toggleTasks(cfg.broadcastTasks)
+        )
         self.menu.addAction(self.broadcastAction)
-        cfg.broadcastTasks.valueChanged.connect(self._refreshBroadcastAction)
-        self._refreshBroadcastAction()
+        cfg.broadcastTasks.valueChanged.connect(
+            lambda tasks: self._refreshTaskAction(
+                self.broadcastAction,
+                tasks,
+                "关闭所有播报",
+                "开启所有播报",
+                FIF.PLAY,
+            )
+        )
+        self._refreshTaskAction(
+            self.broadcastAction,
+            cfg.broadcastTasks.value,
+            "关闭所有播报",
+            "开启所有播报",
+            FIF.PLAY,
+        )
+
+        self.shutdownAction = Action(FIF.POWER_BUTTON, "", self.menu)
+        self.shutdownAction.triggered.connect(
+            lambda: self._toggleTasks(cfg.shutdownTasks)
+        )
+        self.menu.addAction(self.shutdownAction)
+        cfg.shutdownTasks.valueChanged.connect(
+            lambda tasks: self._refreshTaskAction(
+                self.shutdownAction,
+                tasks,
+                "关闭所有关机",
+                "开启所有关机",
+                FIF.POWER_BUTTON,
+            )
+        )
+        self._refreshTaskAction(
+            self.shutdownAction,
+            cfg.shutdownTasks.value,
+            "关闭所有关机",
+            "开启所有关机",
+            FIF.POWER_BUTTON,
+        )
 
         self.menu.addSeparator()
 
@@ -138,21 +176,26 @@ class SystemTrayIcon(QSystemTrayIcon):
             self.parent().raise_()
             self.parent().activateWindow()
 
-    def _refreshBroadcastAction(self):
-        tasks = cfg.broadcastTasks.value
+    @staticmethod
+    def _refreshTaskAction(
+        action,
+        tasks,
+        enabledText,
+        disabledText,
+        disabledIcon,
+    ):
         hasEnabledTask = any(task.get("enabled", False) for task in tasks)
-        self.broadcastAction.setText(
-            "关闭所有播报" if hasEnabledTask else "开启所有播报"
-        )
-        self.broadcastAction.setIcon(FIF.PAUSE if hasEnabledTask else FIF.PLAY)
-        self.broadcastAction.setEnabled(bool(tasks))
+        action.setText(enabledText if hasEnabledTask else disabledText)
+        action.setIcon(FIF.PAUSE if hasEnabledTask else disabledIcon)
+        action.setEnabled(bool(tasks))
 
-    def _onBroadcastActionTriggered(self):
-        tasks = deepcopy(cfg.broadcastTasks.value)
+    @staticmethod
+    def _toggleTasks(configItem):
+        tasks = deepcopy(configItem.value)
         enabled = not any(task.get("enabled", False) for task in tasks)
         for task in tasks:
             task["enabled"] = enabled
-        cfg.set(cfg.broadcastTasks, tasks)
+        cfg.set(configItem, tasks)
 
     def _onQuitActionTriggered(self):
         if self.parent():

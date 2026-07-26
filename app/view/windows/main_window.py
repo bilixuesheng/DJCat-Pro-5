@@ -7,6 +7,7 @@ from PySide6.QtCore import (
     QDate,
     QObject,
     QPropertyAnimation,
+    QProcess,
     Qt,
     QTime,
     QTimer,
@@ -19,6 +20,7 @@ from PySide6.QtTextToSpeech import QTextToSpeech
 from PySide6.QtWidgets import QApplication, QGraphicsOpacityEffect
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import (
+    DrillInTransitionStackedWidget,
     InfoBar,
     InfoBarPosition,
     MessageBoxBase,
@@ -48,6 +50,12 @@ from app.view.pages.credits_page import CreditsPage
 from app.view.pages.home_page import HomePage
 from app.view.pages.schedule_page import SchedulePage
 from app.view.pages.setting_page import SettingPage
+from app.view.pages.shutdown_page import (
+    SHUTDOWN_RESULT,
+    WAIT_RESULT,
+    ShutdownPage,
+    show_shutdown_prompt,
+)
 from app.view.shell.tray import SystemTrayIcon
 
 
@@ -98,6 +106,14 @@ class MainWindow(MSFluentWindow):
         super().__init__(parent=None)
         self.splashScreen = None
 
+        # MSFluentWindow 固定使用弹出式页面栈，快照过渡可避免目标页在动画前闪现。
+        oldView = self.stackedWidget.view
+        self.stackedWidget.view = DrillInTransitionStackedWidget(self.stackedWidget)
+        self.stackedWidget.hBoxLayout.replaceWidget(oldView, self.stackedWidget.view)
+        self.stackedWidget.view.currentChanged.connect(self.stackedWidget.currentChanged)
+        oldView.hide()
+        oldView.deleteLater()
+
         setThemeColor(cfg.customThemeColor.value)
         self._toggleTheme(cfg.customThemeMode.value)
         cfg.customThemeMode.valueChanged.connect(self._toggleTheme)
@@ -135,12 +151,12 @@ class MainWindow(MSFluentWindow):
 
         self.player = QMediaPlayer(self)
         self.audioOutput = QAudioOutput(self)
-        self.audioOutput.setVolume(1.0)
         self.player.setAudioOutput(self.audioOutput)
         self.current_play_repeats = 0
         self.player.mediaStatusChanged.connect(self._onMediaStatusChanged)
 
         self.tts = QTextToSpeech(self)
+        self._setBroadcastVolume(100)
 
         signalBus.testAudio.connect(self._playAudioTask)
 
@@ -148,6 +164,7 @@ class MainWindow(MSFluentWindow):
         self.scheduleTimer.timeout.connect(self._checkSchedule)
         self.scheduleTimer.start(1000)
         self.last_triggered_time = ""
+        self.last_shutdown_triggered_time = ""
 
     def initSplashScreen(self):
         self.splashScreen = CustomSplashScreen(
@@ -158,7 +175,13 @@ class MainWindow(MSFluentWindow):
         self.splashScreen.raise_()
         self.show()
 
+    def _setBroadcastVolume(self, volume):
+        volume /= 100
+        self.audioOutput.setVolume(volume)
+        self.tts.setVolume(volume)
+
     def _playAudioTask(self, task_data):
+        self._setBroadcastVolume(task_data.get("volume", 100))
         t = task_data["type"]
         repeat_count = task_data.get("repeat", 1)
 
@@ -196,20 +219,58 @@ class MainWindow(MSFluentWindow):
 
     def _checkSchedule(self):
         now_time = QTime.currentTime().toString("HH:mm:ss")
-        if now_time == self.last_triggered_time:
-            return
-
         today_week = QDate.currentDate().dayOfWeek() - 1
 
-        for task in cfg.broadcastTasks.value:
-            if not task.get("enabled", False):
-                continue
-
-            # TimePicker 将秒固定为 00，按完整时间比较不会漏触发。
-            if today_week in task["weeks"] and task["time"] == now_time:
+        if now_time != self.last_triggered_time:
+            task = self._scheduledTask(
+                cfg.broadcastTasks.value,
+                now_time,
+                today_week,
+            )
+            if task:
                 self.last_triggered_time = now_time
                 self._playAudioTask(task)
-                break
+
+        if now_time != self.last_shutdown_triggered_time:
+            task = self._scheduledTask(
+                cfg.shutdownTasks.value,
+                now_time,
+                today_week,
+            )
+            if task:
+                self.last_shutdown_triggered_time = now_time
+                self._handleShutdownTask(task)
+
+    @staticmethod
+    def _scheduledTask(tasks, now_time, today_week):
+        return next(
+            (
+                task
+                for task in tasks
+                if task.get("enabled", False)
+                and today_week in task.get("weeks", [])
+                and task.get("time") == now_time
+            ),
+            None,
+        )
+
+    def _handleShutdownTask(self, task):
+        if not task.get("notify", True):
+            self._shutdownNow()
+            return
+
+        result = show_shutdown_prompt(task)
+        if result == SHUTDOWN_RESULT:
+            self._shutdownNow()
+        elif result == WAIT_RESULT:
+            QTimer.singleShot(
+                60_000,
+                lambda: self._handleShutdownTask(task),
+            )
+
+    @staticmethod
+    def _shutdownNow():
+        QProcess.startDetached("shutdown.exe", ["/s", "/t", "0"])
 
     def initNavigation(self):
         self.homePage = HomePage(self)
@@ -220,6 +281,8 @@ class MainWindow(MSFluentWindow):
 
         self.schedulePage = SchedulePage(self)
         self.schedulePage.setObjectName("SchedulePage")
+        self.shutdownPage = ShutdownPage(self)
+        self.shutdownPage.setObjectName("ShutdownPage")
 
         self.addSubInterface(self.homePage, FIF.HOME, "主页")
         self.addSubInterface(
@@ -237,14 +300,18 @@ class MainWindow(MSFluentWindow):
 
         self.stackedWidget.addWidget(self.broadcastEditPage)
         self.stackedWidget.addWidget(self.schedulePage)
+        self.stackedWidget.addWidget(self.shutdownPage)
 
         if "全屏投送" in self.homePage.all_cards:
             self.homePage.all_cards["全屏投送"].clicked.connect(self._navToBroadcast)
         if "定时播报" in self.homePage.all_cards:
             self.homePage.all_cards["定时播报"].clicked.connect(self._navToSchedule)
+        if "定时关机" in self.homePage.all_cards:
+            self.homePage.all_cards["定时关机"].clicked.connect(self._navToShutdown)
 
         self.broadcastEditPage.backSignal.connect(self._navToHome)
         self.schedulePage.backSignal.connect(self._navToHome)
+        self.shutdownPage.backSignal.connect(self._navToHome)
 
     def _navToBroadcast(self):
         self.switchTo(self.broadcastEditPage)
@@ -254,8 +321,12 @@ class MainWindow(MSFluentWindow):
         self.switchTo(self.schedulePage)
         self.navigationInterface.setCurrentItem(None)
 
+    def _navToShutdown(self):
+        self.switchTo(self.shutdownPage)
+        self.navigationInterface.setCurrentItem(None)
+
     def _navToHome(self):
-        self.switchTo(self.homePage)
+        self.stackedWidget.view.setCurrentWidget(self.homePage, isBack=True)
         self.navigationInterface.setCurrentItem(self.homePage.objectName())
 
     def _toggleTheme(self, value):

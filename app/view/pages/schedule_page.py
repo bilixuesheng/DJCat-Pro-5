@@ -1,16 +1,16 @@
 import os
-import sys
+from copy import deepcopy
 
-from PySide6.QtCore import Qt, QTime, Signal
+from PySide6.QtCore import Qt, QTime, QTimer, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
-    QScroller,
     QVBoxLayout,
     QWidget,
 )
 from qfluentwidgets import (
+    CardWidget,
     ComboBox,
     ExpandSettingCard,
     LineEdit,
@@ -19,6 +19,7 @@ from qfluentwidgets import (
     PillPushButton,
     PushButton,
     SettingCard,
+    Slider,
     SpinBox,
     SubtitleLabel,
     SwitchButton,
@@ -28,12 +29,9 @@ from qfluentwidgets import (
 )
 from qfluentwidgets import FluentIcon as FIF
 
-if sys.platform != "darwin":
-    from qfluentwidgets import SmoothScrollArea as ScrollArea
-else:
-    from qfluentwidgets import ScrollArea
-
 from app.config.cfg import cfg
+from app.view.components.scroll_area import ScrollArea
+from app.view.components.setting_card_group import CardPaintFilter
 
 
 class SecondsFormatter(PickerColumnFormatter):
@@ -123,6 +121,13 @@ def create_task_form(parent_widget, initial_data=None):
     layout.addWidget(BroadcastSettingCard(FIF.SYNC, "重复播放", "播报执行的次数", repeatSpin, form))
     widgets['repeatSpin'] = repeatSpin
 
+    volumeSlider = Slider(Qt.Orientation.Horizontal, form)
+    volumeSlider.setRange(0, 100)
+    volumeSlider.setValue(data.get("volume", 100))
+    volumeSlider.setFixedWidth(170)
+    layout.addWidget(BroadcastSettingCard(FIF.VOLUME, "播报音量", "设置当前任务的播放音量", volumeSlider, form))
+    widgets['volumeSlider'] = volumeSlider
+
     def _updateVisibility(text):
         ttsCard.setVisible("TTS" in text)
         fileCard.setVisible(text == "本地音频")
@@ -144,13 +149,13 @@ class AddTaskDialog(MessageBoxBase):
         self.formWidget, self.formWidgets = create_task_form(self)
         self.scrollArea.setWidget(self.formWidget)
 
-        self.scrollArea.setFixedHeight(280)
-        QScroller.grabGesture(self.scrollArea.viewport(), QScroller.ScrollerGestureType.LeftMouseButtonGesture)
+        self.scrollArea.setMinimumHeight(180)
+        self.scrollArea.setMaximumHeight(280)
 
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addSpacing(10)
         self.viewLayout.addWidget(self.scrollArea)
-        self.widget.setMinimumWidth(560)
+        self.widget.setMinimumWidth(580)
 
     def get_data(self):
         w = self.formWidgets
@@ -162,17 +167,31 @@ class AddTaskDialog(MessageBoxBase):
             "content": w['ttsInput'].text(),
             "file": w['filePath'],
             "repeat": w['repeatSpin'].value(),
+            "volume": w['volumeSlider'].value(),
             "enabled": True
         }
 
 
-class TaskCard(ExpandSettingCard):
+class TaskCard(CardWidget):
     deleteClicked = Signal(dict)
     dataChanged = Signal()
 
     def __init__(self, data, parent=None):
-        super().__init__(FIF.MEGAPHONE, data["name"], f"触发时间: {data['time']}", parent)
+        super().__init__(parent)
         self.data = data
+        self.expandCard = ExpandSettingCard(
+            FIF.MEGAPHONE,
+            data["name"],
+            f"触发时间: {data['time']}",
+            self,
+        )
+        self.paintFilter = CardPaintFilter(self)
+        self.expandCard.card.installEventFilter(self.paintFilter)
+        self.expandCard.borderWidget.installEventFilter(self.paintFilter)
+
+        self.cardLayout = QVBoxLayout(self)
+        self.cardLayout.setContentsMargins(0, 0, 0, 0)
+        self.cardLayout.addWidget(self.expandCard)
 
         self._target_title_label = None
         self._target_content_label = None
@@ -185,7 +204,7 @@ class TaskCard(ExpandSettingCard):
         self.switchBtn = SwitchButton(self)
         self.switchBtn.setChecked(data["enabled"])
         self.switchBtn.checkedChanged.connect(self._onEnableChanged)
-        self.addWidget(self.switchBtn)
+        self.expandCard.addWidget(self.switchBtn)
 
         self.formWidget, self.formWidgets = create_task_form(self, data)
 
@@ -193,8 +212,16 @@ class TaskCard(ExpandSettingCard):
         self.formWidgets['timePicker'].timeChanged.connect(self._saveData)
         for btn in self.formWidgets['weekBtns']: btn.clicked.connect(self._saveData)
         self.formWidgets['typeCombo'].currentTextChanged.connect(self._saveData)
+        # 立即刷新发起布局请求，延迟刷新再读取最终高度。
+        self.formWidgets['typeCombo'].currentTextChanged.connect(
+            lambda: QTimer.singleShot(1, self.expandCard._adjustViewSize)
+        )
+        self.formWidgets['typeCombo'].currentTextChanged.connect(
+            self.expandCard._adjustViewSize
+        )
         self.formWidgets['ttsInput'].textChanged.connect(self._saveData)
         self.formWidgets['repeatSpin'].valueChanged.connect(self._saveData)
+        self.formWidgets['volumeSlider'].valueChanged.connect(self._saveData)
 
         self.formWidgets['fileBtn'].clicked.disconnect()
         def _new_select():
@@ -223,7 +250,7 @@ class TaskCard(ExpandSettingCard):
 
         container = QWidget()
         container.setLayout(containerLayout)
-        self.viewLayout.addWidget(container)
+        self.expandCard.viewLayout.addWidget(container)
 
     def _onEnableChanged(self, checked):
         self.data["enabled"] = checked
@@ -238,7 +265,8 @@ class TaskCard(ExpandSettingCard):
             "type": w['typeCombo'].currentText(),
             "content": w['ttsInput'].text(),
             "file": w['filePath'],
-            "repeat": w['repeatSpin'].value()
+            "repeat": w['repeatSpin'].value(),
+            "volume": w['volumeSlider'].value()
         })
 
         if self._target_title_label: self._target_title_label.setText(self.data["name"])
@@ -286,16 +314,20 @@ class SchedulePage(ScrollArea):
         self.setWidget(self.view)
         self.setWidgetResizable(True)
         self.enableTransparentBackground()
-        QScroller.grabGesture(self.viewport(), QScroller.ScrollerGestureType.LeftMouseButtonGesture)
 
         self._loadTasks()
+        cfg.broadcastTasks.valueChanged.connect(self._onTasksChanged)
+
+    def _onTasksChanged(self, tasks):
+        if tasks != self.current_tasks:
+            self._loadTasks()
 
     def _loadTasks(self):
         while self.cardLayout.count():
             w = self.cardLayout.takeAt(0).widget()
             if w: w.deleteLater()
 
-        self.current_tasks = cfg.broadcastTasks.value.copy()
+        self.current_tasks = deepcopy(cfg.broadcastTasks.value)
 
         if not self.current_tasks:
             self.emptyLabel.show()
