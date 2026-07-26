@@ -206,7 +206,7 @@ class CreditGroup(ElevatedCardWidget):
         layout.setSpacing(8)
 
         titleLabel = SubtitleLabel(title, self)
-        titleLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        titleLabel.setAlignment(Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(titleLabel)
 
         for entry in entries:

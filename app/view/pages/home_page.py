@@ -71,7 +71,7 @@ class BannerWidget(QWidget):
         self.vBoxLayout = QVBoxLayout(self)
         self.galleryLabel = QLabel('主页', self)
         self.galleryLabel.setStyleSheet("font-size: 32px; font-weight: bold; color: white;")
-        self.vBoxLayout.setContentsMargins(30, 40, 30, 0)
+        self.vBoxLayout.setContentsMargins(30, 20, 30, 0)
         self.vBoxLayout.addWidget(self.galleryLabel, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
 
         cfg.bannerImageSource.valueChanged.connect(self._onConfigChanged)
