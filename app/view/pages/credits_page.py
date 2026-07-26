@@ -136,11 +136,11 @@ _GROUPS = (
 class CreditEntry(QWidget):
     def __init__(self, name, avatar, description, links, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(58)
+        self.setMinimumHeight(52)
 
         avatarLabel = QLabel(self)
-        avatarLabel.setFixedSize(40, 40)
-        avatarLabel.setPixmap(self._roundPixmap(avatar, 40))
+        avatarLabel.setFixedSize(34, 34)
+        avatarLabel.setPixmap(self._roundPixmap(avatar, 34))
 
         nameLabel = BodyLabel(name, self)
         descriptionLabel = CaptionLabel(description, self)
@@ -154,7 +154,7 @@ class CreditEntry(QWidget):
 
         textLayout = QVBoxLayout()
         textLayout.setContentsMargins(0, 0, 0, 0)
-        textLayout.setSpacing(2)
+        textLayout.setSpacing(0)
         textLayout.addWidget(nameLabel)
         textLayout.addWidget(descriptionLabel)
 
