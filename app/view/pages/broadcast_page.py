@@ -29,10 +29,11 @@ from app.config.cfg import cfg
 
 
 class VerticalButton(QToolButton):
-    def __init__(self, icon_enum, text, primary=False, parent=None):
+    def __init__(self, icon_enum, text, primary=False, parent=None, force_dark=False):
         super().__init__(parent)
         self.primary = primary
         self.icon_enum = icon_enum  # 保存图标枚举，方便变色
+        self.force_dark = force_dark  # 纯黑背景窗口（如考试倒计时）固定使用深色样式
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         self.setText(text)
         self.setIconSize(QSize(20, 20))
@@ -41,7 +42,7 @@ class VerticalButton(QToolButton):
 
     def updateStyle(self):
         theme_color = qconfig.themeColor.value.name()
-        is_dark = isDarkTheme() if cfg.customThemeMode.value == "System" else cfg.customThemeMode.value == "Dark"
+        is_dark = self.force_dark or (isDarkTheme() if cfg.customThemeMode.value == "System" else cfg.customThemeMode.value == "Dark")
 
         if self.primary:
             # 主题色背景需要固定高对比前景。
@@ -134,6 +135,8 @@ class BroadcastWindow(FramelessWindow):
         super().__init__()
         self.setObjectName("BroadcastWindow")
         self.titleBar.hide()
+        # 顶层窗口的 QSS 边框需要该属性才会绘制
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self._is_editing = False
         self._isTracking = False
 
@@ -187,11 +190,15 @@ class BroadcastWindow(FramelessWindow):
                 self._isTracking = False
         return super().eventFilter(obj, event)
 
-    def setContent(self, title, text, is_markdown=False):
+    def _applyStyle(self):
         is_dark = isDarkTheme() if cfg.customThemeMode.value == "System" else cfg.customThemeMode.value == "Dark"
         bg_color = "#202020" if is_dark else "#FFFFFF"
         text_color = "white" if is_dark else "black"
-        self.setStyleSheet(f"BroadcastWindow {{ background-color: {bg_color}; }} QTextEdit {{ color: {text_color}; }}")
+        border = "border: 1px solid #808080;" if self.is_windowed else ""
+        self.setStyleSheet(f"BroadcastWindow {{ background-color: {bg_color}; {border} }} QTextEdit {{ color: {text_color}; }}")
+
+    def setContent(self, title, text, is_markdown=False):
+        self._applyStyle()
 
         self.btn_edit.updateStyle()
         self.btn_min.updateStyle()
@@ -266,6 +273,9 @@ class BroadcastWindow(FramelessWindow):
         flags = Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
         if is_top: flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
+        # 全屏时禁用系统边缘拉伸，避免鼠标在屏幕边缘仍能调整窗口大小
+        self.setResizeEnabled(self.is_windowed)
+        self._applyStyle()
 
         if self.is_windowed:
             self.showNormal()
