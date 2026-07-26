@@ -30,7 +30,7 @@ from app.config.paths import ASSET_DIR
 from app.view.components.setting_card_group import QWIDGETSIZE_MAX
 from app.view.pages.broadcast_page import VerticalButton
 
-DEFAULT_TITLE = "考试倒计时"
+DEFAULT_TITLE = "距离考试结束还剩"
 VOICE_REMIND_SECONDS = 15 * 60
 
 
@@ -214,7 +214,9 @@ class CountdownWindow(FramelessWindow):
     def _updateDisplay(self):
         hours, rest = divmod(self.remaining, 3600)
         minutes, seconds = divmod(rest, 60)
-        self.timeLabel.setText(f"{hours} : {minutes} : {seconds}")
+        # 窗口化宽度有限，用紧凑格式换取更大的字号
+        sep = ":" if self.is_windowed else " : "
+        self.timeLabel.setText(f"{hours}{sep}{minutes}{sep}{seconds}")
         # 文本长度变化会影响窗口化下的自适应字号
         if self.is_windowed:
             self._applyFonts(self.height())
@@ -272,6 +274,7 @@ class CountdownWindow(FramelessWindow):
 
     def toggleWindowMode(self):
         self.is_windowed = not self.is_windowed
+        self._updateDisplay()
         self._setupCornerButtons()
         self._applyWindowState()
 
@@ -293,11 +296,13 @@ class CountdownWindow(FramelessWindow):
         if self.is_windowed:
             self.showNormal()
             rect = self.screen().availableGeometry()
+            self.vBoxLayout.setContentsMargins(16, 12, 16, 12)
             # 先按目标高度缩小字体，否则旧字体的最小尺寸会钳制 resize
             self._applyFonts(240)
             self.setFixedSize(420, 240)
             self.move(rect.center() - self.rect().center())
         else:
+            self.vBoxLayout.setContentsMargins(40, 20, 40, 20)
             self.setMinimumSize(0, 0)
             self.setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX)
             if cfg.showTaskbarInCountdown.value:
@@ -322,7 +327,8 @@ class CountdownWindow(FramelessWindow):
         # 窗口化宽度固定，超宽时按比例缩小字号到刚好放得下
         if self.is_windowed:
             width = QFontMetrics(font).horizontalAdvance(self.timeLabel.text())
-            avail = self.width() - 80
+            margins = self.vBoxLayout.contentsMargins()
+            avail = self.width() - margins.left() - margins.right()
             if width > avail:
                 font.setPixelSize(max(32, size * avail // width))
         self.timeLabel.setFont(font)
