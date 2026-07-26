@@ -183,7 +183,7 @@ class HomePage(ScrollArea):
 
         self.titleWidget = QWidget(self.container)
         self.titleLayout = QVBoxLayout(self.titleWidget)
-        self.titleLayout.setContentsMargins(30, 30, 30, 10)
+        self.titleLayout.setContentsMargins(30, 20, 30, 10)
         self.normalTitle = TitleLabel("主页", self.titleWidget)
         self.titleLayout.addWidget(self.normalTitle)
         self.vBoxLayout.addWidget(self.titleWidget)

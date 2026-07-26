@@ -223,9 +223,12 @@ class CreditsPage(ScrollArea):
 
         container = QWidget(self)
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(8, 30, 8, 36)
+        layout.setContentsMargins(8, 20, 8, 36)
         layout.setSpacing(16)
-        layout.addWidget(TitleLabel("特别鸣谢", container))
+        titleLayout = QHBoxLayout()
+        titleLayout.setContentsMargins(22, 0, 0, 0)
+        titleLayout.addWidget(TitleLabel("特别鸣谢", container))
+        layout.addLayout(titleLayout)
 
         for title, entries in _GROUPS:
             layout.addWidget(CreditGroup(title, entries, container))

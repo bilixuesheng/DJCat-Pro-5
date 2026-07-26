@@ -20,6 +20,7 @@ from qfluentwidgets import (
     RangeSettingCard,
     SettingCard,
     SwitchSettingCard,
+    TitleLabel,
     setThemeColor,
 )
 
@@ -30,6 +31,7 @@ from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import (
     CollapsibleSettingCard,
     CollapsibleSettingCardGroup,
+    QWIDGETSIZE_MAX,
 )
 
 
@@ -148,6 +150,12 @@ class SettingPage(ScrollArea):
         super().__init__(parent)
         self.container = QWidget()
         self.vBoxLayout = QVBoxLayout(self.container)
+        self.vBoxLayout.setContentsMargins(0, 0, 0, 36)
+        self.titleWidget = QWidget(self.container)
+        titleLayout = QVBoxLayout(self.titleWidget)
+        titleLayout.setContentsMargins(30, 20, 30, 10)
+        titleLayout.addWidget(TitleLabel("设置", self.titleWidget))
+        self.vBoxLayout.addWidget(self.titleWidget)
         self.vBoxLayout.addStretch(1)
 
         self.personalGroup = CollapsibleSettingCardGroup(
@@ -342,12 +350,30 @@ class SettingPage(ScrollArea):
             logger.exception("修改开机启动设置失败")
             signalBus.catchException.emit(str(error))
 
+    def setSearchText(self, text: str) -> None:
+        text = text.strip().lower()
+        for group in self._settingGroups():
+            groupHasMatch = False
+            for index in range(group.cardLayout.count()):
+                card = group.cardLayout.itemAt(index).widget()
+                target = card.card if isinstance(card, CollapsibleSettingCard) else card
+                labels = (target.titleLabel.text(), target.contentLabel.text())
+                matched = not text or any(text in label.lower() for label in labels)
+                card.setVisible(matched)
+                groupHasMatch |= matched
+            group.setVisible(groupHasMatch)
+            group.cardContainer.setMaximumHeight(
+                QWIDGETSIZE_MAX
+                if text
+                else 0 if group.isCollapsed else QWIDGETSIZE_MAX
+            )
+
     def showEvent(self, event) -> None:
         self._restoreOrder()
         super().showEvent(event)
 
-    def _restoreOrder(self) -> None:
-        groups = [
+    def _settingGroups(self) -> list[CollapsibleSettingCardGroup]:
+        return [
             self.vBoxLayout.itemAt(index).widget()
             for index in range(self.vBoxLayout.count())
             if isinstance(
@@ -355,10 +381,14 @@ class SettingPage(ScrollArea):
                 CollapsibleSettingCardGroup,
             )
         ]
+
+    def _restoreOrder(self) -> None:
+        groups = self._settingGroups()
         groupByKey = {group.objectName(): group for group in groups}
         keys = [key for key in cfg.settingGroupOrder.value if key in groupByKey]
         keys += [key for key in groupByKey if key not in keys]
+        startIndex = self.vBoxLayout.indexOf(self.titleWidget) + 1
         for index, key in enumerate(keys):
-            self.vBoxLayout.insertWidget(index, groupByKey[key])
+            self.vBoxLayout.insertWidget(startIndex + index, groupByKey[key])
         for group in groups:
             group.updateArrows()

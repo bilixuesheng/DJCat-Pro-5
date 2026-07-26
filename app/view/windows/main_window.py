@@ -28,6 +28,7 @@ from qfluentwidgets import (
     NavigationItemPosition,
     PrimaryPushButton,
     PushButton,
+    SearchLineEdit,
     SplashScreen,
     SubtitleLabel,
     TextEdit,
@@ -103,6 +104,7 @@ class UpdateDialog(MessageBoxBase):
 
 class MainWindow(MSFluentWindow):
     def __init__(self, isSilent: bool = False):
+        self.searchEdit = None
         super().__init__(parent=None)
         self.splashScreen = None
 
@@ -276,6 +278,13 @@ class MainWindow(MSFluentWindow):
         self.homePage = HomePage(self)
         self.creditsPage = CreditsPage(self)
         self.settingPage = SettingPage(self)
+        self.searchEdit = SearchLineEdit(self.titleBar)
+        self.searchEdit.setClearButtonEnabled(True)
+        self.searchEdit.setPlaceholderText("搜索设置")
+        self.searchEdit.hide()
+        self.searchEdit.raise_()
+        self.searchEdit.textChanged.connect(self.settingPage.setSearchText)
+        self.stackedWidget.currentChanged.connect(self._updateSearchEdit)
         self.broadcastEditPage = BroadcastEditPage(self)
         self.broadcastEditPage.setObjectName("BroadcastEditPage")
 
@@ -312,6 +321,23 @@ class MainWindow(MSFluentWindow):
         self.broadcastEditPage.backSignal.connect(self._navToHome)
         self.schedulePage.backSignal.connect(self._navToHome)
         self.shutdownPage.backSignal.connect(self._navToHome)
+        self._updateSearchEdit()
+
+    def _updateSearchEdit(self, *args):
+        isSettingPage = self.stackedWidget.currentWidget() is self.settingPage
+        if not isSettingPage:
+            self.searchEdit.clear()
+        self.searchEdit.setVisible(isSettingPage)
+        if isSettingPage:
+            self._refreshSearchEditGeometry()
+
+    def _refreshSearchEditGeometry(self):
+        width = max(200, min(360, self.titleBar.width() - 300))
+        self.searchEdit.setFixedWidth(width)
+        self.searchEdit.move(
+            (self.titleBar.width() - width) // 2,
+            (self.titleBar.height() - self.searchEdit.height()) // 2,
+        )
 
     def _navToBroadcast(self):
         self.switchTo(self.broadcastEditPage)
@@ -423,6 +449,11 @@ class MainWindow(MSFluentWindow):
         w = UpdateDialog(version, note, self)
         if w.exec():
             QDesktopServices.openUrl(QUrl(DOWNLOAD_URL))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.searchEdit is not None and self.searchEdit.isVisible():
+            self._refreshSearchEditGeometry()
 
     def closeEvent(self, event):
         cfg.set(cfg.geometry, self.geometry())
