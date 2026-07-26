@@ -125,7 +125,19 @@ def create_task_form(parent_widget, initial_data=None):
     volumeSlider.setRange(0, 100)
     volumeSlider.setValue(data.get("volume", 100))
     volumeSlider.setFixedWidth(170)
-    layout.addWidget(BroadcastSettingCard(FIF.VOLUME, "播报音量", "设置当前任务的播放音量", volumeSlider, form))
+    volumeLabel = QLabel(str(volumeSlider.value()), form)
+    volumeLabel.setFixedWidth(24)
+    volumeLabel.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    volumeSlider.valueChanged.connect(volumeLabel.setNum)
+
+    volumeWidget = QWidget(form)
+    volumeLayout = QHBoxLayout(volumeWidget)
+    volumeLayout.setContentsMargins(0, 0, 0, 0)
+    volumeLayout.setSpacing(8)
+    volumeLayout.addWidget(volumeSlider)
+    volumeLayout.addWidget(volumeLabel)
+
+    layout.addWidget(BroadcastSettingCard(FIF.VOLUME, "播报音量", "设置当前任务的播放音量", volumeWidget, form))
     widgets['volumeSlider'] = volumeSlider
 
     def _updateVisibility(text):
