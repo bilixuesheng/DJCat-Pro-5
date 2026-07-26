@@ -44,6 +44,7 @@ from app.config.constants import (
 from app.config.paths import ASSET_DIR
 from app.signal_bus import signalBus
 from app.view.pages.broadcast_page import BroadcastEditPage
+from app.view.pages.credits_page import CreditsPage
 from app.view.pages.home_page import HomePage
 from app.view.pages.schedule_page import SchedulePage
 from app.view.pages.setting_page import SettingPage
@@ -212,6 +213,7 @@ class MainWindow(MSFluentWindow):
 
     def initNavigation(self):
         self.homePage = HomePage(self)
+        self.creditsPage = CreditsPage(self)
         self.settingPage = SettingPage(self)
         self.broadcastEditPage = BroadcastEditPage(self)
         self.broadcastEditPage.setObjectName("BroadcastEditPage")
@@ -220,6 +222,12 @@ class MainWindow(MSFluentWindow):
         self.schedulePage.setObjectName("SchedulePage")
 
         self.addSubInterface(self.homePage, FIF.HOME, "主页")
+        self.addSubInterface(
+            self.creditsPage,
+            FIF.HEART,
+            "特别鸣谢",
+            position=NavigationItemPosition.BOTTOM,
+        )
         self.addSubInterface(
             self.settingPage,
             FIF.SETTING,
