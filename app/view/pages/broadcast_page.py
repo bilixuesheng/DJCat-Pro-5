@@ -416,7 +416,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self.viewLayout.addWidget(self.descriptionLabel)
         self.viewLayout.addWidget(self.inputEdit)
         self.viewLayout.addWidget(self.quotaLabel)
-        self.widget.setMaximumWidth(680)
+        self.widget.setFixedWidth(min(680, max(0, self.width() - 80)))
 
         self.yesButton.setText("开始转换")
         self.cancelButton.setText("取消")
@@ -432,6 +432,11 @@ class AIMarkdownDialog(MessageBoxBase):
         self._updateQuotaLabel()
         self._refreshStartButton()
         threading.Thread(target=self._fetchQuota, daemon=True).start()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "widget"):
+            self.widget.setFixedWidth(min(680, max(0, event.size().width() - 80)))
 
     def resultText(self):
         return self._result

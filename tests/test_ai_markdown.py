@@ -100,6 +100,10 @@ class AIMarkdownTest(unittest.TestCase):
         self.assertIn("qlineargradient", firstStyle)
         self.assertNotEqual(firstStyle, dialog.inputEdit.styleSheet())
 
+        parent.resize(760, 500)
+        self.app.processEvents()
+        self.assertEqual(dialog.widget.width(), 680)
+
     def testDailyLimit(self):
         with (
             tempfile.TemporaryDirectory() as directory,
