@@ -74,8 +74,8 @@ class Config(QConfig):
     bannerImageSource = OptionsConfigItem(
         "Banner",
         "BannerImageSource",
-        "预设: 学校门口",
-        OptionsValidator(["预设: 学校门口", "自定义"]),
+        "预设: 树人门",
+        OptionsValidator(["预设: 树人门", "自定义"]),
     )
     bannerImagePath = ConfigItem("Banner", "BannerImagePath", "")
     bannerBrightness = RangeConfigItem(

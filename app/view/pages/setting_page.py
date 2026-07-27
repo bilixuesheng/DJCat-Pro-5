@@ -244,7 +244,7 @@ class SettingPage(ScrollArea):
                     FluentIcon.IMAGE_EXPORT,
                     "主页图片来源",
                     "选择使用预设图片还是自定义图片",
-                    texts=["预设: 学校门口", "自定义"],
+                    texts=["预设: 树人门", "自定义"],
                 ),
                 self.chooseImageCard,
                 RangeSettingCard(

@@ -85,7 +85,7 @@ class BannerWidget(QWidget):
 
     def get_image_path(self):
         preset_path = str(ASSET_DIR / "home.png")
-        if cfg.bannerImageSource.value == "预设: 学校门口":
+        if cfg.bannerImageSource.value == "预设: 树人门":
             return preset_path
         else:
             path = cfg.bannerImagePath.value
