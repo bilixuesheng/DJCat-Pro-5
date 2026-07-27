@@ -435,7 +435,6 @@ class ShutdownPromptDialog(MessageBoxBase):
         self.cancelButton.setText("等我 1 分钟")
         self.buttonLayout.removeWidget(self.yesButton)
         self.buttonLayout.removeWidget(self.cancelButton)
-        self.buttonLayout.addWidget(self.yesButton)
         self.buttonLayout.addWidget(self.countdownLabel, 1)
         self.buttonLayout.addWidget(self.cancelButton)
 
@@ -444,6 +443,7 @@ class ShutdownPromptDialog(MessageBoxBase):
             self.skipButton = PushButton("本次不关机", self.buttonGroup)
             self.skipButton.clicked.connect(lambda: self.done(SKIP_RESULT))
             self.buttonLayout.addWidget(self.skipButton)
+        self.buttonLayout.addWidget(self.yesButton)
 
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
