@@ -66,6 +66,9 @@ class Config(QConfig):
         "右下角",
         OptionsValidator(["左下角", "右下角"]),
     )
+    showMainWindowAfterFullscreenTask = ConfigItem(
+        "Personalization", "ShowMainWindowAfterFullscreenTask", True, BoolValidator()
+    )
 
     showBanner = ConfigItem("Banner", "ShowBanner", True, BoolValidator())
     bannerImageSource = OptionsConfigItem(

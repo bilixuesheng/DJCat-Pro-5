@@ -434,8 +434,10 @@ class CountdownEditPage(QWidget):
         self.window().hide()
 
     def _onReturnToHome(self):
-        QApplication.instance().setQuitOnLastWindowClosed(True)
-        self.window().show()
-        self.window().raise_()
-        self.window().activateWindow()
+        showMainWindow = cfg.showMainWindowAfterFullscreenTask.value
+        QApplication.instance().setQuitOnLastWindowClosed(showMainWindow)
+        if showMainWindow:
+            self.window().show()
+            self.window().raise_()
+            self.window().activateWindow()
         self.backSignal.emit()

@@ -707,9 +707,11 @@ class BroadcastEditPage(QWidget):
         self.window().show(); self.window().raise_(); self.window().activateWindow()
 
     def _onReturnToHome(self):
-        QApplication.instance().setQuitOnLastWindowClosed(True)
+        showMainWindow = cfg.showMainWindowAfterFullscreenTask.value
+        QApplication.instance().setQuitOnLastWindowClosed(showMainWindow)
         self.titleInput.clear(); self.contentInput.clear()
-        self.window().show(); self.window().raise_(); self.window().activateWindow()
+        if showMainWindow:
+            self.window().show(); self.window().raise_(); self.window().activateWindow()
         self.backSignal.emit()
 
     def _onBack(self):

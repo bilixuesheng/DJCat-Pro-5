@@ -216,6 +216,12 @@ class SettingPage(ScrollArea):
                     "设置全屏任务下方操作按钮的放置位置",
                     texts=["左下角", "右下角"],
                 ),
+                SwitchSettingCard(
+                    FluentIcon.HOME,
+                    "关闭全屏任务后显示主页面",
+                    "关闭全屏投送或考试倒计时后显示软件主页面",
+                    cfg.showMainWindowAfterFullscreenTask,
+                ),
             ]
         )
 
