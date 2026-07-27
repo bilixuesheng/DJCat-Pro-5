@@ -10,4 +10,4 @@ DJCat-Pro-5.code-workspace
 Log/
 CHANGELOG.md
 dist/
-*.sqlite3
+ai_markdown_usage.sqlite3

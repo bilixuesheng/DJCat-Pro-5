@@ -356,20 +356,32 @@ def _machineId():
 
 
 def _iterSseContent(lines):
+    finished = False
     for line in lines:
         if not line or not line.startswith("data:"):
             continue
 
         data = line[5:].strip()
         if data == "[DONE]":
-            return
+            if finished:
+                return
+            break
 
         payload = json.loads(data)
         choices = payload.get("choices", ())
         if choices:
-            content = choices[0].get("delta", {}).get("content")
+            choice = choices[0]
+            finishReason = choice.get("finish_reason")
+            if finishReason == "length":
+                raise RuntimeError("AI 输出过长，请缩短输入后重试。")
+            if finishReason not in (None, "stop"):
+                raise RuntimeError("AI 转换未正常完成，请重试。")
+            finished = finishReason == "stop" or finished
+            content = choice.get("delta", {}).get("content")
             if content:
                 yield content
+
+    raise RuntimeError("AI 服务流式响应未正常结束，请重试。")
 
 
 class AIMarkdownDialog(MessageBoxBase):

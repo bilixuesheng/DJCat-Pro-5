@@ -31,12 +31,43 @@ class AIMarkdownTest(unittest.TestCase):
                     [
                         'data: {"choices":[{"delta":{"content":"**【语文】**"}}]}',
                         'data: {"choices":[{"delta":{"content":"\\n- 作业"}}]}',
+                        'data: {"choices":[{"delta":{"content":""},'
+                        '"finish_reason":"stop"}]}',
                         "data: [DONE]",
                     ]
                 )
             ),
             ["**【语文】**", "\n- 作业"],
         )
+
+    def testIncompleteStreamIsRejected(self):
+        with self.assertRaisesRegex(RuntimeError, "未正常结束"):
+            list(
+                _iterSseContent(
+                    ['data: {"choices":[{"delta":{"content":"半截内容"}}]}']
+                )
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "输出过长"):
+            list(
+                _iterSseContent(
+                    [
+                        'data: {"choices":[{"delta":{"content":""},'
+                        '"finish_reason":"length"}]}'
+                    ]
+                )
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "未正常完成"):
+            list(
+                _iterSseContent(
+                    [
+                        'data: {"choices":[{"delta":{"content":""},'
+                        '"finish_reason":"content_filter"}]}',
+                        "data: [DONE]",
+                    ]
+                )
+            )
 
     def testDailyLimit(self):
         with (
