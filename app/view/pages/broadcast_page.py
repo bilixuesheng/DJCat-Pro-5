@@ -1,10 +1,8 @@
-import hashlib
 import json
 import threading
-import uuid
 
 import requests
-from PySide6.QtCore import QEvent, QPoint, QSize, QSysInfo, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
@@ -19,6 +17,9 @@ from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
     CheckBox,
+    Flyout,
+    FlyoutAnimationType,
+    FlyoutView,
     LineEdit,
     MessageBox,
     MessageBoxBase,
@@ -35,9 +36,32 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 from qframelesswindow import FramelessWindow
 
+from app.common.ai_markdown import fetchQuota, machineId
 from app.config.cfg import cfg
 from app.config.constants import AI_MARKDOWN_API
 from app.config.paths import ASSET_DIR
+
+
+def showCloseConfirmation(window, target, warning):
+    view = FlyoutView("确认关闭？", warning, FIF.QUESTION)
+    buttons = QWidget(view)
+    layout = QHBoxLayout(buttons)
+    layout.setContentsMargins(0, 0, 0, 0)
+    cancelButton = PushButton("取消", buttons)
+    closeButton = PrimaryPushButton("关闭", buttons)
+    layout.addWidget(cancelButton)
+    layout.addWidget(closeButton)
+    view.addWidget(buttons, align=Qt.AlignmentFlag.AlignRight)
+
+    flyout = Flyout.make(
+        view,
+        target,
+        window,
+        FlyoutAnimationType.PULL_UP,
+    )
+    cancelButton.clicked.connect(flyout.close)
+    closeButton.clicked.connect(window.close)
+    return flyout
 
 
 class VerticalButton(QToolButton):
@@ -185,7 +209,7 @@ class BroadcastWindow(FramelessWindow):
         self.btn_edit.clicked.connect(self._onEdit)
         self.btn_min.clicked.connect(self.minimizeToMini)
         self.btn_win.clicked.connect(self.toggleWindowMode)
-        self.btn_close.clicked.connect(self.close)
+        self.btn_close.clicked.connect(self._onClose)
 
     def eventFilter(self, obj, event):
         if obj == self.contentEdit.viewport():
@@ -234,7 +258,7 @@ class BroadcastWindow(FramelessWindow):
             if item.widget(): self.btnLayout.removeWidget(item.widget())
 
         widgets = [self.btn_edit, self.btn_min, self.btn_win, self.btn_close]
-        if cfg.actionButtonPosition.value == "左下角":
+        if cfg.broadcastActionButtonPosition.value == "左下角":
             widgets.reverse()
 
         for w in widgets: self.btnLayout.addWidget(w)
@@ -248,7 +272,7 @@ class BroadcastWindow(FramelessWindow):
 
     def _updateBtnPosition(self):
         margin = self.btnLayout.spacing()
-        if cfg.actionButtonPosition.value == "左下角":
+        if cfg.broadcastActionButtonPosition.value == "左下角":
             target_x = margin
         else:
             target_x = self.width() - self.btnContainer.width() - margin
@@ -310,7 +334,7 @@ class BroadcastWindow(FramelessWindow):
         self.miniWindow._updateStyle()
         self.miniWindow.show()
         rect = self.screen().availableGeometry()
-        if cfg.actionButtonPosition.value == "右下角":
+        if cfg.broadcastActionButtonPosition.value == "右下角":
             self.miniWindow.move(rect.width() - 150, rect.height() - 150)
         else:
             self.miniWindow.move(50, rect.height() - 150)
@@ -324,6 +348,16 @@ class BroadcastWindow(FramelessWindow):
     def _onEdit(self):
         self._is_editing = True
         self.close()
+
+    def _onClose(self):
+        if not cfg.confirmBeforeCloseBroadcast.value:
+            self.close()
+            return
+        self._closeFlyout = showCloseConfirmation(
+            self,
+            self.btn_close,
+            "关闭后不会保存投送文字。",
+        )
 
     def closeEvent(self, event):
         if self._is_editing: self.editClicked.emit()
@@ -346,13 +380,6 @@ class BroadcastWindow(FramelessWindow):
         if e.button() == Qt.MouseButton.LeftButton:
             self._isTracking = False
         super().mouseReleaseEvent(e)
-
-
-def _machineId():
-    raw = bytes(QSysInfo.machineUniqueId())
-    if not raw:
-        raw = uuid.getnode().to_bytes(6, "big")
-    return hashlib.sha256(raw).hexdigest()
 
 
 def _iterSseContent(lines):
@@ -410,7 +437,9 @@ class AIMarkdownDialog(MessageBoxBase):
         self.inputEdit.setPlainText(text)
         self.inputEdit.setPlaceholderText("在此输入要转换的内容")
         self.inputEdit.setMinimumHeight(120)
+        self._inputStyle = self.inputEdit.styleSheet()
         self.quotaLabel = CaptionLabel(self)
+        self.quotaLabel.setWordWrap(True)
 
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(self.descriptionLabel)
@@ -459,17 +488,9 @@ class AIMarkdownDialog(MessageBoxBase):
             super().reject()
 
     def _fetchQuota(self):
-        try:
-            response = requests.get(
-                f"{AI_MARKDOWN_API}/quota",
-                params={"machine_id": _machineId()},
-                timeout=5,
-            )
-            response.raise_for_status()
-            quota = response.json()
-            self.quotaReceived.emit(quota["remaining"], quota["limit"])
-        except (requests.RequestException, KeyError, TypeError, ValueError):
-            pass
+        quota = fetchQuota()
+        if quota:
+            self.quotaReceived.emit(*quota)
 
     def _startConversion(self):
         self._running = True
@@ -485,10 +506,15 @@ class AIMarkdownDialog(MessageBoxBase):
     def _streamConversion(self):
         remaining = self._remaining if self._remaining is not None else -1
         limit = self._limit
+        payload = {"content": self._source, "machine_id": machineId()}
+        if cfg.aiMarkdownCustomStyleEnabled.value:
+            customStyle = cfg.aiMarkdownCustomStyle.value.strip()
+            if customStyle:
+                payload["custom_style"] = customStyle
         try:
             with requests.post(
                 AI_MARKDOWN_API,
-                json={"content": self._source, "machine_id": _machineId()},
+                json=payload,
                 stream=True,
                 timeout=(10, 120),
             ) as response:
@@ -565,7 +591,8 @@ class AIMarkdownDialog(MessageBoxBase):
     def _updateQuotaLabel(self):
         remaining = "正在查询" if self._remaining is None else self._remaining
         self.quotaLabel.setText(
-            f"剩余次数：{remaining} / 总次数：{self._limit}　·　禁止滥用"
+            f"剩余次数：{remaining} / 总次数：{self._limit}　·　每天 0 点刷新"
+            "　·　禁止滥用　·　可在设置中自定义 Markdown 风格"
         )
 
     def _refreshStartButton(self):
@@ -593,7 +620,7 @@ class AIMarkdownDialog(MessageBoxBase):
 
     def _stopBusyStyle(self):
         self._busyTimer.stop()
-        self.inputEdit.setStyleSheet("")
+        self.inputEdit.setStyleSheet(self._inputStyle)
 
 
 class BroadcastEditPage(QWidget):
@@ -707,7 +734,7 @@ class BroadcastEditPage(QWidget):
         self.window().show(); self.window().raise_(); self.window().activateWindow()
 
     def _onReturnToHome(self):
-        showMainWindow = cfg.showMainWindowAfterFullscreenTask.value
+        showMainWindow = cfg.showMainWindowAfterBroadcast.value
         QApplication.instance().setQuitOnLastWindowClosed(showMainWindow)
         self.titleInput.clear(); self.contentInput.clear()
         if showMainWindow:

@@ -60,15 +60,6 @@ class Config(QConfig):
         QColor(*THEME_COLOR_PRESETS[0][1]),
     )
     trayTooltip = ConfigItem("Personalization", "TrayTooltip", "电教猫 Pro 5")
-    actionButtonPosition = OptionsConfigItem(
-        "Personalization",
-        "ActionButtonPosition",
-        "右下角",
-        OptionsValidator(["左下角", "右下角"]),
-    )
-    showMainWindowAfterFullscreenTask = ConfigItem(
-        "Personalization", "ShowMainWindowAfterFullscreenTask", True, BoolValidator()
-    )
 
     showBanner = ConfigItem("Banner", "ShowBanner", True, BoolValidator())
     bannerImageSource = OptionsConfigItem(
@@ -97,6 +88,23 @@ class Config(QConfig):
     topmostInWindowed = ConfigItem(
         "Broadcast", "TopmostInWindowed", True, BoolValidator()
     )
+    broadcastActionButtonPosition = OptionsConfigItem(
+        "Broadcast",
+        "ActionButtonPosition",
+        "右下角",
+        OptionsValidator(["左下角", "右下角"]),
+    )
+    showMainWindowAfterBroadcast = ConfigItem(
+        "Broadcast", "ShowMainWindowAfterClose", True, BoolValidator()
+    )
+    confirmBeforeCloseBroadcast = ConfigItem(
+        "Broadcast", "ConfirmBeforeClose", True, BoolValidator()
+    )
+
+    aiMarkdownCustomStyleEnabled = ConfigItem(
+        "AIMarkdown", "CustomStyleEnabled", False, BoolValidator()
+    )
+    aiMarkdownCustomStyle = ConfigItem("AIMarkdown", "CustomStyle", "")
 
     showTaskbarInCountdown = ConfigItem(
         "Countdown", "ShowTaskbar", True, BoolValidator()
@@ -106,6 +114,18 @@ class Config(QConfig):
     )
     countdownTopmostInWindowed = ConfigItem(
         "Countdown", "TopmostInWindowed", True, BoolValidator()
+    )
+    countdownActionButtonPosition = OptionsConfigItem(
+        "Countdown",
+        "ActionButtonPosition",
+        "右下角",
+        OptionsValidator(["左下角", "右下角"]),
+    )
+    showMainWindowAfterCountdown = ConfigItem(
+        "Countdown", "ShowMainWindowAfterClose", True, BoolValidator()
+    )
+    confirmBeforeCloseCountdown = ConfigItem(
+        "Countdown", "ConfirmBeforeClose", True, BoolValidator()
     )
 
     autoRun = ConfigItem("Software", "AutoRun", False, BoolValidator())
@@ -121,7 +141,7 @@ class Config(QConfig):
     )
 
     homeCardOrder = ConfigItem(
-        "HomePage", "CardOrder", ["全屏投送", "考试倒计时", "定时播报", "定时关机"]
+        "HomePage", "CardOrder", ["全屏投送", "考试倒计时", "定时关机", "定时播报"]
     )
 
     broadcastTasks = ConfigItem("Schedule", "Tasks", [])

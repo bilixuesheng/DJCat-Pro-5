@@ -10,13 +10,14 @@ from flask import Flask, Response, jsonify, request, stream_with_context
 
 DAILY_LIMIT = 15
 MAX_CONTENT_LENGTH = 12_000
+MAX_CUSTOM_STYLE_LENGTH = 4_000
 DATABASE_PATH = Path(
     os.environ.get("DJCATAI_DATABASE_PATH", "ai_markdown_usage.sqlite3")
 )
 TIMEZONE = timezone(timedelta(hours=8))
 DEEPSEEK_API = "https://api.deepseek.com/chat/completions"
 SYSTEM_PROMPT = """你现在需要转换用户的纯文本内容，用户发来的内容可能是一份作业清单，也可能是一份任务，你需要将其转换为简洁标准的markdown格式。
-你可以使用的markdown语法有：加粗**ABC**，分割线---（少用），分点- ，以及这个>
+你可以使用的markdown语法有：加粗**ABC**，分割线---（少用），分点- ，以及这个>。当遇到任务一部分是正常的任务，一部分是其他的警告比如要值日，必须要像下面的示例一样用---分开
 此处给一些格式示例：
 原输入：
 语文作业做小册28页吧
@@ -56,9 +57,28 @@ SYSTEM_PROMPT = """你现在需要转换用户的纯文本内容，用户发来�
 ---
 **⚠️请值日人员到卫生区打扫⚠️**
 
+原输入：
+英语中午做97页，值日
+要求输出：
+**【英语】**
+- 做97页
+---
+**⚠️请值日人员到卫生区打扫⚠️**
+
 由于该内容需要在电脑屏幕上显示，尽量让行数不多。"""
+CUSTOM_STYLE_PREFIX = """
+
+以上为系统默认提示词，以下为用户希望自定义的微调提示词，若规则有冲突，请以下面的内容为准：
+"""
 
 app = Flask(__name__)
+
+
+def _systemPrompt(customStyle):
+    customStyle = customStyle.strip()
+    if not customStyle:
+        return SYSTEM_PROMPT
+    return f"{SYSTEM_PROMPT}{CUSTOM_STYLE_PREFIX}{customStyle}"
 
 
 def _machineId(value):
@@ -170,6 +190,15 @@ def convert():
     if len(content) > MAX_CONTENT_LENGTH:
         return _error(f"输入内容不能超过 {MAX_CONTENT_LENGTH} 个字符", 400)
 
+    customStyle = body.get("custom_style", "")
+    if not isinstance(customStyle, str):
+        return _error("自定义 Markdown 风格必须是文本", 400)
+    if len(customStyle) > MAX_CUSTOM_STYLE_LENGTH:
+        return _error(
+            f"自定义 Markdown 风格不能超过 {MAX_CUSTOM_STYLE_LENGTH} 个字符",
+            400,
+        )
+
     try:
         machineId = _machineId(body.get("machine_id"))
     except ValueError as error:
@@ -195,7 +224,7 @@ def convert():
             json={
                 "model": "deepseek-v4-flash",
                 "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": _systemPrompt(customStyle)},
                     {"role": "user", "content": content.strip()},
                 ],
                 "thinking": {"type": "disabled"},

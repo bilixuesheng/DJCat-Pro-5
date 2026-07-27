@@ -1,5 +1,7 @@
+import threading
+
 from loguru import logger
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -19,11 +21,14 @@ from qfluentwidgets import (
     RadioButton,
     RangeSettingCard,
     SettingCard,
+    SwitchButton,
     SwitchSettingCard,
+    TextEdit,
     TitleLabel,
     setThemeColor,
 )
 
+from app.common.ai_markdown import fetchQuota
 from app.config.cfg import THEME_COLOR_PRESETS, cfg
 from app.config.constants import AUTHOR, AUTHOR_URL, VERSION, YEAR
 from app.signal_bus import signalBus
@@ -32,6 +37,11 @@ from app.view.components.setting_card_group import (
     CollapsibleSettingCard,
     CollapsibleSettingCardGroup,
     QWIDGETSIZE_MAX,
+)
+
+CUSTOM_STYLE_PLACEHOLDER = (
+    "所有关于值日的消息全部使用---与前面的任务分割开，然后使用"
+    "**⚠️请值日人员到卫生区打扫⚠️**来写入之日内容。"
 )
 
 
@@ -145,9 +155,58 @@ class ThemeColorSettingCard(CollapsibleSettingCard):
         setThemeColor(color)
 
 
+class AIMarkdownStyleSettingCard(CollapsibleSettingCard):
+    def __init__(self, parent=None):
+        super().__init__(
+            FluentIcon.EDIT,
+            "自定义微调Markdown风格",
+            "根据偏好调整 AI 输出的 Markdown 格式，最多 4000 个字符",
+            parent,
+        )
+        self.switchButton = SwitchButton(self)
+        self.editorWidget = QWidget(self.view)
+        self.editorLayout = QVBoxLayout(self.editorWidget)
+        self.textEdit = TextEdit(self.editorWidget)
+        self.saveTimer = QTimer(self)
+
+        self.card.expandButton.hide()
+        self.addWidget(self.switchButton)
+        self.textEdit.setMinimumHeight(150)
+        self.textEdit.setPlaceholderText(CUSTOM_STYLE_PLACEHOLDER)
+        self.textEdit.setPlainText(cfg.aiMarkdownCustomStyle.value)
+        self.editorLayout.setContentsMargins(48, 16, 24, 20)
+        self.editorLayout.addWidget(self.textEdit)
+        self.addGroupWidget(self.editorWidget)
+
+        enabled = cfg.aiMarkdownCustomStyleEnabled.value
+        self.switchButton.setChecked(enabled)
+        self.switchButton.setText("开启" if enabled else "关闭")
+        self.isExpand = enabled
+        self.setProperty("isExpand", enabled)
+        self.view.setMaximumHeight(QWIDGETSIZE_MAX if enabled else 0)
+
+        self.saveTimer.setSingleShot(True)
+        self.saveTimer.setInterval(400)
+        self.saveTimer.timeout.connect(self.flushPendingSave)
+        self.switchButton.checkedChanged.connect(self._onCheckedChanged)
+        self.textEdit.textChanged.connect(self.saveTimer.start)
+
+    def _onCheckedChanged(self, enabled: bool) -> None:
+        cfg.set(cfg.aiMarkdownCustomStyleEnabled, enabled)
+        self.switchButton.setText("开启" if enabled else "关闭")
+        self.setExpand(enabled)
+
+    def flushPendingSave(self) -> None:
+        self.saveTimer.stop()
+        cfg.set(cfg.aiMarkdownCustomStyle, self.textEdit.toPlainText())
+
+
 class SettingPage(ScrollArea):
+    aiQuotaReceived = Signal(int, int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._aiQuotaLoading = False
         self.container = QWidget()
         self.vBoxLayout = QVBoxLayout(self.container)
         self.vBoxLayout.setContentsMargins(11, 0, 11, 36)
@@ -166,6 +225,9 @@ class SettingPage(ScrollArea):
         )
         self.broadcastGroup = CollapsibleSettingCardGroup(
             "全屏投送设置", "broadcast", self.container
+        )
+        self.aiMarkdownGroup = CollapsibleSettingCardGroup(
+            "AI帮写Markdown设置", "aiMarkdown", self.container
         )
         self.countdownGroup = CollapsibleSettingCardGroup(
             "考试倒计时设置", "countdown", self.container
@@ -209,19 +271,6 @@ class SettingPage(ScrollArea):
                     placeholder="请输入内容",
                 ),
                 ThemeColorSettingCard(),
-                ComboBoxSettingCard(
-                    cfg.actionButtonPosition,
-                    FluentIcon.LAYOUT,
-                    "操作按钮位置",
-                    "设置全屏任务下方操作按钮的放置位置",
-                    texts=["左下角", "右下角"],
-                ),
-                SwitchSettingCard(
-                    FluentIcon.HOME,
-                    "关闭全屏任务后显示主页面",
-                    "关闭全屏投送或考试倒计时后显示软件主页面",
-                    cfg.showMainWindowAfterFullscreenTask,
-                ),
             ]
         )
 
@@ -283,7 +332,43 @@ class SettingPage(ScrollArea):
                     "投送界面窗口化时始终显示在最顶层",
                     cfg.topmostInWindowed,
                 ),
+                ComboBoxSettingCard(
+                    cfg.broadcastActionButtonPosition,
+                    FluentIcon.LAYOUT,
+                    "操作按钮位置",
+                    "设置全屏投送下方操作按钮的放置位置",
+                    texts=["左下角", "右下角"],
+                ),
+                SwitchSettingCard(
+                    FluentIcon.HOME,
+                    "关闭后显示主页面",
+                    "关闭全屏投送后显示软件主页面",
+                    cfg.showMainWindowAfterBroadcast,
+                ),
+                SwitchSettingCard(
+                    FluentIcon.QUESTION,
+                    "退出前询问",
+                    "关闭全屏投送前询问是否退出",
+                    cfg.confirmBeforeCloseBroadcast,
+                ),
             ]
+        )
+
+        self.aiStyleCard = AIMarkdownStyleSettingCard()
+        self.aiQuotaCard = SettingCard(
+            FluentIcon.HISTORY,
+            "额度",
+            "每天 0 点刷新",
+        )
+        self.aiQuotaLabel = BodyLabel("正在查询", self.aiQuotaCard)
+        self.aiQuotaCard.hBoxLayout.addWidget(
+            self.aiQuotaLabel,
+            0,
+            Qt.AlignmentFlag.AlignRight,
+        )
+        self.aiQuotaCard.hBoxLayout.addSpacing(16)
+        self.aiMarkdownGroup.addSettingCards(
+            [self.aiStyleCard, self.aiQuotaCard]
         )
 
         self.countdownGroup.addSettingCards(
@@ -305,6 +390,25 @@ class SettingPage(ScrollArea):
                     "窗口化时置顶",
                     "倒计时界面窗口化时始终显示在最顶层",
                     cfg.countdownTopmostInWindowed,
+                ),
+                ComboBoxSettingCard(
+                    cfg.countdownActionButtonPosition,
+                    FluentIcon.LAYOUT,
+                    "操作按钮位置",
+                    "设置考试倒计时下方操作按钮的放置位置",
+                    texts=["左下角", "右下角"],
+                ),
+                SwitchSettingCard(
+                    FluentIcon.HOME,
+                    "关闭后显示主页面",
+                    "关闭考试倒计时后显示软件主页面",
+                    cfg.showMainWindowAfterCountdown,
+                ),
+                SwitchSettingCard(
+                    FluentIcon.QUESTION,
+                    "退出前询问",
+                    "关闭考试倒计时前询问是否退出",
+                    cfg.confirmBeforeCloseCountdown,
                 ),
             ]
         )
@@ -350,6 +454,7 @@ class SettingPage(ScrollArea):
         self.addSettingGroup(self.personalGroup)
         self.addSettingGroup(self.bannerGroup)
         self.addSettingGroup(self.broadcastGroup)
+        self.addSettingGroup(self.aiMarkdownGroup)
         self.addSettingGroup(self.countdownGroup)
         self.addSettingGroup(self.softwareGroup)
         self.addSettingGroup(self.aboutGroup)
@@ -358,6 +463,7 @@ class SettingPage(ScrollArea):
         self.chooseImageCard.clicked.connect(self._onChooseImageClicked)
         self.autoRunCard.checkedChanged.connect(self._onAutoRunChanged)
         self.aboutCard.clicked.connect(self._onAboutCardClicked)
+        self.aiQuotaReceived.connect(self._onAIQuotaReceived)
 
     def _onChooseImageClicked(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -403,7 +509,29 @@ class SettingPage(ScrollArea):
 
     def showEvent(self, event) -> None:
         self._restoreOrder()
+        self._refreshAIQuota()
         super().showEvent(event)
+
+    def hideEvent(self, event) -> None:
+        self.aiStyleCard.flushPendingSave()
+        super().hideEvent(event)
+
+    def _refreshAIQuota(self) -> None:
+        if self._aiQuotaLoading:
+            return
+        self._aiQuotaLoading = True
+        self.aiQuotaLabel.setText("正在查询")
+        threading.Thread(target=self._fetchAIQuota, daemon=True).start()
+
+    def _fetchAIQuota(self) -> None:
+        quota = fetchQuota()
+        self.aiQuotaReceived.emit(*quota if quota else (-1, -1))
+
+    def _onAIQuotaReceived(self, remaining: int, limit: int) -> None:
+        self._aiQuotaLoading = False
+        self.aiQuotaLabel.setText(
+            "暂时无法获取" if remaining < 0 else f"{remaining} / {limit}"
+        )
 
     def _settingGroups(self) -> list[CollapsibleSettingCardGroup]:
         return [

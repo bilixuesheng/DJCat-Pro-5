@@ -1,6 +1,6 @@
 import os
 
-from PySide6.QtCore import QEvent, QPoint, QRectF, Qt, Signal
+from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QLinearGradient,
@@ -10,17 +10,17 @@ from PySide6.QtGui import (
     QPixmap,
 )
 from PySide6.QtWidgets import (
-    QGridLayout,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QScroller,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 from qfluentwidgets import (
     BodyLabel,
     CardWidget,
+    FlowLayout,
     IconWidget,
     SubtitleLabel,
     TitleLabel,
@@ -35,41 +35,37 @@ from app.view.components.scroll_area import ScrollArea
 
 
 class ActionCard(CardWidget):
+    dragStarted = Signal(object, QPoint)
     dragMoved = Signal(object, QPoint)
-    dragFinished = Signal()
+    dragFinished = Signal(object)
 
     def __init__(self, icon, title, content, parent=None):
         # CardWidget 构造期间可能进入 event()，拖动状态需先初始化。
         self._editing = False
         self._dragging = False
+        self._drag_position = QPoint()
         super().__init__(parent)
-        self.setFixedHeight(132)
-        self.setMinimumWidth(210)
-        self.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Fixed,
-        )
+        self.setFixedSize(210, 120)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setClickEnabled(True)
 
         qconfig.themeColor.valueChanged.connect(self.update)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 16, 14, 16)
-        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 12, 16)
         top_layout = QHBoxLayout()
         icon_widget = IconWidget(icon, self)
-        icon_widget.setFixedSize(24, 24)
-        title_label = SubtitleLabel(title, self)
+        icon_widget.setFixedSize(18, 18)
+        title_label = TitleLabel(title, self)
         self.deleteButton = ToolButton(FIF.DELETE, self)
-        self.deleteButton.setFixedSize(26, 26)
+        self.deleteButton.setFixedSize(24, 24)
         self.deleteButton.setEnabled(False)
         self.deleteButton.setToolTip("系统卡片不可删除")
         self.deleteButton.setAccessibleName(f"删除{title}")
         self.deleteButton.setStyleSheet("""
             ToolButton {
                 border: none;
-                border-radius: 13px;
+                border-radius: 12px;
                 background: #d13438;
             }
             ToolButton:disabled {
@@ -78,7 +74,6 @@ class ActionCard(CardWidget):
         """)
         self.deleteButton.hide()
         top_layout.addWidget(icon_widget)
-        top_layout.addSpacing(4)
         top_layout.addWidget(title_label)
         top_layout.addStretch(1)
         top_layout.addWidget(self.deleteButton)
@@ -100,27 +95,35 @@ class ActionCard(CardWidget):
         )
         self.update()
 
-    def _start_dragging(self):
+    def _start_dragging(self, global_position):
         self._dragging = True
+        self._drag_position = global_position
         self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        self.dragStarted.emit(self, global_position)
 
     def _finish_dragging(self):
         if not self._dragging:
             return
         self._dragging = False
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.dragFinished.emit()
+        self.dragFinished.emit(self)
 
     def event(self, event):
         if self._editing and event.type() == QEvent.Type.TouchBegin:
-            self._start_dragging()
+            point = event.points()[0]
+            self._start_dragging(point.globalPosition().toPoint())
             event.accept()
             return True
         if self._editing and event.type() == QEvent.Type.TouchUpdate:
             if self._dragging and event.points():
+                position = event.points()[0].globalPosition().toPoint()
+                if position == self._drag_position:
+                    event.accept()
+                    return True
+                self._drag_position = position
                 self.dragMoved.emit(
                     self,
-                    event.points()[0].globalPosition().toPoint(),
+                    position,
                 )
             event.accept()
             return True
@@ -135,14 +138,17 @@ class ActionCard(CardWidget):
 
     def mousePressEvent(self, event):
         if self._editing and event.button() == Qt.MouseButton.LeftButton:
-            self._start_dragging()
+            self._start_dragging(event.globalPosition().toPoint())
             event.accept()
             return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         if self._dragging:
-            self.dragMoved.emit(self, event.globalPosition().toPoint())
+            position = event.globalPosition().toPoint()
+            if position != self._drag_position:
+                self._drag_position = position
+                self.dragMoved.emit(self, position)
             event.accept()
             return
         super().mouseMoveEvent(event)
@@ -289,7 +295,8 @@ class HomePage(ScrollArea):
         super().__init__(parent=parent)
         self._editing_cards = False
         self._card_order = []
-        self._card_columns = 2
+        self._drag_offset = QPoint()
+        self._drag_target = None
         self.setObjectName("HomePage")
         self.container = QWidget()
         self.vBoxLayout = QVBoxLayout(self.container)
@@ -324,13 +331,9 @@ class HomePage(ScrollArea):
         self.vBoxLayout.addLayout(self.headerLayout)
 
         self.cardsWidget = QWidget(self.container)
-        self.cardsWidget.setMaximumWidth(820)
-        self.cardsLayout = QGridLayout(self.cardsWidget)
-        self.cardsLayout.setContentsMargins(30, 10, 30, 20)
-        self.cardsLayout.setHorizontalSpacing(16)
-        self.cardsLayout.setVerticalSpacing(16)
-        self.cardsLayout.setColumnStretch(0, 1)
-        self.cardsLayout.setColumnStretch(1, 1)
+        self.flowLayout = FlowLayout(self.cardsWidget, needAni=True)
+        self.flowLayout.setContentsMargins(20, 10, 20, 20)
+        self.flowLayout.setAnimation(180, QEasingCurve.Type.OutCubic)
         self.cardsWidget.setStyleSheet("background: transparent;")
         self.vBoxLayout.addWidget(self.cardsWidget)
 
@@ -361,8 +364,9 @@ class HomePage(ScrollArea):
             )
         }
         for card in self.all_cards.values():
+            card.dragStarted.connect(self._startCardDrag)
             card.dragMoved.connect(self._moveCard)
-            card.dragFinished.connect(self._saveCardOrder)
+            card.dragFinished.connect(self._finishCardDrag)
 
         self._renderCards()
         self.vBoxLayout.addStretch(1)
@@ -371,6 +375,11 @@ class HomePage(ScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.enableTransparentBackground()
         self.container.setStyleSheet("QWidget{background: transparent;}")
+        self.dragPreview = QLabel(self.viewport())
+        self.dragPreview.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents
+        )
+        self.dragPreview.hide()
 
     def _renderCards(self):
         current_order = [
@@ -383,21 +392,11 @@ class HomePage(ScrollArea):
         self._layoutCards()
 
     def _layoutCards(self):
-        while self.cardsLayout.count():
-            self.cardsLayout.takeAt(0)
-        self.cardsLayout.setColumnStretch(
-            1,
-            1 if self._card_columns == 2 else 0,
-        )
-        for index, name in enumerate(self._card_order):
+        self.flowLayout.removeAllWidgets()
+        for name in self._card_order:
             card = self.all_cards[name]
-            self.cardsLayout.addWidget(
-                card,
-                index // self._card_columns,
-                index % self._card_columns,
-            )
+            self.flowLayout.addWidget(card)
             card.show()
-        self.cardsLayout.activate()
 
     def _toggleCardEditing(self):
         self._editing_cards = not self._editing_cards
@@ -415,18 +414,47 @@ class HomePage(ScrollArea):
         else:
             self._saveCardOrder()
 
+    def _startCardDrag(self, card, global_position):
+        self._drag_target = None
+        self._drag_offset = global_position - card.mapToGlobal(QPoint())
+        self.dragPreview.setPixmap(card.grab())
+        self.dragPreview.resize(card.size())
+        self._moveDragPreview(global_position)
+        self.dragPreview.show()
+        self.dragPreview.raise_()
+        effect = QGraphicsOpacityEffect(card)
+        effect.setOpacity(0.2)
+        card.setGraphicsEffect(effect)
+
+    def _moveDragPreview(self, global_position):
+        self.dragPreview.move(
+            self.viewport().mapFromGlobal(global_position - self._drag_offset)
+        )
+
     def _moveCard(self, card, global_position):
+        self._moveDragPreview(global_position)
         position = self.cardsWidget.mapFromGlobal(global_position)
-        target = next(
+        hit_margin = 32
+        target = min(
             (
                 other
                 for other in self.all_cards.values()
-                if other is not card and other.geometry().contains(position)
+                if other is not card
+                and other.geometry()
+                .adjusted(-hit_margin, -hit_margin, hit_margin, hit_margin)
+                .contains(position)
             ),
-            None,
+            key=lambda other: (
+                other.geometry().center() - position
+            ).manhattanLength(),
+            default=None,
         )
         if target is None:
+            self._drag_target = None
             return
+        if target is self._drag_target:
+            return
+        self._drag_target = target
 
         card_name = next(
             name for name, value in self.all_cards.items() if value is card
@@ -438,20 +466,21 @@ class HomePage(ScrollArea):
         to_index = self._card_order.index(target_name)
         self._card_order.pop(from_index)
         self._card_order.insert(to_index, card_name)
-        self._layoutCards()
+        # FlowLayout 的公开插入接口会二次移除同布局控件，需同步移动现有动画项。
+        item = self.flowLayout._items.pop(from_index)
+        animation = self.flowLayout._anis.pop(from_index)
+        self.flowLayout._items.insert(to_index, item)
+        self.flowLayout._anis.insert(to_index, animation)
+        self.flowLayout.setGeometry(self.flowLayout.geometry())
+
+    def _finishCardDrag(self, card):
+        self.dragPreview.hide()
+        card.setGraphicsEffect(None)
+        self._saveCardOrder()
 
     def _saveCardOrder(self):
         if cfg.homeCardOrder.value != self._card_order:
             cfg.set(cfg.homeCardOrder, list(self._card_order))
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if not hasattr(self, "all_cards"):
-            return
-        columns = 1 if self.viewport().width() < 520 else 2
-        if columns != self._card_columns:
-            self._card_columns = columns
-            self._layoutCards()
 
     def updateBannerVisibility(self):
         if cfg.showBanner.value:
