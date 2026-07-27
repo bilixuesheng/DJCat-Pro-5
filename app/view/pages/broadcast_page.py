@@ -1,5 +1,11 @@
-from PySide6.QtCore import QEvent, QPoint, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont
+import hashlib
+import json
+import threading
+import uuid
+
+import requests
+from PySide6.QtCore import QEvent, QPoint, QSize, QSysInfo, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QIcon, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -10,12 +16,16 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     Action,
+    BodyLabel,
+    CaptionLabel,
     CheckBox,
     LineEdit,
     MessageBox,
+    MessageBoxBase,
     PrimaryPushButton,
     PushButton,
     RoundMenu,
+    SubtitleLabel,
     TextEdit,
     TitleLabel,
     ToolButton,
@@ -26,6 +36,8 @@ from qfluentwidgets import FluentIcon as FIF
 from qframelesswindow import FramelessWindow
 
 from app.config.cfg import cfg
+from app.config.constants import AI_MARKDOWN_API
+from app.config.paths import ASSET_DIR
 
 
 class VerticalButton(QToolButton):
@@ -336,6 +348,229 @@ class BroadcastWindow(FramelessWindow):
         super().mouseReleaseEvent(e)
 
 
+def _machineId():
+    raw = bytes(QSysInfo.machineUniqueId())
+    if not raw:
+        raw = uuid.getnode().to_bytes(6, "big")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _iterSseContent(lines):
+    for line in lines:
+        if not line or not line.startswith("data:"):
+            continue
+
+        data = line[5:].strip()
+        if data == "[DONE]":
+            return
+
+        payload = json.loads(data)
+        choices = payload.get("choices", ())
+        if choices:
+            content = choices[0].get("delta", {}).get("content")
+            if content:
+                yield content
+
+
+class AIMarkdownDialog(MessageBoxBase):
+    quotaReceived = Signal(int, int)
+    chunkReceived = Signal(str)
+    conversionFinished = Signal(int, int)
+    conversionFailed = Signal(str, int, int)
+
+    def __init__(self, text, parent=None):
+        super().__init__(parent)
+        self._source = text
+        self._result = ""
+        self._running = False
+        self._finished = False
+        self._remaining = None
+        self._limit = 15
+        self._borderIndex = 0
+
+        self.titleLabel = SubtitleLabel("AI帮改Markdown", self)
+        self.descriptionLabel = BodyLabel(
+            "将要转换的作业清单或任务填入下面的输入框，即可转换为标准markdown格式。",
+            self,
+        )
+        self.inputEdit = TextEdit(self)
+        self.inputEdit.setPlainText(text)
+        self.inputEdit.setPlaceholderText("在此输入要转换的内容")
+        self.inputEdit.setMinimumSize(620, 300)
+        self.quotaLabel = CaptionLabel(self)
+
+        self.viewLayout.addWidget(self.titleLabel)
+        self.viewLayout.addWidget(self.descriptionLabel)
+        self.viewLayout.addWidget(self.inputEdit)
+        self.viewLayout.addWidget(self.quotaLabel)
+        self.widget.setMinimumWidth(680)
+
+        self.yesButton.setText("开始转换")
+        self.cancelButton.setText("取消")
+        self.inputEdit.textChanged.connect(self._refreshStartButton)
+        self.quotaReceived.connect(self._onQuotaReceived)
+        self.chunkReceived.connect(self._appendChunk)
+        self.conversionFinished.connect(self._onConversionFinished)
+        self.conversionFailed.connect(self._onConversionFailed)
+
+        self._busyTimer = QTimer(self)
+        self._busyTimer.setInterval(180)
+        self._busyTimer.timeout.connect(self._updateBusyStyle)
+        self._updateQuotaLabel()
+        self._refreshStartButton()
+        threading.Thread(target=self._fetchQuota, daemon=True).start()
+
+    def resultText(self):
+        return self._result
+
+    def validate(self):
+        if self._finished:
+            return True
+        if self._running:
+            return False
+
+        self._source = self.inputEdit.toPlainText().strip()
+        if not self._source:
+            return False
+
+        self._startConversion()
+        return False
+
+    def reject(self):
+        if not self._running:
+            super().reject()
+
+    def _fetchQuota(self):
+        try:
+            response = requests.get(
+                f"{AI_MARKDOWN_API}/quota",
+                params={"machine_id": _machineId()},
+                timeout=5,
+            )
+            response.raise_for_status()
+            quota = response.json()
+            self.quotaReceived.emit(quota["remaining"], quota["limit"])
+        except (requests.RequestException, KeyError, TypeError, ValueError):
+            pass
+
+    def _startConversion(self):
+        self._running = True
+        self._result = ""
+        self.inputEdit.clear()
+        self.inputEdit.setReadOnly(True)
+        self.yesButton.setEnabled(False)
+        self.cancelButton.setEnabled(False)
+        self._busyTimer.start()
+        self._updateBusyStyle()
+        threading.Thread(target=self._streamConversion, daemon=True).start()
+
+    def _streamConversion(self):
+        remaining = self._remaining if self._remaining is not None else -1
+        limit = self._limit
+        try:
+            with requests.post(
+                AI_MARKDOWN_API,
+                json={"content": self._source, "machine_id": _machineId()},
+                stream=True,
+                timeout=(10, 120),
+            ) as response:
+                remaining = int(
+                    response.headers.get("X-RateLimit-Remaining", remaining)
+                )
+                limit = int(response.headers.get("X-RateLimit-Limit", limit))
+                if not response.ok:
+                    try:
+                        message = response.json().get("message")
+                    except (AttributeError, ValueError):
+                        message = None
+                    raise RuntimeError(
+                        message or f"AI 服务暂时不可用（{response.status_code}）"
+                    )
+
+                response.encoding = "utf-8"
+                for chunk in _iterSseContent(
+                    response.iter_lines(chunk_size=1, decode_unicode=True)
+                ):
+                    self.chunkReceived.emit(chunk)
+            self.conversionFinished.emit(remaining, limit)
+        except requests.RequestException:
+            self.conversionFailed.emit(
+                "无法连接 AI 服务，请检查网络后重试。",
+                remaining,
+                limit,
+            )
+        except (RuntimeError, TypeError, ValueError) as error:
+            self.conversionFailed.emit(str(error), remaining, limit)
+
+    def _appendChunk(self, chunk):
+        self._result += chunk
+        self.inputEdit.moveCursor(QTextCursor.MoveOperation.End)
+        self.inputEdit.insertPlainText(chunk)
+        self.inputEdit.ensureCursorVisible()
+
+    def _onQuotaReceived(self, remaining, limit):
+        if self._finished:
+            return
+        self._remaining = remaining
+        self._limit = limit
+        self._updateQuotaLabel()
+        self._refreshStartButton()
+
+    def _onConversionFinished(self, remaining, limit):
+        if not self._result.strip():
+            self._onConversionFailed("AI 没有返回内容，请重试。", remaining, limit)
+            return
+
+        self._running = False
+        self._finished = True
+        self._remaining = remaining
+        self._limit = limit
+        self._stopBusyStyle()
+        self._updateQuotaLabel()
+        self.yesButton.setText("使用结果")
+        self.yesButton.setEnabled(True)
+        self.cancelButton.setEnabled(True)
+
+    def _onConversionFailed(self, message, remaining, limit):
+        self._running = False
+        if remaining >= 0:
+            self._remaining = remaining
+            self._limit = limit
+        self._stopBusyStyle()
+        self.inputEdit.setPlainText(self._source)
+        self.inputEdit.setReadOnly(False)
+        self.cancelButton.setEnabled(True)
+        self._updateQuotaLabel()
+        self._refreshStartButton()
+        MessageBox("转换失败", message, self).exec()
+
+    def _updateQuotaLabel(self):
+        remaining = "正在查询" if self._remaining is None else self._remaining
+        self.quotaLabel.setText(
+            f"剩余次数：{remaining} / 总次数：{self._limit}　·　禁止滥用"
+        )
+
+    def _refreshStartButton(self):
+        if not self._running and not self._finished:
+            self.yesButton.setEnabled(
+                bool(self.inputEdit.toPlainText().strip()) and self._remaining != 0
+            )
+
+    def _updateBusyStyle(self):
+        colors = ("#4D6BFE", "#8B5CF6", "#EC4899", "#F59E0B", "#10B981")
+        color = colors[self._borderIndex % len(colors)]
+        self._borderIndex += 1
+        background = "#343434" if isDarkTheme() else "#E8E8E8"
+        self.inputEdit.setStyleSheet(
+            f"QTextEdit {{ background: {background}; border: 2px solid {color}; "
+            "border-radius: 8px; }}"
+        )
+
+    def _stopBusyStyle(self):
+        self._busyTimer.stop()
+        self.inputEdit.setStyleSheet("")
+
+
 class BroadcastEditPage(QWidget):
     backSignal = Signal()
     def __init__(self, parent=None):
@@ -362,6 +597,7 @@ class BroadcastEditPage(QWidget):
         self.titleInput.setPlaceholderText("在此输入大标题")
         font = QFont(); font.setPointSize(20)
         self.titleInput.setFont(font)
+        self.titleInput.setFixedHeight(48)
         self.vBoxLayout.addWidget(self.titleInput)
 
         self.contentInput = TextEdit(self)
@@ -374,6 +610,12 @@ class BroadcastEditPage(QWidget):
         self.templateBtn.setText("导入模板")
         self.templateBtn.clicked.connect(self._showTemplateMenu)
 
+        self.aiBtn = PushButton(self)
+        self.aiBtn.setIcon(QIcon(str(ASSET_DIR / "deepseek.png")))
+        self.aiBtn.setText("AI帮改Markdown")
+        self.aiBtn.setEnabled(False)
+        self.aiBtn.clicked.connect(self._showAIMarkdownDialog)
+
         self.broadcastBtn = PrimaryPushButton(self)
         self.broadcastBtn.setIcon(FIF.SEND)
         self.broadcastBtn.setText("投送")
@@ -381,6 +623,7 @@ class BroadcastEditPage(QWidget):
         self.broadcastBtn.clicked.connect(self._onBroadcast)
 
         btnLayout.addWidget(self.templateBtn)
+        btnLayout.addWidget(self.aiBtn)
         btnLayout.addStretch(1)
         btnLayout.addWidget(self.broadcastBtn)
         self.vBoxLayout.addLayout(btnLayout)
@@ -394,6 +637,15 @@ class BroadcastEditPage(QWidget):
             self.contentInput.setPlaceholderText("支持Markdown语法（注意，在该模式下换行要换两次）")
         else:
             self.contentInput.setPlaceholderText("在此输入要投送的正文")
+        self.aiBtn.setEnabled(self.markdownCheckBox.isChecked())
+
+    def _showAIMarkdownDialog(self):
+        dialog = AIMarkdownDialog(
+            self.contentInput.toPlainText(),
+            self.window(),
+        )
+        if dialog.exec():
+            self.contentInput.setPlainText(dialog.resultText())
 
     def _showTemplateMenu(self):
         menu = RoundMenu(parent=self)

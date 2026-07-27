@@ -19,6 +19,7 @@ def build_args() -> list[str]:
     assetFiles = [
         "app/assets/logo.png",
         "app/assets/home.png",
+        "app/assets/deepseek.png",
         "app/assets/1230.mp3",
         "app/assets/1825.mp3",
         "app/assets/class.mp3",
