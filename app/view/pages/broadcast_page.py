@@ -405,17 +405,18 @@ class AIMarkdownDialog(MessageBoxBase):
             "将要转换的作业清单或任务填入下面的输入框，即可转换为标准markdown格式。",
             self,
         )
+        self.descriptionLabel.setWordWrap(True)
         self.inputEdit = TextEdit(self)
         self.inputEdit.setPlainText(text)
         self.inputEdit.setPlaceholderText("在此输入要转换的内容")
-        self.inputEdit.setMinimumSize(620, 300)
+        self.inputEdit.setMinimumHeight(120)
         self.quotaLabel = CaptionLabel(self)
 
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(self.descriptionLabel)
         self.viewLayout.addWidget(self.inputEdit)
         self.viewLayout.addWidget(self.quotaLabel)
-        self.widget.setMinimumWidth(680)
+        self.widget.setMaximumWidth(680)
 
         self.yesButton.setText("开始转换")
         self.cancelButton.setText("取消")
@@ -426,7 +427,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self.conversionFailed.connect(self._onConversionFailed)
 
         self._busyTimer = QTimer(self)
-        self._busyTimer.setInterval(180)
+        self._busyTimer.setInterval(60)
         self._busyTimer.timeout.connect(self._updateBusyStyle)
         self._updateQuotaLabel()
         self._refreshStartButton()
@@ -569,13 +570,20 @@ class AIMarkdownDialog(MessageBoxBase):
             )
 
     def _updateBusyStyle(self):
-        colors = ("#4D6BFE", "#8B5CF6", "#EC4899", "#F59E0B", "#10B981")
-        color = colors[self._borderIndex % len(colors)]
-        self._borderIndex += 1
+        hue = self._borderIndex % 360
+        colors = [
+            QColor.fromHsv((hue + offset) % 360, 190, 255).name()
+            for offset in (0, 90, 180, 270, 360)
+        ]
+        stops = ", ".join(
+            f"stop:{index / 4:g} {color}" for index, color in enumerate(colors)
+        )
+        self._borderIndex = (hue + 6) % 360
         background = "#343434" if isDarkTheme() else "#E8E8E8"
         self.inputEdit.setStyleSheet(
-            f"QTextEdit {{ background: {background}; border: 2px solid {color}; "
-            "border-radius: 8px; }}"
+            f"QTextEdit {{ background: {background}; border: 2px solid; "
+            f"border-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, {stops}); "
+            "border-radius: 8px; }"
         )
 
     def _stopBusyStyle(self):

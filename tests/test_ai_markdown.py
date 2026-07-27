@@ -6,9 +6,13 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
-from app.view.pages.broadcast_page import BroadcastEditPage, _iterSseContent
+from app.view.pages.broadcast_page import (
+    AIMarkdownDialog,
+    BroadcastEditPage,
+    _iterSseContent,
+)
 from server import ai_markdown
 
 
@@ -68,6 +72,33 @@ class AIMarkdownTest(unittest.TestCase):
                     ]
                 )
             )
+
+    def testAIDialogFitsSmallWindowAndUsesGradientBorder(self):
+        parent = QWidget()
+        parent.resize(500, 400)
+        parent.show()
+        self.addCleanup(parent.close)
+
+        with patch.object(AIMarkdownDialog, "_fetchQuota"):
+            dialog = AIMarkdownDialog("", parent)
+        self.addCleanup(dialog.close)
+        dialog.show()
+        self.app.processEvents()
+
+        self.assertTrue(dialog.rect().contains(dialog.widget.geometry()))
+        inputBottom = dialog.inputEdit.mapTo(
+            dialog.widget, dialog.inputEdit.rect().bottomLeft()
+        ).y()
+        quotaTop = dialog.quotaLabel.mapTo(
+            dialog.widget, dialog.quotaLabel.rect().topLeft()
+        ).y()
+        self.assertLess(inputBottom, quotaTop)
+
+        dialog._updateBusyStyle()
+        firstStyle = dialog.inputEdit.styleSheet()
+        dialog._updateBusyStyle()
+        self.assertIn("qlineargradient", firstStyle)
+        self.assertNotEqual(firstStyle, dialog.inputEdit.styleSheet())
 
     def testDailyLimit(self):
         with (
