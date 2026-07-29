@@ -325,6 +325,7 @@ class MainWindow(MSFluentWindow):
             self.homePage.all_cards["定时关机"].clicked.connect(self._navToShutdown)
 
         self.broadcastEditPage.backSignal.connect(self._navToHome)
+        self.broadcastEditPage.editSignal.connect(self._navToBroadcast)
         self.countdownPage.backSignal.connect(self._navToHome)
         self.schedulePage.backSignal.connect(self._navToHome)
         self.shutdownPage.backSignal.connect(self._navToHome)
