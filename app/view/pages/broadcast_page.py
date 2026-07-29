@@ -212,7 +212,10 @@ class BroadcastWindow(FramelessWindow):
         self.btn_close.clicked.connect(self._onClose)
 
     def eventFilter(self, obj, event):
-        if obj == self.contentEdit.viewport():
+        if (
+            hasattr(self, "contentEdit")
+            and obj == self.contentEdit.viewport()
+        ):
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 if self.is_windowed:
                     self._isTracking = True
@@ -625,6 +628,8 @@ class AIMarkdownDialog(MessageBoxBase):
 
 class BroadcastEditPage(QWidget):
     backSignal = Signal()
+    editSignal = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.vBoxLayout = QVBoxLayout(self)
@@ -683,6 +688,7 @@ class BroadcastEditPage(QWidget):
         self.broadcastWin = BroadcastWindow()
         self.broadcastWin.editClicked.connect(self._onReturnToEdit)
         self.broadcastWin.closeClicked.connect(self._onReturnToHome)
+        self._activeBroadcast = None
 
     def _onMarkdownStateChanged(self, state):
         if self.markdownCheckBox.isChecked():
@@ -721,22 +727,35 @@ class BroadcastEditPage(QWidget):
 
     def _onBroadcast(self):
         QApplication.instance().setQuitOnLastWindowClosed(False)
+        self._activeBroadcast = {
+            "title": self.titleInput.text(),
+            "content": self.contentInput.toPlainText(),
+            "isMarkdown": self.markdownCheckBox.isChecked(),
+        }
         self.broadcastWin.setContent(
-            self.titleInput.text(),
-            self.contentInput.toPlainText(),
-            self.markdownCheckBox.isChecked()
+            self._activeBroadcast["title"],
+            self._activeBroadcast["content"],
+            self._activeBroadcast["isMarkdown"],
         )
         self.broadcastWin.startBroadcast()
         self.window().hide()
 
     def _onReturnToEdit(self):
         QApplication.instance().setQuitOnLastWindowClosed(True)
+        if self._activeBroadcast is not None:
+            self.titleInput.setText(self._activeBroadcast["title"])
+            self.contentInput.setPlainText(self._activeBroadcast["content"])
+            self.markdownCheckBox.setChecked(
+                self._activeBroadcast["isMarkdown"]
+            )
+        self.editSignal.emit()
         self.window().show(); self.window().raise_(); self.window().activateWindow()
 
     def _onReturnToHome(self):
         showMainWindow = cfg.showMainWindowAfterBroadcast.value
         QApplication.instance().setQuitOnLastWindowClosed(showMainWindow)
         self.titleInput.clear(); self.contentInput.clear()
+        self._activeBroadcast = None
         if showMainWindow:
             self.window().show(); self.window().raise_(); self.window().activateWindow()
         self.backSignal.emit()
