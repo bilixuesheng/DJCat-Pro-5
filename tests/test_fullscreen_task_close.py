@@ -2,10 +2,11 @@ import os
 import tempfile
 from pathlib import Path
 from unittest import TestCase
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QStackedWidget, QWidget
 from qfluentwidgets import Flyout, PrimaryPushButton, PushButton
 
 from app.config.cfg import cfg
@@ -68,6 +69,48 @@ class FullscreenTaskCloseTest(TestCase):
                 self.assertEqual(page.isVisible(), enabled)
                 self.assertEqual(self.app.quitOnLastWindowClosed(), enabled)
                 page.close()
+
+    def testBroadcastEditRestoresActiveContentAfterEditorWasDiscarded(self):
+        container = QStackedWidget()
+        page = BroadcastEditPage(container)
+        otherPage = QWidget(container)
+        container.addWidget(page)
+        container.addWidget(otherPage)
+        page.editSignal.connect(lambda: container.setCurrentWidget(page))
+        page.backSignal.connect(lambda: container.setCurrentWidget(otherPage))
+
+        container.show()
+        page.titleInput.setText("正在投送的标题")
+        page.contentInput.setPlainText("**正在投送的正文**")
+        page.markdownCheckBox.setChecked(True)
+        page._onBroadcast()
+        self.app.processEvents()
+
+        container.show()
+        with patch(
+            "app.view.pages.broadcast_page.MessageBox.exec",
+            return_value=True,
+        ):
+            page.backBtn.click()
+        self.app.processEvents()
+
+        self.assertIs(container.currentWidget(), otherPage)
+        self.assertEqual(page.titleInput.text(), "")
+        self.assertEqual(page.contentInput.toPlainText(), "")
+
+        page.broadcastWin.btn_edit.click()
+        self.app.processEvents()
+
+        self.assertIs(container.currentWidget(), page)
+        self.assertTrue(container.isVisible())
+        self.assertEqual(page.titleInput.text(), "正在投送的标题")
+        self.assertEqual(
+            page.contentInput.toPlainText(),
+            "**正在投送的正文**",
+        )
+        self.assertTrue(page.markdownCheckBox.isChecked())
+
+        container.close()
 
     def testCloseButtonsConfirmBeforeDiscardingTask(self):
         for pageType, windowName, setting, warning in (
