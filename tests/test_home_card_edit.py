@@ -133,6 +133,77 @@ class HomeCardEditTest(TestCase):
             ["考试倒计时", "定时关机", "全屏投送", "定时播报"],
         )
 
+    def testCardReleaseOutsideDoesNotClick(self):
+        card = self.page.all_cards["全屏投送"]
+        clicks = []
+        card.clicked.connect(lambda: clicks.append(True))
+
+        QTest.mousePress(
+            card,
+            Qt.MouseButton.LeftButton,
+            pos=card.rect().center(),
+        )
+        QTest.mouseRelease(
+            card,
+            Qt.MouseButton.LeftButton,
+            pos=QPoint(-20, -20),
+        )
+
+        self.assertEqual(clicks, [])
+
+        start = card.rect().center()
+        end = start + QPoint(QApplication.startDragDistance() + 1, 0)
+        QTest.mousePress(card, Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(card, end)
+        QTest.mouseRelease(card, Qt.MouseButton.LeftButton, pos=end)
+
+        self.assertEqual(clicks, [])
+
+        QTest.mouseClick(
+            card,
+            Qt.MouseButton.LeftButton,
+            pos=card.rect().center(),
+        )
+
+        self.assertEqual(clicks, [True])
+
+    def testTouchScrollStartingOnCardDoesNotClick(self):
+        self.page.resize(500, 300)
+        QTest.qWait(300)
+        scrollBar = self.page.verticalScrollBar()
+        scrollBar.setValue(300)
+        scrollStart = scrollBar.value()
+        card = self.page.all_cards["全屏投送"]
+        clicks = []
+        card.clicked.connect(lambda: clicks.append(True))
+        touchDevice = QTest.createTouchDevice(
+            QInputDevice.DeviceType.TouchScreen
+        )
+        start = card.rect().center()
+        end = start + QPoint(0, -80)
+
+        QTest.touchEvent(card, touchDevice).press(
+            0,
+            start,
+            card,
+        ).commit()
+        self.app.processEvents()
+        QTest.touchEvent(card, touchDevice).move(
+            0,
+            end,
+            card,
+        ).commit()
+        QTest.qWait(100)
+        QTest.touchEvent(card, touchDevice).release(
+            0,
+            end,
+            card,
+        ).commit()
+        QTest.qWait(300)
+
+        self.assertGreater(scrollBar.value(), scrollStart)
+        self.assertEqual(clicks, [])
+
     def testCardsShiftBeforePointerFullyEntersTarget(self):
         QTest.mouseClick(self.page.sortBtn, Qt.MouseButton.LeftButton)
         card = self.page.all_cards["全屏投送"]

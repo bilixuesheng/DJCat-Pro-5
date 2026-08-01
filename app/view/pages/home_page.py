@@ -10,6 +10,7 @@ from PySide6.QtGui import (
     QPixmap,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
@@ -44,6 +45,7 @@ class ActionCard(CardWidget):
         self._editing = False
         self._dragging = False
         self._drag_position = QPoint()
+        self._press_position = None
         super().__init__(parent)
         self.setFixedSize(210, 120)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -141,6 +143,7 @@ class ActionCard(CardWidget):
             self._start_dragging(event.globalPosition().toPoint())
             event.accept()
             return
+        self._press_position = event.globalPosition().toPoint()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -156,6 +159,19 @@ class ActionCard(CardWidget):
     def mouseReleaseEvent(self, event):
         if self._editing:
             self._finish_dragging()
+            event.accept()
+            return
+        release_position = event.globalPosition().toPoint()
+        should_click = (
+            self._press_position is not None
+            and self.rect().contains(event.position().toPoint())
+            and (release_position - self._press_position).manhattanLength()
+            < QApplication.startDragDistance()
+        )
+        self._press_position = None
+        if not should_click:
+            self.isPressed = False
+            self._updateBackgroundColor()
             event.accept()
             return
         super().mouseReleaseEvent(event)
