@@ -36,7 +36,7 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 from qframelesswindow import FramelessWindow
 
-from app.common.ai_markdown import fetchQuota, machineId
+from app.common.ai_markdown import PEAK_HOURS_TEXT, fetchQuota, machineId
 from app.config.cfg import cfg
 from app.config.constants import AI_MARKDOWN_API
 from app.config.paths import ASSET_DIR
@@ -415,10 +415,10 @@ def _iterSseContent(lines):
 
 
 class AIMarkdownDialog(MessageBoxBase):
-    quotaReceived = Signal(int, int)
+    quotaReceived = Signal(int, int, int)
     chunkReceived = Signal(str)
-    conversionFinished = Signal(int, int)
-    conversionFailed = Signal(str, int, int)
+    conversionFinished = Signal(int, int, int)
+    conversionFailed = Signal(str, int, int, int)
 
     def __init__(self, text, parent=None):
         super().__init__(parent)
@@ -428,6 +428,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self._finished = False
         self._remaining = None
         self._limit = 15
+        self._cost = 1
         self._borderIndex = 0
 
         self.titleLabel = SubtitleLabel("AI帮改Markdown", self)
@@ -461,9 +462,13 @@ class AIMarkdownDialog(MessageBoxBase):
         self._busyTimer = QTimer(self)
         self._busyTimer.setInterval(60)
         self._busyTimer.timeout.connect(self._updateBusyStyle)
+        self._quotaTimer = QTimer(self)
+        self._quotaTimer.setInterval(30_000)
+        self._quotaTimer.timeout.connect(self._refreshQuota)
+        self._quotaTimer.start()
         self._updateQuotaLabel()
         self._refreshStartButton()
-        threading.Thread(target=self._fetchQuota, daemon=True).start()
+        self._refreshQuota()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -495,6 +500,9 @@ class AIMarkdownDialog(MessageBoxBase):
         if quota:
             self.quotaReceived.emit(*quota)
 
+    def _refreshQuota(self):
+        threading.Thread(target=self._fetchQuota, daemon=True).start()
+
     def _startConversion(self):
         self._running = True
         self._result = ""
@@ -509,6 +517,7 @@ class AIMarkdownDialog(MessageBoxBase):
     def _streamConversion(self):
         remaining = self._remaining if self._remaining is not None else -1
         limit = self._limit
+        cost = self._cost
         payload = {"content": self._source, "machine_id": machineId()}
         if cfg.aiMarkdownCustomStyleEnabled.value:
             customStyle = cfg.aiMarkdownCustomStyle.value.strip()
@@ -525,6 +534,7 @@ class AIMarkdownDialog(MessageBoxBase):
                     response.headers.get("X-RateLimit-Remaining", remaining)
                 )
                 limit = int(response.headers.get("X-RateLimit-Limit", limit))
+                cost = int(response.headers.get("X-RateLimit-Cost", cost))
                 if not response.ok:
                     try:
                         message = response.json().get("message")
@@ -539,15 +549,16 @@ class AIMarkdownDialog(MessageBoxBase):
                     response.iter_lines(chunk_size=1, decode_unicode=True)
                 ):
                     self.chunkReceived.emit(chunk)
-            self.conversionFinished.emit(remaining, limit)
+            self.conversionFinished.emit(remaining, limit, cost)
         except requests.RequestException:
             self.conversionFailed.emit(
                 "无法连接 AI 服务，请检查网络后重试。",
                 remaining,
                 limit,
+                cost,
             )
         except (RuntimeError, TypeError, ValueError) as error:
-            self.conversionFailed.emit(str(error), remaining, limit)
+            self.conversionFailed.emit(str(error), remaining, limit, cost)
 
     def _appendChunk(self, chunk):
         self._result += chunk
@@ -555,53 +566,63 @@ class AIMarkdownDialog(MessageBoxBase):
         self.inputEdit.insertPlainText(chunk)
         self.inputEdit.ensureCursorVisible()
 
-    def _onQuotaReceived(self, remaining, limit):
+    def _onQuotaReceived(self, remaining, limit, cost):
         if self._finished:
             return
         self._remaining = remaining
         self._limit = limit
+        self._cost = cost
         self._updateQuotaLabel()
         self._refreshStartButton()
 
-    def _onConversionFinished(self, remaining, limit):
+    def _onConversionFinished(self, remaining, limit, cost):
         if not self._result.strip():
-            self._onConversionFailed("AI 没有返回内容，请重试。", remaining, limit)
+            self._onConversionFailed(
+                "AI 没有返回内容，请重试。", remaining, limit, cost
+            )
             return
 
         self._running = False
         self._finished = True
         self._remaining = remaining
         self._limit = limit
+        self._cost = cost
         self._stopBusyStyle()
         self._updateQuotaLabel()
         self.yesButton.setText("使用结果")
         self.yesButton.setEnabled(True)
         self.cancelButton.setEnabled(True)
 
-    def _onConversionFailed(self, message, remaining, limit):
+    def _onConversionFailed(self, message, remaining, limit, cost):
         self._running = False
         if remaining >= 0:
             self._remaining = remaining
             self._limit = limit
+            self._cost = cost
+        self._remaining = None
         self._stopBusyStyle()
         self.inputEdit.setPlainText(self._source)
         self.inputEdit.setReadOnly(False)
         self.cancelButton.setEnabled(True)
         self._updateQuotaLabel()
         self._refreshStartButton()
+        self._refreshQuota()
         MessageBox("转换失败", message, self).exec()
 
     def _updateQuotaLabel(self):
         remaining = "正在查询" if self._remaining is None else self._remaining
         self.quotaLabel.setText(
-            f"剩余次数：{remaining} / 总次数：{self._limit}　·　每天 0 点刷新"
-            "　·　禁止滥用　·　可在设置中自定义 Markdown 风格"
+            f"剩余 {remaining}/{self._limit}　·　当前每次扣 {self._cost} 次"
+            f"　·　双倍时段：{PEAK_HOURS_TEXT}　·　每天 0 点刷新"
+            "　·　禁止滥用　·　设置中可自定义风格"
         )
 
     def _refreshStartButton(self):
         if not self._running and not self._finished:
             self.yesButton.setEnabled(
-                bool(self.inputEdit.toPlainText().strip()) and self._remaining != 0
+                bool(self.inputEdit.toPlainText().strip())
+                and self._remaining is not None
+                and self._remaining >= self._cost
             )
 
     def _updateBusyStyle(self):

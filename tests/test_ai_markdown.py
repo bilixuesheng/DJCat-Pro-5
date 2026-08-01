@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -88,6 +89,8 @@ class AIMarkdownTest(unittest.TestCase):
         dialog.show()
         self.app.processEvents()
 
+        self.assertTrue(dialog._quotaTimer.isActive())
+        self.assertEqual(dialog._quotaTimer.interval(), 30_000)
         self.assertTrue(dialog.rect().contains(dialog.widget.geometry()))
         inputBottom = dialog.inputEdit.mapTo(
             dialog.widget, dialog.inputEdit.rect().bottomLeft()
@@ -105,9 +108,15 @@ class AIMarkdownTest(unittest.TestCase):
         dialog._stopBusyStyle()
         self.assertIn("border-radius", dialog.inputEdit.styleSheet())
 
-        dialog._onQuotaReceived(8, 15)
+        dialog._onQuotaReceived(8, 15, 2)
         self.assertIn("每天 0 点刷新", dialog.quotaLabel.text())
+        self.assertIn("9:00–12:00、14:00–18:00", dialog.quotaLabel.text())
+        self.assertIn("当前每次扣 2 次", dialog.quotaLabel.text())
         self.assertIn("设置", dialog.quotaLabel.text())
+        dialog.inputEdit.setPlainText("作业")
+        dialog._remaining = None
+        dialog._refreshStartButton()
+        self.assertFalse(dialog.yesButton.isEnabled())
 
         parent.resize(760, 500)
         self.app.processEvents()
@@ -142,8 +151,12 @@ class AIMarkdownTest(unittest.TestCase):
                 self.app.processEvents()
                 self.assertEqual(cfg.aiMarkdownCustomStyle.value, "只使用列表")
 
-                page._onAIQuotaReceived(8, 15)
+                page._onAIQuotaReceived(8, 15, 2)
                 self.assertEqual(page.aiQuotaLabel.text(), "8 / 15")
+                self.assertIn(
+                    "9:00–12:00、14:00–18:00",
+                    page.aiQuotaCard.contentLabel.text(),
+                )
             finally:
                 cfg.set(cfg.aiMarkdownCustomStyleEnabled, oldEnabled)
                 cfg.set(cfg.aiMarkdownCustomStyle, oldStyle)
@@ -235,7 +248,7 @@ class AIMarkdownTest(unittest.TestCase):
 
     def testServerForwardsCustomStyle(self):
         upstream = MagicMock()
-        upstream.iter_lines.return_value = [b"data: [DONE]"]
+        upstream.iter_lines.return_value = [b"data:[DONE]"]
         with (
             tempfile.TemporaryDirectory() as directory,
             patch.object(
@@ -255,6 +268,7 @@ class AIMarkdownTest(unittest.TestCase):
                 "post",
                 return_value=upstream,
             ) as post,
+            patch.object(ai_markdown, "_quotaCost", return_value=2),
         ):
             response = ai_markdown.app.test_client().post(
                 "/ai/markdown",
@@ -270,8 +284,90 @@ class AIMarkdownTest(unittest.TestCase):
         payload = post.call_args.kwargs["json"]
         self.assertTrue(payload["messages"][0]["content"].endswith("只使用列表"))
         self.assertEqual(payload["thinking"], {"type": "disabled"})
+        self.assertEqual(response.headers["X-RateLimit-Cost"], "2")
+        self.assertEqual(response.headers["X-RateLimit-Remaining"], "13")
 
-    def testDailyLimit(self):
+    def testIncompleteUpstreamStreamRefundsPeakCost(self):
+        upstream = MagicMock()
+        upstream.iter_lines.return_value = [b'data: {"choices":[]}']
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(
+                ai_markdown,
+                "DATABASE_PATH",
+                Path(directory) / "usage.sqlite3",
+            ),
+            patch.dict(
+                os.environ,
+                {
+                    "DEEPSEEK_API_KEY": "test-only",
+                    "DJCATAI_RATE_LIMIT_SALT": "test-only",
+                },
+            ),
+            patch.object(ai_markdown, "_quotaCost", return_value=2),
+            patch.object(ai_markdown.requests, "post", return_value=upstream),
+        ):
+            machineId = ai_markdown._machineId("a" * 64)
+            response = ai_markdown.app.test_client().post(
+                "/ai/markdown",
+                json={"content": "作业", "machine_id": "a" * 64},
+                buffered=True,
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(ai_markdown._remaining(machineId), 15)
+
+    def testPeakRequestWithOneRemainingWaitsForOffPeak(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(
+                ai_markdown,
+                "DATABASE_PATH",
+                Path(directory) / "usage.sqlite3",
+            ),
+            patch.dict(
+                os.environ,
+                {
+                    "DEEPSEEK_API_KEY": "test-only",
+                    "DJCATAI_RATE_LIMIT_SALT": "test-only",
+                },
+            ),
+            patch.object(ai_markdown, "_quotaCost", return_value=2),
+        ):
+            machineId = ai_markdown._machineId("a" * 64)
+            for _ in range(14):
+                ai_markdown._claim(machineId, 1)
+            response = ai_markdown.app.test_client().post(
+                "/ai/markdown",
+                json={"content": "作业", "machine_id": "a" * 64},
+            )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertIn("非双倍时段", response.get_json()["message"])
+        self.assertEqual(response.headers["X-RateLimit-Remaining"], "1")
+        self.assertEqual(response.headers["X-RateLimit-Cost"], "2")
+
+    def testPeakQuotaCostAndDailyLimit(self):
+        self.assertEqual(
+            ai_markdown._quotaCost(
+                datetime(2026, 8, 1, 8, 59, tzinfo=ai_markdown.TIMEZONE)
+            ),
+            1,
+        )
+        for hour in (9, 11, 14, 17):
+            self.assertEqual(
+                ai_markdown._quotaCost(
+                    datetime(2026, 8, 1, hour, tzinfo=ai_markdown.TIMEZONE)
+                ),
+                2,
+            )
+        for hour in (12, 13, 18, 23):
+            self.assertEqual(
+                ai_markdown._quotaCost(
+                    datetime(2026, 8, 1, hour, tzinfo=ai_markdown.TIMEZONE)
+                ),
+                1,
+            )
+
         with (
             tempfile.TemporaryDirectory() as directory,
             patch.object(
@@ -286,12 +382,13 @@ class AIMarkdownTest(unittest.TestCase):
         ):
             machineId = ai_markdown._machineId("a" * 64)
             self.assertEqual(
-                [ai_markdown._claim(machineId) for _ in range(15)],
-                list(range(14, -1, -1)),
+                [ai_markdown._claim(machineId, 2) for _ in range(7)],
+                [13, 11, 9, 7, 5, 3, 1],
             )
-            self.assertEqual(ai_markdown._claim(machineId), -1)
-            ai_markdown._refund(machineId)
+            self.assertEqual(ai_markdown._claim(machineId, 2), -1)
             self.assertEqual(ai_markdown._remaining(machineId), 1)
+            ai_markdown._refund(machineId, 2)
+            self.assertEqual(ai_markdown._remaining(machineId), 3)
 
 
 if __name__ == "__main__":

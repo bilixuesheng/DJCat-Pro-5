@@ -15,6 +15,7 @@ DATABASE_PATH = Path(
     os.environ.get("DJCATAI_DATABASE_PATH", "ai_markdown_usage.sqlite3")
 )
 TIMEZONE = timezone(timedelta(hours=8))
+PEAK_HOURS = ((9, 12), (14, 18))
 DEEPSEEK_API = "https://api.deepseek.com/chat/completions"
 SYSTEM_PROMPT = """你现在需要转换用户的纯文本内容，用户发来的内容可能是一份作业清单，也可能是一份任务，你需要将其转换为简洁标准的markdown格式。
 你可以使用的markdown语法有：加粗**ABC**，分割线---（少用），分点- ，以及这个>。当遇到任务一部分是正常的任务，一部分是其他的警告比如要值日，必须要像下面的示例一样用---分开
@@ -99,6 +100,11 @@ def _today():
     return datetime.now(TIMEZONE).date().isoformat()
 
 
+def _quotaCost(now=None):
+    hour = (now or datetime.now(TIMEZONE)).astimezone(TIMEZONE).hour
+    return 2 if any(start <= hour < end for start, end in PEAK_HOURS) else 1
+
+
 def _connect():
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     database = sqlite3.connect(DATABASE_PATH, timeout=10)
@@ -124,7 +130,7 @@ def _remaining(machineId):
     return max(0, DAILY_LIMIT - (row[0] if row else 0))
 
 
-def _claim(machineId):
+def _claim(machineId, cost):
     day = _today()
     with closing(_connect()) as database:
         database.execute("BEGIN IMMEDIATE")
@@ -133,29 +139,29 @@ def _claim(machineId):
             (day, machineId),
         ).fetchone()
         count = row[0] if row else 0
-        if count >= DAILY_LIMIT:
+        if count + cost > DAILY_LIMIT:
             database.rollback()
             return -1
 
         database.execute(
             """
-            INSERT INTO usage (day, machine_id, count) VALUES (?, ?, 1)
-            ON CONFLICT(day, machine_id) DO UPDATE SET count = count + 1
+            INSERT INTO usage (day, machine_id, count) VALUES (?, ?, ?)
+            ON CONFLICT(day, machine_id) DO UPDATE SET count = count + excluded.count
             """,
-            (day, machineId),
+            (day, machineId, cost),
         )
         database.commit()
-    return DAILY_LIMIT - count - 1
+    return DAILY_LIMIT - count - cost
 
 
-def _refund(machineId):
+def _refund(machineId, cost):
     with closing(_connect()) as database:
         database.execute(
             """
-            UPDATE usage SET count = count - 1
-            WHERE day = ? AND machine_id = ? AND count > 0
+            UPDATE usage SET count = count - ?
+            WHERE day = ? AND machine_id = ? AND count >= ?
             """,
-            (_today(), machineId),
+            (cost, _today(), machineId, cost),
         )
         database.commit()
 
@@ -170,7 +176,13 @@ def _error(message, status):
 def quota():
     try:
         machineId = _machineId(request.args.get("machine_id"))
-        return jsonify({"remaining": _remaining(machineId), "limit": DAILY_LIMIT})
+        return jsonify(
+            {
+                "remaining": _remaining(machineId),
+                "limit": DAILY_LIMIT,
+                "cost": _quotaCost(),
+            }
+        )
     except ValueError as error:
         return _error(str(error), 400)
     except RuntimeError as error:
@@ -206,11 +218,19 @@ def convert():
     except RuntimeError as error:
         return _error(str(error), 503)
 
-    remaining = _claim(machineId)
+    cost = _quotaCost()
+    remaining = _claim(machineId, cost)
     if remaining < 0:
-        response = _error("今天的 15 次转换额度已用完，请明天再试。", 429)
+        remaining = _remaining(machineId)
+        message = (
+            "当前为双倍时段，剩余额度不足，请在非双倍时段再试。"
+            if remaining
+            else "今天的转换额度已用完，请明天再试。"
+        )
+        response = _error(message, 429)
         response.headers["X-RateLimit-Limit"] = str(DAILY_LIMIT)
-        response.headers["X-RateLimit-Remaining"] = "0"
+        response.headers["X-RateLimit-Remaining"] = str(remaining)
+        response.headers["X-RateLimit-Cost"] = str(cost)
         return response
 
     upstream = None
@@ -238,19 +258,21 @@ def convert():
     except requests.RequestException:
         if upstream:
             upstream.close()
-        _refund(machineId)
+        _refund(machineId, cost)
         return _error("AI 服务暂时不可用，请稍后再试。", 502)
 
     @stream_with_context
     def stream():
+        completed = False
         try:
             for line in upstream.iter_lines(chunk_size=1):
                 if line:
+                    if line.startswith(b"data:") and line[5:].strip() == b"[DONE]":
+                        completed = True
                     yield line + b"\n\n"
-        except requests.RequestException:
-            _refund(machineId)
-            raise
         finally:
+            if not completed:
+                _refund(machineId, cost)
             upstream.close()
 
     return Response(
@@ -261,6 +283,7 @@ def convert():
             "X-Accel-Buffering": "no",
             "X-RateLimit-Limit": str(DAILY_LIMIT),
             "X-RateLimit-Remaining": str(remaining),
+            "X-RateLimit-Cost": str(cost),
         },
     )
 

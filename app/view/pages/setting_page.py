@@ -28,7 +28,7 @@ from qfluentwidgets import (
     setThemeColor,
 )
 
-from app.common.ai_markdown import fetchQuota
+from app.common.ai_markdown import PEAK_HOURS_TEXT, fetchQuota
 from app.config.cfg import THEME_COLOR_PRESETS, cfg
 from app.config.constants import AUTHOR, AUTHOR_URL, VERSION, YEAR
 from app.signal_bus import signalBus
@@ -202,7 +202,7 @@ class AIMarkdownStyleSettingCard(CollapsibleSettingCard):
 
 
 class SettingPage(ScrollArea):
-    aiQuotaReceived = Signal(int, int)
+    aiQuotaReceived = Signal(int, int, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -358,7 +358,7 @@ class SettingPage(ScrollArea):
         self.aiQuotaCard = SettingCard(
             FluentIcon.HISTORY,
             "额度",
-            "每天 0 点刷新",
+            f"每天 0 点刷新；{PEAK_HOURS_TEXT} 每次扣 2 次，其余时段扣 1 次",
         )
         self.aiQuotaLabel = BodyLabel("正在查询", self.aiQuotaCard)
         self.aiQuotaCard.hBoxLayout.addWidget(
@@ -525,9 +525,9 @@ class SettingPage(ScrollArea):
 
     def _fetchAIQuota(self) -> None:
         quota = fetchQuota()
-        self.aiQuotaReceived.emit(*quota if quota else (-1, -1))
+        self.aiQuotaReceived.emit(*quota if quota else (-1, -1, 1))
 
-    def _onAIQuotaReceived(self, remaining: int, limit: int) -> None:
+    def _onAIQuotaReceived(self, remaining: int, limit: int, _cost: int) -> None:
         self._aiQuotaLoading = False
         self.aiQuotaLabel.setText(
             "暂时无法获取" if remaining < 0 else f"{remaining} / {limit}"
