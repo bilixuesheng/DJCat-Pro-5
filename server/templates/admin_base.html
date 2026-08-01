@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}电教猫管理面板{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
+</head>
+<body class="admin-page">
+    <div class="admin-shell">
+        <aside class="admin-sidebar">
+            <a class="logo" href="{{ url_for('adminDashboard') }}">电教猫<span>·</span>控制台</a>
+            <div class="sidebar-kicker">Service control</div>
+            <nav class="side-nav" aria-label="管理面板导航">
+                <a class="side-link {% if current_page == 'home' %}active{% endif %}" href="{{ url_for('adminDashboard') }}" {% if current_page == 'home' %}aria-current="page"{% endif %}>
+                    <span class="side-index">01</span>主页
+                </a>
+                <div class="side-group">
+                    <div class="side-group-title">AI 管理</div>
+                    <a class="side-link side-child {% if current_page == 'ai_markdown' %}active{% endif %}" href="{{ url_for('adminAIMarkdown') }}" {% if current_page == 'ai_markdown' %}aria-current="page"{% endif %}>
+                        <span class="side-index">02</span>AI 写 Markdown
+                    </a>
+                </div>
+            </nav>
+            <form class="sidebar-logout" method="post" action="{{ url_for('adminLogout') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button type="submit">退出登录</button>
+            </form>
+        </aside>
+
+        <div class="admin-workspace">
+            <header class="page-topbar">
+                <div>
+                    <div class="page-context">电教猫服务控制台</div>
+                    <strong>{% block page_name %}服务总览{% endblock %}</strong>
+                </div>
+                <div class="page-topbar-actions">{% block page_actions %}<span>dash.djcatpro.top</span>{% endblock %}</div>
+            </header>
+
+            <main class="page-main">
+                {% for category, message in get_flashed_messages(with_categories=true) %}
+                    <div class="notice {{ category }}">{{ message }}</div>
+                {% endfor %}
+                {% block content %}{% endblock %}
+            </main>
+        </div>
+    </div>
+</body>
+</html>

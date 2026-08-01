@@ -1,0 +1,114 @@
+{% extends "admin_base.html" %}
+
+{% block title %}AI 写 Markdown · 电教猫管理面板{% endblock %}
+{% block page_name %}AI 写 Markdown 管理{% endblock %}
+{% block page_actions %}
+<a href="#settings">配置</a>
+<a href="#machines">注册机器</a>
+{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div class="eyebrow">AI management · Markdown</div>
+    <h1>AI 写 Markdown，<br><em>独立管理<svg class="underline-draw" viewBox="0 0 190 14" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M2 9 C 48 3, 142 11, 188 5" /></svg></em>。</h1>
+    <p class="hero-desc">这里仅管理 Markdown 转换服务；以后新增的 AI 功能会作为独立项目出现在 AI 管理下。</p>
+    <div class="hero-meta">
+        <span>当前模型</span><code>{{ model }}</code><i></i>
+        <span>{{ '高峰双倍扣除已开启' if peak_enabled else '高峰双倍扣除已关闭' }}</span>
+    </div>
+</section>
+
+<section class="overview-section">
+    <div class="section-heading">
+        <div>
+            <div class="section-label">Today · Markdown</div>
+            <h2>今日运行情况</h2>
+        </div>
+        <span class="section-note">每天 00:00 自动刷新</span>
+    </div>
+    <div class="metrics metrics-compact" aria-label="AI Markdown 今日统计">
+        <article><div class="card-num">01</div><h3>请求</h3><strong>{{ stats.requests }}</strong></article>
+        <article><div class="card-num">02</div><h3>成功</h3><strong>{{ stats.success }}</strong></article>
+        <article><div class="card-num">03</div><h3>消耗额度</h3><strong>{{ stats.consumed }}</strong></article>
+        <article><div class="card-num">04</div><h3>注册机器</h3><strong>{{ stats.machines }}</strong></article>
+    </div>
+</section>
+
+<section class="panel" id="settings">
+    <div class="panel-title">
+        <div>
+            <div class="section-label">01 · Configuration</div>
+            <h2>Markdown 配置</h2>
+            <p>保存后立即用于新的转换请求，无需重启服务。</p>
+        </div>
+    </div>
+    <form class="settings-grid" method="post" action="{{ url_for('adminSettings') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>每台机器每日额度
+            <input type="number" name="daily_limit" min="1" max="10000" value="{{ daily_limit }}" required>
+        </label>
+        <label>DeepSeek 模型
+            <input name="model" maxlength="100" value="{{ model }}" required>
+        </label>
+        <label class="full">DeepSeek API Key
+            <input type="password" name="api_key" autocomplete="new-password" placeholder="{{ '已配置；留空保持不变' if api_key_configured else '留空则使用服务器环境变量' }}">
+        </label>
+        <label class="full prompt-field">全局系统提示词
+            <textarea name="system_prompt" rows="18" maxlength="{{ max_system_prompt_length }}" required>{{ system_prompt }}</textarea>
+            <span>桌面端用户开启“自定义微调 Markdown 风格”后，其内容会追加在这段提示词后面，并以用户规则优先。</span>
+        </label>
+        <label class="check"><input type="checkbox" name="peak_enabled" value="1" {% if peak_enabled %}checked{% endif %}>启用高峰时段双倍扣除</label>
+        <label class="check"><input type="checkbox" name="clear_api_key" value="1">清除面板密钥，改用环境变量</label>
+        <p class="full hint">高峰时段按北京时间每日 9:00–12:00、14:00–18:00，每次扣除 2 个额度单位。</p>
+        <div class="full actions"><button class="btn btn-primary" type="submit">保存 Markdown 配置</button></div>
+    </form>
+</section>
+
+<section class="panel" id="machines">
+    <div class="panel-title machine-toolbar">
+        <div>
+            <div class="section-label">02 · Registered devices</div>
+            <h2>注册机器</h2>
+            <p>只保存匿名指纹，不保存作业正文或原始硬件信息。</p>
+        </div>
+        <form class="filters" method="get" action="{{ url_for('adminAIMarkdown') }}">
+            <input type="search" name="q" value="{{ search }}" placeholder="搜索代号或匿名指纹">
+            <select name="sort" aria-label="排序方式">
+                <option value="registered" {% if sort == 'registered' %}selected{% endif %}>按注册时间</option>
+                <option value="code" {% if sort == 'code' %}selected{% endif %}>按机器码</option>
+            </select>
+            <button class="btn btn-ghost" type="submit">查询</button>
+        </form>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>机器码</th><th>匿名指纹</th><th>注册时间</th><th>最后访问</th><th>今日额度</th><th>请求数</th><th></th></tr></thead>
+            <tbody>
+            {% for machine in machines %}
+                <tr>
+                    <td><strong>{{ machine.code }}</strong></td>
+                    <td><code title="{{ machine.fingerprint }}">{{ machine.fingerprint[:12] }}…</code></td>
+                    <td>{{ machine.registered_at }}</td>
+                    <td>{{ machine.last_seen_at }}</td>
+                    <td>{{ machine.remaining }} / {{ daily_limit }}</td>
+                    <td>{{ machine.requests }}</td>
+                    <td>
+                        <form method="post" action="{{ url_for('adminResetMachine', alias=machine.code) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button class="danger-link" type="submit">重置额度</button>
+                        </form>
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td class="empty" colspan="7">暂无符合条件的注册机器</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <form class="reset-all" method="post" action="{{ url_for('adminResetAll') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="btn btn-danger" type="submit">重置所有机器今日额度</button>
+    </form>
+</section>
+{% endblock %}

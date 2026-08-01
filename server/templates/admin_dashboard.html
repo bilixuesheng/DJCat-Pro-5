@@ -1,142 +1,58 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>电教猫管理面板</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
-</head>
-<body>
-    <div class="wrap">
-        <header>
-            <div class="nav">
-                <a class="logo" href="{{ url_for('adminDashboard') }}">电教猫<span>·</span>控制台</a>
-                <nav class="nav-links" aria-label="页面导航">
-                    <a href="#overview">概览</a>
-                    <a href="#settings">配置</a>
-                    <a href="#machines">机器</a>
-                </nav>
-                <form method="post" action="{{ url_for('adminLogout') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button class="nav-button" type="submit">退出登录</button>
-                </form>
-            </div>
-        </header>
+{% extends "admin_base.html" %}
 
-        <main>
-            {% for category, message in get_flashed_messages(with_categories=true) %}
-                <div class="notice {{ category }}">{{ message }}</div>
-            {% endfor %}
+{% block page_name %}服务总览{% endblock %}
 
-            <section class="hero" id="overview">
-                <div class="eyebrow">AI Markdown · Control</div>
-                <h1>把 AI 写 Markdown，<br><em>管理得清清楚楚<svg class="underline-draw" viewBox="0 0 280 14" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M2 9 C 70 3, 210 11, 278 5" /></svg></em>。</h1>
-                <p class="hero-desc">在这里调整模型与额度，查看每一次调用，并管理已经注册的电教猫设备。</p>
-                <div class="hero-meta">
-                    <span>当前模型</span>
-                    <code>{{ model }}</code>
-                    <i></i>
-                    <span>配置实时生效</span>
-                </div>
-            </section>
+{% block content %}
+<section class="hero">
+    <div class="eyebrow">Overview · Beijing time</div>
+    <h1>所有功能，<br><em>从这里看清楚<svg class="underline-draw" viewBox="0 0 250 14" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M2 9 C 62 3, 188 11, 248 5" /></svg></em>。</h1>
+    <p class="hero-desc">汇总电教猫在线服务的运行数据，再进入对应功能完成配置和管理。</p>
+</section>
 
-            <section class="overview-section">
-                <div class="section-heading">
-                    <div>
-                        <div class="section-label">Today · Beijing time</div>
-                        <h2>今日概览</h2>
-                    </div>
-                    <span class="section-note">每天 00:00 自动刷新</span>
-                </div>
-                <div class="metrics" aria-label="今日统计">
-                    <article><div class="card-num">01</div><h3>今日请求</h3><strong>{{ stats.requests }}</strong></article>
-                    <article><div class="card-num">02</div><h3>成功</h3><strong>{{ stats.success }}</strong></article>
-                    <article><div class="card-num">03</div><h3>失败</h3><strong>{{ stats.failed }}</strong></article>
-                    <article><div class="card-num">04</div><h3>处理中</h3><strong>{{ stats.processing }}</strong></article>
-                    <article><div class="card-num">05</div><h3>消耗额度</h3><strong>{{ stats.consumed }}</strong></article>
-                    <article><div class="card-num">06</div><h3>注册机器</h3><strong>{{ stats.machines }}</strong></article>
-                </div>
-            </section>
-
-            <section class="panel" id="settings">
-                <div class="panel-title">
-                    <div>
-                        <div class="section-label">01 · Configuration</div>
-                        <h2>AI 配置</h2>
-                        <p>修改后立即生效，无需重启服务。</p>
-                    </div>
-                </div>
-                <form class="settings-grid" method="post" action="{{ url_for('adminSettings') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <label>每台机器每日额度
-                        <input type="number" name="daily_limit" min="1" max="10000" value="{{ daily_limit }}" required>
-                    </label>
-                    <label>模型
-                        <input name="model" maxlength="100" value="{{ model }}" required>
-                    </label>
-                    <label class="full">DeepSeek API Key
-                        <input type="password" name="api_key" autocomplete="new-password" placeholder="{{ '已配置；留空保持不变' if api_key_configured else '留空则使用服务器环境变量' }}">
-                    </label>
-                    <label class="check"><input type="checkbox" name="peak_enabled" value="1" {% if peak_enabled %}checked{% endif %}>启用高峰时段双倍扣除</label>
-                    <label class="check"><input type="checkbox" name="clear_api_key" value="1">清除面板密钥，改用环境变量</label>
-                    <p class="full hint">高峰时段按北京时间每日 9:00–12:00、14:00–18:00，每次扣除 2 个额度单位。</p>
-                    <div class="full actions"><button class="btn btn-primary" type="submit">保存配置</button></div>
-                </form>
-            </section>
-
-            <section class="panel" id="machines">
-                <div class="panel-title machine-toolbar">
-                    <div>
-                        <div class="section-label">02 · Registered devices</div>
-                        <h2>注册机器</h2>
-                        <p>只保存匿名指纹，不保存作业正文或原始硬件信息。</p>
-                    </div>
-                    <form class="filters" method="get" action="{{ url_for('adminDashboard') }}">
-                        <input type="search" name="q" value="{{ search }}" placeholder="搜索代号或匿名指纹">
-                        <select name="sort" aria-label="排序方式">
-                            <option value="registered" {% if sort == 'registered' %}selected{% endif %}>按注册时间</option>
-                            <option value="code" {% if sort == 'code' %}selected{% endif %}>按机器码</option>
-                        </select>
-                        <button class="btn btn-ghost" type="submit">查询</button>
-                    </form>
-                </div>
-
-                <div class="table-wrap">
-                    <table>
-                        <thead><tr><th>机器码</th><th>匿名指纹</th><th>注册时间</th><th>最后访问</th><th>今日额度</th><th>请求数</th><th></th></tr></thead>
-                        <tbody>
-                        {% for machine in machines %}
-                            <tr>
-                                <td><strong>{{ machine.code }}</strong></td>
-                                <td><code title="{{ machine.fingerprint }}">{{ machine.fingerprint[:12] }}…</code></td>
-                                <td>{{ machine.registered_at }}</td>
-                                <td>{{ machine.last_seen_at }}</td>
-                                <td>{{ machine.remaining }} / {{ daily_limit }}</td>
-                                <td>{{ machine.requests }}</td>
-                                <td>
-                                    <form method="post" action="{{ url_for('adminResetMachine', alias=machine.code) }}">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                        <button class="danger-link" type="submit">重置额度</button>
-                                    </form>
-                                </td>
-                            </tr>
-                        {% else %}
-                            <tr><td class="empty" colspan="7">暂无符合条件的注册机器</td></tr>
-                        {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                <form class="reset-all" method="post" action="{{ url_for('adminResetAll') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button class="btn btn-danger" type="submit">重置所有机器今日额度</button>
-                </form>
-            </section>
-        </main>
-
-        <footer>
-            <span>电教猫服务控制台</span>
-            <a href="#overview">回到顶部 <span>↑</span></a>
-        </footer>
+<section class="overview-section">
+    <div class="section-heading">
+        <div>
+            <div class="section-label">Today · Summary</div>
+            <h2>今日数据</h2>
+        </div>
+        <span class="section-note">每天 00:00 自动刷新</span>
     </div>
-</body>
-</html>
+    <div class="metrics" aria-label="今日统计">
+        <article><div class="card-num">01</div><h3>今日请求</h3><strong>{{ stats.requests }}</strong></article>
+        <article><div class="card-num">02</div><h3>成功</h3><strong>{{ stats.success }}</strong></article>
+        <article><div class="card-num">03</div><h3>失败</h3><strong>{{ stats.failed }}</strong></article>
+        <article><div class="card-num">04</div><h3>处理中</h3><strong>{{ stats.processing }}</strong></article>
+        <article><div class="card-num">05</div><h3>消耗额度</h3><strong>{{ stats.consumed }}</strong></article>
+        <article><div class="card-num">06</div><h3>注册机器</h3><strong>{{ stats.machines }}</strong></article>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <div class="section-label">Functions</div>
+            <h2>功能总览</h2>
+        </div>
+        <span class="section-note">当前 1 项在线功能</span>
+    </div>
+    <div class="feature-grid">
+        <a class="feature-card" href="{{ url_for('adminAIMarkdown') }}">
+            <div class="feature-card-top">
+                <span class="feature-icon" aria-hidden="true">AI</span>
+                <span class="feature-status {% if not ai_configured %}pending{% endif %}"><i></i>{{ 'API 已配置' if ai_configured else '待配置 API' }}</span>
+            </div>
+            <div>
+                <div class="section-label">AI 管理 · Markdown</div>
+                <h3>AI 写 Markdown</h3>
+                <p>管理模型、API Key、系统提示词、每日额度和注册机器。</p>
+            </div>
+            <dl class="feature-meta">
+                <div><dt>模型</dt><dd>{{ model }}</dd></div>
+                <div><dt>每日额度</dt><dd>{{ daily_limit }}</dd></div>
+                <div><dt>高峰双倍</dt><dd>{{ '已开启' if peak_enabled else '已关闭' }}</dd></div>
+            </dl>
+            <span class="feature-enter">进入管理 <b>→</b></span>
+        </a>
+    </div>
+</section>
+{% endblock %}

@@ -3,6 +3,7 @@ import re
 import tempfile
 from contextlib import closing
 from datetime import datetime
+from html import escape
 from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
@@ -63,9 +64,29 @@ class AIAdminTest(TestCase):
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
+        self.assertIn("服务总览", response.get_data(as_text=True))
         self.assertIn("AI 写 Markdown", response.get_data(as_text=True))
+        self.assertIn("待配置 API", response.get_data(as_text=True))
         self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
         return response
+
+    def _markdownPage(self):
+        return self.client.get(
+            "/admin/ai/markdown/", base_url="https://dash.djcatpro.top"
+        )
+
+    def testAdminSeparatesOverviewAndMarkdownManagement(self):
+        dashboard = self._login().get_data(as_text=True)
+        self.assertIn("主页", dashboard)
+        self.assertIn("AI 管理", dashboard)
+        self.assertNotIn("注册机器</h2>", dashboard)
+
+        markdown = self._markdownPage()
+        self.assertEqual(markdown.status_code, 200)
+        content = markdown.get_data(as_text=True)
+        self.assertIn("AI 写 Markdown 管理", content)
+        self.assertIn("注册机器</h2>", content)
+        self.assertIn(escape(ai_markdown.SYSTEM_PROMPT), content)
 
     def testMachineRegistrationReturnsStableShortCode(self):
         first = self.client.post(
@@ -83,15 +104,17 @@ class AIAdminTest(TestCase):
         self.assertEqual(third.get_json()["machine_code"], "DJ-000002")
 
     def testAdminUpdatesEncryptedAISettings(self):
-        dashboard = self._login()
+        self._login()
+        markdown = self._markdownPage()
         response = self.client.post(
-            "/admin/settings",
+            "/admin/ai/markdown/settings",
             base_url="https://dash.djcatpro.top",
             data={
-                "csrf_token": self._csrf(dashboard),
+                "csrf_token": self._csrf(markdown),
                 "daily_limit": "20",
                 "model": "deepseek-v4-flash-test",
                 "api_key": "sk-panel-test",
+                "system_prompt": "管理员设置的全局提示词",
             },
             follow_redirects=True,
         )
@@ -100,6 +123,13 @@ class AIAdminTest(TestCase):
         self.assertEqual(ai_markdown._dailyLimit(), 20)
         self.assertEqual(ai_markdown._deepseekModel(), "deepseek-v4-flash-test")
         self.assertEqual(ai_markdown._deepseekApiKey(), "sk-panel-test")
+        home = self.client.get("/admin/", base_url="https://dash.djcatpro.top")
+        self.assertIn("API 已配置", home.get_data(as_text=True))
+        self.assertEqual(
+            ai_markdown._systemPrompt("用户微调"),
+            "管理员设置的全局提示词"
+            f"{ai_markdown.CUSTOM_STYLE_PREFIX}用户微调",
+        )
         self.assertEqual(
             ai_markdown._quotaCost(
                 datetime(2026, 8, 1, 10, tzinfo=ai_markdown.TIMEZONE)
@@ -118,16 +148,18 @@ class AIAdminTest(TestCase):
         self.assertNotIn("sk-panel-test", encrypted)
 
     def testInvalidEncryptionKeyDoesNotPartiallySaveSettings(self):
-        dashboard = self._login()
+        self._login()
+        markdown = self._markdownPage()
         with patch.dict(os.environ, {"DJCATAI_SETTINGS_KEY": "invalid"}):
             response = self.client.post(
-                "/admin/settings",
+                "/admin/ai/markdown/settings",
                 base_url="https://dash.djcatpro.top",
                 data={
-                    "csrf_token": self._csrf(dashboard),
+                    "csrf_token": self._csrf(markdown),
                     "daily_limit": "20",
                     "model": "changed-model",
                     "api_key": "sk-will-not-save",
+                    "system_prompt": "不应保存的提示词",
                 },
                 follow_redirects=True,
             )
@@ -135,6 +167,24 @@ class AIAdminTest(TestCase):
         self.assertIn("格式无效", response.get_data(as_text=True))
         self.assertEqual(ai_markdown._dailyLimit(), 15)
         self.assertEqual(ai_markdown._deepseekModel(), "deepseek-v4-flash")
+
+    def testAdminRejectsOversizedSystemPrompt(self):
+        self._login()
+        markdown = self._markdownPage()
+        response = self.client.post(
+            "/admin/ai/markdown/settings",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(markdown),
+                "daily_limit": "20",
+                "model": "deepseek-v4-flash",
+                "system_prompt": "x" * (ai_markdown.MAX_SYSTEM_PROMPT_LENGTH + 1),
+            },
+            follow_redirects=True,
+        )
+
+        self.assertIn("系统提示词不能超过", response.get_data(as_text=True))
+        self.assertEqual(ai_markdown._setting("system_prompt"), None)
 
     def testAdminSearchSortAndQuotaReset(self):
         self.client.post("/ai/markdown/register", json={"machine_id": "b" * 64})
@@ -144,14 +194,14 @@ class AIAdminTest(TestCase):
         dashboard = self._login()
 
         search = self.client.get(
-            "/admin/?q=DJ-000002&sort=code",
+            "/admin/ai/markdown/?q=DJ-000002&sort=code",
             base_url="https://dash.djcatpro.top",
         ).get_data(as_text=True)
         self.assertIn("DJ-000002", search)
         self.assertNotIn("DJ-000001", search)
 
         reset = self.client.post(
-            "/admin/machines/DJ-000002/reset",
+            "/admin/ai/markdown/machines/DJ-000002/reset",
             base_url="https://dash.djcatpro.top",
             data={"csrf_token": self._csrf(dashboard)},
             follow_redirects=True,
@@ -161,7 +211,7 @@ class AIAdminTest(TestCase):
 
         ai_markdown._claim(machineId, 1)
         self.client.post(
-            "/admin/reset-all",
+            "/admin/ai/markdown/reset-all",
             base_url="https://dash.djcatpro.top",
             data={"csrf_token": self._csrf(reset)},
         )
@@ -180,6 +230,6 @@ class AIAdminTest(TestCase):
 
         self._login()
         response = self.client.post(
-            "/admin/reset-all", base_url="https://dash.djcatpro.top"
+            "/admin/ai/markdown/reset-all", base_url="https://dash.djcatpro.top"
         )
         self.assertEqual(response.status_code, 400)
