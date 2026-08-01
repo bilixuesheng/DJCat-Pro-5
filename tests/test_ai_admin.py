@@ -1,0 +1,185 @@
+import os
+import re
+import tempfile
+from contextlib import closing
+from datetime import datetime
+from pathlib import Path
+from unittest import TestCase
+from unittest.mock import patch
+
+from cryptography.fernet import Fernet
+from werkzeug.security import generate_password_hash
+
+from server import ai_markdown
+
+
+class AIAdminTest(TestCase):
+    def setUp(self):
+        self.tempDir = tempfile.TemporaryDirectory()
+        self.databasePatch = patch.object(
+            ai_markdown,
+            "DATABASE_PATH",
+            Path(self.tempDir.name) / "usage.sqlite3",
+        )
+        self.environmentPatch = patch.dict(
+            os.environ,
+            {
+                "DJCATAI_RATE_LIMIT_SALT": "test-only",
+                "DJCATAI_ADMIN_HOST": "dash.djcatpro.top",
+                "DJCATAI_ADMIN_USERNAME": "admin",
+                "DJCATAI_ADMIN_PASSWORD_HASH": generate_password_hash("secret"),
+                "DJCATAI_SETTINGS_KEY": Fernet.generate_key().decode(),
+            },
+        )
+        self.databasePatch.start()
+        self.environmentPatch.start()
+        self.addCleanup(self.databasePatch.stop)
+        self.addCleanup(self.environmentPatch.stop)
+        self.addCleanup(self.tempDir.cleanup)
+        ai_markdown.app.config.update(
+            TESTING=True,
+            SECRET_KEY="test-session-secret",
+            SESSION_COOKIE_SECURE=True,
+        )
+        self.client = ai_markdown.app.test_client()
+
+    def _csrf(self, response):
+        return re.search(
+            rb'name="csrf_token" value="([^"]+)"', response.data
+        ).group(1).decode()
+
+    def _login(self):
+        login = self.client.get(
+            "/admin/login", base_url="https://dash.djcatpro.top"
+        )
+        response = self.client.post(
+            "/admin/login",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(login),
+                "username": "admin",
+                "password": "secret",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("AI 写 Markdown", response.get_data(as_text=True))
+        self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
+        return response
+
+    def testMachineRegistrationReturnsStableShortCode(self):
+        first = self.client.post(
+            "/ai/markdown/register", json={"machine_id": "a" * 64}
+        )
+        second = self.client.post(
+            "/ai/markdown/register", json={"machine_id": "a" * 64}
+        )
+        third = self.client.post(
+            "/ai/markdown/register", json={"machine_id": "b" * 64}
+        )
+
+        self.assertEqual(first.get_json()["machine_code"], "DJ-000001")
+        self.assertEqual(second.get_json()["machine_code"], "DJ-000001")
+        self.assertEqual(third.get_json()["machine_code"], "DJ-000002")
+
+    def testAdminUpdatesEncryptedAISettings(self):
+        dashboard = self._login()
+        response = self.client.post(
+            "/admin/settings",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(dashboard),
+                "daily_limit": "20",
+                "model": "deepseek-v4-flash-test",
+                "api_key": "sk-panel-test",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ai_markdown._dailyLimit(), 20)
+        self.assertEqual(ai_markdown._deepseekModel(), "deepseek-v4-flash-test")
+        self.assertEqual(ai_markdown._deepseekApiKey(), "sk-panel-test")
+        self.assertEqual(
+            ai_markdown._quotaCost(
+                datetime(2026, 8, 1, 10, tzinfo=ai_markdown.TIMEZONE)
+            ),
+            1,
+        )
+        quota = self.client.get(
+            "/ai/markdown/quota", query_string={"machine_id": "a" * 64}
+        ).get_json()
+        self.assertFalse(quota["peak_enabled"])
+        self.assertEqual(quota["cost"], 1)
+        with closing(ai_markdown._connect()) as database:
+            encrypted = database.execute(
+                "SELECT value FROM settings WHERE key = 'deepseek_api_key'"
+            ).fetchone()[0]
+        self.assertNotIn("sk-panel-test", encrypted)
+
+    def testInvalidEncryptionKeyDoesNotPartiallySaveSettings(self):
+        dashboard = self._login()
+        with patch.dict(os.environ, {"DJCATAI_SETTINGS_KEY": "invalid"}):
+            response = self.client.post(
+                "/admin/settings",
+                base_url="https://dash.djcatpro.top",
+                data={
+                    "csrf_token": self._csrf(dashboard),
+                    "daily_limit": "20",
+                    "model": "changed-model",
+                    "api_key": "sk-will-not-save",
+                },
+                follow_redirects=True,
+            )
+
+        self.assertIn("格式无效", response.get_data(as_text=True))
+        self.assertEqual(ai_markdown._dailyLimit(), 15)
+        self.assertEqual(ai_markdown._deepseekModel(), "deepseek-v4-flash")
+
+    def testAdminSearchSortAndQuotaReset(self):
+        self.client.post("/ai/markdown/register", json={"machine_id": "b" * 64})
+        self.client.post("/ai/markdown/register", json={"machine_id": "a" * 64})
+        machineId = ai_markdown._machineId("a" * 64)
+        ai_markdown._claim(machineId, 2)
+        dashboard = self._login()
+
+        search = self.client.get(
+            "/admin/?q=DJ-000002&sort=code",
+            base_url="https://dash.djcatpro.top",
+        ).get_data(as_text=True)
+        self.assertIn("DJ-000002", search)
+        self.assertNotIn("DJ-000001", search)
+
+        reset = self.client.post(
+            "/admin/machines/DJ-000002/reset",
+            base_url="https://dash.djcatpro.top",
+            data={"csrf_token": self._csrf(dashboard)},
+            follow_redirects=True,
+        )
+        self.assertEqual(reset.status_code, 200)
+        self.assertEqual(ai_markdown._remaining(machineId), 15)
+
+        ai_markdown._claim(machineId, 1)
+        self.client.post(
+            "/admin/reset-all",
+            base_url="https://dash.djcatpro.top",
+            data={"csrf_token": self._csrf(reset)},
+        )
+        self.assertEqual(ai_markdown._remaining(machineId), 15)
+
+    def testAdminRequiresLoginAndCsrf(self):
+        response = self.client.get(
+            "/admin/login", base_url="https://api.djcatpro.top"
+        )
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.get(
+            "/admin/", base_url="https://dash.djcatpro.top"
+        )
+        self.assertEqual(response.status_code, 302)
+
+        self._login()
+        response = self.client.post(
+            "/admin/reset-all", base_url="https://dash.djcatpro.top"
+        )
+        self.assertEqual(response.status_code, 400)

@@ -415,7 +415,7 @@ def _iterSseContent(lines):
 
 
 class AIMarkdownDialog(MessageBoxBase):
-    quotaReceived = Signal(int, int, int)
+    quotaReceived = Signal(int, int, int, object, str)
     chunkReceived = Signal(str)
     conversionFinished = Signal(int, int, int)
     conversionFailed = Signal(str, int, int, int)
@@ -429,6 +429,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self._remaining = None
         self._limit = 15
         self._cost = 1
+        self._peakEnabled = None
         self._borderIndex = 0
 
         self.titleLabel = SubtitleLabel("AI帮改Markdown", self)
@@ -497,8 +498,9 @@ class AIMarkdownDialog(MessageBoxBase):
 
     def _fetchQuota(self):
         quota = fetchQuota()
-        if quota:
-            self.quotaReceived.emit(*quota)
+        self.quotaReceived.emit(
+            *(quota if quota else (-1, self._limit, 1, None, ""))
+        )
 
     def _refreshQuota(self):
         threading.Thread(target=self._fetchQuota, daemon=True).start()
@@ -566,12 +568,17 @@ class AIMarkdownDialog(MessageBoxBase):
         self.inputEdit.insertPlainText(chunk)
         self.inputEdit.ensureCursorVisible()
 
-    def _onQuotaReceived(self, remaining, limit, cost):
+    def _onQuotaReceived(
+        self, remaining, limit, cost, peakEnabled, machineCode
+    ):
         if self._finished:
             return
         self._remaining = remaining
         self._limit = limit
         self._cost = cost
+        self._peakEnabled = peakEnabled
+        if machineCode:
+            cfg.set(cfg.aiMarkdownMachineCode, machineCode)
         self._updateQuotaLabel()
         self._refreshStartButton()
 
@@ -610,10 +617,22 @@ class AIMarkdownDialog(MessageBoxBase):
         MessageBox("转换失败", message, self).exec()
 
     def _updateQuotaLabel(self):
-        remaining = "正在查询" if self._remaining is None else self._remaining
+        if self._remaining is None:
+            remaining = "正在查询"
+        elif self._remaining < 0:
+            remaining = "暂时无法获取"
+        else:
+            remaining = self._remaining
+        peakText = "高峰计费状态正在查询"
+        if self._peakEnabled is not None:
+            peakText = (
+                f"双倍时段：{PEAK_HOURS_TEXT}"
+                if self._peakEnabled
+                else "高峰双倍扣除已关闭"
+            )
         self.quotaLabel.setText(
             f"剩余 {remaining}/{self._limit}　·　当前每次扣 {self._cost} 次"
-            f"　·　双倍时段：{PEAK_HOURS_TEXT}　·　每天 0 点刷新"
+            f"　·　{peakText}　·　每天 0 点刷新"
             "　·　禁止滥用　·　设置中可自定义风格"
         )
 

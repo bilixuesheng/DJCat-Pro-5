@@ -37,6 +37,7 @@ from qfluentwidgets import (
     setThemeColor,
 )
 
+from app.common.ai_markdown import registerMachine
 from app.config.cfg import cfg
 from app.config.constants import (
     APP_NAME,
@@ -87,6 +88,13 @@ class UpdateWorker(QObject):
             self.finished.emit({}, str(error))
 
 
+class MachineRegistrationWorker(QObject):
+    finished = Signal(str)
+
+    def run(self):
+        self.finished.emit(registerMachine() or "")
+
+
 class UpdateDialog(MessageBoxBase):
     def __init__(self, version, note, parent=None):
         super().__init__(parent)
@@ -127,6 +135,7 @@ class MainWindow(MSFluentWindow):
             QApplication.processEvents()
 
         self.initNavigation()
+        self._startMachineRegistration()
         self.tray = SystemTrayIcon(self)
         self.tray.show()
 
@@ -136,6 +145,21 @@ class MainWindow(MSFluentWindow):
 
         if cfg.checkUpdateAtStartUp.value:
             self.checkForUpdates(manual=False)
+
+    def _startMachineRegistration(self):
+        if cfg.aiMarkdownMachineCode.value:
+            return
+        self.machineRegistrationWorker = MachineRegistrationWorker()
+        self.machineRegistrationWorker.finished.connect(self._onMachineRegistered)
+        self.machineRegistrationThread = threading.Thread(
+            target=self.machineRegistrationWorker.run,
+            daemon=True,
+        )
+        self.machineRegistrationThread.start()
+
+    def _onMachineRegistered(self, machineCode):
+        if machineCode:
+            cfg.set(cfg.aiMarkdownMachineCode, machineCode)
 
     def initWindow(self):
         self.setWindowTitle(APP_NAME)

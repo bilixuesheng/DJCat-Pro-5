@@ -202,7 +202,7 @@ class AIMarkdownStyleSettingCard(CollapsibleSettingCard):
 
 
 class SettingPage(ScrollArea):
-    aiQuotaReceived = Signal(int, int, int)
+    aiQuotaReceived = Signal(int, int, int, object, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -367,8 +367,23 @@ class SettingPage(ScrollArea):
             Qt.AlignmentFlag.AlignRight,
         )
         self.aiQuotaCard.hBoxLayout.addSpacing(16)
+        self.aiMachineCodeCard = SettingCard(
+            FluentIcon.FINGERPRINT,
+            "当前注册机器码",
+            "首次启动联网后由服务器分配，不包含原始硬件信息",
+        )
+        self.aiMachineCodeLabel = BodyLabel(
+            cfg.aiMarkdownMachineCode.value or "正在注册",
+            self.aiMachineCodeCard,
+        )
+        self.aiMachineCodeCard.hBoxLayout.addWidget(
+            self.aiMachineCodeLabel,
+            0,
+            Qt.AlignmentFlag.AlignRight,
+        )
+        self.aiMachineCodeCard.hBoxLayout.addSpacing(16)
         self.aiMarkdownGroup.addSettingCards(
-            [self.aiStyleCard, self.aiQuotaCard]
+            [self.aiStyleCard, self.aiQuotaCard, self.aiMachineCodeCard]
         )
 
         self.countdownGroup.addSettingCards(
@@ -464,6 +479,9 @@ class SettingPage(ScrollArea):
         self.autoRunCard.checkedChanged.connect(self._onAutoRunChanged)
         self.aboutCard.clicked.connect(self._onAboutCardClicked)
         self.aiQuotaReceived.connect(self._onAIQuotaReceived)
+        cfg.aiMarkdownMachineCode.valueChanged.connect(
+            self._onMachineCodeChanged
+        )
 
     def _onChooseImageClicked(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -525,13 +543,35 @@ class SettingPage(ScrollArea):
 
     def _fetchAIQuota(self) -> None:
         quota = fetchQuota()
-        self.aiQuotaReceived.emit(*quota if quota else (-1, -1, 1))
+        self.aiQuotaReceived.emit(*quota if quota else (-1, -1, 1, None, ""))
 
-    def _onAIQuotaReceived(self, remaining: int, limit: int, _cost: int) -> None:
+    def _onAIQuotaReceived(
+        self,
+        remaining: int,
+        limit: int,
+        _cost: int,
+        peakEnabled,
+        machineCode: str,
+    ) -> None:
         self._aiQuotaLoading = False
         self.aiQuotaLabel.setText(
             "暂时无法获取" if remaining < 0 else f"{remaining} / {limit}"
         )
+        if peakEnabled is None:
+            self.aiQuotaCard.contentLabel.setText(
+                "每天 0 点刷新；高峰计费状态暂时无法获取"
+            )
+        else:
+            self.aiQuotaCard.contentLabel.setText(
+                f"每天 0 点刷新；{PEAK_HOURS_TEXT} 每次扣 2 次，其余时段扣 1 次"
+                if peakEnabled
+                else "每天 0 点刷新；高峰双倍扣除已关闭"
+            )
+        if machineCode:
+            cfg.set(cfg.aiMarkdownMachineCode, machineCode)
+
+    def _onMachineCodeChanged(self, machineCode: str) -> None:
+        self.aiMachineCodeLabel.setText(machineCode or "正在注册")
 
     def _settingGroups(self) -> list[CollapsibleSettingCardGroup]:
         return [

@@ -105,6 +105,7 @@ class Config(QConfig):
         "AIMarkdown", "CustomStyleEnabled", False, BoolValidator()
     )
     aiMarkdownCustomStyle = ConfigItem("AIMarkdown", "CustomStyle", "")
+    aiMarkdownMachineCode = ConfigItem("AIMarkdown", "MachineCode", "")
 
     showTaskbarInCountdown = ConfigItem(
         "Countdown", "ShowTaskbar", True, BoolValidator()

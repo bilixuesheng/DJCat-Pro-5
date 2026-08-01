@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -10,6 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 
+from app.common import ai_markdown as client_ai_markdown
 from app.config.cfg import cfg
 from app.view.pages.broadcast_page import (
     AIMarkdownDialog,
@@ -17,6 +19,7 @@ from app.view.pages.broadcast_page import (
     _iterSseContent,
 )
 from app.view.pages.setting_page import CUSTOM_STYLE_PLACEHOLDER, SettingPage
+from app.view.windows.main_window import MachineRegistrationWorker
 from server import ai_markdown
 
 
@@ -108,11 +111,14 @@ class AIMarkdownTest(unittest.TestCase):
         dialog._stopBusyStyle()
         self.assertIn("border-radius", dialog.inputEdit.styleSheet())
 
-        dialog._onQuotaReceived(8, 15, 2)
+        dialog._onQuotaReceived(8, 15, 2, True, "DJ-000123")
         self.assertIn("每天 0 点刷新", dialog.quotaLabel.text())
         self.assertIn("9:00–12:00、14:00–18:00", dialog.quotaLabel.text())
         self.assertIn("当前每次扣 2 次", dialog.quotaLabel.text())
         self.assertIn("设置", dialog.quotaLabel.text())
+        dialog._onQuotaReceived(-1, 15, 1, None, "")
+        self.assertIn("暂时无法获取", dialog.quotaLabel.text())
+        self.assertIn("高峰计费状态正在查询", dialog.quotaLabel.text())
         dialog.inputEdit.setPlainText("作业")
         dialog._remaining = None
         dialog._refreshStartButton()
@@ -126,11 +132,13 @@ class AIMarkdownTest(unittest.TestCase):
         oldFile = cfg.file
         oldEnabled = cfg.aiMarkdownCustomStyleEnabled.value
         oldStyle = cfg.aiMarkdownCustomStyle.value
+        oldMachineCode = cfg.aiMarkdownMachineCode.value
         with tempfile.TemporaryDirectory() as directory:
             cfg.file = Path(directory) / "config.json"
             try:
                 cfg.set(cfg.aiMarkdownCustomStyleEnabled, False)
                 cfg.set(cfg.aiMarkdownCustomStyle, "")
+                cfg.set(cfg.aiMarkdownMachineCode, "DJ-000123")
                 with patch.object(SettingPage, "_refreshAIQuota"):
                     page = SettingPage()
                     page.show()
@@ -151,16 +159,64 @@ class AIMarkdownTest(unittest.TestCase):
                 self.app.processEvents()
                 self.assertEqual(cfg.aiMarkdownCustomStyle.value, "只使用列表")
 
-                page._onAIQuotaReceived(8, 15, 2)
+                page._onAIQuotaReceived(8, 15, 2, True, "DJ-000124")
                 self.assertEqual(page.aiQuotaLabel.text(), "8 / 15")
+                self.assertEqual(page.aiMachineCodeLabel.text(), "DJ-000124")
+                self.assertEqual(cfg.aiMarkdownMachineCode.value, "DJ-000124")
                 self.assertIn(
                     "9:00–12:00、14:00–18:00",
+                    page.aiQuotaCard.contentLabel.text(),
+                )
+                page._onAIQuotaReceived(8, 15, 1, False, "")
+                self.assertIn(
+                    "高峰双倍扣除已关闭",
+                    page.aiQuotaCard.contentLabel.text(),
+                )
+                page._onAIQuotaReceived(-1, -1, 1, None, "")
+                self.assertIn(
+                    "高峰计费状态暂时无法获取",
                     page.aiQuotaCard.contentLabel.text(),
                 )
             finally:
                 cfg.set(cfg.aiMarkdownCustomStyleEnabled, oldEnabled)
                 cfg.set(cfg.aiMarkdownCustomStyle, oldStyle)
+                cfg.set(cfg.aiMarkdownMachineCode, oldMachineCode)
                 cfg.file = oldFile
+
+    def testClientRegistersMachineOnFirstStartup(self):
+        response = MagicMock()
+        response.json.return_value = {"machine_code": "DJ-000321"}
+        with patch.object(
+            client_ai_markdown.requests,
+            "post",
+            return_value=response,
+        ) as post:
+            self.assertEqual(client_ai_markdown.registerMachine(), "DJ-000321")
+        self.assertTrue(post.call_args.args[0].endswith("/register"))
+        self.assertEqual(len(post.call_args.kwargs["json"]["machine_id"]), 64)
+
+        response.json.return_value = {
+            "remaining": 9,
+            "limit": 15,
+            "cost": 1,
+            "peak_enabled": False,
+            "machine_code": "DJ-000321",
+        }
+        with patch.object(client_ai_markdown.requests, "get", return_value=response):
+            self.assertEqual(
+                client_ai_markdown.fetchQuota(),
+                (9, 15, 1, False, "DJ-000321"),
+            )
+
+        codes = []
+        worker = MachineRegistrationWorker()
+        worker.finished.connect(codes.append)
+        with patch(
+            "app.view.windows.main_window.registerMachine",
+            return_value="DJ-000321",
+        ):
+            worker.run()
+        self.assertEqual(codes, ["DJ-000321"])
 
     def testCustomStylePrompt(self):
         self.assertIn("英语中午做97页，值日", ai_markdown.SYSTEM_PROMPT)
@@ -279,6 +335,7 @@ class AIMarkdownTest(unittest.TestCase):
                 },
                 buffered=True,
             )
+            stats = ai_markdown._dashboardStats()
 
         self.assertEqual(response.status_code, 200)
         payload = post.call_args.kwargs["json"]
@@ -286,6 +343,9 @@ class AIMarkdownTest(unittest.TestCase):
         self.assertEqual(payload["thinking"], {"type": "disabled"})
         self.assertEqual(response.headers["X-RateLimit-Cost"], "2")
         self.assertEqual(response.headers["X-RateLimit-Remaining"], "13")
+        self.assertEqual(stats["requests"], 1)
+        self.assertEqual(stats["success"], 1)
+        self.assertEqual(stats["consumed"], 2)
 
     def testIncompleteUpstreamStreamRefundsPeakCost(self):
         upstream = MagicMock()
@@ -315,6 +375,44 @@ class AIMarkdownTest(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 200)
             self.assertEqual(ai_markdown._remaining(machineId), 15)
+            stats = ai_markdown._dashboardStats()
+            self.assertEqual(stats["failed"], 1)
+            self.assertEqual(stats["consumed"], 0)
+
+    def testRequestLogFailureDoesNotConsumeQuota(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(
+                ai_markdown,
+                "DATABASE_PATH",
+                Path(directory) / "usage.sqlite3",
+            ),
+            patch.dict(
+                os.environ,
+                {
+                    "DEEPSEEK_API_KEY": "test-only",
+                    "DJCATAI_RATE_LIMIT_SALT": "test-only",
+                },
+            ),
+        ):
+            machineId = ai_markdown._machineId("a" * 64)
+            with closing(ai_markdown._connect()) as database:
+                database.executescript(
+                    """
+                    CREATE TRIGGER fail_request_log
+                    BEFORE INSERT ON request_log
+                    BEGIN
+                        SELECT RAISE(ABORT, 'test failure');
+                    END;
+                    """
+                )
+            response = ai_markdown.app.test_client().post(
+                "/ai/markdown",
+                json={"content": "作业", "machine_id": "a" * 64},
+            )
+
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(ai_markdown._remaining(machineId), 15)
 
     def testPeakRequestWithOneRemainingWaitsForOffPeak(self):
         with (
@@ -340,30 +438,36 @@ class AIMarkdownTest(unittest.TestCase):
                 "/ai/markdown",
                 json={"content": "作业", "machine_id": "a" * 64},
             )
+            stats = ai_markdown._dashboardStats()
 
         self.assertEqual(response.status_code, 429)
         self.assertIn("非双倍时段", response.get_json()["message"])
         self.assertEqual(response.headers["X-RateLimit-Remaining"], "1")
         self.assertEqual(response.headers["X-RateLimit-Cost"], "2")
+        self.assertEqual(stats["requests"], 1)
+        self.assertEqual(stats["failed"], 1)
 
     def testPeakQuotaCostAndDailyLimit(self):
         self.assertEqual(
             ai_markdown._quotaCost(
-                datetime(2026, 8, 1, 8, 59, tzinfo=ai_markdown.TIMEZONE)
+                datetime(2026, 8, 1, 8, 59, tzinfo=ai_markdown.TIMEZONE),
+                peakEnabled=True,
             ),
             1,
         )
         for hour in (9, 11, 14, 17):
             self.assertEqual(
                 ai_markdown._quotaCost(
-                    datetime(2026, 8, 1, hour, tzinfo=ai_markdown.TIMEZONE)
+                    datetime(2026, 8, 1, hour, tzinfo=ai_markdown.TIMEZONE),
+                    peakEnabled=True,
                 ),
                 2,
             )
         for hour in (12, 13, 18, 23):
             self.assertEqual(
                 ai_markdown._quotaCost(
-                    datetime(2026, 8, 1, hour, tzinfo=ai_markdown.TIMEZONE)
+                    datetime(2026, 8, 1, hour, tzinfo=ai_markdown.TIMEZONE),
+                    peakEnabled=True,
                 ),
                 1,
             )

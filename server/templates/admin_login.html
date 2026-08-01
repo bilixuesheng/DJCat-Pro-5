@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>电教猫管理面板</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
+</head>
+<body class="login-page">
+    <main class="login-card">
+        <div class="brand-icon">DJ</div>
+        <h1>电教猫管理面板</h1>
+        <p class="muted">登录后管理服务端功能与机器额度</p>
+        {% for category, message in get_flashed_messages(with_categories=true) %}
+            <div class="notice {{ category }}">{{ message }}</div>
+        {% endfor %}
+        <form method="post" action="{{ url_for('adminLogin') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label>用户名
+                <input name="username" autocomplete="username" required autofocus>
+            </label>
+            <label>密码
+                <input type="password" name="password" autocomplete="current-password" required>
+            </label>
+            <button class="primary wide" type="submit">登录</button>
+        </form>
+    </main>
+</body>
+</html>

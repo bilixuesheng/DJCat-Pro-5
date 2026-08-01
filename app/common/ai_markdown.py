@@ -1,4 +1,5 @@
 import hashlib
+import re
 import uuid
 
 import requests
@@ -16,6 +17,20 @@ def machineId():
     return hashlib.sha256(raw).hexdigest()
 
 
+def registerMachine():
+    try:
+        response = requests.post(
+            f"{AI_MARKDOWN_API}/register",
+            json={"machine_id": machineId()},
+            timeout=5,
+        )
+        response.raise_for_status()
+        machineCode = str(response.json()["machine_code"])
+        return machineCode if re.fullmatch(r"DJ-\d{6}", machineCode) else None
+    except (requests.RequestException, KeyError, TypeError, ValueError):
+        return None
+
+
 def fetchQuota():
     try:
         response = requests.get(
@@ -25,10 +40,13 @@ def fetchQuota():
         )
         response.raise_for_status()
         quota = response.json()
+        machineCode = str(quota.get("machine_code", ""))
         return (
             int(quota["remaining"]),
             int(quota["limit"]),
             int(quota.get("cost", 1)),
+            bool(quota.get("peak_enabled", True)),
+            machineCode if re.fullmatch(r"DJ-\d{6}", machineCode) else "",
         )
     except (requests.RequestException, KeyError, TypeError, ValueError):
         return None

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>电教猫管理面板</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
+</head>
+<body>
+    <header class="topbar">
+        <div>
+            <strong>电教猫管理面板</strong>
+            <span class="muted">dash.djcatpro.top</span>
+        </div>
+        <form method="post" action="{{ url_for('adminLogout') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="ghost" type="submit">退出登录</button>
+        </form>
+    </header>
+
+    <main class="page">
+        {% for category, message in get_flashed_messages(with_categories=true) %}
+            <div class="notice {{ category }}">{{ message }}</div>
+        {% endfor %}
+
+        <section class="feature-heading">
+            <div class="ai-icon">AI</div>
+            <div>
+                <h1>AI 写 Markdown</h1>
+                <p class="muted">服务状态、额度、模型与注册机器管理</p>
+            </div>
+        </section>
+
+        <section class="metrics" aria-label="今日统计">
+            <article><span>今日请求</span><strong>{{ stats.requests }}</strong></article>
+            <article><span>成功</span><strong>{{ stats.success }}</strong></article>
+            <article><span>失败</span><strong>{{ stats.failed }}</strong></article>
+            <article><span>处理中</span><strong>{{ stats.processing }}</strong></article>
+            <article><span>今日消耗额度</span><strong>{{ stats.consumed }}</strong></article>
+            <article><span>注册机器</span><strong>{{ stats.machines }}</strong></article>
+        </section>
+
+        <section class="panel">
+            <div class="panel-title">
+                <div>
+                    <h2>AI 配置</h2>
+                    <p class="muted">修改后立即生效，无需重启服务</p>
+                </div>
+            </div>
+            <form class="settings-grid" method="post" action="{{ url_for('adminSettings') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <label>每台机器每日额度
+                    <input type="number" name="daily_limit" min="1" max="10000" value="{{ daily_limit }}" required>
+                </label>
+                <label>模型
+                    <input name="model" maxlength="100" value="{{ model }}" required>
+                </label>
+                <label class="full">DeepSeek API Key
+                    <input type="password" name="api_key" autocomplete="new-password" placeholder="{{ '已配置；留空保持不变' if api_key_configured else '留空则使用服务器环境变量' }}">
+                </label>
+                <label class="check"><input type="checkbox" name="peak_enabled" value="1" {% if peak_enabled %}checked{% endif %}>启用高峰时段双倍扣除</label>
+                <label class="check"><input type="checkbox" name="clear_api_key" value="1">清除面板密钥，改用环境变量</label>
+                <p class="full hint">高峰时段按北京时间每日 9:00–12:00、14:00–18:00，每次扣除 2 个额度单位。</p>
+                <div class="full actions"><button class="primary" type="submit">保存配置</button></div>
+            </form>
+        </section>
+
+        <section class="panel">
+            <div class="panel-title machine-toolbar">
+                <div>
+                    <h2>注册机器</h2>
+                    <p class="muted">只保存匿名指纹，不保存作业正文或原始硬件信息</p>
+                </div>
+                <form class="filters" method="get" action="{{ url_for('adminDashboard') }}">
+                    <input type="search" name="q" value="{{ search }}" placeholder="搜索代号或匿名指纹">
+                    <select name="sort" aria-label="排序方式">
+                        <option value="registered" {% if sort == 'registered' %}selected{% endif %}>按注册时间</option>
+                        <option value="code" {% if sort == 'code' %}selected{% endif %}>按机器码</option>
+                    </select>
+                    <button class="ghost" type="submit">查询</button>
+                </form>
+            </div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>机器码</th><th>匿名指纹</th><th>注册时间</th><th>最后访问</th><th>今日额度</th><th>请求数</th><th></th></tr></thead>
+                    <tbody>
+                    {% for machine in machines %}
+                        <tr>
+                            <td><strong>{{ machine.code }}</strong></td>
+                            <td><code title="{{ machine.fingerprint }}">{{ machine.fingerprint[:12] }}…</code></td>
+                            <td>{{ machine.registered_at }}</td>
+                            <td>{{ machine.last_seen_at }}</td>
+                            <td>{{ machine.remaining }} / {{ daily_limit }}</td>
+                            <td>{{ machine.requests }}</td>
+                            <td>
+                                <form method="post" action="{{ url_for('adminResetMachine', alias=machine.code) }}">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <button class="danger-link" type="submit">重置额度</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% else %}
+                        <tr><td class="empty" colspan="7">暂无符合条件的注册机器</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <form class="reset-all" method="post" action="{{ url_for('adminResetAll') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="danger" type="submit">重置所有机器今日额度</button>
+            </form>
+        </section>
+    </main>
+</body>
+</html>

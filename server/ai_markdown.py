@@ -1,12 +1,30 @@
 import hashlib
 import os
+import re
+import secrets
 import sqlite3
+import threading
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 from pathlib import Path
 
 import requests
-from flask import Flask, Response, jsonify, request, stream_with_context
+from cryptography.fernet import Fernet, InvalidToken
+from flask import (
+    Flask,
+    Response,
+    abort,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    session,
+    stream_with_context,
+    url_for,
+)
+from werkzeug.security import check_password_hash
 
 DAILY_LIMIT = 15
 MAX_CONTENT_LENGTH = 12_000
@@ -73,6 +91,17 @@ CUSTOM_STYLE_PREFIX = """
 """
 
 app = Flask(__name__)
+app.config.update(
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=True,
+)
+if os.environ.get("DJCATAI_ADMIN_SESSION_SECRET"):
+    app.config["SECRET_KEY"] = os.environ["DJCATAI_ADMIN_SESSION_SECRET"]
+
+_databaseInitLock = threading.Lock()
+_initializedDatabases = set()
 
 
 def _systemPrompt(customStyle):
@@ -100,7 +129,15 @@ def _today():
     return datetime.now(TIMEZONE).date().isoformat()
 
 
-def _quotaCost(now=None):
+def _nowIso():
+    return datetime.now(TIMEZONE).isoformat(timespec="seconds")
+
+
+def _quotaCost(now=None, peakEnabled=None):
+    if peakEnabled is None:
+        peakEnabled = _setting("peak_enabled", "1") == "1"
+    if not peakEnabled:
+        return 1
     hour = (now or datetime.now(TIMEZONE)).astimezone(TIMEZONE).hour
     return 2 if any(start <= hour < end for start, end in PEAK_HOURS) else 1
 
@@ -108,60 +145,247 @@ def _quotaCost(now=None):
 def _connect():
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     database = sqlite3.connect(DATABASE_PATH, timeout=10)
-    database.execute(
-        """
+    database.row_factory = sqlite3.Row
+    databaseKey = str(DATABASE_PATH.resolve())
+    if databaseKey not in _initializedDatabases:
+        with _databaseInitLock:
+            if databaseKey not in _initializedDatabases:
+                database.executescript(
+                    """
+        PRAGMA journal_mode = WAL;
         CREATE TABLE IF NOT EXISTS usage (
             day TEXT NOT NULL,
             machine_id TEXT NOT NULL,
             count INTEGER NOT NULL,
             PRIMARY KEY (day, machine_id)
-        )
-        """
-    )
+        );
+        CREATE TABLE IF NOT EXISTS machines (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            machine_id TEXT NOT NULL UNIQUE,
+            registered_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS request_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            day TEXT NOT NULL,
+            machine_id TEXT NOT NULL,
+            requested_at TEXT NOT NULL,
+            cost INTEGER NOT NULL,
+            status TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS request_log_day_idx ON request_log(day);
+        CREATE INDEX IF NOT EXISTS request_log_machine_idx
+            ON request_log(machine_id);
+        INSERT OR IGNORE INTO machines(machine_id, registered_at, last_seen_at)
+        SELECT
+            machine_id,
+            MIN(day) || 'T00:00:00+08:00',
+            MAX(day) || 'T00:00:00+08:00'
+        FROM usage
+        GROUP BY machine_id;
+                    """
+                )
+                _initializedDatabases.add(databaseKey)
     return database
 
 
-def _remaining(machineId):
+def _setting(key, default=None):
     with closing(_connect()) as database:
         row = database.execute(
-            "SELECT count FROM usage WHERE day = ? AND machine_id = ?",
-            (_today(), machineId),
+            "SELECT value FROM settings WHERE key = ?", (key,)
         ).fetchone()
-    return max(0, DAILY_LIMIT - (row[0] if row else 0))
+    return row["value"] if row else default
 
 
-def _claim(machineId, cost):
-    day = _today()
+def _dailyLimit():
+    try:
+        return max(1, min(10_000, int(_setting("daily_limit", DAILY_LIMIT))))
+    except (TypeError, ValueError):
+        return DAILY_LIMIT
+
+
+def _deepseekModel():
+    return _setting("deepseek_model", "deepseek-v4-flash")
+
+
+def _fernet():
+    key = os.environ.get("DJCATAI_SETTINGS_KEY")
+    if not key:
+        raise RuntimeError("服务器未配置 DJCATAI_SETTINGS_KEY")
+    try:
+        return Fernet(key.encode())
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("DJCATAI_SETTINGS_KEY 格式无效") from error
+
+
+def _deepseekApiKey():
+    encrypted = _setting("deepseek_api_key")
+    if not encrypted:
+        return os.environ.get("DEEPSEEK_API_KEY", "")
+    try:
+        return _fernet().decrypt(encrypted.encode()).decode()
+    except (InvalidToken, UnicodeDecodeError) as error:
+        raise RuntimeError("面板中保存的 DeepSeek API Key 无法解密") from error
+
+
+def _saveAISettings(dailyLimit, peakEnabled, model, apiKey="", clearApiKey=False):
+    settings = [
+        ("daily_limit", str(dailyLimit)),
+        ("peak_enabled", "1" if peakEnabled else "0"),
+        ("deepseek_model", model),
+    ]
+    if apiKey and not clearApiKey:
+        settings.append(
+            (
+                "deepseek_api_key",
+                _fernet().encrypt(apiKey.encode()).decode(),
+            )
+        )
     with closing(_connect()) as database:
         database.execute("BEGIN IMMEDIATE")
+        database.executemany(
+            """
+            INSERT INTO settings(key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            settings,
+        )
+        if clearApiKey:
+            database.execute("DELETE FROM settings WHERE key = 'deepseek_api_key'")
+        database.commit()
+
+
+def _registerMachine(machineId):
+    now = _nowIso()
+    with closing(_connect()) as database:
+        database.execute("BEGIN IMMEDIATE")
+        row = database.execute(
+            "SELECT id FROM machines WHERE machine_id = ?", (machineId,)
+        ).fetchone()
+        if row:
+            machineNumber = row["id"]
+            database.execute(
+                "UPDATE machines SET last_seen_at = ? WHERE id = ?",
+                (now, machineNumber),
+            )
+        else:
+            cursor = database.execute(
+                """
+                INSERT INTO machines(machine_id, registered_at, last_seen_at)
+                VALUES (?, ?, ?)
+                """,
+                (machineId, now, now),
+            )
+            machineNumber = cursor.lastrowid
+        database.commit()
+    return f"DJ-{machineNumber:06d}"
+
+
+def _recordFailedRequest(machineId, cost, day=None):
+    day = day or _today()
+    with closing(_connect()) as database:
+        database.execute(
+            """
+            INSERT INTO request_log(day, machine_id, requested_at, cost, status)
+            VALUES (?, ?, ?, ?, 'failed')
+            """,
+            (day, machineId, _nowIso(), cost),
+        )
+        database.commit()
+
+
+def _requestFinished(requestId, success, machineId=None, cost=0, day=None):
+    with closing(_connect()) as database:
+        database.execute("BEGIN IMMEDIATE")
+        if not success and machineId:
+            database.execute(
+                """
+                UPDATE usage SET count = count - ?
+                WHERE day = ? AND machine_id = ? AND count >= ?
+                """,
+                (cost, day or _today(), machineId, cost),
+            )
+        database.execute(
+            "UPDATE request_log SET status = ? WHERE id = ?",
+            ("success" if success else "failed", requestId),
+        )
+        database.commit()
+
+
+def _remaining(machineId, day=None, limit=None):
+    day = day or _today()
+    limit = limit or _dailyLimit()
+    with closing(_connect()) as database:
         row = database.execute(
             "SELECT count FROM usage WHERE day = ? AND machine_id = ?",
             (day, machineId),
         ).fetchone()
-        count = row[0] if row else 0
-        if count + cost > DAILY_LIMIT:
+    return max(0, limit - (row[0] if row else 0))
+
+
+def _claimInTransaction(database, machineId, cost, day, limit):
+    row = database.execute(
+        "SELECT count FROM usage WHERE day = ? AND machine_id = ?",
+        (day, machineId),
+    ).fetchone()
+    count = row[0] if row else 0
+    if count + cost > limit:
+        return -1
+
+    database.execute(
+        """
+        INSERT INTO usage (day, machine_id, count) VALUES (?, ?, ?)
+        ON CONFLICT(day, machine_id) DO UPDATE SET count = count + excluded.count
+        """,
+        (day, machineId, cost),
+    )
+    return limit - count - cost
+
+
+def _claim(machineId, cost, day=None, limit=None):
+    day = day or _today()
+    limit = limit or _dailyLimit()
+    with closing(_connect()) as database:
+        database.execute("BEGIN IMMEDIATE")
+        remaining = _claimInTransaction(database, machineId, cost, day, limit)
+        if remaining < 0:
             database.rollback()
             return -1
+        database.commit()
+    return remaining
 
-        database.execute(
+
+def _claimRequest(machineId, cost, day, limit):
+    with closing(_connect()) as database:
+        database.execute("BEGIN IMMEDIATE")
+        remaining = _claimInTransaction(database, machineId, cost, day, limit)
+        if remaining < 0:
+            database.rollback()
+            return -1, None
+        cursor = database.execute(
             """
-            INSERT INTO usage (day, machine_id, count) VALUES (?, ?, ?)
-            ON CONFLICT(day, machine_id) DO UPDATE SET count = count + excluded.count
+            INSERT INTO request_log(day, machine_id, requested_at, cost, status)
+            VALUES (?, ?, ?, ?, 'processing')
             """,
-            (day, machineId, cost),
+            (day, machineId, _nowIso(), cost),
         )
         database.commit()
-    return DAILY_LIMIT - count - cost
+    return remaining, cursor.lastrowid
 
 
-def _refund(machineId, cost):
+def _refund(machineId, cost, day=None):
+    day = day or _today()
     with closing(_connect()) as database:
         database.execute(
             """
             UPDATE usage SET count = count - ?
             WHERE day = ? AND machine_id = ? AND count >= ?
             """,
-            (cost, _today(), machineId, cost),
+            (cost, day, machineId, cost),
         )
         database.commit()
 
@@ -172,15 +396,30 @@ def _error(message, status):
     return response
 
 
+@app.post("/ai/markdown/register")
+def registerMachine():
+    try:
+        machineId = _machineId((request.get_json(silent=True) or {}).get("machine_id"))
+        return jsonify({"machine_code": _registerMachine(machineId)})
+    except ValueError as error:
+        return _error(str(error), 400)
+    except RuntimeError as error:
+        return _error(str(error), 503)
+
+
 @app.get("/ai/markdown/quota")
 def quota():
     try:
         machineId = _machineId(request.args.get("machine_id"))
+        machineCode = _registerMachine(machineId)
+        peakEnabled = _setting("peak_enabled", "1") == "1"
         return jsonify(
             {
                 "remaining": _remaining(machineId),
-                "limit": DAILY_LIMIT,
-                "cost": _quotaCost(),
+                "limit": _dailyLimit(),
+                "cost": _quotaCost(peakEnabled=peakEnabled),
+                "peak_enabled": peakEnabled,
+                "machine_code": machineCode,
             }
         )
     except ValueError as error:
@@ -191,7 +430,10 @@ def quota():
 
 @app.post("/ai/markdown")
 def convert():
-    apiKey = os.environ.get("DEEPSEEK_API_KEY")
+    try:
+        apiKey = _deepseekApiKey()
+    except RuntimeError as error:
+        return _error(str(error), 503)
     if not apiKey:
         return _error("服务器未配置 DEEPSEEK_API_KEY", 503)
 
@@ -218,17 +460,25 @@ def convert():
     except RuntimeError as error:
         return _error(str(error), 503)
 
+    _registerMachine(machineId)
+    day = _today()
+    limit = _dailyLimit()
     cost = _quotaCost()
-    remaining = _claim(machineId, cost)
+    model = _deepseekModel()
+    try:
+        remaining, requestId = _claimRequest(machineId, cost, day, limit)
+    except sqlite3.Error:
+        return _error("额度服务暂时不可用，请稍后再试。", 503)
     if remaining < 0:
-        remaining = _remaining(machineId)
+        remaining = _remaining(machineId, day, limit)
+        _recordFailedRequest(machineId, 0, day)
         message = (
             "当前为双倍时段，剩余额度不足，请在非双倍时段再试。"
             if remaining
             else "今天的转换额度已用完，请明天再试。"
         )
         response = _error(message, 429)
-        response.headers["X-RateLimit-Limit"] = str(DAILY_LIMIT)
+        response.headers["X-RateLimit-Limit"] = str(limit)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
         response.headers["X-RateLimit-Cost"] = str(cost)
         return response
@@ -242,7 +492,7 @@ def convert():
                 "Content-Type": "application/json",
             },
             json={
-                "model": "deepseek-v4-flash",
+                "model": model,
                 "messages": [
                     {"role": "system", "content": _systemPrompt(customStyle)},
                     {"role": "user", "content": content.strip()},
@@ -258,7 +508,7 @@ def convert():
     except requests.RequestException:
         if upstream:
             upstream.close()
-        _refund(machineId, cost)
+        _requestFinished(requestId, False, machineId, cost, day)
         return _error("AI 服务暂时不可用，请稍后再试。", 502)
 
     @stream_with_context
@@ -271,8 +521,13 @@ def convert():
                         completed = True
                     yield line + b"\n\n"
         finally:
-            if not completed:
-                _refund(machineId, cost)
+            _requestFinished(
+                requestId,
+                completed,
+                machineId if not completed else None,
+                cost,
+                day,
+            )
             upstream.close()
 
     return Response(
@@ -281,12 +536,286 @@ def convert():
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
-            "X-RateLimit-Limit": str(DAILY_LIMIT),
+            "X-RateLimit-Limit": str(limit),
             "X-RateLimit-Remaining": str(remaining),
             "X-RateLimit-Cost": str(cost),
         },
     )
 
 
+def _adminHost():
+    return os.environ.get("DJCATAI_ADMIN_HOST", "dash.djcatpro.top").lower()
+
+
+def _onAdminHost():
+    return request.host.partition(":")[0].lower() == _adminHost()
+
+
+def _adminConfigured():
+    return all(
+        (
+            app.secret_key,
+            os.environ.get("DJCATAI_ADMIN_USERNAME"),
+            os.environ.get("DJCATAI_ADMIN_PASSWORD_HASH"),
+        )
+    )
+
+
+def _csrfToken():
+    token = session.get("csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["csrf_token"] = token
+    return token
+
+
+def _checkCsrf():
+    expected = session.get("csrf_token", "")
+    received = request.form.get("csrf_token", "")
+    if not expected or not secrets.compare_digest(expected, received):
+        abort(400, "无效的请求令牌")
+
+
+def _adminRoute(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not _onAdminHost():
+            abort(404)
+        if not _adminConfigured():
+            return "管理面板环境变量未配置完整", 503
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def _loginRequired(view):
+    @wraps(view)
+    @_adminRoute
+    def wrapped(*args, **kwargs):
+        if not session.get("admin"):
+            return redirect(url_for("adminLogin"))
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def _dashboardStats():
+    day = _today()
+    with closing(_connect()) as database:
+        machines = database.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
+        requestsByStatus = {
+            row["status"]: row["count"]
+            for row in database.execute(
+                """
+                SELECT status, COUNT(*) AS count
+                FROM request_log WHERE day = ? GROUP BY status
+                """,
+                (day,),
+            )
+        }
+        consumed = database.execute(
+            "SELECT COALESCE(SUM(count), 0) FROM usage WHERE day = ?", (day,)
+        ).fetchone()[0]
+    return {
+        "machines": machines,
+        "requests": sum(requestsByStatus.values()),
+        "success": requestsByStatus.get("success", 0),
+        "failed": requestsByStatus.get("failed", 0),
+        "processing": requestsByStatus.get("processing", 0),
+        "consumed": consumed,
+    }
+
+
+def _machineRows(search="", sort="registered"):
+    day = _today()
+    limit = _dailyLimit()
+    with closing(_connect()) as database:
+        rows = database.execute(
+            """
+            SELECT
+                m.id,
+                m.machine_id,
+                m.registered_at,
+                m.last_seen_at,
+                COALESCE(u.count, 0) AS used,
+                COUNT(r.id) AS requests
+            FROM machines m
+            LEFT JOIN usage u ON u.machine_id = m.machine_id AND u.day = ?
+            LEFT JOIN request_log r ON r.machine_id = m.machine_id
+            GROUP BY m.id
+            """,
+            (day,),
+        ).fetchall()
+
+    machines = [
+        {
+            "code": f"DJ-{row['id']:06d}",
+            "fingerprint": row["machine_id"],
+            "registered_at": row["registered_at"],
+            "last_seen_at": row["last_seen_at"],
+            "used": row["used"],
+            "remaining": max(0, limit - row["used"]),
+            "requests": row["requests"],
+        }
+        for row in rows
+    ]
+    search = search.strip().lower()
+    if search:
+        machines = [
+            machine
+            for machine in machines
+            if search in machine["code"].lower()
+            or search in machine["fingerprint"].lower()
+        ]
+    machines.sort(
+        key=(
+            (lambda machine: machine["code"])
+            if sort == "code"
+            else (lambda machine: machine["registered_at"])
+        ),
+        reverse=sort != "code",
+    )
+    return machines
+
+
+def _resetMachine(alias):
+    match = re.fullmatch(r"DJ-(\d{6})", alias)
+    if not match:
+        return False
+    with closing(_connect()) as database:
+        row = database.execute(
+            "SELECT machine_id FROM machines WHERE id = ?", (int(match.group(1)),)
+        ).fetchone()
+        if not row:
+            return False
+        database.execute(
+            "DELETE FROM usage WHERE day = ? AND machine_id = ?",
+            (_today(), row["machine_id"]),
+        )
+        database.commit()
+    return True
+
+
+@app.after_request
+def secureResponses(response):
+    if request.path.startswith("/admin") or _onAdminHost():
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; style-src 'self'; img-src 'self' data:; "
+            "frame-ancestors 'none'; form-action 'self'; base-uri 'none'"
+        )
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+    return response
+
+
+@app.get("/")
+def adminRoot():
+    if not _onAdminHost():
+        abort(404)
+    return redirect(url_for("adminDashboard"))
+
+
+@app.route("/admin/login", methods=["GET", "POST"])
+@_adminRoute
+def adminLogin():
+    if request.method == "POST":
+        _checkCsrf()
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        valid = secrets.compare_digest(
+            username, os.environ["DJCATAI_ADMIN_USERNAME"]
+        ) and check_password_hash(
+            os.environ["DJCATAI_ADMIN_PASSWORD_HASH"], password
+        )
+        if valid:
+            session.clear()
+            session["admin"] = True
+            session.permanent = True
+            _csrfToken()
+            return redirect(url_for("adminDashboard"))
+        flash("用户名或密码错误", "error")
+    return render_template("admin_login.html", csrf_token=_csrfToken())
+
+
+@app.get("/admin/")
+@_loginRequired
+def adminDashboard():
+    search = request.args.get("q", "")
+    sort = request.args.get("sort", "registered")
+    if sort not in {"registered", "code"}:
+        sort = "registered"
+    return render_template(
+        "admin_dashboard.html",
+        csrf_token=_csrfToken(),
+        stats=_dashboardStats(),
+        machines=_machineRows(search, sort),
+        search=search,
+        sort=sort,
+        daily_limit=_dailyLimit(),
+        peak_enabled=_setting("peak_enabled", "1") == "1",
+        model=_deepseekModel(),
+        api_key_configured=bool(_setting("deepseek_api_key")),
+    )
+
+
+@app.post("/admin/settings")
+@_loginRequired
+def adminSettings():
+    _checkCsrf()
+    try:
+        dailyLimit = int(request.form.get("daily_limit", ""))
+    except ValueError:
+        dailyLimit = 0
+    model = request.form.get("model", "").strip()
+    if not 1 <= dailyLimit <= 10_000:
+        flash("每日额度必须在 1 到 10000 之间", "error")
+    elif not re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", model):
+        flash("模型名称格式无效", "error")
+    else:
+        apiKey = request.form.get("api_key", "").strip()
+        try:
+            _saveAISettings(
+                dailyLimit,
+                bool(request.form.get("peak_enabled")),
+                model,
+                apiKey,
+                bool(request.form.get("clear_api_key")),
+            )
+        except (RuntimeError, sqlite3.Error) as error:
+            flash(str(error), "error")
+            return redirect(url_for("adminDashboard"))
+        flash("AI 配置已保存", "success")
+    return redirect(url_for("adminDashboard"))
+
+
+@app.post("/admin/machines/<alias>/reset")
+@_loginRequired
+def adminResetMachine(alias):
+    _checkCsrf()
+    flash("机器额度已重置" if _resetMachine(alias) else "未找到该机器", "success")
+    return redirect(url_for("adminDashboard"))
+
+
+@app.post("/admin/reset-all")
+@_loginRequired
+def adminResetAll():
+    _checkCsrf()
+    with closing(_connect()) as database:
+        database.execute("DELETE FROM usage WHERE day = ?", (_today(),))
+        database.commit()
+    flash("所有机器今日额度已重置", "success")
+    return redirect(url_for("adminDashboard"))
+
+
+@app.post("/admin/logout")
+@_loginRequired
+def adminLogout():
+    _checkCsrf()
+    session.clear()
+    return redirect(url_for("adminLogin"))
+
+
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", "8000")))
+    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", "18080")))
