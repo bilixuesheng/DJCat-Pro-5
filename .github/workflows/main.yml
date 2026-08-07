@@ -1,71 +1,237 @@
 name: Build and Release DJCat Pro
 
 on:
+  push:
+    branches: [ main ]
+    paths:
+      - app/common/config.py
+      - .github/release-notes/**
+      - .github/workflows/main.yml
+      - scripts/DJCat-Pro-5.iss
+      - scripts/verify_pe_arch.py
   workflow_dispatch:
-  release:
-    types: [ published ]
 
 permissions:
   contents: write
 
+concurrency:
+  group: djcat-release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   PYTHONUTF8: 1
+  PYTHON_VERSION: 3.12.8
 
 jobs:
-  build-windows:
-    runs-on: windows-2022
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      source_sha: ${{ steps.release.outputs.source_sha }}
+      notes_file: ${{ steps.release.outputs.notes_file }}
     steps:
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12.8'
-
-      - name: Install Dependencies
+      - name: Resolve release metadata
+        id: release
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          # 添加了 imageio，让 Nuitka 能把 logo.png 转为 ico
-          pip install Nuitka imageio
-          pip install .
+          VERSION=$(python - <<'PY'
+          import pathlib
+          import re
 
-      - name: Extract Version (Safe PowerShell Way)
-        shell: pwsh
-        run: |
-          $configPath = "app/common/config.py"
-          $content = Get-Content $configPath -Raw
-          if ($content -match 'VERSION\s*=\s*"([^"]+)"') {
-              $VERSION = $Matches[1]
-              "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-              Write-Host "Detected Version: $VERSION"
-          } else {
-              Write-Error "Could not find VERSION in $configPath"
-              exit 1
+          text = pathlib.Path("app/common/config.py").read_text(encoding="utf-8")
+          match = re.search(r'^VERSION\s*=\s*"([^"]+)"', text, re.MULTILINE)
+          if not match:
+              raise SystemExit("VERSION was not found in app/common/config.py")
+          print(match.group(1))
+          PY
+          )
+          TAG="v${VERSION}"
+          NOTES_FILE=".github/release-notes/${TAG}.md"
+
+          test -f "$NOTES_FILE" || {
+            echo "Missing release notes: $NOTES_FILE" >&2
+            exit 1
           }
 
-      - name: Build with Nuitka
-        run: |
-          python deploy.py
+          git fetch --tags --force
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            SOURCE_SHA=$(git rev-list -n 1 "$TAG")
+          else
+            SOURCE_SHA="${GITHUB_SHA}"
+          fi
 
-      - name: Create Zip Archive
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "notes_file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
+
+  build-windows:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86_64
+            runner: windows-2022
+            python_arch: x64
+            inno_arch: x64compatible
+          - architecture: arm64
+            runner: windows-11-arm
+            python_arch: arm64
+            inno_arch: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      BUILD_ARCH: ${{ matrix.architecture }}
+      INNO_ARCH: ${{ matrix.inno_arch }}
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: ${{ matrix.python_arch }}
+          cache: pip
+
+      - name: Verify runner architecture
         shell: pwsh
         run: |
-          $distPath = "dist/djcat.dist"
-          $zipFile = "DJCat-Pro-v${{ env.VERSION }}-Windows-x86_64.zip"
-          7z a -tzip -mx=9 -m0=LZMA $zipFile "./$distPath/*"
+          $actual = python -c "import platform; print(platform.machine().lower())"
+          $expected = if ($env:BUILD_ARCH -eq "arm64") { "arm64" } else { "amd64" }
+          if ($actual.Trim() -ne $expected) {
+            throw "Runner Python architecture is '$actual'; expected '$expected'."
+          }
 
-      - name: Upload Artifacts (For Manual Run)
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+
+      - name: Build standalone application
+        run: python deploy.py
+
+      - name: Verify executable architecture
+        run: python scripts/verify_pe_arch.py dist/djcat.dist/djcat.exe ${{ matrix.architecture }}
+
+      - name: Build portable ZIP and installer
+        shell: pwsh
+        run: |
+          $zipFile = "DJCat-Pro-v$env:VERSION-Windows-$env:BUILD_ARCH.zip"
+          7z a -tzip -mx=9 -m0=LZMA $zipFile ".\dist\djcat.dist\*"
+
+          $iscc = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) {
+            $candidates = @(
+              "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+              "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+            )
+            $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+          if (-not $iscc) {
+            throw "Inno Setup compiler (ISCC.exe) was not found."
+          }
+
+          $languagesDir = Join-Path (Split-Path $iscc -Parent) "Languages"
+          New-Item -ItemType Directory -Force -Path $languagesDir | Out-Null
+          Invoke-WebRequest `
+            -Uri "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseSimplified.isl" `
+            -OutFile (Join-Path $languagesDir "ChineseSimplified.isl")
+
+          $baseVersion = [regex]::Match($env:VERSION, '^\d+\.\d+\.\d+').Value
+          $preNumber = [regex]::Match($env:VERSION, 'pre\.(\d+)$')
+          $numericVersion = if ($preNumber.Success) {
+            "$baseVersion.$($preNumber.Groups[1].Value)"
+          } else {
+            "$baseVersion.0"
+          }
+
+          & $iscc `
+            "/DMyAppVersion=$env:VERSION" `
+            "/DMyAppNumericVersion=$numericVersion" `
+            "/DMyAppArch=$env:INNO_ARCH" `
+            "/DMyAppArchName=$env:BUILD_ARCH" `
+            "scripts\DJCat-Pro-5.iss"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup failed with exit code $LASTEXITCODE."
+          }
+
+          $setupFile = "dist\DJCat-Pro-v$env:VERSION-Windows-$env:BUILD_ARCH-Setup.exe"
+          if (-not (Test-Path $zipFile) -or -not (Test-Path $setupFile)) {
+            throw "Expected release package was not generated."
+          }
+
+      - name: Upload architecture packages
         uses: actions/upload-artifact@v4
         with:
-          name: DJCat-Pro-v${{ env.VERSION }}-Windows-x86_64
-          path: dist/djcat.dist
+          name: DJCat-Pro-v${{ env.VERSION }}-Windows-${{ matrix.architecture }}
+          path: |
+            DJCat-Pro-v${{ env.VERSION }}-Windows-${{ matrix.architecture }}.zip
+            dist/DJCat-Pro-v${{ env.VERSION }}-Windows-${{ matrix.architecture }}-Setup.exe
+          if-no-files-found: error
 
-      - name: Upload to Release (For Release Published)
-        uses: softprops/action-gh-release@v2
-        if: ${{ github.event_name == 'release' }}
+  publish-release:
+    needs: [ prepare, build-windows ]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+      NOTES_FILE: ${{ needs.prepare.outputs.notes_file }}
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
         with:
-          files: DJCat-Pro-v${{ env.VERSION }}-Windows-x86_64.zip
+          ref: ${{ env.SOURCE_SHA }}
+
+      - name: Download release packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: DJCat-Pro-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Validate release packages
+        shell: bash
+        run: |
+          expected=(
+            "DJCat-Pro-${TAG}-Windows-x86_64.zip"
+            "DJCat-Pro-${TAG}-Windows-x86_64-Setup.exe"
+            "DJCat-Pro-${TAG}-Windows-arm64.zip"
+            "DJCat-Pro-${TAG}-Windows-arm64-Setup.exe"
+          )
+          for file in "${expected[@]}"; do
+            test -s "release-assets/$file" || {
+              echo "Missing or empty release asset: $file" >&2
+              exit 1
+            }
+          done
+          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 4
+
+      - name: Create or update prerelease
+        shell: bash
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$TAG" \
+              --title "$TAG" \
+              --notes-file "$NOTES_FILE" \
+              --prerelease \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" release-assets/* \
+              --target "$SOURCE_SHA" \
+              --title "$TAG" \
+              --notes-file "$NOTES_FILE" \
+              --prerelease \
+              --repo "$GITHUB_REPOSITORY"
+          fi
