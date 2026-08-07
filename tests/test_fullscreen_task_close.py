@@ -6,11 +6,14 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QStackedWidget, QWidget
 from qfluentwidgets import Flyout, PrimaryPushButton, PushButton
+from qfluentwidgets import FluentIcon as FIF
 
 from app.config.cfg import cfg
-from app.view.pages.broadcast_page import BroadcastEditPage
+from app.view.pages.broadcast_page import BroadcastEditPage, VerticalButton
 from app.view.pages.countdown_page import CountdownEditPage
 
 
@@ -49,6 +52,37 @@ class FullscreenTaskCloseTest(TestCase):
         self.assertTrue(cfg.showMainWindowAfterCountdown.defaultValue)
         self.assertTrue(cfg.confirmBeforeCloseBroadcast.defaultValue)
         self.assertTrue(cfg.confirmBeforeCloseCountdown.defaultValue)
+
+    def testFullscreenActionButtonShowsPressedStateAndCancelsOutsideRelease(self):
+        for primary in (False, True):
+            with self.subTest(primary=primary):
+                button = VerticalButton(
+                    FIF.CLOSE,
+                    "关闭",
+                    primary=primary,
+                    force_dark=True,
+                )
+                button.show()
+                self.app.processEvents()
+                clicks = []
+                button.clicked.connect(lambda: clicks.append(True))
+
+                center = button.rect().center()
+                QTest.mousePress(button, Qt.MouseButton.LeftButton, pos=center)
+                self.assertTrue(button.isDown())
+                self.assertIn("QToolButton:pressed", button.styleSheet())
+
+                QTest.mouseRelease(
+                    button,
+                    Qt.MouseButton.LeftButton,
+                    pos=QPoint(button.width() + 10, button.height() + 10),
+                )
+                self.assertFalse(button.isDown())
+                self.assertEqual(clicks, [])
+
+                QTest.mouseClick(button, Qt.MouseButton.LeftButton, pos=center)
+                self.assertEqual(clicks, [True])
+                button.close()
 
     def testClosingTasksFollowsEachMainWindowSetting(self):
         for enabled, pageType, windowName, setting in (

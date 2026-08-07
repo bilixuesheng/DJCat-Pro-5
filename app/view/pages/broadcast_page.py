@@ -70,26 +70,125 @@ class VerticalButton(QToolButton):
         self.primary = primary
         self.icon_enum = icon_enum  # 保存图标枚举，方便变色
         self.force_dark = force_dark  # 纯黑背景窗口（如考试倒计时）固定使用深色样式
+        self._press_started_inside = False
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         self.setText(text)
         self.setIconSize(QSize(20, 20))
         self.setFixedSize(80, 65)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.updateStyle()
 
     def updateStyle(self):
-        theme_color = qconfig.themeColor.value.name()
+        theme = QColor(qconfig.themeColor.value)
+        theme_color = theme.name()
+        theme_top = theme.lighter(112).name()
+        theme_hover_top = theme.lighter(122).name()
+        theme_hover_bottom = theme.lighter(106).name()
+        theme_pressed_bottom = theme.darker(122).name()
+        theme_border = theme.lighter(138).name()
         is_dark = self.force_dark or (isDarkTheme() if cfg.customThemeMode.value == "System" else cfg.customThemeMode.value == "Dark")
 
         if self.primary:
-            # 主题色背景需要固定高对比前景。
-            self.setStyleSheet(f"QToolButton {{ background-color: {theme_color}; color: white; border-radius: 8px; border: none; font-size: 13px; padding-top: 6px; padding-bottom: 4px;}} QToolButton:hover {{ opacity: 0.8; }}")
+            # Qt 样式表不支持 opacity，使用渐变和独立的按下色呈现可靠反馈。
+            self.setStyleSheet(f"""
+                QToolButton {{
+                    color: white;
+                    background: qlineargradient(
+                        x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 {theme_top}, stop: 1 {theme_color}
+                    );
+                    border: 1px solid {theme_border};
+                    border-radius: 8px;
+                    font-size: 13px;
+                    padding-top: 6px;
+                    padding-bottom: 4px;
+                }}
+                QToolButton:hover {{
+                    background: qlineargradient(
+                        x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 {theme_hover_top}, stop: 1 {theme_hover_bottom}
+                    );
+                }}
+                QToolButton:pressed {{
+                    background: qlineargradient(
+                        x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 {theme_color}, stop: 1 {theme_pressed_bottom}
+                    );
+                    border-color: {theme_color};
+                    padding-top: 8px;
+                    padding-bottom: 2px;
+                }}
+            """)
             self.setIcon(self.icon_enum.icon(color=QColor("white")))
         else:
-            bg = "rgba(255,255,255,0.1)" if is_dark else "rgba(0,0,0,0.05)"
-            hover_bg = "rgba(255,255,255,0.15)" if is_dark else "rgba(0,0,0,0.1)"
+            if is_dark:
+                bg_top, bg_bottom = "rgba(255,255,255,41)", "rgba(255,255,255,23)"
+                hover_top, hover_bottom = "rgba(255,255,255,61)", "rgba(255,255,255,38)"
+                pressed_top, pressed_bottom = "rgba(255,255,255,31)", "rgba(255,255,255,61)"
+                border, pressed_border = "rgba(255,255,255,46)", "rgba(255,255,255,77)"
+            else:
+                bg_top, bg_bottom = "rgba(255,255,255,235)", "rgba(0,0,0,13)"
+                hover_top, hover_bottom = "rgba(255,255,255,255)", "rgba(0,0,0,23)"
+                pressed_top, pressed_bottom = "rgba(0,0,0,13)", "rgba(0,0,0,33)"
+                border, pressed_border = "rgba(0,0,0,31)", "rgba(0,0,0,56)"
             color_str = "white" if is_dark else "black"
-            self.setStyleSheet(f"QToolButton {{ background-color: {bg}; color: {color_str}; border-radius: 8px; border: none; font-size: 13px; padding-top: 6px; padding-bottom: 4px;}} QToolButton:hover {{ background-color: {hover_bg}; }}")
+            self.setStyleSheet(f"""
+                QToolButton {{
+                    color: {color_str};
+                    background: qlineargradient(
+                        x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 {bg_top}, stop: 1 {bg_bottom}
+                    );
+                    border: 1px solid {border};
+                    border-radius: 8px;
+                    font-size: 13px;
+                    padding-top: 6px;
+                    padding-bottom: 4px;
+                }}
+                QToolButton:hover {{
+                    background: qlineargradient(
+                        x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 {hover_top}, stop: 1 {hover_bottom}
+                    );
+                }}
+                QToolButton:pressed {{
+                    background: qlineargradient(
+                        x1: 0, y1: 0, x2: 0, y2: 1,
+                        stop: 0 {pressed_top}, stop: 1 {pressed_bottom}
+                    );
+                    border-color: {pressed_border};
+                    padding-top: 8px;
+                    padding-bottom: 2px;
+                }}
+            """)
             self.setIcon(self.icon_enum.icon(color=QColor(color_str)))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._press_started_inside = self.rect().contains(
+                event.position().toPoint()
+            )
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+        if (
+            self._press_started_inside
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
+            # 保持按压反馈与最终命中区域一致；移出后立即恢复悬浮前状态。
+            self.setDown(self.rect().contains(event.position().toPoint()))
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            release_inside = self.rect().contains(event.position().toPoint())
+            pressed_inside = self._press_started_inside
+            self._press_started_inside = False
+            if pressed_inside and not release_inside:
+                self.setDown(False)
+                event.accept()
+                return
+        super().mouseReleaseEvent(event)
 
     def setWindowed(self, windowed: bool):
         if windowed:
