@@ -85,7 +85,8 @@ class CountdownWindow(FramelessWindow):
 
         self.controlsWidget = QWidget(self)
         controlsLayout = QHBoxLayout(self.controlsWidget)
-        controlsLayout.setContentsMargins(0, 0, 0, 0)
+        # 全屏模式的控件间距放在控件自身内部；窗口化隐藏控件时会一起折叠
+        controlsLayout.setContentsMargins(0, 20, 0, 0)
         controlsLayout.setSpacing(16)
         controlsLayout.addStretch(1)
         self.btn_rewind = ToolButton(FIF.SKIP_BACK.icon(color="white"), self.controlsWidget)
@@ -130,7 +131,6 @@ class CountdownWindow(FramelessWindow):
         self.vBoxLayout.addWidget(self.titleLabel)
         self.vBoxLayout.addStretch(1)
         self.vBoxLayout.addWidget(self.timeLabel)
-        self.vBoxLayout.addSpacing(20)
         self.vBoxLayout.addWidget(self.controlsWidget)
         self.vBoxLayout.addStretch(2)
 
@@ -302,15 +302,19 @@ class CountdownWindow(FramelessWindow):
         self.titleLabel.setVisible(not self.is_windowed)
 
         if self.is_windowed:
+            # 窗口化只保留时间与角落操作按钮，彻底折叠中间控件所占空间
+            self._setControlsVisible(False, animated=False)
+            self.controlsWidget.hide()
             self.showNormal()
             rect = self.screen().availableGeometry()
-            # 底部留出角落小操作按钮的高度，避免与暂停/加减秒按钮重叠
+            # 底部只留角落操作按钮自身的高度，时间区域不再为隐藏控件留空
             self.vBoxLayout.setContentsMargins(16, 12, 16, 56)
             # 先按目标高度缩小字体，否则旧字体的最小尺寸会钳制 resize
             self._applyFonts(240)
             self.setFixedSize(720, 240)
             self.move(rect.center() - self.rect().center())
         else:
+            self.controlsWidget.show()
             self.vBoxLayout.setContentsMargins(40, 20, 40, 20)
             self.setMinimumSize(0, 0)
             self.setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX)
@@ -361,7 +365,11 @@ class CountdownWindow(FramelessWindow):
         super().mouseMoveEvent(e)
 
     def mouseReleaseEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton and not self._moved:
+        if (
+            not self.is_windowed
+            and e.button() == Qt.MouseButton.LeftButton
+            and not self._moved
+        ):
             self._setControlsVisible(not self._controls_visible)
         super().mouseReleaseEvent(e)
 
