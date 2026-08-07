@@ -71,3 +71,12 @@ def test_release_workflow_uses_native_windows_runners_and_four_packages():
     assert "Windows-arm64-Setup.exe" in workflow
     assert "gh release create" in workflow
     assert "--prerelease" in workflow
+
+
+def test_python_requirement_accepts_native_arm_runner_patch_version():
+    metadata = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert 'requires-python = ">=3.12.8,<3.13"' in metadata
+    assert "PYTHON_VERSION: 3.12.10" in (
+        REPO / ".github" / "workflows" / "main.yml"
+    ).read_text(encoding="utf-8")
