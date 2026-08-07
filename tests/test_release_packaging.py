@@ -74,6 +74,9 @@ def test_release_workflow_uses_native_windows_runners_and_four_packages():
     assert "--prerelease" in workflow
     assert "cancel-in-progress: true" in workflow
     assert '-OutFile "scripts\\ChineseSimplified.isl"' in workflow
+    assert 'find release-assets -type f -name "$file"' in workflow
+    assert 'cp "${matches[0]}" "release-files/$file"' in workflow
+    assert 'gh release create "$TAG" release-files/*' in workflow
 
 
 def test_python_requirement_accepts_native_arm_runner_patch_version():
