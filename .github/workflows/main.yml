@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: djcat-release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   PYTHONUTF8: 1
@@ -142,11 +142,9 @@ jobs:
             throw "Inno Setup compiler (ISCC.exe) was not found."
           }
 
-          $languagesDir = Join-Path (Split-Path $iscc -Parent) "Languages"
-          New-Item -ItemType Directory -Force -Path $languagesDir | Out-Null
           Invoke-WebRequest `
             -Uri "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseSimplified.isl" `
-            -OutFile (Join-Path $languagesDir "ChineseSimplified.isl")
+            -OutFile "scripts\ChineseSimplified.isl"
 
           $baseVersion = [regex]::Match($env:VERSION, '^\d+\.\d+\.\d+').Value
           $preNumber = [regex]::Match($env:VERSION, 'pre\.(\d+)$')

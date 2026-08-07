@@ -51,6 +51,7 @@ def test_installer_is_single_language_and_architecture_aware():
     script = (REPO / "scripts" / "DJCat-Pro-5.iss").read_text(encoding="utf-8")
 
     assert 'Name: "chinesesimplified"' in script
+    assert 'MessagesFile: "scripts\\ChineseSimplified.isl"' in script
     assert 'Name: "english"' not in script
     assert 'Name: "chinesetraditional"' not in script
     assert "ArchitecturesAllowed={#MyAppArch}" in script
@@ -71,6 +72,8 @@ def test_release_workflow_uses_native_windows_runners_and_four_packages():
     assert "Windows-arm64-Setup.exe" in workflow
     assert "gh release create" in workflow
     assert "--prerelease" in workflow
+    assert "cancel-in-progress: true" in workflow
+    assert '-OutFile "scripts\\ChineseSimplified.isl"' in workflow
 
 
 def test_python_requirement_accepts_native_arm_runner_patch_version():
