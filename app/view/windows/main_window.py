@@ -38,6 +38,7 @@ from qfluentwidgets import (
 )
 
 from app.common.ai_markdown import registerMachine
+from app.common.edge_tts import DEFAULT_EDGE_VOICE, EdgeSpeechWorker
 from app.config.cfg import cfg
 from app.config.constants import (
     APP_NAME,
@@ -181,6 +182,9 @@ class MainWindow(MSFluentWindow):
         self.player.setAudioOutput(self.audioOutput)
         self.current_play_repeats = 0
         self.player.mediaStatusChanged.connect(self._onMediaStatusChanged)
+        self._edge_tts_request_id = 0
+        self._edge_tts_jobs = {}
+        self._edge_tts_temp_path = ""
 
         self.tts = QTextToSpeech(self)
         self._setBroadcastVolume(100)
@@ -208,11 +212,28 @@ class MainWindow(MSFluentWindow):
         self.tts.setVolume(volume)
 
     def _playAudioTask(self, task_data):
-        self._setBroadcastVolume(task_data.get("volume", 100))
+        volume = task_data.get("volume", 100)
+        self._setBroadcastVolume(volume)
         t = task_data["type"]
         repeat_count = task_data.get("repeat", 1)
 
-        if "TTS" in t:
+        if t == "Edge TTS（需要联网）":
+            content = task_data.get("content", "").strip()
+            if content:
+                self._startEdgeTts(
+                    content,
+                    task_data.get("voice", DEFAULT_EDGE_VOICE),
+                    repeat_count,
+                    volume,
+                )
+            else:
+                self._invalidatePendingEdgeTts()
+            return
+
+        self._invalidatePendingEdgeTts()
+        self._cleanupEdgeTtsFile()
+
+        if t == "系统TTS":
             content = task_data.get("content", "")
             if content:
                 full_text = "。".join([content] * repeat_count)
@@ -235,6 +256,70 @@ class MainWindow(MSFluentWindow):
             self.player.setSource(QUrl.fromLocalFile(path))
             self.player.play()
 
+    def _startEdgeTts(self, content, voice, repeat_count, volume):
+        self._edge_tts_request_id += 1
+        request_id = self._edge_tts_request_id
+        worker = EdgeSpeechWorker(request_id, content, voice, self)
+        thread = threading.Thread(target=worker.run, daemon=True)
+        self._edge_tts_jobs[request_id] = (
+            worker,
+            thread,
+            repeat_count,
+            volume,
+        )
+        worker.finished.connect(self._onEdgeTtsReady)
+        thread.start()
+
+    def _onEdgeTtsReady(self, request_id, path, error):
+        job = self._edge_tts_jobs.pop(request_id, None)
+        if request_id != self._edge_tts_request_id:
+            if path:
+                self._removeTempFile(path)
+            return
+
+        if error or not path or not job:
+            if path:
+                self._removeTempFile(path)
+            InfoBar.error(
+                title="Edge TTS 播报失败",
+                content="请检查网络连接后重试。",
+                duration=5000,
+                position=InfoBarPosition.BOTTOM_RIGHT,
+                parent=self,
+            )
+            return
+
+        _, _, repeat_count, volume = job
+        self._setBroadcastVolume(volume)
+        self._cleanupEdgeTtsFile()
+        self._edge_tts_temp_path = path
+        self.current_play_repeats = repeat_count - 1
+        self.player.setSource(QUrl.fromLocalFile(path))
+        self.player.play()
+
+    def _invalidatePendingEdgeTts(self):
+        self._edge_tts_request_id += 1
+
+    def _cleanupEdgeTtsFile(self):
+        if not self._edge_tts_temp_path:
+            return
+
+        path = self._edge_tts_temp_path
+        self._edge_tts_temp_path = ""
+        if self.player.source().toLocalFile() == path:
+            self.player.setSource(QUrl())
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError:
+            QTimer.singleShot(1000, lambda: self._removeTempFile(path))
+
+    @staticmethod
+    def _removeTempFile(path):
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError:
+            pass
+
     def _onMediaStatusChanged(self, status):
         if (
             status == QMediaPlayer.MediaStatus.EndOfMedia
@@ -243,6 +328,8 @@ class MainWindow(MSFluentWindow):
             self.current_play_repeats -= 1
             self.player.setPosition(0)
             self.player.play()
+        elif status == QMediaPlayer.MediaStatus.EndOfMedia:
+            QTimer.singleShot(0, self._cleanupEdgeTtsFile)
 
     def _checkSchedule(self):
         now_time = QTime.currentTime().toString("HH:mm:ss")

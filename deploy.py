@@ -43,6 +43,7 @@ def build_args() -> list[str]:
         "--include-qt-plugins=multimedia,texttospeech",
         "--include-package=requests",
         "--include-package=loguru",
+        "--include-package=edge_tts",
         "--include-data-dir=app/assets=app/assets",
         "--windows-icon-from-ico=app/assets/logo.png",
         f'--company-name="{AUTHOR}"',

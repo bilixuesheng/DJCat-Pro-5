@@ -1,6 +1,10 @@
 import asyncio
+import os
+import tempfile
+from pathlib import Path
 
 import edge_tts
+from PySide6.QtCore import QObject, Signal
 
 
 DEFAULT_EDGE_VOICE = "zh-CN-XiaoxiaoNeural"
@@ -35,3 +39,32 @@ def filter_chinese_voices(voices):
 def load_chinese_voices():
     """Load the current Chinese-only Edge TTS voice catalog from the network."""
     return filter_chinese_voices(asyncio.run(edge_tts.list_voices()))
+
+
+def synthesize_edge_speech(text, voice, output_path):
+    """Synthesize text to an MP3 file with Edge TTS."""
+    communicate = edge_tts.Communicate(text=text, voice=voice)
+    asyncio.run(communicate.save(str(output_path)))
+
+
+class EdgeSpeechWorker(QObject):
+    finished = Signal(int, str, str)
+
+    def __init__(self, request_id, text, voice, parent=None):
+        super().__init__(parent)
+        self.request_id = request_id
+        self.text = text
+        self.voice = voice
+
+    def run(self):
+        descriptor, path = tempfile.mkstemp(prefix="djcat-edge-tts-", suffix=".mp3")
+        os.close(descriptor)
+
+        try:
+            synthesize_edge_speech(self.text, self.voice, path)
+        except Exception as error:
+            Path(path).unlink(missing_ok=True)
+            self.finished.emit(self.request_id, "", str(error))
+            return
+
+        self.finished.emit(self.request_id, path, "")
