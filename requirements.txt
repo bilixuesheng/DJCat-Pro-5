@@ -5,3 +5,4 @@ loguru
 markdown
 nuitka
 imageio
+edge-tts==7.2.8

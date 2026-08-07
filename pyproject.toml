@@ -17,7 +17,8 @@ dependencies = [
     "loguru",
     "markdown",
     "nuitka",
-    "imageio"
+    "imageio",
+    "edge-tts==7.2.8"
 ]
 
 [tool.setuptools.packages.find]

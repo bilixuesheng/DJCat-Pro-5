@@ -1,7 +1,8 @@
 import os
+import threading
 from copy import deepcopy
 
-from PySide6.QtCore import Qt, QTime, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, QTime, QTimer, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -12,6 +13,8 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     ComboBox,
     ExpandSettingCard,
+    InfoBar,
+    InfoBarPosition,
     LineEdit,
     MessageBoxBase,
     PickerColumnFormatter,
@@ -28,6 +31,7 @@ from qfluentwidgets import (
 )
 from qfluentwidgets import FluentIcon as FIF
 
+from app.common.edge_tts import DEFAULT_EDGE_VOICE, load_chinese_voices
 from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import SettingMaterialCard
@@ -47,6 +51,26 @@ class BroadcastSettingCard(SettingCard):
         self.hBoxLayout.addSpacing(16)
 
 
+class ChineseVoiceLoader(QObject):
+    finished = Signal(list, str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._thread = None
+
+    def start(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._thread = threading.Thread(target=self._load, daemon=True)
+        self._thread.start()
+
+    def _load(self):
+        try:
+            self.finished.emit(load_chinese_voices(), "")
+        except Exception as error:
+            self.finished.emit([], str(error))
+
+
 def create_task_form(parent_widget, initial_data=None):
     form = QWidget(parent_widget)
     layout = QVBoxLayout(form)
@@ -57,7 +81,8 @@ def create_task_form(parent_widget, initial_data=None):
     data = initial_data or {
         "name": "", "time": default_time.toString("HH:mm:ss"),
         "weeks": [0,1,2,3,4,5,6], "type": "预设: 12:30报时",
-        "content": "", "file": "", "repeat": 3
+        "content": "", "file": "", "repeat": 3,
+        "voice": DEFAULT_EDGE_VOICE,
     }
 
     widgets = {}
@@ -88,7 +113,14 @@ def create_task_form(parent_widget, initial_data=None):
     widgets['weekBtns'] = weekBtns
 
     typeCombo = ComboBox(form)
-    typeCombo.addItems(["预设: 12:30报时", "预设: 18:25报时", "预设: 上课铃", "系统TTS", "本地音频"])
+    typeCombo.addItems([
+        "预设: 12:30报时",
+        "预设: 18:25报时",
+        "预设: 上课铃",
+        "系统TTS",
+        "Edge TTS（需要联网）",
+        "本地音频",
+    ])
     typeCombo.setCurrentText(data["type"])
     typeCombo.setFixedWidth(200)
     layout.addWidget(BroadcastSettingCard(FIF.MUSIC, "播报类型", "选择音频来源或语音合成", typeCombo, form))
@@ -100,6 +132,23 @@ def create_task_form(parent_widget, initial_data=None):
     ttsCard = BroadcastSettingCard(FIF.CHAT, "TTS内容", "输入要被朗读的文本", ttsInput, form)
     layout.addWidget(ttsCard)
     widgets['ttsInput'] = ttsInput
+
+    voiceCombo = ComboBox(form)
+    voiceCombo.setFixedWidth(280)
+    voiceCombo.addItem(
+        "晓晓（普通话 · 女声，默认）",
+        userData=data.get("voice", DEFAULT_EDGE_VOICE),
+    )
+    voiceCard = BroadcastSettingCard(
+        FIF.PEOPLE,
+        "Edge TTS 音色",
+        "仅显示中文音色；加载音色和语音播报均需要联网",
+        voiceCombo,
+        form,
+    )
+    layout.addWidget(voiceCard)
+    widgets['voiceCombo'] = voiceCombo
+    widgets['voiceCard'] = voiceCard
 
     fileBtn = PushButton("选择文件" if not data["file"] else os.path.basename(data["file"]), form)
     fileCard = BroadcastSettingCard(FIF.FOLDER, "音频文件", "选择本地 mp3/wav 文件", fileBtn, form)
@@ -139,9 +188,43 @@ def create_task_form(parent_widget, initial_data=None):
     layout.addWidget(BroadcastSettingCard(FIF.VOLUME, "播报音量", "设置当前任务的播放音量", volumeWidget, form))
     widgets['volumeSlider'] = volumeSlider
 
+    voiceLoader = ChineseVoiceLoader(form)
+    widgets['voiceLoader'] = voiceLoader
+    widgets['voicesLoaded'] = False
+
+    def _onVoicesLoaded(voices, error):
+        selected_voice = voiceCombo.currentData() or data.get(
+            "voice", DEFAULT_EDGE_VOICE
+        )
+        if voices:
+            voiceCombo.clear()
+            for voice in voices:
+                voiceCombo.addItem(voice["label"], userData=voice["name"])
+            selected_index = voiceCombo.findData(selected_voice)
+            voiceCombo.setCurrentIndex(max(0, selected_index))
+            widgets['voicesLoaded'] = True
+            voiceCombo.setEnabled(True)
+            return
+
+        voiceCombo.setEnabled(True)
+        InfoBar.error(
+            title="中文音色加载失败",
+            content="请检查网络连接，当前保留默认音色“晓晓”。",
+            duration=5000,
+            position=InfoBarPosition.BOTTOM_RIGHT,
+            parent=form.window(),
+        )
+
+    voiceLoader.finished.connect(_onVoicesLoaded)
+
     def _updateVisibility(text):
         ttsCard.setVisible("TTS" in text)
+        is_edge_tts = text == "Edge TTS（需要联网）"
+        voiceCard.setVisible(is_edge_tts)
         fileCard.setVisible(text == "本地音频")
+        if is_edge_tts and not widgets['voicesLoaded']:
+            voiceCombo.setEnabled(False)
+            voiceLoader.start()
     typeCombo.currentTextChanged.connect(_updateVisibility)
     _updateVisibility(typeCombo.currentText())
 
@@ -179,6 +262,7 @@ class AddTaskDialog(MessageBoxBase):
             "file": w['filePath'],
             "repeat": w['repeatSpin'].value(),
             "volume": w['volumeSlider'].value(),
+            "voice": w['voiceCombo'].currentData() or DEFAULT_EDGE_VOICE,
             "enabled": True
         }
 
@@ -229,6 +313,7 @@ class TaskCard(SettingMaterialCard):
             self.expandCard._adjustViewSize
         )
         self.formWidgets['ttsInput'].textChanged.connect(self._saveData)
+        self.formWidgets['voiceCombo'].currentIndexChanged.connect(self._saveData)
         self.formWidgets['repeatSpin'].valueChanged.connect(self._saveData)
         self.formWidgets['volumeSlider'].valueChanged.connect(self._saveData)
 
@@ -275,7 +360,8 @@ class TaskCard(SettingMaterialCard):
             "content": w['ttsInput'].text(),
             "file": w['filePath'],
             "repeat": w['repeatSpin'].value(),
-            "volume": w['volumeSlider'].value()
+            "volume": w['volumeSlider'].value(),
+            "voice": w['voiceCombo'].currentData() or DEFAULT_EDGE_VOICE,
         })
 
         if self._target_title_label: self._target_title_label.setText(self.data["name"])
