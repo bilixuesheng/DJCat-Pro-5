@@ -17,7 +17,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtTextToSpeech import QTextToSpeech
-from PySide6.QtWidgets import QApplication, QGraphicsOpacityEffect
+from PySide6.QtWidgets import QApplication, QGraphicsOpacityEffect, QWidget
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import (
     DrillInTransitionStackedWidget,
@@ -357,11 +357,21 @@ class MainWindow(MSFluentWindow):
 
     def _updateSearchEdit(self, *args):
         isSettingPage = self.stackedWidget.currentWidget() is self.settingPage
+        self._setSearchEditVisible(isSettingPage)
+
+    def _setSearchEditVisible(self, isSettingPage: bool) -> None:
         if not isSettingPage:
             self.searchEdit.clear()
         self.searchEdit.setVisible(isSettingPage)
         if isSettingPage:
             self._refreshSearchEditGeometry()
+
+    def switchTo(self, interface: QWidget) -> None:
+        super().switchTo(interface)
+        # DrillInTransitionStackedWidget only updates currentWidget after its
+        # animation finishes. Keep title-bar controls in sync with the user's
+        # navigation action instead of waiting for that delayed signal.
+        self._setSearchEditVisible(interface is self.settingPage)
 
     def _refreshSearchEditGeometry(self):
         width = max(200, min(360, self.titleBar.width() - 300))
