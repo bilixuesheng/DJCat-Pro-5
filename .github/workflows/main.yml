@@ -202,6 +202,8 @@ jobs:
       - name: Validate release packages
         shell: bash
         run: |
+          rm -rf release-files
+          mkdir release-files
           expected=(
             "DJCat-Pro-${TAG}-Windows-x86_64.zip"
             "DJCat-Pro-${TAG}-Windows-x86_64-Setup.exe"
@@ -209,25 +211,31 @@ jobs:
             "DJCat-Pro-${TAG}-Windows-arm64-Setup.exe"
           )
           for file in "${expected[@]}"; do
-            test -s "release-assets/$file" || {
-              echo "Missing or empty release asset: $file" >&2
+            mapfile -t matches < <(find release-assets -type f -name "$file")
+            test "${#matches[@]}" -eq 1 || {
+              echo "Expected exactly one release asset named $file; found ${#matches[@]}." >&2
               exit 1
             }
+            test -s "${matches[0]}" || {
+              echo "Release asset is empty: ${matches[0]}" >&2
+              exit 1
+            }
+            cp "${matches[0]}" "release-files/$file"
           done
-          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq 4
+          test "$(find release-files -maxdepth 1 -type f | wc -l)" -eq 4
 
       - name: Create or update prerelease
         shell: bash
         run: |
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$TAG" release-files/* --clobber --repo "$GITHUB_REPOSITORY"
             gh release edit "$TAG" \
               --title "$TAG" \
               --notes-file "$NOTES_FILE" \
               --prerelease \
               --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" release-assets/* \
+            gh release create "$TAG" release-files/* \
               --target "$SOURCE_SHA" \
               --title "$TAG" \
               --notes-file "$NOTES_FILE" \
