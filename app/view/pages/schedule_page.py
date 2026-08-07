@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from qfluentwidgets import (
-    CardWidget,
     ComboBox,
     ExpandSettingCard,
     LineEdit,
@@ -31,7 +30,7 @@ from qfluentwidgets import FluentIcon as FIF
 
 from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
-from app.view.components.setting_card_group import CardPaintFilter
+from app.view.components.setting_card_group import SettingMaterialCard
 
 
 class SecondsFormatter(PickerColumnFormatter):
@@ -184,7 +183,7 @@ class AddTaskDialog(MessageBoxBase):
         }
 
 
-class TaskCard(CardWidget):
+class TaskCard(SettingMaterialCard):
     deleteClicked = Signal(dict)
     dataChanged = Signal()
 
@@ -197,9 +196,7 @@ class TaskCard(CardWidget):
             f"触发时间: {data['time']}",
             self,
         )
-        self.paintFilter = CardPaintFilter(self)
-        self.expandCard.card.installEventFilter(self.paintFilter)
-        self.expandCard.borderWidget.installEventFilter(self.paintFilter)
+        self.paintFilter = self.applyExpandCardMaterial(self.expandCard)
 
         self.cardLayout = QVBoxLayout(self)
         self.cardLayout.setContentsMargins(0, 0, 0, 0)

@@ -62,6 +62,32 @@ class CardPaintFilter(QObject):
         return event.type() == QEvent.Type.Paint
 
 
+class SettingMaterialCard(CardWidget):
+    """Card using the same translucent material as setting groups."""
+
+    def _normalBackgroundColor(self):
+        return QColor(255, 255, 255, 13 if isDarkTheme() else 170)
+
+    def applyExpandCardMaterial(self, expandCard):
+        """Let this card's material show through an ``ExpandSettingCard``."""
+        paintFilter = CardPaintFilter(self)
+        expandCard.card.installEventFilter(paintFilter)
+        expandCard.borderWidget.installEventFilter(paintFilter)
+
+        surfaces = (
+            expandCard,
+            expandCard.viewport(),
+            expandCard.scrollWidget,
+            expandCard.view,
+            expandCard.card,
+        )
+        for surface in surfaces:
+            surface.setAutoFillBackground(False)
+            surface.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        return paintFilter
+
+
 class CollapsibleSettingCard(QWidget):
     def __init__(self, icon, title: str, content: str | None = None, parent=None):
         super().__init__(parent)
@@ -132,7 +158,7 @@ class CollapsibleSettingCard(QWidget):
             self.view.setMaximumHeight(QWIDGETSIZE_MAX)
 
 
-class CollapsibleSettingCardGroup(CardWidget):
+class CollapsibleSettingCardGroup(SettingMaterialCard):
     orderChanged = Signal()
 
     def __init__(self, title: str, key: str, parent=None):
@@ -239,9 +265,6 @@ class CollapsibleSettingCardGroup(CardWidget):
         super().leaveEvent(event)
         self.moveUpButton.hide()
         self.moveDownButton.hide()
-
-    def _normalBackgroundColor(self):
-        return QColor(255, 255, 255, 13 if isDarkTheme() else 170)
 
     def _onExpandClicked(self) -> None:
         self._setCollapsed(not self.isCollapsed)

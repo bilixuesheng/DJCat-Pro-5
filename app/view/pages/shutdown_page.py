@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     BodyLabel,
-    CardWidget,
     ExpandSettingCard,
     LineEdit,
     MessageBoxBase,
@@ -29,7 +28,7 @@ from qfluentwidgets import FluentIcon as FIF
 
 from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
-from app.view.components.setting_card_group import CardPaintFilter
+from app.view.components.setting_card_group import SettingMaterialCard
 
 DEFAULT_PROMPT_TITLE = "Windows 即将关闭你的计算机"
 DEFAULT_PROMPT_MESSAGE = (
@@ -241,7 +240,7 @@ class AddShutdownTaskDialog(MessageBoxBase):
         return {**shutdown_task_data(self.formWidgets), "enabled": True}
 
 
-class ShutdownTaskCard(CardWidget):
+class ShutdownTaskCard(SettingMaterialCard):
     deleteClicked = Signal(dict)
     dataChanged = Signal()
 
@@ -257,9 +256,7 @@ class ShutdownTaskCard(CardWidget):
             f"关机时间：{time}",
             self,
         )
-        self.paintFilter = CardPaintFilter(self)
-        self.expandCard.card.installEventFilter(self.paintFilter)
-        self.expandCard.borderWidget.installEventFilter(self.paintFilter)
+        self.paintFilter = self.applyExpandCardMaterial(self.expandCard)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
