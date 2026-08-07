@@ -20,7 +20,8 @@ concurrency:
 
 env:
   PYTHONUTF8: 1
-  PYTHON_VERSION: 3.12.8
+  # windows-11-arm ships this native ARM64 patch release in its tool cache.
+  PYTHON_VERSION: 3.12.10
 
 jobs:
   prepare:
@@ -32,7 +33,7 @@ jobs:
       notes_file: ${{ steps.release.outputs.notes_file }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -92,12 +93,12 @@ jobs:
       INNO_ARCH: ${{ matrix.inno_arch }}
     steps:
       - name: Checkout release source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.source_sha }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           architecture: ${{ matrix.python_arch }}
@@ -171,7 +172,7 @@ jobs:
           }
 
       - name: Upload architecture packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: DJCat-Pro-v${{ env.VERSION }}-Windows-${{ matrix.architecture }}
           path: |
@@ -189,12 +190,12 @@ jobs:
       NOTES_FILE: ${{ needs.prepare.outputs.notes_file }}
     steps:
       - name: Checkout release source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.SOURCE_SHA }}
 
       - name: Download release packages
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: DJCat-Pro-*
           path: release-assets
