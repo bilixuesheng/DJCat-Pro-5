@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     BodyLabel,
-    ExpandSettingCard,
     LineEdit,
     MessageBoxBase,
     PickerColumnFormatter,
@@ -29,6 +28,7 @@ from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import SettingMaterialCard
 from app.view.components.task_picker import (
+    TaskExpandSettingCard,
     TouchTimePicker,
     configure_task_expand_card,
 )
@@ -253,7 +253,7 @@ class ShutdownTaskCard(SettingMaterialCard):
         name = data.get("name") or "未命名任务"
         time = data.get("time") or "00:00:00"
         self.data.update({"name": name, "time": time})
-        self.expandCard = ExpandSettingCard(
+        self.expandCard = TaskExpandSettingCard(
             FIF.POWER_BUTTON,
             name,
             f"关机时间：{time}",

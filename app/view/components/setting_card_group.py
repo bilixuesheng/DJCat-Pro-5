@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     CardWidget,
+    CaptionLabel,
     FluentIcon,
     FluentStyleSheet,
     IconWidget,
@@ -162,12 +163,20 @@ class CollapsibleSettingCard(QWidget):
 class CollapsibleSettingCardGroup(SettingMaterialCard):
     orderChanged = Signal()
 
-    def __init__(self, title: str, key: str, parent=None, icon=None):
+    def __init__(
+        self,
+        title: str,
+        key: str,
+        parent=None,
+        icon=None,
+        content: str = "",
+    ):
         super().__init__(parent)
         self.setObjectName(key)
 
         self.iconWidget = IconWidget(icon, self) if icon is not None else None
         self.titleLabel = StrongBodyLabel(title, self)
+        self.contentLabel = CaptionLabel(content, self)
         self.moveUpButton = TransparentToolButton(FluentIcon.UP, self)
         self.moveDownButton = TransparentToolButton(FluentIcon.DOWN, self)
         self.expandButton = TransparentToolButton(FluentIcon.CHEVRON_DOWN_MED, self)
@@ -179,8 +188,11 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         )
 
         self.headerLayout = QHBoxLayout()
+        self.titleLayout = QVBoxLayout()
         self.cardLayout = QVBoxLayout(self.cardContainer)
         self.vBoxLayout = QVBoxLayout(self)
+        self._headerPressPosition = None
+        self._headerPressCanceled = False
 
         self._initWidget()
         self._initLayout()
@@ -194,7 +206,8 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self.moveDownButton.hide()
         if self.iconWidget is not None:
             self.iconWidget.setFixedSize(24, 24)
-        self.titleLabel.setFixedHeight(32)
+        self.titleLabel.setFixedHeight(22)
+        self.contentLabel.setFixedHeight(18)
 
         self.collapseAnimation.setDuration(200)
         self.collapseAnimation.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -205,11 +218,15 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self._refreshExpandIcon()
 
     def _initLayout(self) -> None:
-        self.headerLayout.setContentsMargins(16, 16, 8, 16)
+        self.headerLayout.setContentsMargins(16, 12, 8, 12)
         self.headerLayout.setSpacing(12)
         if self.iconWidget is not None:
             self.headerLayout.addWidget(self.iconWidget)
-        self.headerLayout.addWidget(self.titleLabel)
+        self.titleLayout.setContentsMargins(0, 0, 0, 0)
+        self.titleLayout.setSpacing(0)
+        self.titleLayout.addWidget(self.titleLabel)
+        self.titleLayout.addWidget(self.contentLabel)
+        self.headerLayout.addLayout(self.titleLayout)
         self.headerLayout.addStretch(1)
         self.headerLayout.addWidget(self.moveUpButton)
         self.headerLayout.addWidget(self.moveDownButton)
@@ -259,8 +276,38 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
             event.button() == Qt.MouseButton.LeftButton
             and event.position().y() < self.cardContainer.geometry().top()
         ):
-            self._onExpandClicked()
+            self._headerPressPosition = event.globalPosition().toPoint()
+            self._headerPressCanceled = False
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._headerPressPosition is not None:
+            distance = (
+                event.globalPosition().toPoint() - self._headerPressPosition
+            ).manhattanLength()
+            if (
+                distance >= QApplication.startDragDistance()
+                or not self.rect().contains(event.position().toPoint())
+                or event.position().y() >= self.cardContainer.geometry().top()
+            ):
+                self._headerPressCanceled = True
+                self.isPressed = False
+                self._updateBackgroundColor()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        shouldToggle = (
+            event.button() == Qt.MouseButton.LeftButton
+            and self._headerPressPosition is not None
+            and not self._headerPressCanceled
+            and self.rect().contains(event.position().toPoint())
+            and event.position().y() < self.cardContainer.geometry().top()
+        )
+        self._headerPressPosition = None
+        self._headerPressCanceled = False
+        super().mouseReleaseEvent(event)
+        if shouldToggle:
+            self._onExpandClicked()
 
     def enterEvent(self, event) -> None:
         super().enterEvent(event)
@@ -268,6 +315,10 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self.moveDownButton.show()
 
     def leaveEvent(self, event) -> None:
+        if self._headerPressPosition is not None:
+            self._headerPressCanceled = True
+            self.isPressed = False
+            self._updateBackgroundColor()
         super().leaveEvent(event)
         self.moveUpButton.hide()
         self.moveDownButton.hide()

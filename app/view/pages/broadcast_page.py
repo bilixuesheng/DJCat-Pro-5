@@ -117,8 +117,36 @@ class _VerticalButtonMixin:
         self.setIconSize(QSize(20, 20))
         self.setFixedSize(80, 65)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.updateStyle()
 
     def updateStyle(self):
+        dark = self.force_dark or (
+            isDarkTheme()
+            if cfg.customThemeMode.value == "System"
+            else cfg.customThemeMode.value == "Dark"
+        )
+        if self._primary:
+            normal = qconfig.themeColor.value.name()
+            hover = qconfig.themeColor.value.lighter(108).name()
+            pressed = qconfig.themeColor.value.darker(108).name()
+            foreground = "white"
+        elif dark:
+            normal = "rgba(255, 255, 255, 26)"
+            hover = "rgba(255, 255, 255, 38)"
+            pressed = "rgba(255, 255, 255, 18)"
+            foreground = "white"
+        else:
+            normal = "rgba(0, 0, 0, 13)"
+            hover = "rgba(0, 0, 0, 26)"
+            pressed = "rgba(0, 0, 0, 20)"
+            foreground = "black"
+
+        self.setStyleSheet(
+            f"QPushButton {{ color: {foreground}; background-color: {normal};"
+            " border: none; border-radius: 8px; padding: 0; }"
+            f" QPushButton:hover {{ background-color: {hover}; }}"
+            f" QPushButton:pressed {{ background-color: {pressed}; }}"
+        )
         self.update()
 
     def setWindowed(self, windowed: bool):
@@ -158,9 +186,12 @@ class _VerticalButtonMixin:
             )
 
     def _foregroundColor(self):
-        return QColor("white") if (
-            self._primary or self.force_dark or isDarkTheme()
-        ) else QColor("black")
+        dark = self.force_dark or (
+            isDarkTheme()
+            if cfg.customThemeMode.value == "System"
+            else cfg.customThemeMode.value == "Dark"
+        )
+        return QColor("white") if self._primary or dark else QColor("black")
 
 
 class _VerticalPushButton(_VerticalButtonMixin, PushButton):

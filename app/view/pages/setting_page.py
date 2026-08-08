@@ -225,33 +225,49 @@ class SettingPage(ScrollArea):
             "personalization",
             self.container,
             icon=FluentIcon.BRUSH,
+            content="应用主题、颜色和托盘显示",
         )
         self.bannerGroup = CollapsibleSettingCardGroup(
-            "横幅设置", "banner", self.container, icon=FluentIcon.PHOTO
+            "横幅设置",
+            "banner",
+            self.container,
+            icon=FluentIcon.PHOTO,
+            content="主页横幅的显示与自定义",
         )
         self.broadcastGroup = CollapsibleSettingCardGroup(
             "全屏投送设置",
             "broadcast",
             self.container,
             icon=FluentIcon.FULL_SCREEN,
+            content="投送窗口、操作按钮和关闭行为",
         )
         self.aiMarkdownGroup = CollapsibleSettingCardGroup(
             "AI帮写Markdown设置",
             "aiMarkdown",
             self.container,
             icon=FluentIcon.EDIT,
+            content="AI 帮写功能和 Markdown 风格",
         )
         self.countdownGroup = CollapsibleSettingCardGroup(
             "考试倒计时设置",
             "countdown",
             self.container,
             icon=FluentIcon.CALENDAR,
+            content="倒计时窗口、提醒和重置行为",
         )
         self.softwareGroup = CollapsibleSettingCardGroup(
-            "应用", "software", self.container, icon=FluentIcon.SETTING
+            "应用",
+            "software",
+            self.container,
+            icon=FluentIcon.SETTING,
+            content="启动、更新和应用行为",
         )
         self.aboutGroup = CollapsibleSettingCardGroup(
-            "关于", "about", self.container, icon=FluentIcon.INFO
+            "关于",
+            "about",
+            self.container,
+            icon=FluentIcon.INFO,
+            content="版本、支持和项目相关信息",
         )
 
         self._initWidget()

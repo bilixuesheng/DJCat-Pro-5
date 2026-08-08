@@ -11,7 +11,6 @@ from PySide6.QtWidgets import QApplication
 from app.common.edge_tts import (
     DEFAULT_EDGE_VOICE,
     EdgeSpeechWorker,
-    clear_edge_speech_files,
     filter_chinese_voices,
     synthesize_edge_speech,
 )
@@ -166,19 +165,6 @@ class EdgeTtsVoiceTest(TestCase):
         self.assertEqual(results, [(8, "", "")])
         self.assertEqual(len(outputPaths), 1)
         self.assertFalse(outputPaths[0].exists())
-
-    def testStartupCleanupRemovesOnlyEdgeSpeechTemporaryFiles(self):
-        with tempfile.TemporaryDirectory() as directory:
-            temp_directory = Path(directory)
-            stale_speech = temp_directory / "djcat-edge-tts-stale.mp3"
-            unrelated = temp_directory / "unrelated.mp3"
-            stale_speech.write_bytes(b"stale")
-            unrelated.write_bytes(b"keep")
-
-            clear_edge_speech_files(temp_directory)
-
-            self.assertFalse(stale_speech.exists())
-            self.assertTrue(unrelated.exists())
 
     def testPlaybackRoutesEdgeTtsToOnlineSynthesizer(self):
         window = MagicMock()

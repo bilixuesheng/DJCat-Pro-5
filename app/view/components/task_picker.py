@@ -1,7 +1,15 @@
-from PySide6.QtCore import QEvent, QObject, QRectF, Qt
+from PySide6.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QObject,
+    Property,
+    QPropertyAnimation,
+    QRectF,
+    Qt,
+)
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QApplication, QAbstractItemView, QScroller
-from qfluentwidgets import TimePicker, isDarkTheme
+from qfluentwidgets import ExpandSettingCard, TimePicker, isDarkTheme
 from qfluentwidgets import FluentIcon as FIF
 
 
@@ -37,6 +45,63 @@ class TouchTimePicker(TimePicker):
         column.scrollToItem(item)
 
 
+class TaskExpandSettingCard(ExpandSettingCard):
+    """Expand a task by revealing its body below a stationary header."""
+
+    def __init__(self, icon, title, content=None, parent=None):
+        super().__init__(icon, title, content, parent)
+        self._revealHeight = 0
+        self.revealAnimation = QPropertyAnimation(
+            self,
+            b"revealHeight",
+            self,
+        )
+        self.revealAnimation.setDuration(200)
+        self.revealAnimation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.verticalScrollBar().setValue(0)
+
+    def getRevealHeight(self):
+        return self._revealHeight
+
+    def setRevealHeight(self, height):
+        self._revealHeight = max(0, int(height))
+        self.verticalScrollBar().setValue(0)
+        height = self.card.height() + self._revealHeight
+        self.setFixedHeight(height)
+        parent = self.parentWidget()
+        if parent is not None and getattr(parent, "expandCard", None) is self:
+            parent.setFixedHeight(height)
+
+    revealHeight = Property(int, getRevealHeight, setRevealHeight)
+
+    def setExpand(self, isExpand: bool):
+        if self.isExpand == isExpand:
+            return
+
+        self._adjustViewSize()
+        self.isExpand = isExpand
+        self.setProperty("isExpand", isExpand)
+        self.setStyle(QApplication.style())
+
+        self.revealAnimation.stop()
+        self.revealAnimation.setStartValue(self._revealHeight)
+        self.revealAnimation.setEndValue(
+            self.viewLayout.sizeHint().height() if isExpand else 0
+        )
+        self.revealAnimation.start()
+        self.card.expandButton.setExpand(isExpand)
+
+    def _adjustViewSize(self):
+        height = self.viewLayout.sizeHint().height()
+        self.spaceWidget.setFixedHeight(0)
+        if (
+            self.isExpand
+            and self.revealAnimation.state()
+            != QPropertyAnimation.State.Running
+        ):
+            self.setRevealHeight(height)
+
+
 class TaskExpandCardBehavior(QObject):
     def __init__(self, expandCard):
         super().__init__(expandCard)
@@ -51,12 +116,8 @@ class TaskExpandCardBehavior(QObject):
     def eventFilter(self, obj, event):
         if obj is self.expandCard.card:
             return self._filterHeader(event)
-        if (
-            obj is self.expandCard.card.expandButton
-            and event.type() == QEvent.Type.Paint
-        ):
-            self._paintArrow(obj)
-            return True
+        if obj is self.expandCard.card.expandButton:
+            return self._filterArrow(obj, event)
         if (
             obj is self.expandCard.borderWidget
             and event.type() == QEvent.Type.Paint
@@ -71,6 +132,7 @@ class TaskExpandCardBehavior(QObject):
                 return False
             self._pressPosition = event.globalPosition().toPoint()
             self._dragged = False
+            self._setMaterialPressed(True)
             return True
 
         if self._pressPosition is None:
@@ -83,7 +145,11 @@ class TaskExpandCardBehavior(QObject):
             self._dragged = (
                 self._dragged
                 or distance >= QApplication.startDragDistance()
+                or not self.expandCard.card.rect().contains(
+                    event.position().toPoint()
+                )
             )
+            self._setMaterialPressed(not self._dragged)
             return True
 
         if event.type() != QEvent.Type.MouseButtonRelease:
@@ -98,9 +164,39 @@ class TaskExpandCardBehavior(QObject):
         )
         self._pressPosition = None
         self._dragged = False
+        self._setMaterialPressed(False)
         if shouldExpand:
             self.expandCard.card.expandButton.click()
         return True
+
+    def _filterArrow(self, button, event):
+        if event.type() == QEvent.Type.Paint:
+            self._paintArrow(button)
+            return True
+        if (
+            event.type() == QEvent.Type.MouseButtonPress
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            self._setMaterialPressed(True)
+        elif event.type() == QEvent.Type.MouseMove and (
+            event.buttons() & Qt.MouseButton.LeftButton
+        ):
+            self._setMaterialPressed(
+                button.rect().contains(event.position().toPoint())
+            )
+        elif event.type() in (
+            QEvent.Type.MouseButtonRelease,
+            QEvent.Type.Leave,
+        ):
+            self._setMaterialPressed(False)
+        return False
+
+    def _setMaterialPressed(self, pressed):
+        card = self.expandCard.parentWidget()
+        if card is None or not hasattr(card, "_updateBackgroundColor"):
+            return
+        card.isPressed = pressed
+        card._updateBackgroundColor()
 
     @staticmethod
     def _paintArrow(button):
@@ -111,16 +207,18 @@ class TaskExpandCardBehavior(QObject):
         )
         if not button.isEnabled():
             painter.setOpacity(0.36)
+        elif button.isDown():
+            painter.setOpacity(0.63)
         painter.translate(button.width() // 2, button.height() // 2)
         painter.rotate(button.angle)
         FIF.ARROW_DOWN.render(painter, QRectF(-5, -5, 9.6, 9.6))
 
     def _paintSeparator(self, widget):
-        if not self.expandCard.isExpand:
+        if widget.height() <= self.expandCard.card.height():
             return
         painter = QPainter(widget)
         painter.setPen(
-            QColor(255, 255, 255, 24)
+            QColor(0, 0, 0, 50)
             if isDarkTheme()
             else QColor(0, 0, 0, 19)
         )

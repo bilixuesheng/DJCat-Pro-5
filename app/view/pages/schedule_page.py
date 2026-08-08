@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     ComboBox,
-    ExpandSettingCard,
     InfoBar,
     InfoBarPosition,
     LineEdit,
@@ -36,6 +35,7 @@ from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import SettingMaterialCard
 from app.view.components.task_picker import (
+    TaskExpandSettingCard,
     TouchTimePicker,
     configure_task_expand_card,
 )
@@ -290,7 +290,7 @@ class TaskCard(SettingMaterialCard):
     def __init__(self, data, parent=None):
         super().__init__(parent)
         self.data = data
-        self.expandCard = ExpandSettingCard(
+        self.expandCard = TaskExpandSettingCard(
             FIF.MEGAPHONE,
             data["name"],
             f"触发时间: {data['time']}",

@@ -49,6 +49,7 @@ from app.config.constants import (
     VERSION,
 )
 from app.config.paths import ASSET_DIR, UPDATE_INSTALLER_PATH
+from app.platform.memory import emptyWorkingSet
 from app.signal_bus import signalBus
 from app.view.pages.broadcast_page import BroadcastEditPage
 from app.view.pages.countdown_page import CountdownEditPage
@@ -914,3 +915,4 @@ class MainWindow(MSFluentWindow):
         cfg.set(cfg.geometry, self.geometry())
         event.ignore()
         self.hide()
+        QTimer.singleShot(0, self, emptyWorkingSet)

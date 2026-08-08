@@ -115,6 +115,10 @@ class FullscreenTaskCloseTest(TestCase):
             self.assertEqual(normalButton._foregroundColor().name(), "#000000")
             self.assertEqual(forcedDarkButton._foregroundColor().name(), "#ffffff")
             self.assertEqual(primaryButton._foregroundColor().name(), "#ffffff")
+            self.assertIn(
+                "rgba(255, 255, 255, 26)",
+                forcedDarkButton.styleSheet(),
+            )
 
         with patch(
             "app.view.pages.broadcast_page.isDarkTheme",
@@ -124,6 +128,20 @@ class FullscreenTaskCloseTest(TestCase):
 
         for button in (normalButton, forcedDarkButton, primaryButton):
             button.close()
+
+    def testCountdownButtonsAlwaysUseTheDarkSurfacePalette(self):
+        page = CountdownEditPage()
+        self.addCleanup(page.deleteLater)
+
+        for button in (
+            page.countdownWin.btn_reset,
+            page.countdownWin.btn_win,
+        ):
+            self.assertTrue(button.force_dark)
+            self.assertIn(
+                "rgba(255, 255, 255, 26)",
+                button.styleSheet(),
+            )
 
     def testClosingTasksFollowsEachMainWindowSetting(self):
         for enabled, pageType, windowName, setting in (

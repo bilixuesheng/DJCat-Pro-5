@@ -145,12 +145,13 @@ class CountdownWindow(FramelessWindow):
         self.btnLayout = QHBoxLayout(self.btnContainer)
         self.btnLayout.setContentsMargins(0, 0, 0, 0)
         self.btnLayout.setSpacing(12)
-        self.btn_reset = VerticalButton(FIF.SYNC, "重置")
-        self.btn_win = VerticalButton(FIF.COPY, "窗口化")
+        self.btn_reset = VerticalButton(FIF.SYNC, "重置", force_dark=True)
+        self.btn_win = VerticalButton(FIF.COPY, "窗口化", force_dark=True)
         self.btn_close = VerticalButton(
             FIF.CLOSE,
             "关闭",
             primary=True,
+            force_dark=True,
         )
 
         self.btn_pause.clicked.connect(self._onPause)

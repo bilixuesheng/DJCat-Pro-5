@@ -103,6 +103,50 @@ class ScheduleShutdownUiTest(TestCase):
             with self.subTest(card=type(card).__name__):
                 self.assertFalse(card.expandCard.isExpand)
 
+    def testTaskHeadersWaitForReleaseAndShowPressedMaterial(self):
+        cards = (TaskCard(broadcast_task()), ShutdownTaskCard(shutdown_task()))
+        for card in cards:
+            self.addCleanup(card.deleteLater)
+            card.resize(600, card.sizeHint().height())
+            card.show()
+            self.app.processEvents()
+            header = card.expandCard.card
+            start = QPoint(120, header.height() // 2)
+
+            QTest.mousePress(header, Qt.MouseButton.LeftButton, pos=start)
+            QTest.qWait(250)
+            with self.subTest(card=type(card).__name__):
+                self.assertFalse(card.expandCard.isExpand)
+                self.assertTrue(card.isPressed)
+
+            QTest.mouseRelease(header, Qt.MouseButton.LeftButton, pos=start)
+            self.assertTrue(card.expandCard.isExpand)
+            self.assertFalse(card.isPressed)
+
+    def testTaskBodyRevealKeepsHeaderAndIconStationary(self):
+        card = TaskCard(broadcast_task())
+        self.addCleanup(card.deleteLater)
+        card.resize(600, card.sizeHint().height())
+        card.show()
+        self.app.processEvents()
+        expandCard = card.expandCard
+        header = expandCard.card
+        iconPosition = header.iconLabel.mapTo(card, QPoint())
+        headerPosition = header.mapTo(card, QPoint())
+
+        expandCard.setExpand(True)
+        QTest.qWait(80)
+        self.assertEqual(header.iconLabel.mapTo(card, QPoint()), iconPosition)
+        self.assertEqual(header.mapTo(card, QPoint()), headerPosition)
+        self.assertEqual(expandCard.verticalScrollBar().value(), 0)
+
+        QTest.qWait(160)
+        expandCard.setExpand(False)
+        QTest.qWait(80)
+        self.assertEqual(header.iconLabel.mapTo(card, QPoint()), iconPosition)
+        self.assertEqual(header.mapTo(card, QPoint()), headerPosition)
+        self.assertEqual(expandCard.verticalScrollBar().value(), 0)
+
     def testTaskHeadersStillExpandOnClick(self):
         card = TaskCard(broadcast_task())
         self.addCleanup(card.deleteLater)

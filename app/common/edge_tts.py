@@ -12,16 +12,6 @@ DEFAULT_EDGE_VOICE = "zh-CN-XiaoxiaoNeural"
 EDGE_SPEECH_PREFIX = "djcat-edge-tts-"
 
 
-def clear_edge_speech_files(directory=None):
-    """Remove speech files left behind by an interrupted previous run."""
-    temp_directory = Path(directory or tempfile.gettempdir())
-    for path in temp_directory.glob(f"{EDGE_SPEECH_PREFIX}*.mp3"):
-        try:
-            path.unlink()
-        except OSError:
-            pass
-
-
 def filter_chinese_voices(voices):
     """Return normalized Edge TTS voices whose locale is Chinese."""
     result = []
