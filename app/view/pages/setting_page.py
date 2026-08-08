@@ -36,7 +36,6 @@ from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import (
     CollapsibleSettingCard,
     CollapsibleSettingCardGroup,
-    QWIDGETSIZE_MAX,
 )
 
 CUSTOM_STYLE_PLACEHOLDER = (
@@ -552,17 +551,15 @@ class SettingPage(ScrollArea):
             groupHasMatch = False
             for index in range(group.cardLayout.count()):
                 card = group.cardLayout.itemAt(index).widget()
+                if card is group.separator:
+                    continue
                 target = card.card if isinstance(card, CollapsibleSettingCard) else card
                 labels = (target.titleLabel.text(), target.contentLabel.text())
                 matched = not text or any(text in label.lower() for label in labels)
                 card.setVisible(matched)
                 groupHasMatch |= matched
             group.setVisible(groupHasMatch)
-            group.cardContainer.setMaximumHeight(
-                QWIDGETSIZE_MAX
-                if text
-                else 0 if group.isCollapsed else QWIDGETSIZE_MAX
-            )
+            group.setSearchExpanded(bool(text))
 
     def showEvent(self, event) -> None:
         self._restoreOrder()

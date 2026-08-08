@@ -8,9 +8,11 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+from qfluentwidgets import FluentIcon
 from shiboken6 import delete
 
 from app.config.cfg import cfg
+from app.view.components.setting_card_group import QWIDGETSIZE_MAX
 from app.view.pages.setting_page import SettingPage
 
 
@@ -115,6 +117,32 @@ class SettingGroupHeaderTest(TestCase):
 
         QTest.mouseClick(header, Qt.MouseButton.LeftButton, pos=start)
         self.assertNotEqual(group.isCollapsed, initialState)
+
+    @patch("app.view.pages.setting_page.threading.Thread")
+    def testSearchExpansionKeepsArrowAndContentInSync(self, _):
+        page = SettingPage()
+        self.addCleanup(page.deleteLater)
+        page.resize(800, 600)
+        page.show()
+        self.app.processEvents()
+        group = page.aiMarkdownGroup
+        group._setCollapsed(True)
+        QTest.qWait(group.collapseAnimation.duration())
+
+        page.setSearchText("AI")
+
+        self.assertTrue(group.isCollapsed)
+        self.assertEqual(group.cardContainer.maximumHeight(), QWIDGETSIZE_MAX)
+        self.assertIs(group.expandButton._icon, FluentIcon.CHEVRON_DOWN_MED)
+
+        group._onExpandClicked()
+        self.assertTrue(group.isCollapsed)
+        self.assertIs(group.expandButton._icon, FluentIcon.CHEVRON_DOWN_MED)
+
+        page.setSearchText("")
+
+        self.assertEqual(group.cardContainer.maximumHeight(), 0)
+        self.assertIs(group.expandButton._icon, FluentIcon.CHEVRON_RIGHT_MED)
 
     def testNewPromptSettingsDefaultToSafeValues(self):
         self.assertFalse(cfg.broadcastMarkdownEnabled.defaultValue)

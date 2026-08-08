@@ -195,6 +195,7 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self.separator = GroupSeparator(self.cardContainer)
         self._headerPressPosition = None
         self._headerPressCanceled = False
+        self._searchExpanded = False
 
         self._initWidget()
         self._initLayout()
@@ -328,6 +329,8 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self.moveDownButton.hide()
 
     def _onExpandClicked(self) -> None:
+        if self._searchExpanded:
+            return
         self._setCollapsed(not self.isCollapsed)
         key = self.objectName()
         expandedGroups = list(cfg.expandedSettingGroups.value)
@@ -343,14 +346,24 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self.collapseAnimation.stop()
         self.collapseAnimation.setStartValue(self.cardContainer.height())
         self.collapseAnimation.setEndValue(
-            0 if isCollapsed else self.cardContainer.sizeHint().height()
+            0
+            if isCollapsed and not self._searchExpanded
+            else self.cardContainer.sizeHint().height()
         )
         self.collapseAnimation.start()
+
+    def setSearchExpanded(self, expanded: bool) -> None:
+        self._searchExpanded = expanded
+        self.collapseAnimation.stop()
+        self.cardContainer.setMaximumHeight(
+            QWIDGETSIZE_MAX if expanded or not self.isCollapsed else 0
+        )
+        self._refreshExpandIcon()
 
     def _refreshExpandIcon(self) -> None:
         icon = (
             FluentIcon.CHEVRON_RIGHT_MED
-            if self.isCollapsed
+            if self.isCollapsed and not self._searchExpanded
             else FluentIcon.CHEVRON_DOWN_MED
         )
         self.expandButton.setIcon(icon)
