@@ -8,9 +8,8 @@ import djcat
 
 
 class WindowStub:
-    def __init__(self, isSilent=False, showSplash=True):
+    def __init__(self, isSilent=False):
         self.isShown = not isSilent
-        self.showSplash = showSplash
 
 
 class StartupTest(TestCase):
@@ -25,13 +24,6 @@ class StartupTest(TestCase):
             window = djcat.startApp(isSilent=True)
 
         self.assertFalse(window.isShown)
-
-    def testExternalStartupScreenDisablesWindowSplash(self):
-        with patch.object(djcat, "MainWindow", WindowStub):
-            window = djcat.startApp(isSilent=False, showSplash=False)
-
-        self.assertTrue(window.isShown)
-        self.assertFalse(window.showSplash)
 
     def testEntryPointDefersMainWindowImport(self):
         repo = Path(__file__).resolve().parents[1]
@@ -49,3 +41,27 @@ class StartupTest(TestCase):
         )
 
         self.assertEqual(result.stdout.strip(), "False")
+
+    def testMainWindowImportDefersTaskPageModules(self):
+        repo = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; "
+                "import app.view.windows.main_window; "
+                "pages = ('broadcast_page', 'countdown_page', "
+                "'schedule_page', 'shutdown_page'); "
+                "print([f'app.view.pages.{page}' in sys.modules "
+                "for page in pages])",
+            ],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(
+            result.stdout.strip().splitlines()[-1],
+            "[False, False, False, False]",
+        )

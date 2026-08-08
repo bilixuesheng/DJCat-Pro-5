@@ -51,18 +51,9 @@ from app.config.constants import (
 from app.config.paths import ASSET_DIR, UPDATE_INSTALLER_PATH
 from app.platform.memory import emptyWorkingSet
 from app.signal_bus import signalBus
-from app.view.pages.broadcast_page import BroadcastEditPage
-from app.view.pages.countdown_page import CountdownEditPage
 from app.view.pages.credits_page import CreditsPage
 from app.view.pages.home_page import HomePage
-from app.view.pages.schedule_page import SchedulePage
 from app.view.pages.setting_page import SettingPage
-from app.view.pages.shutdown_page import (
-    SHUTDOWN_RESULT,
-    WAIT_RESULT,
-    ShutdownPage,
-    show_shutdown_prompt,
-)
 from app.view.shell.tray import SystemTrayIcon
 
 
@@ -120,7 +111,7 @@ class UpdateDialog(MessageBoxBase):
 
 
 class MainWindow(MSFluentWindow):
-    def __init__(self, isSilent: bool = False, showSplash: bool = True):
+    def __init__(self, isSilent: bool = False):
         self.searchEdit = None
         super().__init__(parent=None)
         self.splashScreen = None
@@ -153,10 +144,7 @@ class MainWindow(MSFluentWindow):
 
         self.initWindow()
         if not isSilent:
-            if showSplash:
-                self.initSplashScreen()
-            else:
-                self.show()
+            self.initSplashScreen()
             QApplication.processEvents()
 
         self.initNavigation()
@@ -420,6 +408,12 @@ class MainWindow(MSFluentWindow):
             self._shutdownNow()
             return
 
+        from app.view.pages.shutdown_page import (
+            SHUTDOWN_RESULT,
+            WAIT_RESULT,
+            show_shutdown_prompt,
+        )
+
         result = show_shutdown_prompt(task)
         if result == SHUTDOWN_RESULT:
             self._shutdownNow()
@@ -438,6 +432,10 @@ class MainWindow(MSFluentWindow):
         self.homePage = HomePage(self)
         self.creditsPage = CreditsPage(self)
         self.settingPage = SettingPage(self)
+        self.broadcastEditPage = None
+        self.countdownPage = None
+        self.schedulePage = None
+        self.shutdownPage = None
         self.searchEdit = SearchLineEdit(self.titleBar)
         self.searchEdit.setClearButtonEnabled(True)
         self.searchEdit.setPlaceholderText("搜索设置")
@@ -446,16 +444,6 @@ class MainWindow(MSFluentWindow):
         self.searchEdit.textChanged.connect(self.settingPage.setSearchText)
         self.stackedWidget.currentChanged.connect(self._updateSearchEdit)
         self.stackedWidget.currentChanged.connect(self._onNavigationCompleted)
-        self.broadcastEditPage = BroadcastEditPage(self)
-        self.broadcastEditPage.setObjectName("BroadcastEditPage")
-        self.countdownPage = CountdownEditPage(self)
-        self.countdownPage.setObjectName("CountdownPage")
-
-        self.schedulePage = SchedulePage(self)
-        self.schedulePage.setObjectName("SchedulePage")
-        self.shutdownPage = ShutdownPage(self)
-        self.shutdownPage.setObjectName("ShutdownPage")
-
         self.addSubInterface(self.homePage, FIF.HOME, "主页")
         self.addSubInterface(
             self.creditsPage,
@@ -470,11 +458,6 @@ class MainWindow(MSFluentWindow):
             position=NavigationItemPosition.BOTTOM,
         )
 
-        self.stackedWidget.addWidget(self.broadcastEditPage)
-        self.stackedWidget.addWidget(self.countdownPage)
-        self.stackedWidget.addWidget(self.schedulePage)
-        self.stackedWidget.addWidget(self.shutdownPage)
-
         if "全屏投送" in self.homePage.all_cards:
             self.homePage.all_cards["全屏投送"].clicked.connect(self._navToBroadcast)
         if "考试倒计时" in self.homePage.all_cards:
@@ -484,12 +467,61 @@ class MainWindow(MSFluentWindow):
         if "定时关机" in self.homePage.all_cards:
             self.homePage.all_cards["定时关机"].clicked.connect(self._navToShutdown)
 
-        self.broadcastEditPage.backSignal.connect(self._navToHome)
-        self.broadcastEditPage.editSignal.connect(self._navToBroadcast)
-        self.countdownPage.backSignal.connect(self._navToHome)
-        self.schedulePage.backSignal.connect(self._navToHome)
-        self.shutdownPage.backSignal.connect(self._navToHome)
         self._updateSearchEdit()
+
+    def _getTaskPage(self, attribute, pageClass, objectName):
+        page = getattr(self, attribute)
+        if page is not None:
+            return page, False
+
+        page = pageClass(self)
+        page.setObjectName(objectName)
+        page.backSignal.connect(self._navToHome)
+        self.stackedWidget.addWidget(page)
+        setattr(self, attribute, page)
+        return page, True
+
+    def _getBroadcastEditPage(self):
+        from app.view.pages.broadcast_page import BroadcastEditPage
+
+        page, created = self._getTaskPage(
+            "broadcastEditPage",
+            BroadcastEditPage,
+            "BroadcastEditPage",
+        )
+        if created:
+            page.editSignal.connect(self._navToBroadcast)
+        return page
+
+    def _getCountdownPage(self):
+        from app.view.pages.countdown_page import CountdownEditPage
+
+        page, _ = self._getTaskPage(
+            "countdownPage",
+            CountdownEditPage,
+            "CountdownPage",
+        )
+        return page
+
+    def _getSchedulePage(self):
+        from app.view.pages.schedule_page import SchedulePage
+
+        page, _ = self._getTaskPage(
+            "schedulePage",
+            SchedulePage,
+            "SchedulePage",
+        )
+        return page
+
+    def _getShutdownPage(self):
+        from app.view.pages.shutdown_page import ShutdownPage
+
+        page, _ = self._getTaskPage(
+            "shutdownPage",
+            ShutdownPage,
+            "ShutdownPage",
+        )
+        return page
 
     def _updateSearchEdit(self, *args):
         pendingTarget = (
@@ -552,19 +584,19 @@ class MainWindow(MSFluentWindow):
         )
 
     def _navToBroadcast(self):
-        self.switchTo(self.broadcastEditPage)
+        self.switchTo(self._getBroadcastEditPage())
         self.navigationInterface.setCurrentItem(None)
 
     def _navToCountdown(self):
-        self.switchTo(self.countdownPage)
+        self.switchTo(self._getCountdownPage())
         self.navigationInterface.setCurrentItem(None)
 
     def _navToSchedule(self):
-        self.switchTo(self.schedulePage)
+        self.switchTo(self._getSchedulePage())
         self.navigationInterface.setCurrentItem(None)
 
     def _navToShutdown(self):
-        self.switchTo(self.shutdownPage)
+        self.switchTo(self._getShutdownPage())
         self.navigationInterface.setCurrentItem(None)
 
     def _navToHome(self):

@@ -1,11 +1,8 @@
 import os
 import sys
 import traceback
-from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication
 
 
 MainWindow = None
@@ -29,52 +26,12 @@ def exceptionHook(excType, excValue, excTraceback):
         sys.__excepthook__(*excInfo)
 
 
-def startApp(isSilent: bool = False, showSplash: bool = True):
+def startApp(isSilent: bool = False):
     windowClass = MainWindow
     if windowClass is None:
         from app.view.windows.main_window import MainWindow as windowClass
 
-    if showSplash:
-        return windowClass(isSilent=isSilent)
-    return windowClass(isSilent=isSilent, showSplash=False)
-
-
-def createStartupScreen() -> QLabel:
-    iconPath = Path(__file__).resolve().parent / "app" / "assets" / "logo.png"
-    icon = QPixmap(str(iconPath))
-    canvas = QPixmap(800, 450)
-    canvas.fill(QApplication.palette().window().color())
-
-    if not icon.isNull():
-        icon = icon.scaled(
-            96,
-            96,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        painter = QPainter(canvas)
-        painter.drawPixmap(
-            (canvas.width() - icon.width()) // 2,
-            (canvas.height() - icon.height()) // 2,
-            icon,
-        )
-        painter.end()
-
-    splashScreen = QLabel()
-    splashScreen.setPixmap(canvas)
-    splashScreen.setWindowFlags(
-        Qt.WindowType.SplashScreen | Qt.WindowType.WindowStaysOnTopHint
-    )
-    splashScreen.setWindowIcon(QIcon(str(iconPath)))
-    splashScreen.resize(canvas.size())
-    screen = QApplication.primaryScreen()
-    if screen is not None:
-        splashScreen.move(
-            screen.availableGeometry().center() - splashScreen.rect().center()
-        )
-    splashScreen.show()
-    QApplication.processEvents()
-    return splashScreen
+    return windowClass(isSilent=isSilent)
 
 
 def configureLogging():
@@ -97,7 +54,6 @@ def main():
 
     app = QApplication(sys.argv)
     isSilent = "--silence" in sys.argv
-    startupScreen = None if isSilent else createStartupScreen()
 
     from PySide6.QtGui import QColor
     from qfluentwidgets import qconfig, setThemeColor
@@ -112,19 +68,7 @@ def main():
     qconfig.load(CONFIG_PATH, cfg)
     setThemeColor(QColor(49, 101, 49))
 
-    try:
-        app.window = startApp(
-            isSilent=isSilent,
-            showSplash=startupScreen is None,
-        )
-    except Exception:
-        if startupScreen is not None:
-            startupScreen.close()
-        raise
-
-    if startupScreen is not None:
-        startupScreen.close()
-        startupScreen.deleteLater()
+    app.window = startApp(isSilent=isSilent)
     app.aboutToQuit.connect(app.window._shutdownResources)
     sys.exit(app.exec())
 

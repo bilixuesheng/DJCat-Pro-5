@@ -114,20 +114,80 @@ class SettingSearchTest(TestCase):
 
     def testLatestQueuedDestinationReplacesIntermediateDestination(self):
         changes = []
+        schedulePage = self.window._getSchedulePage()
         self.window.stackedWidget.currentChanged.connect(
             lambda _: changes.append(self.window.stackedWidget.currentWidget())
         )
 
         self.window.switchTo(self.window.settingPage)
         self.window.switchTo(self.window.creditsPage)
-        self.window.switchTo(self.window.schedulePage)
+        self.window.switchTo(schedulePage)
         QTest.qWait(800)
 
         self.assertEqual(
             changes,
-            [self.window.settingPage, self.window.schedulePage],
+            [self.window.settingPage, schedulePage],
         )
         self.assertIs(
             self.window.stackedWidget.currentWidget(),
-            self.window.schedulePage,
+            schedulePage,
         )
+
+    def testTaskPagesAreCreatedOnlyWhenFirstOpened(self):
+        pageSpecs = (
+            ("全屏投送", "broadcastEditPage"),
+            ("考试倒计时", "countdownPage"),
+            ("定时播报", "schedulePage"),
+            ("定时关机", "shutdownPage"),
+        )
+        self.assertTrue(
+            all(getattr(self.window, name) is None for _, name in pageSpecs)
+        )
+
+        for title, name in pageSpecs:
+            with self.subTest(page=name):
+                previousCount = self.window.stackedWidget.count()
+                self.window.homePage.all_cards[title].clicked.emit()
+                QTest.qWait(500)
+                page = getattr(self.window, name)
+
+                self.assertIsNotNone(page)
+                self.assertIs(self.window.stackedWidget.currentWidget(), page)
+                self.assertEqual(
+                    self.window.stackedWidget.count(),
+                    previousCount + 1,
+                )
+
+                self.window._navToHome()
+                QTest.qWait(500)
+                self.window.homePage.all_cards[title].clicked.emit()
+                QTest.qWait(500)
+
+                self.assertIs(getattr(self.window, name), page)
+                self.assertEqual(
+                    self.window.stackedWidget.count(),
+                    previousCount + 1,
+                )
+
+                self.window._navToHome()
+                QTest.qWait(500)
+
+    def testBackgroundSchedulesDoNotLoadManagementPages(self):
+        broadcastTask = {"type": "系统TTS", "content": "测试"}
+        shutdownTask = {"notify": False}
+
+        with (
+            patch.object(
+                self.window,
+                "_scheduledTask",
+                side_effect=(broadcastTask, shutdownTask),
+            ),
+            patch.object(self.window, "_playAudioTask") as playAudio,
+            patch.object(self.window, "_handleShutdownTask") as handleShutdown,
+        ):
+            self.window._checkSchedule()
+
+        playAudio.assert_called_once_with(broadcastTask)
+        handleShutdown.assert_called_once_with(shutdownTask)
+        self.assertIsNone(self.window.schedulePage)
+        self.assertIsNone(self.window.shutdownPage)
