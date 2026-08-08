@@ -8,6 +8,7 @@ from PySide6.QtCore import QPoint, QPropertyAnimation, Qt
 from PySide6.QtGui import QImage
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication
+from qfluentwidgets import TransparentToolButton
 from shiboken6 import delete
 
 from app.config.cfg import cfg
@@ -40,6 +41,32 @@ class SettingGroupHeaderTest(TestCase):
                 for card in group.settingCards():
                     header = getattr(card, "card", card)
                     self.assertEqual(header.height(), group.headerWidget.height())
+
+    @patch("app.view.pages.setting_page.threading.Thread")
+    def testSettingGroupsDoNotExposeReorderControls(self, _):
+        page = SettingPage()
+        self.addCleanup(page.deleteLater)
+        page.resize(800, 600)
+        page.show()
+        self.app.processEvents()
+
+        self.assertEqual(
+            [group.objectName() for group in page._settingGroups()],
+            [
+                "personalization",
+                "banner",
+                "broadcast",
+                "aiMarkdown",
+                "countdown",
+                "software",
+                "about",
+            ],
+        )
+        for group in page._settingGroups():
+            with self.subTest(group=group.objectName()):
+                self.assertFalse(
+                    group.headerWidget.findChildren(TransparentToolButton)
+                )
 
     @patch("app.view.pages.setting_page.threading.Thread")
     def testHeaderGeometryStaysFixedDuringExpandAnimation(self, _):

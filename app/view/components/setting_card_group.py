@@ -8,9 +8,7 @@ from PySide6.QtCore import (
     Property,
     QPropertyAnimation,
     QRectF,
-    QSize,
     Qt,
-    Signal,
 )
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
@@ -31,7 +29,6 @@ from qfluentwidgets import (
     IconWidget,
     SettingCard,
     StrongBodyLabel,
-    TransparentToolButton,
     isDarkTheme,
 )
 from qfluentwidgets.components.settings.expand_setting_card import (
@@ -304,8 +301,6 @@ class CollapsibleSettingCard(QWidget):
 
 
 class CollapsibleSettingCardGroup(SettingMaterialCard):
-    orderChanged = Signal()
-
     def __init__(
         self,
         title: str,
@@ -320,8 +315,6 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self.iconWidget = IconWidget(icon, self) if icon is not None else None
         self.titleLabel = StrongBodyLabel(title, self)
         self.contentLabel = CaptionLabel(content, self)
-        self.moveUpButton = TransparentToolButton(FluentIcon.UP, self)
-        self.moveDownButton = TransparentToolButton(FluentIcon.DOWN, self)
         self.expandButton = SettingExpandButton(self)
         self.cardContainer = QWidget(self)
         self.cardView = QWidget(self.cardContainer)
@@ -350,12 +343,7 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self._bind()
 
     def _initWidget(self) -> None:
-        for button in (self.moveUpButton, self.moveDownButton):
-            button.setFixedSize(26, 26)
-            button.setIconSize(QSize(12, 12))
         self.expandButton.setFixedSize(26, 26)
-        self.moveUpButton.hide()
-        self.moveDownButton.hide()
         if self.iconWidget is not None:
             self.iconWidget.setFixedSize(24, 24)
         self.headerWidget.setFixedHeight(70)
@@ -382,8 +370,6 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self.titleLayout.addWidget(self.contentLabel)
         self.headerLayout.addLayout(self.titleLayout)
         self.headerLayout.addStretch(1)
-        self.headerLayout.addWidget(self.moveUpButton)
-        self.headerLayout.addWidget(self.moveDownButton)
         self.headerLayout.addWidget(self.expandButton)
 
         self.cardLayout.setContentsMargins(0, 0, 0, 0)
@@ -403,8 +389,6 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
 
     def _bind(self) -> None:
         self.expandButton.clicked.connect(self._onExpandClicked)
-        self.moveUpButton.clicked.connect(lambda: self._reorder(-1))
-        self.moveDownButton.clicked.connect(lambda: self._reorder(1))
         self.collapseAnimation.finished.connect(self._onCollapseFinished)
         self.collapseAnimation.valueChanged.connect(self._onCollapseValueChanged)
 
@@ -510,19 +494,12 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         if shouldToggle:
             self._onExpandClicked()
 
-    def enterEvent(self, event) -> None:
-        super().enterEvent(event)
-        self.moveUpButton.show()
-        self.moveDownButton.show()
-
     def leaveEvent(self, event) -> None:
         if self._headerPressPosition is not None:
             self._headerPressCanceled = True
             self.isPressed = False
             self._updateBackgroundColor()
         super().leaveEvent(event)
-        self.moveUpButton.hide()
-        self.moveDownButton.hide()
 
     def _onExpandClicked(self) -> None:
         if self._searchActive:
@@ -583,35 +560,3 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         height = max(0, int(height))
         self.setFixedHeight(self.headerWidget.height() + height)
         _set_reveal_painting(self.cardView, height > 0)
-
-    def _reorder(self, offset: int) -> None:
-        groups = self._siblings()
-        target = groups[groups.index(self) + offset]
-        layout = self.parentWidget().layout()
-        layout.insertWidget(layout.indexOf(target), self)
-        self._saveOrder()
-        for group in self._siblings():
-            group.updateArrows()
-        self.orderChanged.emit()
-
-    def _siblings(self) -> list[CollapsibleSettingCardGroup]:
-        layout = self.parentWidget().layout()
-        return [
-            layout.itemAt(index).widget()
-            for index in range(layout.count())
-            if isinstance(
-                layout.itemAt(index).widget(),
-                CollapsibleSettingCardGroup,
-            )
-        ]
-
-    def updateArrows(self) -> None:
-        groups = self._siblings()
-        index = groups.index(self)
-        self.moveUpButton.setEnabled(index > 0)
-        self.moveDownButton.setEnabled(index < len(groups) - 1)
-
-    def _saveOrder(self) -> None:
-        keys = [group.objectName() for group in self._siblings()]
-        staleKeys = [key for key in cfg.settingGroupOrder.value if key not in keys]
-        cfg.set(cfg.settingGroupOrder, keys + staleKeys)

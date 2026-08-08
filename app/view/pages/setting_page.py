@@ -566,7 +566,6 @@ class SettingPage(ScrollArea):
             group.setSearchExpanded(bool(text))
 
     def showEvent(self, event) -> None:
-        self._restoreOrder()
         self._refreshAIQuota()
         super().showEvent(event)
 
@@ -629,14 +628,3 @@ class SettingPage(ScrollArea):
                 CollapsibleSettingCardGroup,
             )
         ]
-
-    def _restoreOrder(self) -> None:
-        groups = self._settingGroups()
-        groupByKey = {group.objectName(): group for group in groups}
-        keys = [key for key in cfg.settingGroupOrder.value if key in groupByKey]
-        keys += [key for key in groupByKey if key not in keys]
-        startIndex = self.vBoxLayout.indexOf(self.titleWidget) + 1
-        for index, key in enumerate(keys):
-            self.vBoxLayout.insertWidget(startIndex + index, groupByKey[key])
-        for group in groups:
-            group.updateArrows()

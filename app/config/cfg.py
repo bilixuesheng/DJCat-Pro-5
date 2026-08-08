@@ -156,7 +156,6 @@ class Config(QConfig):
     shutdownTasks = ConfigItem("Schedule", "ShutdownTasks", [])
 
     expandedSettingGroups = ConfigItem("UI", "ExpandedSettingGroups", [])
-    settingGroupOrder = ConfigItem("UI", "SettingGroupOrder", [])
 
 
 cfg = Config()
