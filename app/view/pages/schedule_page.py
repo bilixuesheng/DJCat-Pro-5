@@ -61,6 +61,9 @@ class BroadcastSettingCard(SettingCard):
         self.hBoxLayout.addWidget(widget, 0, Qt.AlignmentFlag.AlignRight)
         self.hBoxLayout.addSpacing(16)
 
+    def paintEvent(self, event):
+        pass
+
 
 class ChineseVoiceLoader(QObject):
     finished = Signal(list, str)

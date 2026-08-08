@@ -183,9 +183,7 @@ class AIMarkdownStyleSettingCard(CollapsibleSettingCard):
         enabled = cfg.aiMarkdownCustomStyleEnabled.value
         self.switchButton.setChecked(enabled)
         self.switchButton.setText("开启" if enabled else "关闭")
-        self.isExpand = enabled
-        self.setProperty("isExpand", enabled)
-        self.view.setMaximumHeight(QWIDGETSIZE_MAX if enabled else 0)
+        self.setExpandedImmediately(enabled)
 
         self.saveTimer.setSingleShot(True)
         self.saveTimer.setInterval(400)
@@ -549,14 +547,11 @@ class SettingPage(ScrollArea):
         text = text.strip().lower()
         for group in self._settingGroups():
             groupHasMatch = False
-            for index in range(group.cardLayout.count()):
-                card = group.cardLayout.itemAt(index).widget()
-                if card is group.separator:
-                    continue
+            for card in group.settingCards():
                 target = card.card if isinstance(card, CollapsibleSettingCard) else card
                 labels = (target.titleLabel.text(), target.contentLabel.text())
                 matched = not text or any(text in label.lower() for label in labels)
-                card.setVisible(matched)
+                group.setSettingCardVisible(card, matched)
                 groupHasMatch |= matched
             group.setVisible(groupHasMatch)
             group.setSearchExpanded(bool(text))

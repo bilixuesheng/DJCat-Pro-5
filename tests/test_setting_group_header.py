@@ -71,6 +71,50 @@ class SettingGroupHeaderTest(TestCase):
         )
 
     @patch("app.view.pages.setting_page.threading.Thread")
+    def testSettingCardsRevealBelowHeaderWithoutBeingCompressed(self, _):
+        page = SettingPage()
+        self.addCleanup(page.deleteLater)
+        page.resize(800, 600)
+        page.show()
+        self.app.processEvents()
+        group = page.bannerGroup
+        group._setCollapsed(True)
+        QTest.qWait(group.collapseAnimation.duration())
+        card = group.settingCards()[0]
+        initialGeometry = card.geometry()
+
+        group._setCollapsed(False)
+        QTest.qWait(40)
+        self.app.processEvents()
+
+        self.assertEqual(group.cardView.y(), 0)
+        self.assertEqual(card.geometry(), initialGeometry)
+        self.assertEqual(card.mapTo(group, QPoint()).y(), 67)
+
+    @patch("app.view.pages.setting_page.threading.Thread")
+    def testAIMarkdownEditorRevealsBelowStationaryHeader(self, _):
+        page = SettingPage()
+        self.addCleanup(page.deleteLater)
+        page.resize(800, 600)
+        page.show()
+        self.app.processEvents()
+        card = page.aiStyleCard
+        card.setExpandedImmediately(False)
+        editorGeometry = card.editorWidget.geometry()
+
+        for expanded in (True, False):
+            card.setExpand(expanded)
+            QTest.qWait(80)
+            self.app.processEvents()
+            with self.subTest(expanded=expanded):
+                self.assertEqual(card.card.y(), 0)
+                self.assertEqual(card.card.height(), 70)
+                self.assertEqual(card.view.y(), 70)
+                self.assertEqual(card.viewContent.y(), 0)
+                self.assertEqual(card.editorWidget.geometry(), editorGeometry)
+            QTest.qWait(card.expandAnimation.duration())
+
+    @patch("app.view.pages.setting_page.threading.Thread")
     def testExpandedGroupDrawsHeaderSeparator(self, _):
         page = SettingPage()
         self.addCleanup(page.deleteLater)
@@ -90,6 +134,35 @@ class SettingGroupHeaderTest(TestCase):
         self.assertTrue(
             any(image.pixelColor(x, 1).alpha() for x in range(image.width()))
         )
+
+    @patch("app.view.pages.setting_page.threading.Thread")
+    def testSettingCardsHaveVisibleSeparatorsWithoutOrphans(self, _):
+        page = SettingPage()
+        self.addCleanup(page.deleteLater)
+        page.resize(800, 600)
+        page.show()
+        self.app.processEvents()
+        group = page.countdownGroup
+
+        self.assertEqual(len(group._itemSeparators), len(group.settingCards()))
+        self.assertIsNone(group._itemSeparators[0])
+        for separator in group._itemSeparators[1:]:
+            with self.subTest(separator=separator):
+                self.assertFalse(separator.isHidden())
+                image = QImage(separator.size(), QImage.Format.Format_ARGB32)
+                image.fill(Qt.GlobalColor.transparent)
+                separator.render(image)
+                self.assertTrue(
+                    any(
+                        image.pixelColor(x, 1).alpha()
+                        for x in range(image.width())
+                    )
+                )
+
+        page.setSearchText("重置时间")
+
+        self.assertTrue(group.isVisible())
+        self.assertTrue(all(s.isHidden() for s in group._itemSeparators[1:]))
 
     @patch("app.view.components.setting_card_group.cfg.set")
     @patch("app.view.pages.setting_page.threading.Thread")
@@ -137,6 +210,14 @@ class SettingGroupHeaderTest(TestCase):
 
         group._onExpandClicked()
         self.assertTrue(group.isCollapsed)
+        QTest.qWait(group.collapseAnimation.duration())
+        self.assertEqual(group.cardContainer.maximumHeight(), 0)
+        self.assertIs(group.expandButton._icon, FluentIcon.CHEVRON_RIGHT_MED)
+
+        group._onExpandClicked()
+        QTest.qWait(group.collapseAnimation.duration())
+        self.assertTrue(group.isCollapsed)
+        self.assertGreater(group.cardContainer.height(), 0)
         self.assertIs(group.expandButton._icon, FluentIcon.CHEVRON_DOWN_MED)
 
         page.setSearchText("")

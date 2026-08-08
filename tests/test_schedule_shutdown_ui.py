@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QPoint, Qt
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
@@ -18,6 +18,7 @@ from shiboken6 import delete, isValid
 
 from app.view.components.task_picker import TouchTimePicker
 from app.view.pages.schedule_page import (
+    BroadcastSettingCard,
     ChineseVoiceLoader,
     SchedulePage,
     TaskCard,
@@ -199,6 +200,25 @@ class ScheduleShutdownUiTest(TestCase):
             rendered.pixelColor(300, y),
             rendered.pixelColor(300, y - 1),
         )
+
+    def testBroadcastFormRowsDoNotPaintNestedCards(self):
+        form, _ = create_task_form(None)
+        self.addCleanup(form.deleteLater)
+        form.resize(700, form.sizeHint().height())
+        form.show()
+        self.app.processEvents()
+
+        cards = form.findChildren(BroadcastSettingCard)
+        self.assertGreater(len(cards), 1)
+        for card in cards:
+            image = QImage(card.size(), QImage.Format.Format_ARGB32)
+            image.fill(Qt.GlobalColor.transparent)
+            card.render(image)
+            with self.subTest(card=card.titleLabel.text()):
+                self.assertEqual(
+                    image.pixelColor(5, card.height() // 2),
+                    card.palette().color(card.backgroundRole()),
+                )
 
     @patch.object(ChineseVoiceLoader, "start")
     def testEdgeTtsFormKeepsAConstrainedWidth(self, startLoader):
