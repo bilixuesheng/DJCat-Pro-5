@@ -358,7 +358,7 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self.moveDownButton.hide()
         if self.iconWidget is not None:
             self.iconWidget.setFixedSize(24, 24)
-        self.headerWidget.setFixedHeight(64)
+        self.headerWidget.setFixedHeight(70)
         self.titleLabel.setFixedHeight(22)
         self.contentLabel.setFixedHeight(18)
 
@@ -372,7 +372,7 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self._refreshExpandIcon()
 
     def _initLayout(self) -> None:
-        self.headerLayout.setContentsMargins(16, 12, 8, 12)
+        self.headerLayout.setContentsMargins(16, 15, 8, 15)
         self.headerLayout.setSpacing(12)
         if self.iconWidget is not None:
             self.headerLayout.addWidget(self.iconWidget)
@@ -399,6 +399,7 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self.vBoxLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.vBoxLayout.addWidget(self.headerWidget)
         self.vBoxLayout.addWidget(self.cardContainer)
+        self.setFixedHeight(self.headerWidget.height())
 
     def _bind(self) -> None:
         self.expandButton.clicked.connect(self._onExpandClicked)
@@ -463,6 +464,12 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self.cardLayout.activate()
         height = self.cardLayout.sizeHint().height()
         self.cardView.setFixedHeight(height)
+        if (
+            not self._isVisuallyCollapsed()
+            and self.collapseAnimation.state()
+            == QPropertyAnimation.State.Stopped
+        ):
+            self.setFixedHeight(self.headerWidget.height() + height)
         return height
 
     def mousePressEvent(self, event) -> None:
@@ -553,7 +560,7 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self.collapseAnimation.stop()
         isCollapsed = self._isVisuallyCollapsed()
         self.cardContainer.setMaximumHeight(0 if isCollapsed else QWIDGETSIZE_MAX)
-        _set_reveal_painting(self.cardView, not isCollapsed)
+        self._onCollapseValueChanged(0 if isCollapsed else self._contentHeight())
         self._refreshExpandIcon()
 
     def _isVisuallyCollapsed(self) -> bool:
@@ -568,9 +575,14 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
     def _onCollapseFinished(self) -> None:
         if not self._isVisuallyCollapsed():
             self.cardContainer.setMaximumHeight(QWIDGETSIZE_MAX)
+            self._onCollapseValueChanged(self._contentHeight())
+        else:
+            self._onCollapseValueChanged(0)
 
     def _onCollapseValueChanged(self, height) -> None:
-        _set_reveal_painting(self.cardView, int(height) > 0)
+        height = max(0, int(height))
+        self.setFixedHeight(self.headerWidget.height() + height)
+        _set_reveal_painting(self.cardView, height > 0)
 
     def _reorder(self, offset: int) -> None:
         groups = self._siblings()

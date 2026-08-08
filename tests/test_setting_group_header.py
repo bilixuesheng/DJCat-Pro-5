@@ -35,8 +35,11 @@ class SettingGroupHeaderTest(TestCase):
                 self.assertEqual(group.iconWidget.size().width(), 24)
                 self.assertTrue(group.contentLabel.text())
                 self.assertTrue(group.contentLabel.isVisible())
-                self.assertEqual(group.headerWidget.height(), 64)
+                self.assertEqual(group.headerWidget.height(), 70)
                 self.assertGreaterEqual(group.headerLayout.contentsMargins().top(), 12)
+                for card in group.settingCards():
+                    header = getattr(card, "card", card)
+                    self.assertEqual(header.height(), group.headerWidget.height())
 
     @patch("app.view.pages.setting_page.threading.Thread")
     def testHeaderGeometryStaysFixedDuringExpandAnimation(self, _):
@@ -57,18 +60,33 @@ class SettingGroupHeaderTest(TestCase):
         )
 
         group._setCollapsed(False)
-        QTest.qWait(40)
-        self.app.processEvents()
-
-        self.assertEqual(
-            (
-                group.headerWidget.geometry(),
-                group.iconWidget.geometry(),
-                group.titleLabel.geometry(),
-                group.contentLabel.geometry(),
-            ),
-            initialGeometry,
-        )
+        group.collapseAnimation.pause()
+        for frame in (0, 1, 8, 16, 32, 40):
+            group.collapseAnimation.setCurrentTime(frame)
+            self.app.processEvents()
+            with self.subTest(frame=frame):
+                self.assertEqual(
+                    (
+                        group.headerWidget.geometry(),
+                        group.iconWidget.geometry(),
+                        group.titleLabel.geometry(),
+                        group.contentLabel.geometry(),
+                    ),
+                    initialGeometry,
+                )
+                self.assertEqual(
+                    group.height(),
+                    group.headerWidget.height()
+                    + int(group.collapseAnimation.currentValue()),
+                )
+                self.assertEqual(
+                    group.cardContainer.geometry().top(),
+                    group.headerWidget.height(),
+                )
+                self.assertGreaterEqual(
+                    group.settingCards()[0].mapTo(group, QPoint()).y(),
+                    group.headerWidget.height(),
+                )
 
     @patch("app.view.pages.setting_page.threading.Thread")
     def testSettingCardsRevealBelowHeaderWithoutBeingCompressed(self, _):
@@ -94,7 +112,7 @@ class SettingGroupHeaderTest(TestCase):
         self.assertIsNone(group.cardView.graphicsEffect())
         self.assertEqual(group.cardView.y(), 0)
         self.assertEqual(card.geometry(), initialGeometry)
-        self.assertEqual(card.mapTo(group, QPoint()).y(), 67)
+        self.assertEqual(card.mapTo(group, QPoint()).y(), 73)
 
     @patch("app.view.pages.setting_page.threading.Thread")
     def testAIMarkdownEditorRevealsBelowStationaryHeader(self, _):
