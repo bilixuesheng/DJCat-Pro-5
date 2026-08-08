@@ -120,7 +120,7 @@ class UpdateDialog(MessageBoxBase):
 
 
 class MainWindow(MSFluentWindow):
-    def __init__(self, isSilent: bool = False):
+    def __init__(self, isSilent: bool = False, showSplash: bool = True):
         self.searchEdit = None
         super().__init__(parent=None)
         self.splashScreen = None
@@ -153,7 +153,10 @@ class MainWindow(MSFluentWindow):
 
         self.initWindow()
         if not isSilent:
-            self.initSplashScreen()
+            if showSplash:
+                self.initSplashScreen()
+            else:
+                self.show()
             QApplication.processEvents()
 
         self.initNavigation()

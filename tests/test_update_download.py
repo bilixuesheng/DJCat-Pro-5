@@ -188,7 +188,7 @@ class UpdateDownloadTest(TestCase):
             self.assertEqual(list(updateDir.iterdir()), [])
 
     def testLoggingKeepsFourteenDays(self):
-        with patch.object(djcat.logger, "add") as add:
+        with patch("loguru.logger.add") as add:
             djcat.configureLogging()
 
         self.assertEqual(add.call_args.kwargs["rotation"], "00:00")
