@@ -392,7 +392,7 @@ class UpdateWindowLifecycleTest(TestCase):
             ),
         ):
             self.window._onUpdateChecked(
-                {"latest_version": "5.0.0-pre.18", "update_note": "note"},
+                {"latest_version": "9999.0.0", "update_note": "note"},
                 "",
                 False,
             )
@@ -426,7 +426,7 @@ class UpdateWindowLifecycleTest(TestCase):
         toolTip = StateToolTipStub("", "", self.window)
         self.window._downloadWorker = worker
         self.window._downloadStateToolTip = toolTip
-        self.window._downloadVersion = "5.0.0-pre.18"
+        self.window._downloadVersion = "9999.0.0"
         self.window.hide()
 
         with tempfile.TemporaryDirectory() as tempDir:
