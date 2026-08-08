@@ -187,10 +187,12 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
             self.cardContainer, QByteArray(b"maximumHeight"), self
         )
 
-        self.headerLayout = QHBoxLayout()
+        self.headerWidget = QWidget(self)
+        self.headerLayout = QHBoxLayout(self.headerWidget)
         self.titleLayout = QVBoxLayout()
         self.cardLayout = QVBoxLayout(self.cardContainer)
         self.vBoxLayout = QVBoxLayout(self)
+        self.separator = GroupSeparator(self.cardContainer)
         self._headerPressPosition = None
         self._headerPressCanceled = False
 
@@ -206,6 +208,7 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self.moveDownButton.hide()
         if self.iconWidget is not None:
             self.iconWidget.setFixedSize(24, 24)
+        self.headerWidget.setFixedHeight(64)
         self.titleLabel.setFixedHeight(22)
         self.contentLabel.setFixedHeight(18)
 
@@ -234,11 +237,12 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
 
         self.cardLayout.setContentsMargins(0, 0, 0, 0)
         self.cardLayout.setSpacing(0)
+        self.cardLayout.addWidget(self.separator)
 
         self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
         self.vBoxLayout.setSpacing(0)
         self.vBoxLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.vBoxLayout.addLayout(self.headerLayout)
+        self.vBoxLayout.addWidget(self.headerWidget)
         self.vBoxLayout.addWidget(self.cardContainer)
 
     def _bind(self) -> None:
