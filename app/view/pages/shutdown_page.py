@@ -15,7 +15,6 @@ from qfluentwidgets import (
     PickerColumnFormatter,
     PillPushButton,
     PushButton,
-    SettingCard,
     SpinBox,
     SubtitleLabel,
     SwitchButton,
@@ -29,6 +28,7 @@ from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import SettingMaterialCard
 from app.view.components.task_picker import (
     TaskExpandSettingCard,
+    TaskFormSettingCard,
     TouchTimePicker,
     configure_task_expand_card,
 )
@@ -51,11 +51,8 @@ class SecondsFormatter(PickerColumnFormatter):
         return int(value[:-1])
 
 
-class ShutdownSettingCard(SettingCard):
-    def __init__(self, icon, title, content, widget, parent=None):
-        super().__init__(icon, title, content, parent)
-        self.hBoxLayout.addWidget(widget, 0, Qt.AlignmentFlag.AlignRight)
-        self.hBoxLayout.addSpacing(16)
+class ShutdownSettingCard(TaskFormSettingCard):
+    pass
 
 
 def create_shutdown_form(parent, initialData=None):
@@ -293,9 +290,10 @@ class ShutdownTaskCard(SettingMaterialCard):
         buttonLayout = QHBoxLayout()
         buttonLayout.addStretch(1)
         buttonLayout.addWidget(deleteButton)
+        buttonLayout.setContentsMargins(16, 0, 16, 0)
 
         containerLayout = QVBoxLayout()
-        containerLayout.setContentsMargins(48, 10, 16, 16)
+        containerLayout.setContentsMargins(0, 0, 0, 16)
         containerLayout.addWidget(self.formWidget)
         containerLayout.addSpacing(10)
         containerLayout.addLayout(buttonLayout)

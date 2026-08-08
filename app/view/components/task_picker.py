@@ -8,9 +8,30 @@ from PySide6.QtCore import (
     Qt,
 )
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QApplication, QAbstractItemView, QScroller
-from qfluentwidgets import ExpandSettingCard, TimePicker, isDarkTheme
+from PySide6.QtWidgets import (
+    QApplication,
+    QAbstractItemView,
+    QGraphicsOpacityEffect,
+    QScroller,
+    QSizePolicy,
+)
+from qfluentwidgets import (
+    ExpandSettingCard,
+    SettingCard,
+    TimePicker,
+    isDarkTheme,
+)
 from qfluentwidgets import FluentIcon as FIF
+
+
+def _set_reveal_painting(widget, enabled):
+    if enabled:
+        if widget.graphicsEffect() is not None:
+            widget.setGraphicsEffect(None)
+    elif widget.graphicsEffect() is None:
+        effect = QGraphicsOpacityEffect(widget)
+        effect.setOpacity(0)
+        widget.setGraphicsEffect(effect)
 
 
 class TouchTimePicker(TimePicker):
@@ -45,6 +66,29 @@ class TouchTimePicker(TimePicker):
         column.scrollToItem(item)
 
 
+class TaskFormSettingCard(SettingCard):
+    def __init__(self, icon, title, content, widget, parent=None):
+        super().__init__(icon, title, content, parent)
+        for label in (self.titleLabel, self.contentLabel):
+            label.setWordWrap(False)
+            label.setSizePolicy(
+                QSizePolicy.Policy.Ignored,
+                QSizePolicy.Policy.Preferred,
+            )
+        self.hBoxLayout.setStretchFactor(self.vBoxLayout, 1)
+        self.hBoxLayout.addWidget(widget, 0, Qt.AlignmentFlag.AlignRight)
+        self.hBoxLayout.addSpacing(16)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setPen(
+            QColor(0, 0, 0, 50)
+            if isDarkTheme()
+            else QColor(0, 0, 0, 19)
+        )
+        painter.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
+
+
 class TaskExpandSettingCard(ExpandSettingCard):
     """Expand a task by revealing its body below a stationary header."""
 
@@ -58,6 +102,9 @@ class TaskExpandSettingCard(ExpandSettingCard):
         )
         self.revealAnimation.setDuration(200)
         self.revealAnimation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.viewLayout.setContentsMargins(0, 0, 0, 0)
+        self.viewLayout.setSpacing(0)
+        _set_reveal_painting(self.view, False)
         self.verticalScrollBar().setValue(0)
 
     def getRevealHeight(self):
@@ -71,6 +118,7 @@ class TaskExpandSettingCard(ExpandSettingCard):
         parent = self.parentWidget()
         if parent is not None and getattr(parent, "expandCard", None) is self:
             parent.setFixedHeight(height)
+        _set_reveal_painting(self.view, self._revealHeight > 0)
 
     revealHeight = Property(int, getRevealHeight, setRevealHeight)
 

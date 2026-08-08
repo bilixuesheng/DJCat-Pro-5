@@ -82,11 +82,16 @@ class SettingGroupHeaderTest(TestCase):
         QTest.qWait(group.collapseAnimation.duration())
         card = group.settingCards()[0]
         initialGeometry = card.geometry()
+        self.assertIsNotNone(group.cardView.graphicsEffect())
 
         group._setCollapsed(False)
+        self.assertEqual(group.cardContainer.height(), 0)
+        self.assertIsNotNone(group.cardView.graphicsEffect())
+        self.app.processEvents()
         QTest.qWait(40)
         self.app.processEvents()
 
+        self.assertIsNone(group.cardView.graphicsEffect())
         self.assertEqual(group.cardView.y(), 0)
         self.assertEqual(card.geometry(), initialGeometry)
         self.assertEqual(card.mapTo(group, QPoint()).y(), 67)
@@ -101,9 +106,14 @@ class SettingGroupHeaderTest(TestCase):
         card = page.aiStyleCard
         card.setExpandedImmediately(False)
         editorGeometry = card.editorWidget.geometry()
+        self.assertIsNotNone(card.viewContent.graphicsEffect())
 
         for expanded in (True, False):
             card.setExpand(expanded)
+            if expanded:
+                self.assertEqual(card.view.height(), 0)
+                self.assertIsNotNone(card.viewContent.graphicsEffect())
+            self.app.processEvents()
             QTest.qWait(80)
             self.app.processEvents()
             with self.subTest(expanded=expanded):
@@ -113,6 +123,7 @@ class SettingGroupHeaderTest(TestCase):
                 self.assertEqual(card.viewContent.y(), 0)
                 self.assertEqual(card.editorWidget.geometry(), editorGeometry)
             QTest.qWait(card.expandAnimation.duration())
+            self.assertEqual(card.viewContent.graphicsEffect() is None, expanded)
 
     @patch("app.view.pages.setting_page.threading.Thread")
     def testExpandedGroupDrawsHeaderSeparator(self, _):

@@ -7,7 +7,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -20,7 +19,6 @@ from qfluentwidgets import (
     PickerColumnFormatter,
     PillPushButton,
     PushButton,
-    SettingCard,
     Slider,
     SpinBox,
     SubtitleLabel,
@@ -36,6 +34,7 @@ from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import SettingMaterialCard
 from app.view.components.task_picker import (
     TaskExpandSettingCard,
+    TaskFormSettingCard,
     TouchTimePicker,
     configure_task_expand_card,
 )
@@ -48,21 +47,8 @@ class SecondsFormatter(PickerColumnFormatter):
     def decode(self, value: str):
         return int(value[:-1])
 
-class BroadcastSettingCard(SettingCard):
-    def __init__(self, icon, title, content, widget, parent=None):
-        super().__init__(icon, title, content, parent)
-        for label in (self.titleLabel, self.contentLabel):
-            label.setWordWrap(False)
-            label.setSizePolicy(
-                QSizePolicy.Policy.Ignored,
-                QSizePolicy.Policy.Preferred,
-            )
-        self.hBoxLayout.setStretchFactor(self.vBoxLayout, 1)
-        self.hBoxLayout.addWidget(widget, 0, Qt.AlignmentFlag.AlignRight)
-        self.hBoxLayout.addSpacing(16)
-
-    def paintEvent(self, event):
-        pass
+class BroadcastSettingCard(TaskFormSettingCard):
+    pass
 
 
 class ChineseVoiceLoader(QObject):
@@ -357,9 +343,10 @@ class TaskCard(SettingMaterialCard):
         btnLayout.addWidget(self.playBtn)
         btnLayout.addStretch(1)
         btnLayout.addWidget(self.delBtn)
+        btnLayout.setContentsMargins(16, 0, 16, 0)
 
         containerLayout = QVBoxLayout()
-        containerLayout.setContentsMargins(48, 10, 16, 16)
+        containerLayout.setContentsMargins(0, 0, 0, 16)
         containerLayout.addWidget(self.formWidget)
         containerLayout.addSpacing(10)
         containerLayout.addLayout(btnLayout)

@@ -13,6 +13,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QApplication,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
@@ -39,6 +40,16 @@ from qfluentwidgets.components.settings.expand_setting_card import (
 from app.config.cfg import cfg
 
 QWIDGETSIZE_MAX = (1 << 24) - 1
+
+
+def _set_reveal_painting(widget: QWidget, enabled: bool) -> None:
+    if enabled:
+        if widget.graphicsEffect() is not None:
+            widget.setGraphicsEffect(None)
+    elif widget.graphicsEffect() is None:
+        effect = QGraphicsOpacityEffect(widget)
+        effect.setOpacity(0)
+        widget.setGraphicsEffect(effect)
 
 
 class LabelElideFilter(QObject):
@@ -114,6 +125,7 @@ class CollapsibleSettingCard(QWidget):
         self.expandAnimation.setDuration(200)
         self.expandAnimation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.view.setMaximumHeight(0)
+        _set_reveal_painting(self.viewContent, False)
         self.setFixedHeight(self.card.height())
         self.view.setObjectName("view")
 
@@ -179,7 +191,9 @@ class CollapsibleSettingCard(QWidget):
         self._onExpandValueChanged(height)
 
     def _onExpandValueChanged(self, height) -> None:
-        self.setFixedHeight(self.card.height() + int(height))
+        height = int(height)
+        self.setFixedHeight(self.card.height() + height)
+        _set_reveal_painting(self.viewContent, height > 0)
 
     def _onExpandClicked(self) -> None:
         self.setExpand(not self.isExpand)
@@ -254,6 +268,7 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
 
         self.isCollapsed = self.objectName() not in cfg.expandedSettingGroups.value
         self.cardContainer.setMaximumHeight(0 if self.isCollapsed else QWIDGETSIZE_MAX)
+        _set_reveal_painting(self.cardView, not self.isCollapsed)
         self._refreshExpandIcon()
 
     def _initLayout(self) -> None:
@@ -290,6 +305,7 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self.moveUpButton.clicked.connect(lambda: self._reorder(-1))
         self.moveDownButton.clicked.connect(lambda: self._reorder(1))
         self.collapseAnimation.finished.connect(self._onCollapseFinished)
+        self.collapseAnimation.valueChanged.connect(self._onCollapseValueChanged)
 
     def addSettingCard(self, card: QWidget) -> None:
         separator = None
@@ -435,9 +451,9 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         if not expanded:
             self._searchCollapsed = False
         self.collapseAnimation.stop()
-        self.cardContainer.setMaximumHeight(
-            0 if self._isVisuallyCollapsed() else QWIDGETSIZE_MAX
-        )
+        isCollapsed = self._isVisuallyCollapsed()
+        self.cardContainer.setMaximumHeight(0 if isCollapsed else QWIDGETSIZE_MAX)
+        _set_reveal_painting(self.cardView, not isCollapsed)
         self._refreshExpandIcon()
 
     def _isVisuallyCollapsed(self) -> bool:
@@ -454,6 +470,9 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
     def _onCollapseFinished(self) -> None:
         if not self._isVisuallyCollapsed():
             self.cardContainer.setMaximumHeight(QWIDGETSIZE_MAX)
+
+    def _onCollapseValueChanged(self, height) -> None:
+        _set_reveal_painting(self.cardView, int(height) > 0)
 
     def _reorder(self, offset: int) -> None:
         groups = self._siblings()

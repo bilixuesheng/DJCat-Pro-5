@@ -25,6 +25,7 @@ from app.view.pages.schedule_page import (
     create_task_form,
 )
 from app.view.pages.shutdown_page import (
+    ShutdownSettingCard,
     ShutdownPromptDialog,
     ShutdownPage,
     ShutdownTaskCard,
@@ -125,28 +126,41 @@ class ScheduleShutdownUiTest(TestCase):
             self.assertFalse(card.isPressed)
 
     def testTaskBodyRevealKeepsHeaderAndIconStationary(self):
-        card = TaskCard(broadcast_task())
-        self.addCleanup(card.deleteLater)
-        card.resize(600, card.sizeHint().height())
-        card.show()
-        self.app.processEvents()
-        expandCard = card.expandCard
-        header = expandCard.card
-        iconPosition = header.iconLabel.mapTo(card, QPoint())
-        headerPosition = header.mapTo(card, QPoint())
+        cards = (TaskCard(broadcast_task()), ShutdownTaskCard(shutdown_task()))
+        for card in cards:
+            self.addCleanup(card.deleteLater)
+            card.resize(600, card.sizeHint().height())
+            card.show()
+            self.app.processEvents()
+            expandCard = card.expandCard
+            header = expandCard.card
+            iconPosition = header.iconLabel.mapTo(card, QPoint())
+            headerPosition = header.mapTo(card, QPoint())
+            self.assertIsNotNone(expandCard.view.graphicsEffect())
 
-        expandCard.setExpand(True)
-        QTest.qWait(80)
-        self.assertEqual(header.iconLabel.mapTo(card, QPoint()), iconPosition)
-        self.assertEqual(header.mapTo(card, QPoint()), headerPosition)
-        self.assertEqual(expandCard.verticalScrollBar().value(), 0)
+            expandCard.setExpand(True)
+            with self.subTest(card=type(card).__name__, frame="initial"):
+                self.assertEqual(expandCard.revealHeight, 0)
+                self.assertIsNotNone(expandCard.view.graphicsEffect())
 
-        QTest.qWait(160)
-        expandCard.setExpand(False)
-        QTest.qWait(80)
-        self.assertEqual(header.iconLabel.mapTo(card, QPoint()), iconPosition)
-        self.assertEqual(header.mapTo(card, QPoint()), headerPosition)
-        self.assertEqual(expandCard.verticalScrollBar().value(), 0)
+            self.app.processEvents()
+            QTest.qWait(80)
+            with self.subTest(card=type(card).__name__, frame="expanding"):
+                self.assertIsNone(expandCard.view.graphicsEffect())
+                self.assertEqual(header.iconLabel.mapTo(card, QPoint()), iconPosition)
+                self.assertEqual(header.mapTo(card, QPoint()), headerPosition)
+                self.assertEqual(expandCard.verticalScrollBar().value(), 0)
+
+            QTest.qWait(160)
+            expandCard.setExpand(False)
+            QTest.qWait(80)
+            with self.subTest(card=type(card).__name__, frame="collapsing"):
+                self.assertEqual(header.iconLabel.mapTo(card, QPoint()), iconPosition)
+                self.assertEqual(header.mapTo(card, QPoint()), headerPosition)
+                self.assertEqual(expandCard.verticalScrollBar().value(), 0)
+
+            QTest.qWait(160)
+            self.assertIsNotNone(expandCard.view.graphicsEffect())
 
     def testTaskHeadersStillExpandOnClick(self):
         card = TaskCard(broadcast_task())
@@ -201,23 +215,50 @@ class ScheduleShutdownUiTest(TestCase):
             rendered.pixelColor(300, y - 1),
         )
 
-    def testBroadcastFormRowsDoNotPaintNestedCards(self):
-        form, _ = create_task_form(None)
-        self.addCleanup(form.deleteLater)
-        form.resize(700, form.sizeHint().height())
-        form.show()
-        self.app.processEvents()
+    def testTaskFormsUseFullWidthRowsWithSeparators(self):
+        forms = (
+            (*create_task_form(None), BroadcastSettingCard),
+            (*create_shutdown_form(None), ShutdownSettingCard),
+        )
+        for form, _, cardType in forms:
+            self.addCleanup(form.deleteLater)
+            form.resize(700, form.sizeHint().height())
+            form.show()
+            self.app.processEvents()
 
-        cards = form.findChildren(BroadcastSettingCard)
-        self.assertGreater(len(cards), 1)
+            cards = form.findChildren(cardType)
+            self.assertGreater(len(cards), 1)
+            for card in cards:
+                if card.isHidden():
+                    continue
+                image = QImage(card.size(), QImage.Format.Format_ARGB32)
+                image.fill(Qt.GlobalColor.transparent)
+                card.render(image)
+                x = card.width() // 2
+                with self.subTest(card=card.titleLabel.text()):
+                    self.assertEqual(card.x(), 0)
+                    self.assertEqual(card.width(), form.width())
+                    self.assertNotEqual(
+                        image.pixelColor(x, card.height() - 1),
+                        image.pixelColor(x, card.height() - 2),
+                    )
+
+    def testTaskFormsStartDirectlyBelowHeader(self):
+        cards = (TaskCard(broadcast_task()), ShutdownTaskCard(shutdown_task()))
         for card in cards:
-            image = QImage(card.size(), QImage.Format.Format_ARGB32)
-            image.fill(Qt.GlobalColor.transparent)
-            card.render(image)
-            with self.subTest(card=card.titleLabel.text()):
-                self.assertEqual(
-                    image.pixelColor(5, card.height() // 2),
-                    card.palette().color(card.backgroundRole()),
+            self.addCleanup(card.deleteLater)
+            card.resize(700, card.sizeHint().height())
+            card.show()
+            card.expandCard.setExpand(True)
+            QTest.qWait(card.expandCard.revealAnimation.duration())
+            self.app.processEvents()
+            firstRow = card.formWidget.layout().itemAt(0).widget()
+
+            with self.subTest(card=type(card).__name__):
+                self.assertLessEqual(firstRow.mapTo(card.expandCard, QPoint()).x(), 1)
+                self.assertLessEqual(
+                    firstRow.mapTo(card.expandCard, QPoint()).y(),
+                    card.expandCard.card.height() + 1,
                 )
 
     @patch.object(ChineseVoiceLoader, "start")
