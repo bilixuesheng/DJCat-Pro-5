@@ -20,7 +20,6 @@ from qfluentwidgets import (
     SpinBox,
     SubtitleLabel,
     SwitchButton,
-    TimePicker,
     TitleLabel,
     ToolButton,
 )
@@ -29,6 +28,10 @@ from qfluentwidgets import FluentIcon as FIF
 from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import SettingMaterialCard
+from app.view.components.task_picker import (
+    TouchTimePicker,
+    configure_task_expand_card,
+)
 
 DEFAULT_PROMPT_TITLE = "Windows 即将关闭你的计算机"
 DEFAULT_PROMPT_MESSAGE = (
@@ -88,7 +91,7 @@ def create_shutdown_form(parent, initialData=None):
     )
     widgets["nameInput"] = nameInput
 
-    timePicker = TimePicker(form, showSeconds=True)
+    timePicker = TouchTimePicker(form, showSeconds=True)
     timePicker.setColumnFormatter(2, SecondsFormatter())
     taskTime = QTime.fromString(data.get("time", ""), "HH:mm:ss")
     timePicker.setTime(taskTime if taskTime.isValid() else now)
@@ -257,6 +260,7 @@ class ShutdownTaskCard(SettingMaterialCard):
             self,
         )
         self.paintFilter = self.applyExpandCardMaterial(self.expandCard)
+        self.expandBehavior = configure_task_expand_card(self.expandCard)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -276,6 +280,12 @@ class ShutdownTaskCard(SettingMaterialCard):
         self.expandCard.addWidget(self.enableSwitch)
 
         self.formWidget, self.formWidgets = create_shutdown_form(self, data)
+        self.formHeightTimer = QTimer(self)
+        self.formHeightTimer.setSingleShot(True)
+        self.formHeightTimer.setInterval(10)
+        self.formHeightTimer.timeout.connect(
+            self.expandCard._adjustViewSize
+        )
         self._bindForm()
 
         deleteButton = PushButton(FIF.DELETE, "删除任务", self)
@@ -310,9 +320,8 @@ class ShutdownTaskCard(SettingMaterialCard):
         widgets["waitSpin"].valueChanged.connect(self._saveData)
 
     def _refreshFormHeight(self):
-        # Qt 会延迟处理显隐布局，第二次刷新读取最终高度。
-        QTimer.singleShot(10, self.expandCard._adjustViewSize)
         self.expandCard._adjustViewSize()
+        self.formHeightTimer.start()
 
     def _onEnabledChanged(self, checked):
         self.data["enabled"] = checked
@@ -393,10 +402,13 @@ class ShutdownPage(ScrollArea):
 
     def _addTask(self):
         dialog = AddShutdownTaskDialog(self.window())
-        if dialog.exec():
-            self.current_tasks.append(dialog.get_data())
-            cfg.set(cfg.shutdownTasks, self.current_tasks)
-            self._loadTasks()
+        try:
+            if dialog.exec():
+                self.current_tasks.append(dialog.get_data())
+                cfg.set(cfg.shutdownTasks, self.current_tasks)
+                self._loadTasks()
+        finally:
+            dialog.deleteLater()
 
     def _updateTask(self, index, data):
         self.current_tasks[index] = data
@@ -433,6 +445,7 @@ class ShutdownPromptDialog(MessageBoxBase):
         self.buttonLayout.removeWidget(self.yesButton)
         self.buttonLayout.removeWidget(self.cancelButton)
         self.buttonLayout.addWidget(self.countdownLabel, 1)
+        self.buttonLayout.addWidget(self.yesButton)
         self.buttonLayout.addWidget(self.cancelButton)
 
         self.skipButton = None
@@ -440,7 +453,6 @@ class ShutdownPromptDialog(MessageBoxBase):
             self.skipButton = PushButton("本次不关机", self.buttonGroup)
             self.skipButton.clicked.connect(lambda: self.done(SKIP_RESULT))
             self.buttonLayout.addWidget(self.skipButton)
-        self.buttonLayout.addWidget(self.yesButton)
 
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
@@ -480,7 +492,12 @@ def show_shutdown_prompt(task):
     overlay.raise_()
     overlay.activateWindow()
 
-    dialog = ShutdownPromptDialog(task, overlay)
-    result = dialog.exec()
-    overlay.close()
-    return result
+    dialog = None
+    try:
+        dialog = ShutdownPromptDialog(task, overlay)
+        return dialog.exec()
+    finally:
+        if dialog is not None:
+            dialog.deleteLater()
+        overlay.close()
+        overlay.deleteLater()

@@ -18,7 +18,6 @@ from qfluentwidgets import (
     PrimaryToolButton,
     SettingCard,
     SwitchButton,
-    TimePicker,
     TitleLabel,
     ToolButton,
 )
@@ -28,7 +27,12 @@ from qframelesswindow import FramelessWindow
 from app.config.cfg import cfg
 from app.config.paths import ASSET_DIR
 from app.view.components.setting_card_group import QWIDGETSIZE_MAX
-from app.view.pages.broadcast_page import VerticalButton, showCloseConfirmation
+from app.view.components.task_picker import TouchTimePicker
+from app.view.pages.broadcast_page import (
+    VerticalButton,
+    showActionConfirmation,
+    showCloseConfirmation,
+)
 
 DEFAULT_TITLE = "距离考试结束还剩"
 VOICE_REMIND_SECONDS = 15 * 60
@@ -74,6 +78,8 @@ class CountdownWindow(FramelessWindow):
         self._played15 = False
         self._moved = False
         self._controls_visible = False
+        self._closeFlyout = None
+        self._resetFlyout = None
 
         self.titleLabel = QLabel(self)
         self.timeLabel = QLabel(self)
@@ -119,6 +125,7 @@ class CountdownWindow(FramelessWindow):
         self.controlsWidget.setEnabled(False)
         self._controlsAnim = QPropertyAnimation(self._controlsFx, b"opacity", self)
         self._controlsAnim.setDuration(200)
+        self._controlsAnim.finished.connect(self._onControlsAnimationFinished)
 
         self.hideControlsTimer = QTimer(self)
         self.hideControlsTimer.setSingleShot(True)
@@ -138,9 +145,13 @@ class CountdownWindow(FramelessWindow):
         self.btnLayout = QHBoxLayout(self.btnContainer)
         self.btnLayout.setContentsMargins(0, 0, 0, 0)
         self.btnLayout.setSpacing(12)
-        self.btn_reset = VerticalButton(FIF.SYNC, "重置", force_dark=True)
-        self.btn_win = VerticalButton(FIF.COPY, "窗口化", force_dark=True)
-        self.btn_close = VerticalButton(FIF.CLOSE, "关闭", primary=True, force_dark=True)
+        self.btn_reset = VerticalButton(FIF.SYNC, "重置")
+        self.btn_win = VerticalButton(FIF.COPY, "窗口化")
+        self.btn_close = VerticalButton(
+            FIF.CLOSE,
+            "关闭",
+            primary=True,
+        )
 
         self.btn_pause.clicked.connect(self._onPause)
         self.btn_rewind.clicked.connect(lambda: self._onAdjust(10))
@@ -172,7 +183,7 @@ class CountdownWindow(FramelessWindow):
         self._applyWindowState()
         self.timer.start()
 
-    def resetCountdown(self):
+    def _resetCountdown(self):
         self.ended = False
         self._played15 = False
         self.remaining = self.initial_seconds
@@ -180,6 +191,23 @@ class CountdownWindow(FramelessWindow):
         self.btn_pause.setIcon(FIF.PAUSE)
         self._updateDisplay()
         self.timer.start()
+
+    def resetCountdown(self):
+        if not cfg.confirmBeforeResetCountdown.value:
+            self._resetCountdown()
+            return None
+        if self._resetFlyout is not None:
+            return self._resetFlyout
+        self._resetFlyout = showActionConfirmation(
+            self,
+            self.btn_reset,
+            "确认重置？",
+            "倒计时将恢复到最初设置的时间。",
+            "重置",
+            self._resetCountdown,
+            "_resetFlyout",
+        )
+        return self._resetFlyout
 
     def _onPause(self):
         if self.ended:
@@ -235,7 +263,12 @@ class CountdownWindow(FramelessWindow):
 
     def _setControlsVisible(self, visible, animated=True):
         self._controls_visible = visible
-        self.controlsWidget.setEnabled(visible)
+        self.controlsWidget.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            not visible,
+        )
+        if visible:
+            self.controlsWidget.setEnabled(True)
         target = 1.0 if visible else 0.0
         self._controlsAnim.stop()
         if animated:
@@ -244,10 +277,16 @@ class CountdownWindow(FramelessWindow):
             self._controlsAnim.start()
         else:
             self._controlsFx.setOpacity(target)
+            self.controlsWidget.setEnabled(visible)
         if visible:
             self.hideControlsTimer.start()
         else:
             self.hideControlsTimer.stop()
+
+    def _onControlsAnimationFinished(self):
+        if not self._controls_visible:
+            self.controlsWidget.setEnabled(False)
+        self.btn_pause.update()
 
     def _setupCornerButtons(self):
         while self.btnLayout.count():
@@ -377,6 +416,8 @@ class CountdownWindow(FramelessWindow):
         if not cfg.confirmBeforeCloseCountdown.value:
             self.close()
             return
+        if self._closeFlyout is not None:
+            return
         self._closeFlyout = showCloseConfirmation(
             self,
             self.btn_close,
@@ -384,8 +425,16 @@ class CountdownWindow(FramelessWindow):
         )
 
     def closeEvent(self, event):
+        for name in ("_closeFlyout", "_resetFlyout"):
+            flyout = getattr(self, name)
+            if flyout is not None:
+                flyout.hide()
+                flyout.deleteLater()
+                setattr(self, name, None)
         self.timer.stop()
         self.hideControlsTimer.stop()
+        self._controlsAnim.stop()
+        self.sound.stop()
         self.closeClicked.emit()
         super().closeEvent(event)
 
@@ -415,7 +464,7 @@ class CountdownEditPage(QWidget):
             FormCard(FIF.FONT, "倒计时标题", "显示在倒计时上方，结束时变为“考试结束”", self.titleInput, self)
         )
 
-        self.timePicker = TimePicker(self, showSeconds=True)
+        self.timePicker = TouchTimePicker(self, showSeconds=True)
         for column, unit in enumerate(("时", "分", "秒")):
             self.timePicker.setColumnFormatter(column, UnitFormatter(unit))
         self.timePicker.setTime(QTime(1, 0, 0))
@@ -448,7 +497,15 @@ class CountdownEditPage(QWidget):
         time = self.timePicker.getTime()
         seconds = time.hour() * 3600 + time.minute() * 60 + time.second()
         if seconds <= 0:
-            MessageBox("无法开始", "倒计时时长不能为 0，请先设置时长。", self.window()).exec()
+            dialog = MessageBox(
+                "无法开始",
+                "倒计时时长不能为 0，请先设置时长。",
+                self.window(),
+            )
+            try:
+                dialog.exec()
+            finally:
+                dialog.deleteLater()
             return
 
         QApplication.instance().setQuitOnLastWindowClosed(False)

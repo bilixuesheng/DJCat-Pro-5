@@ -23,6 +23,7 @@ from qfluentwidgets import (
     CardWidget,
     FluentIcon,
     FluentStyleSheet,
+    IconWidget,
     SettingCard,
     StrongBodyLabel,
     TransparentToolButton,
@@ -161,10 +162,11 @@ class CollapsibleSettingCard(QWidget):
 class CollapsibleSettingCardGroup(SettingMaterialCard):
     orderChanged = Signal()
 
-    def __init__(self, title: str, key: str, parent=None):
+    def __init__(self, title: str, key: str, parent=None, icon=None):
         super().__init__(parent)
         self.setObjectName(key)
 
+        self.iconWidget = IconWidget(icon, self) if icon is not None else None
         self.titleLabel = StrongBodyLabel(title, self)
         self.moveUpButton = TransparentToolButton(FluentIcon.UP, self)
         self.moveDownButton = TransparentToolButton(FluentIcon.DOWN, self)
@@ -190,7 +192,9 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
             button.setIconSize(QSize(12, 12))
         self.moveUpButton.hide()
         self.moveDownButton.hide()
-        self.titleLabel.setFixedHeight(26)
+        if self.iconWidget is not None:
+            self.iconWidget.setFixedSize(24, 24)
+        self.titleLabel.setFixedHeight(32)
 
         self.collapseAnimation.setDuration(200)
         self.collapseAnimation.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -201,8 +205,10 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self._refreshExpandIcon()
 
     def _initLayout(self) -> None:
-        self.headerLayout.setContentsMargins(16, 4, 8, 4)
-        self.headerLayout.setSpacing(4)
+        self.headerLayout.setContentsMargins(16, 16, 8, 16)
+        self.headerLayout.setSpacing(12)
+        if self.iconWidget is not None:
+            self.headerLayout.addWidget(self.iconWidget)
         self.headerLayout.addWidget(self.titleLabel)
         self.headerLayout.addStretch(1)
         self.headerLayout.addWidget(self.moveUpButton)

@@ -143,7 +143,10 @@ class ThemeColorSettingCard(CollapsibleSettingCard):
                 self.window(),
             )
             dialog.colorChanged.connect(self._setThemeColor)
-            dialog.exec()
+            try:
+                dialog.exec()
+            finally:
+                dialog.deleteLater()
             return
         cfg.set(cfg.themeColorPreset, preset)
         rgb = next(rgb for name, rgb in THEME_COLOR_PRESETS if name == preset)
@@ -218,24 +221,38 @@ class SettingPage(ScrollArea):
         self.vBoxLayout.addStretch(1)
 
         self.personalGroup = CollapsibleSettingCardGroup(
-            "个性化", "personalization", self.container
+            "个性化",
+            "personalization",
+            self.container,
+            icon=FluentIcon.BRUSH,
         )
         self.bannerGroup = CollapsibleSettingCardGroup(
-            "横幅设置", "banner", self.container
+            "横幅设置", "banner", self.container, icon=FluentIcon.PHOTO
         )
         self.broadcastGroup = CollapsibleSettingCardGroup(
-            "全屏投送设置", "broadcast", self.container
+            "全屏投送设置",
+            "broadcast",
+            self.container,
+            icon=FluentIcon.FULL_SCREEN,
         )
         self.aiMarkdownGroup = CollapsibleSettingCardGroup(
-            "AI帮写Markdown设置", "aiMarkdown", self.container
+            "AI帮写Markdown设置",
+            "aiMarkdown",
+            self.container,
+            icon=FluentIcon.EDIT,
         )
         self.countdownGroup = CollapsibleSettingCardGroup(
-            "考试倒计时设置", "countdown", self.container
+            "考试倒计时设置",
+            "countdown",
+            self.container,
+            icon=FluentIcon.CALENDAR,
         )
         self.softwareGroup = CollapsibleSettingCardGroup(
-            "应用", "software", self.container
+            "应用", "software", self.container, icon=FluentIcon.SETTING
         )
-        self.aboutGroup = CollapsibleSettingCardGroup("关于", "about", self.container)
+        self.aboutGroup = CollapsibleSettingCardGroup(
+            "关于", "about", self.container, icon=FluentIcon.INFO
+        )
 
         self._initWidget()
         self._initCards()
@@ -425,6 +442,12 @@ class SettingPage(ScrollArea):
                     "关闭考试倒计时前询问是否退出",
                     cfg.confirmBeforeCloseCountdown,
                 ),
+                SwitchSettingCard(
+                    FluentIcon.SYNC,
+                    "重置时间前询问",
+                    "重置考试倒计时时询问是否重新开始",
+                    cfg.confirmBeforeResetCountdown,
+                ),
             ]
         )
 
@@ -543,7 +566,14 @@ class SettingPage(ScrollArea):
 
     def _fetchAIQuota(self) -> None:
         quota = fetchQuota()
-        self.aiQuotaReceived.emit(*quota if quota else (-1, -1, 1, None, ""))
+        try:
+            self.aiQuotaReceived.emit(
+                *quota if quota else (-1, -1, 1, None, "")
+            )
+        except RuntimeError:
+            # The settings page can be destroyed while the network request is
+            # still running during application shutdown.
+            pass
 
     def _onAIQuotaReceived(
         self,

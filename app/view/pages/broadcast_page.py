@@ -7,6 +7,9 @@ from PySide6.QtGui import QColor, QFont, QIcon, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
+    QStyle,
+    QStyleOptionButton,
+    QStylePainter,
     QTextEdit,
     QToolButton,
     QVBoxLayout,
@@ -42,15 +45,23 @@ from app.config.constants import AI_MARKDOWN_API
 from app.config.paths import ASSET_DIR
 
 
-def showCloseConfirmation(window, target, warning):
-    view = FlyoutView("确认关闭？", warning, FIF.QUESTION)
+def showActionConfirmation(
+    window,
+    target,
+    title,
+    warning,
+    confirmText,
+    callback,
+    referenceName=None,
+):
+    view = FlyoutView(title, warning, FIF.QUESTION)
     buttons = QWidget(view)
     layout = QHBoxLayout(buttons)
     layout.setContentsMargins(0, 0, 0, 0)
     cancelButton = PushButton("取消", buttons)
-    closeButton = PrimaryPushButton("关闭", buttons)
+    confirmButton = PrimaryPushButton(confirmText, buttons)
     layout.addWidget(cancelButton)
-    layout.addWidget(closeButton)
+    layout.addWidget(confirmButton)
     view.addWidget(buttons, align=Qt.AlignmentFlag.AlignRight)
 
     flyout = Flyout.make(
@@ -59,144 +70,125 @@ def showCloseConfirmation(window, target, warning):
         window,
         FlyoutAnimationType.PULL_UP,
     )
-    cancelButton.clicked.connect(flyout.close)
-    closeButton.clicked.connect(window.close)
+    flyout.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+    def clearReference():
+        if referenceName and getattr(window, referenceName, None) is flyout:
+            setattr(window, referenceName, None)
+
+    flyout.destroyed.connect(clearReference)
+
+    def dismiss():
+        clearReference()
+        flyout.hide()
+        flyout.close()
+        flyout.deleteLater()
+
+    def confirm():
+        dismiss()
+        QTimer.singleShot(0, callback)
+
+    cancelButton.clicked.connect(dismiss)
+    confirmButton.clicked.connect(confirm)
     return flyout
 
 
-class VerticalButton(QToolButton):
-    def __init__(self, icon_enum, text, primary=False, parent=None, force_dark=False):
-        super().__init__(parent)
-        self.primary = primary
-        self.icon_enum = icon_enum  # 保存图标枚举，方便变色
-        self.force_dark = force_dark  # 纯黑背景窗口（如考试倒计时）固定使用深色样式
-        self._press_started_inside = False
-        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+def showCloseConfirmation(window, target, warning):
+    return showActionConfirmation(
+        window,
+        target,
+        "确认关闭？",
+        warning,
+        "关闭",
+        window.close,
+        "_closeFlyout",
+    )
+
+
+class _VerticalButtonMixin:
+    def _initVerticalButton(self, icon_enum, text, primary, force_dark):
+        self.icon_enum = icon_enum
+        self._buttonText = text
+        self._primary = primary
+        self.force_dark = force_dark
+        self._windowed = False
+        self.setIcon(QIcon())
         self.setText(text)
         self.setIconSize(QSize(20, 20))
         self.setFixedSize(80, 65)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.updateStyle()
 
     def updateStyle(self):
-        theme = QColor(qconfig.themeColor.value)
-        theme_color = theme.name()
-        theme_top = theme.lighter(112).name()
-        theme_hover_top = theme.lighter(122).name()
-        theme_hover_bottom = theme.lighter(106).name()
-        theme_pressed_bottom = theme.darker(122).name()
-        theme_border = theme.lighter(138).name()
-        is_dark = self.force_dark or (isDarkTheme() if cfg.customThemeMode.value == "System" else cfg.customThemeMode.value == "Dark")
-
-        if self.primary:
-            # Qt 样式表不支持 opacity，使用渐变和独立的按下色呈现可靠反馈。
-            self.setStyleSheet(f"""
-                QToolButton {{
-                    color: white;
-                    background: qlineargradient(
-                        x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 {theme_top}, stop: 1 {theme_color}
-                    );
-                    border: 1px solid {theme_border};
-                    border-radius: 8px;
-                    font-size: 13px;
-                    padding-top: 6px;
-                    padding-bottom: 4px;
-                }}
-                QToolButton:hover {{
-                    background: qlineargradient(
-                        x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 {theme_hover_top}, stop: 1 {theme_hover_bottom}
-                    );
-                }}
-                QToolButton:pressed {{
-                    background: qlineargradient(
-                        x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 {theme_color}, stop: 1 {theme_pressed_bottom}
-                    );
-                    border-color: {theme_color};
-                    padding-top: 8px;
-                    padding-bottom: 2px;
-                }}
-            """)
-            self.setIcon(self.icon_enum.icon(color=QColor("white")))
-        else:
-            if is_dark:
-                bg_top, bg_bottom = "rgba(255,255,255,41)", "rgba(255,255,255,23)"
-                hover_top, hover_bottom = "rgba(255,255,255,61)", "rgba(255,255,255,38)"
-                pressed_top, pressed_bottom = "rgba(255,255,255,31)", "rgba(255,255,255,61)"
-                border, pressed_border = "rgba(255,255,255,46)", "rgba(255,255,255,77)"
-            else:
-                bg_top, bg_bottom = "rgba(255,255,255,235)", "rgba(0,0,0,13)"
-                hover_top, hover_bottom = "rgba(255,255,255,255)", "rgba(0,0,0,23)"
-                pressed_top, pressed_bottom = "rgba(0,0,0,13)", "rgba(0,0,0,33)"
-                border, pressed_border = "rgba(0,0,0,31)", "rgba(0,0,0,56)"
-            color_str = "white" if is_dark else "black"
-            self.setStyleSheet(f"""
-                QToolButton {{
-                    color: {color_str};
-                    background: qlineargradient(
-                        x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 {bg_top}, stop: 1 {bg_bottom}
-                    );
-                    border: 1px solid {border};
-                    border-radius: 8px;
-                    font-size: 13px;
-                    padding-top: 6px;
-                    padding-bottom: 4px;
-                }}
-                QToolButton:hover {{
-                    background: qlineargradient(
-                        x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 {hover_top}, stop: 1 {hover_bottom}
-                    );
-                }}
-                QToolButton:pressed {{
-                    background: qlineargradient(
-                        x1: 0, y1: 0, x2: 0, y2: 1,
-                        stop: 0 {pressed_top}, stop: 1 {pressed_bottom}
-                    );
-                    border-color: {pressed_border};
-                    padding-top: 8px;
-                    padding-bottom: 2px;
-                }}
-            """)
-            self.setIcon(self.icon_enum.icon(color=QColor(color_str)))
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._press_started_inside = self.rect().contains(
-                event.position().toPoint()
-            )
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        super().mouseMoveEvent(event)
-        if (
-            self._press_started_inside
-            and event.buttons() & Qt.MouseButton.LeftButton
-        ):
-            # 保持按压反馈与最终命中区域一致；移出后立即恢复悬浮前状态。
-            self.setDown(self.rect().contains(event.position().toPoint()))
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            release_inside = self.rect().contains(event.position().toPoint())
-            pressed_inside = self._press_started_inside
-            self._press_started_inside = False
-            if pressed_inside and not release_inside:
-                self.setDown(False)
-                event.accept()
-                return
-        super().mouseReleaseEvent(event)
+        self.update()
 
     def setWindowed(self, windowed: bool):
-        if windowed:
-            self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-            self.setFixedSize(50, 40)
-        else:
-            self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-            self.setFixedSize(80, 65)
+        self._windowed = windowed
+        self.setFixedSize(50, 40) if windowed else self.setFixedSize(80, 65)
+        self.update()
+
+    def paintEvent(self, event):
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.icon = QIcon()
+        option.text = ""
+
+        painter = QStylePainter(self)
+        painter.drawControl(QStyle.ControlElement.CE_PushButton, option)
+        if not self.isEnabled():
+            painter.setOpacity(0.36)
+        elif self.isDown():
+            painter.setOpacity(0.63)
+
+        color = self._foregroundColor()
+        icon = self.icon_enum.icon(color=color)
+        iconSize = self.iconSize()
+        iconX = (self.width() - iconSize.width()) // 2
+        iconY = (self.height() - iconSize.height()) // 2 if self._windowed else 9
+        icon.paint(painter, iconX, iconY, iconSize.width(), iconSize.height())
+
+        if not self._windowed:
+            painter.setPen(color)
+            painter.drawText(
+                0,
+                iconY + iconSize.height() + 4,
+                self.width(),
+                22,
+                Qt.AlignmentFlag.AlignCenter,
+                self._buttonText,
+            )
+
+    def _foregroundColor(self):
+        return QColor("white") if (
+            self._primary or self.force_dark or isDarkTheme()
+        ) else QColor("black")
+
+
+class _VerticalPushButton(_VerticalButtonMixin, PushButton):
+    def __init__(self, icon_enum, text, parent=None, force_dark=False):
+        super().__init__(parent)
+        self._initVerticalButton(icon_enum, text, False, force_dark)
+
+
+class _VerticalPrimaryPushButton(_VerticalButtonMixin, PrimaryPushButton):
+    def __init__(self, icon_enum, text, parent=None, force_dark=False):
+        super().__init__(parent)
+        self._initVerticalButton(icon_enum, text, True, force_dark)
+
+
+def VerticalButton(
+    icon_enum,
+    text,
+    primary=False,
+    parent=None,
+    force_dark=False,
+):
+    buttonType = _VerticalPrimaryPushButton if primary else _VerticalPushButton
+    return buttonType(
+        icon_enum,
+        text,
+        parent=parent,
+        force_dark=force_dark,
+    )
 
 class FloatingMiniWindow(QWidget):
     restoreSignal = Signal()
@@ -265,6 +257,7 @@ class FloatingMiniWindow(QWidget):
 class BroadcastWindow(FramelessWindow):
     editClicked = Signal()
     closeClicked = Signal()
+    BORDER_WIDTH = 12
 
     def __init__(self):
         super().__init__()
@@ -274,6 +267,7 @@ class BroadcastWindow(FramelessWindow):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self._is_editing = False
         self._isTracking = False
+        self._closeFlyout = None
 
         self.vBoxLayout = QVBoxLayout(self)
         self.vBoxLayout.setContentsMargins(40, 20, 40, 20)
@@ -297,7 +291,7 @@ class BroadcastWindow(FramelessWindow):
         self.btnLayout.setSpacing(12)
 
         self.is_windowed = False
-        self.miniWindow = FloatingMiniWindow()
+        self.miniWindow = FloatingMiniWindow(self)
         self.miniWindow.restoreSignal.connect(self.restoreFromMini)
 
         self.btn_edit = VerticalButton(FIF.EDIT, "编辑")
@@ -455,6 +449,8 @@ class BroadcastWindow(FramelessWindow):
         if not cfg.confirmBeforeCloseBroadcast.value:
             self.close()
             return
+        if self._closeFlyout is not None:
+            return
         self._closeFlyout = showCloseConfirmation(
             self,
             self.btn_close,
@@ -462,6 +458,11 @@ class BroadcastWindow(FramelessWindow):
         )
 
     def closeEvent(self, event):
+        if self._closeFlyout is not None:
+            self._closeFlyout.hide()
+            self._closeFlyout.deleteLater()
+            self._closeFlyout = None
+        self.miniWindow.hide()
         if self._is_editing: self.editClicked.emit()
         else: self.closeClicked.emit()
         self._is_editing = False
@@ -482,7 +483,6 @@ class BroadcastWindow(FramelessWindow):
         if e.button() == Qt.MouseButton.LeftButton:
             self._isTracking = False
         super().mouseReleaseEvent(e)
-
 
 def _iterSseContent(lines):
     finished = False
@@ -530,6 +530,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self._cost = 1
         self._peakEnabled = None
         self._borderIndex = 0
+        self._quotaRequestRunning = False
 
         self.titleLabel = SubtitleLabel("AI帮改Markdown", self)
         self.descriptionLabel = BodyLabel(
@@ -596,12 +597,21 @@ class AIMarkdownDialog(MessageBoxBase):
             super().reject()
 
     def _fetchQuota(self):
-        quota = fetchQuota()
-        self.quotaReceived.emit(
-            *(quota if quota else (-1, self._limit, 1, None, ""))
-        )
+        try:
+            quota = fetchQuota()
+            try:
+                self.quotaReceived.emit(
+                    *(quota if quota else (-1, self._limit, 1, None, ""))
+                )
+            except RuntimeError:
+                pass
+        finally:
+            self._quotaRequestRunning = False
 
     def _refreshQuota(self):
+        if self._quotaRequestRunning:
+            return
+        self._quotaRequestRunning = True
         threading.Thread(target=self._fetchQuota, daemon=True).start()
 
     def _startConversion(self):
@@ -649,17 +659,29 @@ class AIMarkdownDialog(MessageBoxBase):
                 for chunk in _iterSseContent(
                     response.iter_lines(chunk_size=1, decode_unicode=True)
                 ):
-                    self.chunkReceived.emit(chunk)
-            self.conversionFinished.emit(remaining, limit, cost)
+                    try:
+                        self.chunkReceived.emit(chunk)
+                    except RuntimeError:
+                        return
+            try:
+                self.conversionFinished.emit(remaining, limit, cost)
+            except RuntimeError:
+                pass
         except requests.RequestException:
-            self.conversionFailed.emit(
-                "无法连接 AI 服务，请检查网络后重试。",
-                remaining,
-                limit,
-                cost,
-            )
+            try:
+                self.conversionFailed.emit(
+                    "无法连接 AI 服务，请检查网络后重试。",
+                    remaining,
+                    limit,
+                    cost,
+                )
+            except RuntimeError:
+                pass
         except (RuntimeError, TypeError, ValueError) as error:
-            self.conversionFailed.emit(str(error), remaining, limit, cost)
+            try:
+                self.conversionFailed.emit(str(error), remaining, limit, cost)
+            except RuntimeError:
+                pass
 
     def _appendChunk(self, chunk):
         self._result += chunk
@@ -690,6 +712,7 @@ class AIMarkdownDialog(MessageBoxBase):
 
         self._running = False
         self._finished = True
+        self._quotaTimer.stop()
         self._remaining = remaining
         self._limit = limit
         self._cost = cost
@@ -713,7 +736,11 @@ class AIMarkdownDialog(MessageBoxBase):
         self._updateQuotaLabel()
         self._refreshStartButton()
         self._refreshQuota()
-        MessageBox("转换失败", message, self).exec()
+        dialog = MessageBox("转换失败", message, self)
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
 
     def _updateQuotaLabel(self):
         if self._remaining is None:
@@ -764,6 +791,18 @@ class AIMarkdownDialog(MessageBoxBase):
         self._busyTimer.stop()
         self.inputEdit.setStyleSheet(self._inputStyle)
 
+    def _stopTimers(self):
+        self._busyTimer.stop()
+        self._quotaTimer.stop()
+
+    def done(self, result):
+        self._stopTimers()
+        super().done(result)
+
+    def closeEvent(self, event):
+        self._stopTimers()
+        super().closeEvent(event)
+
 
 class BroadcastEditPage(QWidget):
     backSignal = Signal()
@@ -780,7 +819,7 @@ class BroadcastEditPage(QWidget):
         self.pageTitle = TitleLabel("全屏投送编辑器", self)
 
         self.markdownCheckBox = CheckBox("使用 Markdown 语法", self)
-        self.markdownCheckBox.setChecked(False)
+        self.markdownCheckBox.setChecked(cfg.broadcastMarkdownEnabled.value)
         self.markdownCheckBox.stateChanged.connect(self._onMarkdownStateChanged)
 
         topLayout.addWidget(self.backBtn)
@@ -823,6 +862,7 @@ class BroadcastEditPage(QWidget):
         btnLayout.addStretch(1)
         btnLayout.addWidget(self.broadcastBtn)
         self.vBoxLayout.addLayout(btnLayout)
+        self._updateMarkdownUi()
 
         self.broadcastWin = BroadcastWindow()
         self.broadcastWin.editClicked.connect(self._onReturnToEdit)
@@ -830,6 +870,13 @@ class BroadcastEditPage(QWidget):
         self._activeBroadcast = None
 
     def _onMarkdownStateChanged(self, state):
+        cfg.set(
+            cfg.broadcastMarkdownEnabled,
+            self.markdownCheckBox.isChecked(),
+        )
+        self._updateMarkdownUi()
+
+    def _updateMarkdownUi(self):
         if self.markdownCheckBox.isChecked():
             self.contentInput.setPlaceholderText("支持Markdown语法（注意，在该模式下换行要换两次）")
         else:
@@ -841,14 +888,22 @@ class BroadcastEditPage(QWidget):
             self.contentInput.toPlainText(),
             self.window(),
         )
-        if dialog.exec():
-            self.contentInput.setPlainText(dialog.resultText())
+        try:
+            if dialog.exec():
+                self.contentInput.setPlainText(dialog.resultText())
+        finally:
+            dialog.deleteLater()
 
     def _showTemplateMenu(self):
         menu = RoundMenu(parent=self)
+        menu.closedSignal.connect(menu.deleteLater)
         menu.addAction(Action(FIF.DOCUMENT, "中午作业模板", triggered=self._useNoonTemplate))
         menu.addAction(Action(FIF.DOCUMENT, "晚辅导作业模板", triggered=self._useNightTemplate))
-        menu.exec(self.templateBtn.mapToGlobal(QPoint(0, self.templateBtn.height())))
+        menu.exec(
+            self.templateBtn.mapToGlobal(
+                QPoint(0, self.templateBtn.height())
+            )
+        )
 
     def _useNoonTemplate(self):
         self.titleInput.setText("今日中午作业")
@@ -901,7 +956,16 @@ class BroadcastEditPage(QWidget):
 
     def _onBack(self):
         if self.titleInput.text().strip() or self.contentInput.toPlainText().strip():
-            w = MessageBox("未投送内容", "您还有内容未投送，是否退出？", self.window())
-            if not w.exec(): return
+            dialog = MessageBox(
+                "未投送内容",
+                "您还有内容未投送，是否退出？",
+                self.window(),
+            )
+            try:
+                confirmed = dialog.exec()
+            finally:
+                dialog.deleteLater()
+            if not confirmed:
+                return
         self.titleInput.clear(); self.contentInput.clear()
         self.backSignal.emit()

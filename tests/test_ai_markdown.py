@@ -28,6 +28,18 @@ class AIMarkdownTest(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
+    def setUp(self):
+        self.tempConfigDir = tempfile.TemporaryDirectory()
+        self.configFile = cfg.file
+        self.markdownEnabled = cfg.broadcastMarkdownEnabled.value
+        cfg.file = Path(self.tempConfigDir.name) / "config.json"
+        cfg.set(cfg.broadcastMarkdownEnabled, False)
+
+    def tearDown(self):
+        cfg.set(cfg.broadcastMarkdownEnabled, self.markdownEnabled)
+        cfg.file = self.configFile
+        self.tempConfigDir.cleanup()
+
     def testEditorControlsAndStreamParsing(self):
         page = BroadcastEditPage()
         self.addCleanup(page.close)

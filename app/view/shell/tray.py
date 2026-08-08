@@ -118,19 +118,9 @@ class SystemTrayIcon(QSystemTrayIcon):
         self.menu.addAction(self.showAction)
 
         self.broadcastAction = Action(FIF.PLAY, "", self.menu)
-        self.broadcastAction.triggered.connect(
-            lambda: self._toggleTasks(cfg.broadcastTasks)
-        )
+        self.broadcastAction.triggered.connect(self._toggleBroadcastTasks)
         self.menu.addAction(self.broadcastAction)
-        cfg.broadcastTasks.valueChanged.connect(
-            lambda tasks: self._refreshTaskAction(
-                self.broadcastAction,
-                tasks,
-                "关闭所有播报",
-                "开启所有播报",
-                FIF.PLAY,
-            )
-        )
+        cfg.broadcastTasks.valueChanged.connect(self._refreshBroadcastAction)
         self._refreshTaskAction(
             self.broadcastAction,
             cfg.broadcastTasks.value,
@@ -140,19 +130,9 @@ class SystemTrayIcon(QSystemTrayIcon):
         )
 
         self.shutdownAction = Action(FIF.POWER_BUTTON, "", self.menu)
-        self.shutdownAction.triggered.connect(
-            lambda: self._toggleTasks(cfg.shutdownTasks)
-        )
+        self.shutdownAction.triggered.connect(self._toggleShutdownTasks)
         self.menu.addAction(self.shutdownAction)
-        cfg.shutdownTasks.valueChanged.connect(
-            lambda tasks: self._refreshTaskAction(
-                self.shutdownAction,
-                tasks,
-                "关闭所有关机",
-                "开启所有关机",
-                FIF.POWER_BUTTON,
-            )
-        )
+        cfg.shutdownTasks.valueChanged.connect(self._refreshShutdownAction)
         self._refreshTaskAction(
             self.shutdownAction,
             cfg.shutdownTasks.value,
@@ -175,6 +155,30 @@ class SystemTrayIcon(QSystemTrayIcon):
             self.parent().show()
             self.parent().raise_()
             self.parent().activateWindow()
+
+    def _toggleBroadcastTasks(self):
+        self._toggleTasks(cfg.broadcastTasks)
+
+    def _toggleShutdownTasks(self):
+        self._toggleTasks(cfg.shutdownTasks)
+
+    def _refreshBroadcastAction(self, tasks):
+        self._refreshTaskAction(
+            self.broadcastAction,
+            tasks,
+            "关闭所有播报",
+            "开启所有播报",
+            FIF.PLAY,
+        )
+
+    def _refreshShutdownAction(self, tasks):
+        self._refreshTaskAction(
+            self.shutdownAction,
+            tasks,
+            "关闭所有关机",
+            "开启所有关机",
+            FIF.POWER_BUTTON,
+        )
 
     @staticmethod
     def _refreshTaskAction(

@@ -1,6 +1,7 @@
 import asyncio
 import os
 import tempfile
+import threading
 from pathlib import Path
 
 import edge_tts
@@ -8,6 +9,17 @@ from PySide6.QtCore import QObject, Signal
 
 
 DEFAULT_EDGE_VOICE = "zh-CN-XiaoxiaoNeural"
+EDGE_SPEECH_PREFIX = "djcat-edge-tts-"
+
+
+def clear_edge_speech_files(directory=None):
+    """Remove speech files left behind by an interrupted previous run."""
+    temp_directory = Path(directory or tempfile.gettempdir())
+    for path in temp_directory.glob(f"{EDGE_SPEECH_PREFIX}*.mp3"):
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
 
 def filter_chinese_voices(voices):
@@ -55,16 +67,26 @@ class EdgeSpeechWorker(QObject):
         self.request_id = request_id
         self.text = text
         self.voice = voice
+        self._cancelEvent = threading.Event()
+
+    def cancel(self):
+        self._cancelEvent.set()
 
     def run(self):
-        descriptor, path = tempfile.mkstemp(prefix="djcat-edge-tts-", suffix=".mp3")
+        descriptor, path = tempfile.mkstemp(prefix=EDGE_SPEECH_PREFIX, suffix=".mp3")
         os.close(descriptor)
 
         try:
             synthesize_edge_speech(self.text, self.voice, path)
         except Exception as error:
             Path(path).unlink(missing_ok=True)
-            self.finished.emit(self.request_id, "", str(error))
+            message = "" if self._cancelEvent.is_set() else str(error)
+            self.finished.emit(self.request_id, "", message)
+            return
+
+        if self._cancelEvent.is_set():
+            Path(path).unlink(missing_ok=True)
+            self.finished.emit(self.request_id, "", "")
             return
 
         self.finished.emit(self.request_id, path, "")

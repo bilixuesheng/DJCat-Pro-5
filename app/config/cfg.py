@@ -100,6 +100,9 @@ class Config(QConfig):
     confirmBeforeCloseBroadcast = ConfigItem(
         "Broadcast", "ConfirmBeforeClose", True, BoolValidator()
     )
+    broadcastMarkdownEnabled = ConfigItem(
+        "Broadcast", "MarkdownEnabled", False, BoolValidator()
+    )
 
     aiMarkdownCustomStyleEnabled = ConfigItem(
         "AIMarkdown", "CustomStyleEnabled", False, BoolValidator()
@@ -127,6 +130,9 @@ class Config(QConfig):
     )
     confirmBeforeCloseCountdown = ConfigItem(
         "Countdown", "ConfirmBeforeClose", True, BoolValidator()
+    )
+    confirmBeforeResetCountdown = ConfigItem(
+        "Countdown", "ConfirmBeforeReset", True, BoolValidator()
     )
 
     autoRun = ConfigItem("Software", "AutoRun", False, BoolValidator())

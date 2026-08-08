@@ -79,16 +79,20 @@ class CustomSplashScreen(SplashScreen):
 
 
 class UpdateWorker(QObject):
-    finished = Signal(dict, str)
+    finished = Signal(int, dict, str)
+
+    def __init__(self, requestId):
+        super().__init__()
+        self.requestId = requestId
 
     def run(self):
         try:
             response = requests.get(UPDATE_API, timeout=5)
             response.raise_for_status()
             data = response.json()
-            self.finished.emit(data, "")
+            self.finished.emit(self.requestId, data, "")
         except (requests.RequestException, ValueError) as error:
-            self.finished.emit({}, str(error))
+            self.finished.emit(self.requestId, {}, str(error))
 
 
 class MachineRegistrationWorker(QObject):
@@ -125,6 +129,13 @@ class MainWindow(MSFluentWindow):
         self._downloadThread = None
         self._downloadVersion = ""
         self._quitAfterDownload = False
+        self._navigationTarget = None
+        self._pendingNavigation = None
+        self._updateRequestId = 0
+        self._updateJobs = {}
+        self._resourcesShutdown = False
+        self.machineRegistrationWorker = None
+        self.machineRegistrationThread = None
 
         # MSFluentWindow 固定使用弹出式页面栈，快照过渡可避免目标页在动画前闪现。
         oldView = self.stackedWidget.view
@@ -150,7 +161,9 @@ class MainWindow(MSFluentWindow):
 
         signalBus.catchException.connect(self._onExceptionCaught)
         if self.splashScreen:
-            self.splashScreen.finish()
+            splashScreen = self.splashScreen
+            self.splashScreen = None
+            splashScreen.finish()
 
         if cfg.checkUpdateAtStartUp.value:
             self.checkForUpdates(manual=False)
@@ -167,7 +180,12 @@ class MainWindow(MSFluentWindow):
         self.machineRegistrationThread.start()
 
     def _onMachineRegistered(self, machineCode):
-        if machineCode:
+        worker = self.machineRegistrationWorker
+        self.machineRegistrationWorker = None
+        self.machineRegistrationThread = None
+        if worker is not None:
+            worker.deleteLater()
+        if machineCode and not self._resourcesShutdown:
             cfg.set(cfg.aiMarkdownMachineCode, machineCode)
 
     def initWindow(self):
@@ -220,6 +238,9 @@ class MainWindow(MSFluentWindow):
         self.tts.setVolume(volume)
 
     def _playAudioTask(self, task_data):
+        if self._resourcesShutdown:
+            return
+
         volume = task_data.get("volume", 100)
         self._setBroadcastVolume(volume)
         t = task_data["type"]
@@ -267,7 +288,7 @@ class MainWindow(MSFluentWindow):
     def _startEdgeTts(self, content, voice, repeat_count, volume):
         self._edge_tts_request_id += 1
         request_id = self._edge_tts_request_id
-        worker = EdgeSpeechWorker(request_id, content, voice, self)
+        worker = EdgeSpeechWorker(request_id, content, voice)
         thread = threading.Thread(target=worker.run, daemon=True)
         self._edge_tts_jobs[request_id] = (
             worker,
@@ -280,6 +301,8 @@ class MainWindow(MSFluentWindow):
 
     def _onEdgeTtsReady(self, request_id, path, error):
         job = self._edge_tts_jobs.pop(request_id, None)
+        if job:
+            job[0].deleteLater()
         if request_id != self._edge_tts_request_id:
             if path:
                 self._removeTempFile(path)
@@ -308,6 +331,11 @@ class MainWindow(MSFluentWindow):
     def _invalidatePendingEdgeTts(self):
         self._edge_tts_request_id += 1
 
+    def _cancelPendingEdgeTts(self):
+        self._invalidatePendingEdgeTts()
+        for worker, *_ in self._edge_tts_jobs.values():
+            worker.cancel()
+
     def _cleanupEdgeTtsFile(self):
         if not self._edge_tts_temp_path:
             return
@@ -319,7 +347,7 @@ class MainWindow(MSFluentWindow):
         try:
             Path(path).unlink(missing_ok=True)
         except OSError:
-            QTimer.singleShot(1000, lambda: self._removeTempFile(path))
+            QTimer.singleShot(1000, self, lambda: self._removeTempFile(path))
 
     @staticmethod
     def _removeTempFile(path):
@@ -337,7 +365,7 @@ class MainWindow(MSFluentWindow):
             self.player.setPosition(0)
             self.player.play()
         elif status == QMediaPlayer.MediaStatus.EndOfMedia:
-            QTimer.singleShot(0, self._cleanupEdgeTtsFile)
+            QTimer.singleShot(0, self, self._cleanupEdgeTtsFile)
 
     def _checkSchedule(self):
         now_time = QTime.currentTime().toString("HH:mm:ss")
@@ -377,6 +405,9 @@ class MainWindow(MSFluentWindow):
         )
 
     def _handleShutdownTask(self, task):
+        if self._resourcesShutdown:
+            return
+
         if not task.get("notify", True):
             self._shutdownNow()
             return
@@ -387,6 +418,7 @@ class MainWindow(MSFluentWindow):
         elif result == WAIT_RESULT:
             QTimer.singleShot(
                 60_000,
+                self,
                 lambda: self._handleShutdownTask(task),
             )
 
@@ -405,6 +437,7 @@ class MainWindow(MSFluentWindow):
         self.searchEdit.raise_()
         self.searchEdit.textChanged.connect(self.settingPage.setSearchText)
         self.stackedWidget.currentChanged.connect(self._updateSearchEdit)
+        self.stackedWidget.currentChanged.connect(self._onNavigationCompleted)
         self.broadcastEditPage = BroadcastEditPage(self)
         self.broadcastEditPage.setObjectName("BroadcastEditPage")
         self.countdownPage = CountdownEditPage(self)
@@ -451,8 +484,24 @@ class MainWindow(MSFluentWindow):
         self._updateSearchEdit()
 
     def _updateSearchEdit(self, *args):
-        isSettingPage = self.stackedWidget.currentWidget() is self.settingPage
+        pendingTarget = (
+            self._pendingNavigation[0]
+            if self._pendingNavigation is not None
+            else self._navigationTarget
+        )
+        interface = pendingTarget or self.stackedWidget.currentWidget()
+        isSettingPage = interface is self.settingPage
         self._setSearchEditVisible(isSettingPage)
+
+    def _onNavigationCompleted(self, *args):
+        if self.stackedWidget.currentWidget() is not self._navigationTarget:
+            return
+
+        self._navigationTarget = None
+        pending = self._pendingNavigation
+        self._pendingNavigation = None
+        if pending is not None:
+            QTimer.singleShot(0, self, lambda: self._navigateTo(*pending))
 
     def _setSearchEditVisible(self, isSettingPage: bool) -> None:
         if not isSettingPage:
@@ -462,11 +511,29 @@ class MainWindow(MSFluentWindow):
             self._refreshSearchEditGeometry()
 
     def switchTo(self, interface: QWidget) -> None:
-        super().switchTo(interface)
-        # DrillInTransitionStackedWidget only updates currentWidget after its
-        # animation finishes. Keep title-bar controls in sync with the user's
-        # navigation action instead of waiting for that delayed signal.
+        self._navigateTo(interface)
+
+    def _navigateTo(self, interface: QWidget, isBack: bool = False) -> None:
+        # currentWidget changes only when the snapshot animation finishes.
+        # Queue one latest destination so a second click cannot stop and rebuild
+        # the in-flight snapshots in an inconsistent state.
+        if self._resourcesShutdown:
+            return
         self._setSearchEditVisible(interface is self.settingPage)
+        if interface is self._navigationTarget:
+            self._pendingNavigation = None
+            return
+        if self._navigationTarget is not None:
+            self._pendingNavigation = (interface, isBack)
+            return
+        if interface is self.stackedWidget.currentWidget():
+            return
+
+        self._navigationTarget = interface
+        if isBack:
+            self.stackedWidget.view.setCurrentWidget(interface, isBack=True)
+        else:
+            super().switchTo(interface)
 
     def _refreshSearchEditGeometry(self):
         width = max(200, min(360, self.titleBar.width() - 300))
@@ -493,7 +560,7 @@ class MainWindow(MSFluentWindow):
         self.navigationInterface.setCurrentItem(None)
 
     def _navToHome(self):
-        self.stackedWidget.view.setCurrentWidget(self.homePage, isBack=True)
+        self._navigateTo(self.homePage, isBack=True)
         self.navigationInterface.setCurrentItem(self.homePage.objectName())
 
     def _toggleTheme(self, value):
@@ -516,6 +583,8 @@ class MainWindow(MSFluentWindow):
         )
 
     def checkForUpdates(self, manual: bool = False):
+        if self._resourcesShutdown:
+            return
         if manual:
             InfoBar.info(
                 "检查更新",
@@ -524,12 +593,24 @@ class MainWindow(MSFluentWindow):
                 position=InfoBarPosition.BOTTOM_RIGHT,
                 parent=self,
             )
-        self.worker = UpdateWorker()
-        self.thread = threading.Thread(target=self.worker.run, daemon=True)
-        self.worker.finished.connect(
-            lambda data, error: self._onUpdateChecked(data, error, manual)
-        )
-        self.thread.start()
+        self._updateRequestId += 1
+        requestId = self._updateRequestId
+        worker = UpdateWorker(requestId)
+        thread = threading.Thread(target=worker.run, daemon=True)
+        self._updateJobs[requestId] = (worker, thread, manual)
+        worker.finished.connect(self._onUpdateCheckFinished)
+        thread.start()
+
+    def _onUpdateCheckFinished(self, requestId, data, error):
+        job = self._updateJobs.pop(requestId, None)
+        if job is None:
+            return
+
+        worker, _, manual = job
+        worker.deleteLater()
+        if requestId != self._updateRequestId or self._resourcesShutdown:
+            return
+        self._onUpdateChecked(data, error, manual)
 
     def _onUpdateChecked(self, data, error, manual):
         if error:
@@ -588,9 +669,7 @@ class MainWindow(MSFluentWindow):
         detailButton.clicked.connect(lambda: self._showUpdateLog(latest_version, note))
         infoBar.addWidget(detailButton)
         self._updateInfoBar = infoBar
-        infoBar.destroyed.connect(
-            lambda _=None, bar=infoBar: self._clearUpdateInfoBar(bar)
-        )
+        infoBar.destroyed.connect(self._clearUpdateInfoBar)
         infoBar.show()
 
     def _clearUpdateInfoBar(self, infoBar):
@@ -599,8 +678,11 @@ class MainWindow(MSFluentWindow):
 
     def _showUpdateLog(self, version, note):
         w = UpdateDialog(version, note, self)
-        if w.exec():
-            self._startUpdateDownload(version)
+        try:
+            if w.exec():
+                self._startUpdateDownload(version)
+        finally:
+            w.deleteLater()
 
     def _startUpdateDownload(self, version):
         if self._downloadWorker is not None:
@@ -621,6 +703,12 @@ class MainWindow(MSFluentWindow):
             self._downloadStateToolTip.getSuitablePos()
         )
         self._downloadStateToolTip.show()
+        self._downloadStateToolTip.closedSignal.connect(
+            self._onDownloadStateToolTipClosed
+        )
+        self._downloadStateToolTip.destroyed.connect(
+            self._clearDownloadStateToolTip
+        )
 
         self._downloadWorker = UpdateDownloadWorker(
             DOWNLOAD_URL,
@@ -663,6 +751,24 @@ class MainWindow(MSFluentWindow):
             self._downloadStateToolTip.getSuitablePos()
         )
 
+    def _onDownloadStateToolTipClosed(self):
+        toolTip = self._downloadStateToolTip
+        if toolTip is not None:
+            self._downloadStateToolTip = None
+            toolTip.deleteLater()
+
+    def _clearDownloadStateToolTip(self, toolTip=None):
+        if toolTip is None or self._downloadStateToolTip is toolTip:
+            self._downloadStateToolTip = None
+
+    def _disposeDownloadStateToolTip(self):
+        toolTip = self._downloadStateToolTip
+        if toolTip is None:
+            return
+        self._downloadStateToolTip = None
+        toolTip.hide()
+        toolTip.deleteLater()
+
     @staticmethod
     def _formatDownloadSize(size):
         value = float(size)
@@ -688,17 +794,13 @@ class MainWindow(MSFluentWindow):
             return
 
         if canceled:
-            if self._downloadStateToolTip is not None:
-                self._downloadStateToolTip.hide()
-            self._downloadStateToolTip = None
+            self._disposeDownloadStateToolTip()
             return
 
         self._restoreForUpdateMessage()
 
         if error:
-            if self._downloadStateToolTip is not None:
-                self._downloadStateToolTip.hide()
-                self._downloadStateToolTip = None
+            self._disposeDownloadStateToolTip()
             InfoBar.error(
                 "更新下载失败",
                 error,
@@ -770,15 +872,38 @@ class MainWindow(MSFluentWindow):
             return
 
         infoBar.close()
+        self._shutdownResources()
         QApplication.quit()
 
     def requestQuit(self):
         cfg.set(cfg.geometry, self.geometry())
+        self._shutdownResources()
         if self._downloadWorker is not None:
             self._quitAfterDownload = True
             self._downloadWorker.cancel()
             return
         QApplication.quit()
+
+    def _shutdownResources(self):
+        if self._resourcesShutdown:
+            return
+        self._resourcesShutdown = True
+        self._updateRequestId += 1
+        self._pendingNavigation = None
+        self.stackedWidget.view._stopAnimation()
+        self._navigationTarget = None
+        self.scheduleTimer.stop()
+        self._cancelPendingEdgeTts()
+        self.tts.stop()
+        self.player.stop()
+        self._cleanupEdgeTtsFile()
+        if self._downloadWorker is not None:
+            self._downloadWorker.cancel()
+
+        if self._updateInfoBar is not None:
+            self._updateInfoBar.close()
+            self._updateInfoBar = None
+        self._disposeDownloadStateToolTip()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import qconfig, setThemeColor
 
+from app.common.edge_tts import clear_edge_speech_files
 from app.common.update_download import clearUpdateDirectory
 from app.config.cfg import cfg
 from app.config.paths import CONFIG_PATH
@@ -49,6 +50,7 @@ def main():
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
     clearUpdateDirectory()
+    clear_edge_speech_files()
     configureLogging()
     sys.excepthook = exceptionHook
 
@@ -57,6 +59,7 @@ def main():
     setThemeColor(QColor(49, 101, 49))
 
     app.window = startApp(isSilent="--silence" in sys.argv)
+    app.aboutToQuit.connect(app.window._shutdownResources)
     sys.exit(app.exec())
 
 

@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QApplication
 
 import djcat
@@ -23,7 +24,7 @@ from app.common.update_download import (
 from app.config.constants import DOWNLOAD_URL
 from app.view.pages.setting_page import SettingPage
 from app.view.shell.tray import SystemTrayIcon
-from app.view.windows.main_window import MainWindow
+from app.view.windows.main_window import MainWindow, UpdateWorker
 
 
 class FakeResponse:
@@ -111,6 +112,9 @@ class StateToolTipStub:
         self.titleLabel.sizeHint.return_value.width.return_value = 100
         self.closeButton = Mock()
         self.fixedWidth = 0
+        self.closedSignal = SignalStub()
+        self.destroyed = SignalStub()
+        self.deleted = False
 
     def getSuitablePos(self):
         return (0, 0)
@@ -132,6 +136,9 @@ class StateToolTipStub:
 
     def setFixedWidth(self, width):
         self.fixedWidth = width
+
+    def deleteLater(self):
+        self.deleted = True
 
     def width(self):
         return self.fixedWidth
@@ -365,7 +372,9 @@ class UpdateWindowLifecycleTest(TestCase):
 
     def tearDown(self):
         self.window.tray = None
+        self.window._shutdownResources()
         self.window.deleteLater()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.app.processEvents()
         self.quotaPatcher.stop()
 
@@ -478,6 +487,83 @@ class UpdateWindowLifecycleTest(TestCase):
         SystemTrayIcon._onQuitActionTriggered(tray)
 
         parent.requestQuit.assert_called_once_with()
+
+    def testOnlyLatestOverlappingUpdateCheckCanChangeTheUi(self):
+        firstWorker = Mock()
+        secondWorker = Mock()
+        self.window._updateRequestId = 2
+        self.window._updateJobs = {
+            1: (firstWorker, Mock(), False),
+            2: (secondWorker, Mock(), True),
+        }
+
+        with patch.object(self.window, "_onUpdateChecked") as checked:
+            self.window._onUpdateCheckFinished(1, {"latest_version": "1"}, "")
+            checked.assert_not_called()
+            self.window._onUpdateCheckFinished(2, {"latest_version": "2"}, "")
+
+        firstWorker.deleteLater.assert_called_once_with()
+        secondWorker.deleteLater.assert_called_once_with()
+        checked.assert_called_once_with({"latest_version": "2"}, "", True)
+        self.assertEqual(self.window._updateJobs, {})
+
+    def testUpdateWorkerCarriesItsRequestIdToCompletion(self):
+        response = Mock()
+        response.json.return_value = {"latest_version": "9999.0.0"}
+        results = []
+        worker = UpdateWorker(17)
+        worker.finished.connect(lambda *args: results.append(args))
+
+        with patch(
+            "app.view.windows.main_window.requests.get",
+            return_value=response,
+        ):
+            worker.run()
+
+        self.assertEqual(
+            results,
+            [(17, {"latest_version": "9999.0.0"}, "")],
+        )
+
+    def testUpdateDialogIsScheduledForDeletionAfterClosing(self):
+        dialog = Mock()
+        dialog.exec.return_value = False
+        with patch(
+            "app.view.windows.main_window.UpdateDialog",
+            return_value=dialog,
+        ):
+            self.window._showUpdateLog("9999.0.0", "note")
+
+        dialog.deleteLater.assert_called_once_with()
+
+    def testShutdownResourcesStopsRuntimeWorkOnlyOnce(self):
+        downloadWorker = Mock()
+        self.window._downloadWorker = downloadWorker
+        self.window.scheduleTimer = Mock()
+        self.window.tts = Mock()
+        self.window.player = Mock()
+
+        with (
+            patch.object(self.window, "_cancelPendingEdgeTts") as cancelEdge,
+            patch.object(self.window, "_cleanupEdgeTtsFile") as cleanupEdge,
+            patch.object(
+                self.window,
+                "_disposeDownloadStateToolTip",
+            ) as disposeToolTip,
+        ):
+            self.window._shutdownResources()
+            self.window._shutdownResources()
+            self.window.switchTo(self.window.settingPage)
+
+        self.window.scheduleTimer.stop.assert_called_once_with()
+        cancelEdge.assert_called_once_with()
+        self.window.tts.stop.assert_called_once_with()
+        self.window.player.stop.assert_called_once_with()
+        cleanupEdge.assert_called_once_with()
+        downloadWorker.cancel.assert_called_once_with()
+        disposeToolTip.assert_called_once_with()
+        self.assertIsNone(self.window._navigationTarget)
+        self.assertIsNone(self.window._pendingNavigation)
 
     def testInstallerStartsBeforeApplicationQuits(self):
         infoBar = Mock()

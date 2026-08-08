@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -25,7 +26,6 @@ from qfluentwidgets import (
     SpinBox,
     SubtitleLabel,
     SwitchButton,
-    TimePicker,
     TitleLabel,
     ToolButton,
 )
@@ -35,6 +35,10 @@ from app.common.edge_tts import DEFAULT_EDGE_VOICE, load_chinese_voices
 from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import SettingMaterialCard
+from app.view.components.task_picker import (
+    TouchTimePicker,
+    configure_task_expand_card,
+)
 
 
 class SecondsFormatter(PickerColumnFormatter):
@@ -47,6 +51,13 @@ class SecondsFormatter(PickerColumnFormatter):
 class BroadcastSettingCard(SettingCard):
     def __init__(self, icon, title, content, widget, parent=None):
         super().__init__(icon, title, content, parent)
+        for label in (self.titleLabel, self.contentLabel):
+            label.setWordWrap(False)
+            label.setSizePolicy(
+                QSizePolicy.Policy.Ignored,
+                QSizePolicy.Policy.Preferred,
+            )
+        self.hBoxLayout.setStretchFactor(self.vBoxLayout, 1)
         self.hBoxLayout.addWidget(widget, 0, Qt.AlignmentFlag.AlignRight)
         self.hBoxLayout.addSpacing(16)
 
@@ -66,9 +77,13 @@ class ChineseVoiceLoader(QObject):
 
     def _load(self):
         try:
-            self.finished.emit(load_chinese_voices(), "")
-        except Exception as error:
-            self.finished.emit([], str(error))
+            voices, error = load_chinese_voices(), ""
+        except Exception as exception:
+            voices, error = [], str(exception)
+        try:
+            self.finished.emit(voices, error)
+        except RuntimeError:
+            pass
 
 
 def create_task_form(parent_widget, initial_data=None):
@@ -93,7 +108,7 @@ def create_task_form(parent_widget, initial_data=None):
     layout.addWidget(BroadcastSettingCard(FIF.EDIT, "任务名称", "设置该播报任务的标题", nameInput, form))
     widgets['nameInput'] = nameInput
 
-    timePicker = TimePicker(form, showSeconds=True)
+    timePicker = TouchTimePicker(form, showSeconds=True)
     timePicker.setColumnFormatter(2, SecondsFormatter())
     timePicker.setTime(QTime.fromString(data["time"], "HH:mm:ss") if data["time"] else default_time)
     layout.addWidget(BroadcastSettingCard(FIF.ALBUM, "播报时间", "设置触发的具体时间(时:分:秒)", timePicker, form))
@@ -134,7 +149,7 @@ def create_task_form(parent_widget, initial_data=None):
     widgets['ttsInput'] = ttsInput
 
     voiceCombo = ComboBox(form)
-    voiceCombo.setFixedWidth(280)
+    voiceCombo.setFixedWidth(260)
     voiceCombo.addItem(
         "晓晓（普通话 · 女声，默认）",
         userData=data.get("voice", DEFAULT_EDGE_VOICE),
@@ -200,6 +215,7 @@ def create_task_form(parent_widget, initial_data=None):
             voiceCombo.clear()
             for voice in voices:
                 voiceCombo.addItem(voice["label"], userData=voice["name"])
+            voiceCombo.setFixedWidth(260)
             selected_index = voiceCombo.findData(selected_voice)
             voiceCombo.setCurrentIndex(max(0, selected_index))
             widgets['voicesLoaded'] = True
@@ -281,6 +297,7 @@ class TaskCard(SettingMaterialCard):
             self,
         )
         self.paintFilter = self.applyExpandCardMaterial(self.expandCard)
+        self.expandBehavior = configure_task_expand_card(self.expandCard)
 
         self.cardLayout = QVBoxLayout(self)
         self.cardLayout.setContentsMargins(0, 0, 0, 0)
@@ -300,17 +317,19 @@ class TaskCard(SettingMaterialCard):
         self.expandCard.addWidget(self.switchBtn)
 
         self.formWidget, self.formWidgets = create_task_form(self, data)
+        self.formHeightTimer = QTimer(self)
+        self.formHeightTimer.setSingleShot(True)
+        self.formHeightTimer.setInterval(10)
+        self.formHeightTimer.timeout.connect(
+            self.expandCard._adjustViewSize
+        )
 
         self.formWidgets['nameInput'].textChanged.connect(self._saveData)
         self.formWidgets['timePicker'].timeChanged.connect(self._saveData)
         for btn in self.formWidgets['weekBtns']: btn.clicked.connect(self._saveData)
         self.formWidgets['typeCombo'].currentTextChanged.connect(self._saveData)
-        # 立即刷新发起布局请求，延迟刷新再读取最终高度。
         self.formWidgets['typeCombo'].currentTextChanged.connect(
-            lambda: QTimer.singleShot(1, self.expandCard._adjustViewSize)
-        )
-        self.formWidgets['typeCombo'].currentTextChanged.connect(
-            self.expandCard._adjustViewSize
+            self._refreshFormHeight
         )
         self.formWidgets['ttsInput'].textChanged.connect(self._saveData)
         self.formWidgets['voiceCombo'].currentIndexChanged.connect(self._saveData)
@@ -345,6 +364,10 @@ class TaskCard(SettingMaterialCard):
         container = QWidget()
         container.setLayout(containerLayout)
         self.expandCard.viewLayout.addWidget(container)
+
+    def _refreshFormHeight(self):
+        self.expandCard._adjustViewSize()
+        self.formHeightTimer.start()
 
     def _onEnableChanged(self, checked):
         self.data["enabled"] = checked
@@ -439,12 +462,15 @@ class SchedulePage(ScrollArea):
         cfg.set(cfg.broadcastTasks, self.current_tasks)
 
     def _addTask(self):
-        w = AddTaskDialog(self.window())
-        if w.exec():
-            data = w.get_data()
-            self.current_tasks.append(data)
-            cfg.set(cfg.broadcastTasks, self.current_tasks)
-            self._loadTasks()
+        dialog = AddTaskDialog(self.window())
+        try:
+            if dialog.exec():
+                data = dialog.get_data()
+                self.current_tasks.append(data)
+                cfg.set(cfg.broadcastTasks, self.current_tasks)
+                self._loadTasks()
+        finally:
+            dialog.deleteLater()
 
     def _removeTask(self, data):
         self.current_tasks.remove(data)

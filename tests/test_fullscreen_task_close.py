@@ -6,14 +6,18 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QSize, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QStackedWidget, QWidget
 from qfluentwidgets import Flyout, PrimaryPushButton, PushButton
 from qfluentwidgets import FluentIcon as FIF
 
 from app.config.cfg import cfg
-from app.view.pages.broadcast_page import BroadcastEditPage, VerticalButton
+from app.view.pages.broadcast_page import (
+    AIMarkdownDialog,
+    BroadcastEditPage,
+    VerticalButton,
+)
 from app.view.pages.countdown_page import CountdownEditPage
 
 
@@ -31,9 +35,11 @@ class FullscreenTaskCloseTest(TestCase):
                 cfg.broadcastActionButtonPosition,
                 cfg.showMainWindowAfterBroadcast,
                 cfg.confirmBeforeCloseBroadcast,
+                cfg.broadcastMarkdownEnabled,
                 cfg.countdownActionButtonPosition,
                 cfg.showMainWindowAfterCountdown,
                 cfg.confirmBeforeCloseCountdown,
+                cfg.confirmBeforeResetCountdown,
             )
         ]
         cfg.file = Path(self.tempDir.name) / "config.json"
@@ -52,6 +58,8 @@ class FullscreenTaskCloseTest(TestCase):
         self.assertTrue(cfg.showMainWindowAfterCountdown.defaultValue)
         self.assertTrue(cfg.confirmBeforeCloseBroadcast.defaultValue)
         self.assertTrue(cfg.confirmBeforeCloseCountdown.defaultValue)
+        self.assertFalse(cfg.broadcastMarkdownEnabled.defaultValue)
+        self.assertTrue(cfg.confirmBeforeResetCountdown.defaultValue)
 
     def testFullscreenActionButtonShowsPressedStateAndCancelsOutsideRelease(self):
         for primary in (False, True):
@@ -60,7 +68,6 @@ class FullscreenTaskCloseTest(TestCase):
                     FIF.CLOSE,
                     "关闭",
                     primary=primary,
-                    force_dark=True,
                 )
                 button.show()
                 self.app.processEvents()
@@ -70,7 +77,10 @@ class FullscreenTaskCloseTest(TestCase):
                 center = button.rect().center()
                 QTest.mousePress(button, Qt.MouseButton.LeftButton, pos=center)
                 self.assertTrue(button.isDown())
-                self.assertIn("QToolButton:pressed", button.styleSheet())
+                expectedType = PrimaryPushButton if primary else PushButton
+                self.assertIsInstance(button, expectedType)
+                self.assertNotIn("qlineargradient", button.styleSheet())
+                self.assertEqual(button.size(), QSize(80, 65))
 
                 QTest.mouseRelease(
                     button,
@@ -82,7 +92,38 @@ class FullscreenTaskCloseTest(TestCase):
 
                 QTest.mouseClick(button, Qt.MouseButton.LeftButton, pos=center)
                 self.assertEqual(clicks, [True])
+                button.setWindowed(True)
+                self.assertEqual(button.size(), QSize(50, 40))
                 button.close()
+
+    def testFullscreenActionButtonUsesReadableForegroundColor(self):
+        with patch(
+            "app.view.pages.broadcast_page.isDarkTheme",
+            return_value=False,
+        ):
+            normalButton = VerticalButton(FIF.EDIT, "编辑")
+            forcedDarkButton = VerticalButton(
+                FIF.EDIT,
+                "编辑",
+                force_dark=True,
+            )
+            primaryButton = VerticalButton(
+                FIF.CLOSE,
+                "关闭",
+                primary=True,
+            )
+            self.assertEqual(normalButton._foregroundColor().name(), "#000000")
+            self.assertEqual(forcedDarkButton._foregroundColor().name(), "#ffffff")
+            self.assertEqual(primaryButton._foregroundColor().name(), "#ffffff")
+
+        with patch(
+            "app.view.pages.broadcast_page.isDarkTheme",
+            return_value=True,
+        ):
+            self.assertEqual(normalButton._foregroundColor().name(), "#ffffff")
+
+        for button in (normalButton, forcedDarkButton, primaryButton):
+            button.close()
 
     def testClosingTasksFollowsEachMainWindowSetting(self):
         for enabled, pageType, windowName, setting in (
@@ -182,6 +223,17 @@ class FullscreenTaskCloseTest(TestCase):
                 self.assertTrue(flyout.isVisible())
                 self.assertEqual(flyout.view.contentLabel.text(), warning)
 
+                taskWindow.btn_close.click()
+                self.app.processEvents()
+                self.assertEqual(
+                    [
+                        child
+                        for child in taskWindow.findChildren(Flyout)
+                        if child.isVisible()
+                    ],
+                    [flyout],
+                )
+
                 cancelButton = next(
                     button
                     for button in flyout.findChildren(PushButton)
@@ -207,6 +259,13 @@ class FullscreenTaskCloseTest(TestCase):
                 self.app.processEvents()
 
                 self.assertFalse(taskWindow.isVisible())
+                self.assertFalse(
+                    any(
+                        child.isVisible()
+                        for child in taskWindow.findChildren(Flyout)
+                    )
+                )
+                self.assertIsNone(taskWindow._closeFlyout)
 
                 cfg.set(setting, False)
                 taskWindow.show()
@@ -214,3 +273,51 @@ class FullscreenTaskCloseTest(TestCase):
                 self.app.processEvents()
                 self.assertFalse(taskWindow.isVisible())
                 page.close()
+
+    def testMarkdownChoiceIsLoadedAndPersisted(self):
+        cfg.set(cfg.broadcastMarkdownEnabled, True)
+        page = BroadcastEditPage()
+        self.assertTrue(page.markdownCheckBox.isChecked())
+        self.assertTrue(page.aiBtn.isEnabled())
+        self.assertIn("Markdown", page.contentInput.placeholderText())
+
+        page.markdownCheckBox.setChecked(False)
+        self.app.processEvents()
+
+        self.assertFalse(cfg.broadcastMarkdownEnabled.value)
+        page.close()
+
+    def testWindowedBroadcastUsesTouchFriendlyResizeBorder(self):
+        page = BroadcastEditPage()
+        window = page.broadcastWin
+
+        self.assertGreaterEqual(window.BORDER_WIDTH, 12)
+        window.is_windowed = True
+        window._applyWindowState()
+
+        self.assertTrue(window._isResizeEnabled)
+        window.close()
+        page.close()
+
+    def testAIMarkdownDialogDoesNotOverlapQuotaRequestsAndStopsTimers(self):
+        parent = QWidget()
+        parent.resize(800, 600)
+        with patch("app.view.pages.broadcast_page.threading.Thread") as thread:
+            dialog = AIMarkdownDialog("", parent)
+            self.assertEqual(thread.call_count, 1)
+
+            dialog._refreshQuota()
+            self.assertEqual(thread.call_count, 1)
+
+            dialog._result = "转换结果"
+            dialog._onConversionFinished(10, 15, 1)
+            self.assertFalse(dialog._quotaTimer.isActive())
+
+            dialog._busyTimer.start()
+            dialog.close()
+            self.app.processEvents()
+
+        self.assertFalse(dialog._busyTimer.isActive())
+        self.assertFalse(dialog._quotaTimer.isActive())
+        dialog.deleteLater()
+        parent.close()
