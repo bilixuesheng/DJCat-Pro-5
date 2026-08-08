@@ -14,7 +14,7 @@ from PySide6.QtCore import (
     QUrl,
     Signal,
 )
-from PySide6.QtGui import QDesktopServices, QIcon
+from PySide6.QtGui import QIcon
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtTextToSpeech import QTextToSpeech
 from PySide6.QtWidgets import QApplication, QGraphicsOpacityEffect, QWidget
@@ -30,6 +30,7 @@ from qfluentwidgets import (
     PushButton,
     SearchLineEdit,
     SplashScreen,
+    StateToolTip,
     SubtitleLabel,
     TextEdit,
     Theme,
@@ -39,6 +40,7 @@ from qfluentwidgets import (
 
 from app.common.ai_markdown import registerMachine
 from app.common.edge_tts import DEFAULT_EDGE_VOICE, EdgeSpeechWorker
+from app.common.update_download import UpdateDownloadWorker, clearUpdateDirectory
 from app.config.cfg import cfg
 from app.config.constants import (
     APP_NAME,
@@ -46,7 +48,7 @@ from app.config.constants import (
     UPDATE_API,
     VERSION,
 )
-from app.config.paths import ASSET_DIR
+from app.config.paths import ASSET_DIR, UPDATE_INSTALLER_PATH
 from app.signal_bus import signalBus
 from app.view.pages.broadcast_page import BroadcastEditPage
 from app.view.pages.countdown_page import CountdownEditPage
@@ -117,6 +119,12 @@ class MainWindow(MSFluentWindow):
         self.searchEdit = None
         super().__init__(parent=None)
         self.splashScreen = None
+        self._updateInfoBar = None
+        self._downloadStateToolTip = None
+        self._downloadWorker = None
+        self._downloadThread = None
+        self._downloadVersion = ""
+        self._quitAfterDownload = False
 
         # MSFluentWindow 固定使用弹出式页面栈，快照过渡可避免目标页在动画前闪现。
         oldView = self.stackedWidget.view
@@ -557,6 +565,9 @@ class MainWindow(MSFluentWindow):
         note = note.replace("\\n", "\n")
         note = re.sub(r"\n+", "\n\n", note)
 
+        if self._updateInfoBar is not None:
+            self._updateInfoBar.close()
+
         infoBar = InfoBar(
             icon=FIF.UPDATE,
             title=f"检测到新版本: v{latest_version}",
@@ -570,18 +581,204 @@ class MainWindow(MSFluentWindow):
         infoBar.widgetLayout.addSpacing(10)
         downloadButton = PrimaryPushButton(FIF.DOWNLOAD, "下载更新")
         downloadButton.clicked.connect(
-            lambda: QDesktopServices.openUrl(QUrl(DOWNLOAD_URL))
+            lambda: self._startUpdateDownload(latest_version)
         )
         infoBar.addWidget(downloadButton)
         detailButton = PushButton(FIF.DOCUMENT, "更新日志")
         detailButton.clicked.connect(lambda: self._showUpdateLog(latest_version, note))
         infoBar.addWidget(detailButton)
+        self._updateInfoBar = infoBar
+        infoBar.destroyed.connect(
+            lambda _=None, bar=infoBar: self._clearUpdateInfoBar(bar)
+        )
         infoBar.show()
+
+    def _clearUpdateInfoBar(self, infoBar):
+        if self._updateInfoBar is infoBar:
+            self._updateInfoBar = None
 
     def _showUpdateLog(self, version, note):
         w = UpdateDialog(version, note, self)
         if w.exec():
-            QDesktopServices.openUrl(QUrl(DOWNLOAD_URL))
+            self._startUpdateDownload(version)
+
+    def _startUpdateDownload(self, version):
+        if self._downloadWorker is not None:
+            return
+
+        if self._updateInfoBar is not None:
+            self._updateInfoBar.close()
+            self._updateInfoBar = None
+
+        self._downloadVersion = str(version)
+        self._quitAfterDownload = False
+        self._downloadStateToolTip = StateToolTip(
+            "正在下载更新",
+            "正在连接下载服务器...",
+            self,
+        )
+        self._downloadStateToolTip.move(
+            self._downloadStateToolTip.getSuitablePos()
+        )
+        self._downloadStateToolTip.show()
+
+        self._downloadWorker = UpdateDownloadWorker(
+            DOWNLOAD_URL,
+            UPDATE_INSTALLER_PATH,
+        )
+        self._downloadWorker.progressChanged.connect(
+            self._onUpdateDownloadProgress
+        )
+        self._downloadWorker.finished.connect(self._onUpdateDownloadFinished)
+        self._downloadThread = threading.Thread(
+            target=self._downloadWorker.run,
+            daemon=True,
+        )
+        self._downloadThread.start()
+
+    def _onUpdateDownloadProgress(self, downloaded, total, speed, threads):
+        if self._downloadStateToolTip is None:
+            return
+
+        downloadedText = self._formatDownloadSize(downloaded)
+        if total > 0:
+            percent = min(100, int(downloaded * 100 / total))
+            totalText = self._formatDownloadSize(total)
+            progressText = f"{percent}% · {downloadedText} / {totalText}"
+        else:
+            progressText = f"已下载 {downloadedText}"
+        speedText = self._formatDownloadSize(speed)
+        content = f"{progressText} · {speedText}/s · {threads} 线程"
+        self._downloadStateToolTip.setContent(content)
+        contentWidth = self._downloadStateToolTip.contentLabel.sizeHint().width()
+        titleWidth = self._downloadStateToolTip.titleLabel.sizeHint().width()
+        self._downloadStateToolTip.setFixedWidth(
+            max(256, contentWidth + 56, titleWidth + 56)
+        )
+        self._downloadStateToolTip.closeButton.move(
+            self._downloadStateToolTip.width() - 24,
+            19,
+        )
+        self._downloadStateToolTip.move(
+            self._downloadStateToolTip.getSuitablePos()
+        )
+
+    @staticmethod
+    def _formatDownloadSize(size):
+        value = float(size)
+        for unit in ("B", "KB", "MB", "GB"):
+            if value < 1024 or unit == "GB":
+                if unit == "B":
+                    return f"{value:.0f} {unit}"
+                return f"{value:.1f} {unit}"
+            value /= 1024
+        return f"{value:.1f} GB"
+
+    def _onUpdateDownloadFinished(self, installerPath, error, canceled):
+        worker = self._downloadWorker
+        self._downloadWorker = None
+        self._downloadThread = None
+        if worker is not None:
+            worker.deleteLater()
+
+        if self._quitAfterDownload:
+            self._quitAfterDownload = False
+            clearUpdateDirectory()
+            QApplication.quit()
+            return
+
+        if canceled:
+            if self._downloadStateToolTip is not None:
+                self._downloadStateToolTip.hide()
+            self._downloadStateToolTip = None
+            return
+
+        self._restoreForUpdateMessage()
+
+        if error:
+            if self._downloadStateToolTip is not None:
+                self._downloadStateToolTip.hide()
+                self._downloadStateToolTip = None
+            InfoBar.error(
+                "更新下载失败",
+                error,
+                duration=5000,
+                position=InfoBarPosition.BOTTOM_RIGHT,
+                parent=self,
+            )
+            return
+
+        if self._downloadStateToolTip is not None:
+            self._downloadStateToolTip.setContent("安装程序下载完成")
+            self._downloadStateToolTip.setState(True)
+
+        self._showInstallUpdateInfoBar(Path(installerPath))
+
+    def _restoreForUpdateMessage(self):
+        if self.isMinimized():
+            self.showNormal()
+        else:
+            self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _showInstallUpdateInfoBar(self, installerPath):
+        infoBar = InfoBar(
+            icon=FIF.UPDATE,
+            title=f"v{self._downloadVersion} 下载完成",
+            content="是否立即安装更新？",
+            orient=Qt.Orientation.Horizontal,
+            isClosable=True,
+            duration=-1,
+            position=InfoBarPosition.BOTTOM_RIGHT,
+            parent=self,
+        )
+        infoBar.widgetLayout.addSpacing(10)
+
+        installButton = PrimaryPushButton(FIF.UPDATE, "立即更新")
+        installButton.clicked.connect(
+            lambda: self._launchUpdateInstaller(installerPath, infoBar)
+        )
+        infoBar.addWidget(installButton)
+
+        laterButton = PushButton("稍后更新")
+        laterButton.clicked.connect(infoBar.close)
+        infoBar.addWidget(laterButton)
+        infoBar.show()
+
+    def _launchUpdateInstaller(self, installerPath, infoBar):
+        if not installerPath.is_file():
+            InfoBar.error(
+                "无法安装更新",
+                "安装程序已不存在，请重新下载。",
+                duration=4000,
+                position=InfoBarPosition.BOTTOM_RIGHT,
+                parent=self,
+            )
+            return
+
+        result = QProcess.startDetached(str(installerPath), [])
+        started = result[0] if isinstance(result, tuple) else bool(result)
+        if not started:
+            InfoBar.error(
+                "无法启动安装程序",
+                "请重新下载后再试。",
+                duration=4000,
+                position=InfoBarPosition.BOTTOM_RIGHT,
+                parent=self,
+            )
+            return
+
+        infoBar.close()
+        QApplication.quit()
+
+    def requestQuit(self):
+        cfg.set(cfg.geometry, self.geometry())
+        if self._downloadWorker is not None:
+            self._quitAfterDownload = True
+            self._downloadWorker.cancel()
+            return
+        QApplication.quit()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import qconfig, setThemeColor
 
+from app.common.update_download import clearUpdateDirectory
 from app.config.cfg import cfg
 from app.config.paths import CONFIG_PATH
 from app.signal_bus import signalBus
@@ -31,19 +32,24 @@ def startApp(isSilent: bool = False) -> MainWindow:
     return MainWindow(isSilent=isSilent)
 
 
+def configureLogging():
+    logger.add(
+        "Log/djcatpro日志_{time:YYYY-MM-DD}.log",
+        rotation="00:00",
+        retention="14 days",
+        enqueue=True,
+        encoding="utf-8",
+    )
+
+
 def main():
     if getattr(sys, "frozen", False) or "__compiled__" in globals():
         os.chdir(os.path.dirname(sys.executable))
     else:
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-    logger.add(
-        "Log/djcatpro日志_{time:YYYY-MM-DD}.log",
-        rotation="00:00",
-        retention="7 days",
-        enqueue=True,
-        encoding="utf-8",
-    )
+    clearUpdateDirectory()
+    configureLogging()
     sys.excepthook = exceptionHook
 
     app = QApplication(sys.argv)

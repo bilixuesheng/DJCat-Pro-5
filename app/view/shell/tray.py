@@ -199,8 +199,10 @@ class SystemTrayIcon(QSystemTrayIcon):
 
     def _onQuitActionTriggered(self):
         if self.parent():
-            from app.config.cfg import cfg
-            cfg.set(cfg.geometry, self.parent().geometry())
+            requestQuit = getattr(self.parent(), "requestQuit", None)
+            if requestQuit is not None:
+                requestQuit()
+                return
         QApplication.quit()
 
     def onTrayIconClick(self, reason):
