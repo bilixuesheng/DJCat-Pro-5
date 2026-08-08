@@ -5,13 +5,16 @@ from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
     QObject,
+    Property,
     QPropertyAnimation,
+    QRectF,
     QSize,
     Qt,
     Signal,
 )
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QApplication,
     QGraphicsOpacityEffect,
     QHBoxLayout,
@@ -101,6 +104,51 @@ class SettingMaterialCard(CardWidget):
         return paintFilter
 
 
+class SettingExpandButton(QAbstractButton):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._angle = 0.0
+        self.rotateAnimation = QPropertyAnimation(self, b"angle", self)
+        self.rotateAnimation.setDuration(200)
+        self.rotateAnimation.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHints(
+            QPainter.RenderHint.Antialiasing
+            | QPainter.RenderHint.SmoothPixmapTransform
+        )
+        if not self.isEnabled():
+            painter.setOpacity(0.36)
+        elif self.isDown():
+            painter.setOpacity(0.63)
+        painter.translate(self.width() / 2, self.height() / 2)
+        painter.rotate(self._angle)
+        FluentIcon.CHEVRON_RIGHT_MED.render(
+            painter,
+            QRectF(-6, -6, 12, 12),
+        )
+
+    def setExpanded(self, expanded: bool, animated: bool = True) -> None:
+        endAngle = 90.0 if expanded else 0.0
+        self.rotateAnimation.stop()
+        if not animated:
+            self.setAngle(endAngle)
+            return
+        self.rotateAnimation.setStartValue(self._angle)
+        self.rotateAnimation.setEndValue(endAngle)
+        self.rotateAnimation.start()
+
+    def getAngle(self) -> float:
+        return self._angle
+
+    def setAngle(self, angle: float) -> None:
+        self._angle = angle
+        self.update()
+
+    angle = Property(float, getAngle, setAngle)
+
+
 class CollapsibleSettingCard(QWidget):
     def __init__(self, icon, title: str, content: str | None = None, parent=None):
         super().__init__(parent)
@@ -109,6 +157,9 @@ class CollapsibleSettingCard(QWidget):
         self._initCardWidget(icon, title, content)
         self._initCardLayout()
         self._bindCard()
+        self._headerPressPosition = None
+        self._headerPressCanceled = False
+        self.card.installEventFilter(self)
 
     def _initCardWidget(self, icon, title: str, content: str | None) -> None:
         self.card = HeaderSettingCard(icon, title, content, self)
@@ -203,6 +254,54 @@ class CollapsibleSettingCard(QWidget):
             self.view.setMaximumHeight(QWIDGETSIZE_MAX)
             self._onExpandValueChanged(self._contentHeight())
 
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if obj is not self.card:
+            return super().eventFilter(obj, event)
+
+        if (
+            event.type() == QEvent.Type.MouseButtonPress
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            self._headerPressPosition = event.globalPosition().toPoint()
+            self._headerPressCanceled = False
+            self.card.expandButton.setPressed(True)
+            return True
+
+        if self._headerPressPosition is None:
+            return super().eventFilter(obj, event)
+
+        if event.type() == QEvent.Type.MouseMove:
+            distance = (
+                event.globalPosition().toPoint() - self._headerPressPosition
+            ).manhattanLength()
+            self._headerPressCanceled = (
+                self._headerPressCanceled
+                or distance >= QApplication.startDragDistance()
+                or not self.card.rect().contains(event.position().toPoint())
+            )
+            self.card.expandButton.setPressed(not self._headerPressCanceled)
+            return True
+
+        if event.type() == QEvent.Type.Leave:
+            self._headerPressCanceled = True
+            self.card.expandButton.setPressed(False)
+            return super().eventFilter(obj, event)
+
+        if event.type() != QEvent.Type.MouseButtonRelease:
+            return super().eventFilter(obj, event)
+
+        shouldToggle = (
+            event.button() == Qt.MouseButton.LeftButton
+            and not self._headerPressCanceled
+            and self.card.rect().contains(event.position().toPoint())
+        )
+        self._headerPressPosition = None
+        self._headerPressCanceled = False
+        self.card.expandButton.setPressed(False)
+        if shouldToggle:
+            self.card.expandButton.click()
+        return True
+
 
 class CollapsibleSettingCardGroup(SettingMaterialCard):
     orderChanged = Signal()
@@ -223,7 +322,7 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self.contentLabel = CaptionLabel(content, self)
         self.moveUpButton = TransparentToolButton(FluentIcon.UP, self)
         self.moveDownButton = TransparentToolButton(FluentIcon.DOWN, self)
-        self.expandButton = TransparentToolButton(FluentIcon.CHEVRON_DOWN_MED, self)
+        self.expandButton = SettingExpandButton(self)
         self.cardContainer = QWidget(self)
         self.cardView = QWidget(self.cardContainer)
         self.cardPaintFilter = CardPaintFilter(self)
@@ -251,9 +350,10 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self._bind()
 
     def _initWidget(self) -> None:
-        for button in (self.moveUpButton, self.moveDownButton, self.expandButton):
+        for button in (self.moveUpButton, self.moveDownButton):
             button.setFixedSize(26, 26)
             button.setIconSize(QSize(12, 12))
+        self.expandButton.setFixedSize(26, 26)
         self.moveUpButton.hide()
         self.moveDownButton.hide()
         if self.iconWidget is not None:
@@ -436,7 +536,7 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self._animateCollapsed(self._isVisuallyCollapsed())
 
     def _animateCollapsed(self, isCollapsed: bool) -> None:
-        self._refreshExpandIcon()
+        self._refreshExpandIcon(animated=True)
         self.collapseAnimation.stop()
         self.collapseAnimation.setStartValue(self.cardContainer.height())
         self.collapseAnimation.setEndValue(
@@ -459,13 +559,11 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
     def _isVisuallyCollapsed(self) -> bool:
         return self._searchCollapsed if self._searchActive else self.isCollapsed
 
-    def _refreshExpandIcon(self) -> None:
-        icon = (
-            FluentIcon.CHEVRON_RIGHT_MED
-            if self._isVisuallyCollapsed()
-            else FluentIcon.CHEVRON_DOWN_MED
+    def _refreshExpandIcon(self, animated: bool = False) -> None:
+        self.expandButton.setExpanded(
+            not self._isVisuallyCollapsed(),
+            animated,
         )
-        self.expandButton.setIcon(icon)
 
     def _onCollapseFinished(self) -> None:
         if not self._isVisuallyCollapsed():

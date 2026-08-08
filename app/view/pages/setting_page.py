@@ -30,7 +30,7 @@ from qfluentwidgets import (
 
 from app.common.ai_markdown import PEAK_HOURS_TEXT, fetchQuota
 from app.config.cfg import THEME_COLOR_PRESETS, cfg
-from app.config.constants import AUTHOR, AUTHOR_URL, VERSION, YEAR
+from app.config.constants import APP_NAME, AUTHOR, AUTHOR_URL, VERSION, YEAR
 from app.signal_bus import signalBus
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import (
@@ -284,6 +284,14 @@ class SettingPage(ScrollArea):
         self.setProperty("isStackedTransparent", False)
 
     def _initCards(self) -> None:
+        self.windowTitleCard = LineEditSettingCard(
+            FluentIcon.APPLICATION,
+            "自定义窗口标题",
+            "设置主窗口标题，留空时使用默认标题",
+            configItem=cfg.windowTitle,
+            placeholder=APP_NAME,
+        )
+        self.themeColorCard = ThemeColorSettingCard()
         self.personalGroup.addSettingCards(
             [
                 ComboBoxSettingCard(
@@ -293,6 +301,7 @@ class SettingPage(ScrollArea):
                     "更改应用程序的外观",
                     texts=["浅色", "深色", "跟随系统设置"],
                 ),
+                self.windowTitleCard,
                 LineEditSettingCard(
                     FluentIcon.INFO,
                     "自定义托盘文本",
@@ -300,7 +309,7 @@ class SettingPage(ScrollArea):
                     configItem=cfg.trayTooltip,
                     placeholder="请输入内容",
                 ),
-                ThemeColorSettingCard(),
+                self.themeColorCard,
             ]
         )
 

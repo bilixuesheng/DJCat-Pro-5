@@ -4,14 +4,14 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QPropertyAnimation, Qt
 from PySide6.QtGui import QImage
-from PySide6.QtTest import QTest
+from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication
-from qfluentwidgets import FluentIcon
 from shiboken6 import delete
 
 from app.config.cfg import cfg
+from app.config.constants import APP_NAME
 from app.view.components.setting_card_group import QWIDGETSIZE_MAX
 from app.view.pages.setting_page import SettingPage
 
@@ -203,6 +203,38 @@ class SettingGroupHeaderTest(TestCase):
         self.assertNotEqual(group.isCollapsed, initialState)
 
     @patch("app.view.pages.setting_page.threading.Thread")
+    def testNestedCardsToggleOnlyAfterValidRelease(self, _):
+        page = SettingPage()
+        self.addCleanup(page.deleteLater)
+        page.resize(800, 600)
+        page.show()
+        self.app.processEvents()
+
+        for card in (page.themeColorCard, page.aiStyleCard):
+            card.setExpandedImmediately(False)
+            header = card.card
+            start = QPoint(120, header.height() // 2)
+            outside = QPoint(header.width() + 20, start.y())
+
+            QTest.mousePress(header, Qt.MouseButton.LeftButton, pos=start)
+            QTest.mouseMove(header, outside)
+            QTest.mouseRelease(header, Qt.MouseButton.LeftButton, pos=outside)
+            with self.subTest(card=header.titleLabel.text()):
+                self.assertFalse(card.isExpand)
+
+            QTest.mouseClick(header, Qt.MouseButton.LeftButton, pos=start)
+            with self.subTest(card=header.titleLabel.text(), action="click"):
+                self.assertTrue(card.isExpand)
+
+    @patch("app.view.pages.setting_page.threading.Thread")
+    def testWindowTitleSettingDefaultsToApplicationName(self, _):
+        page = SettingPage()
+        self.addCleanup(page.deleteLater)
+
+        self.assertEqual(cfg.windowTitle.defaultValue, "")
+        self.assertEqual(page.windowTitleCard.lineEdit.placeholderText(), APP_NAME)
+
+    @patch("app.view.pages.setting_page.threading.Thread")
     def testSearchExpansionKeepsArrowAndContentInSync(self, _):
         page = SettingPage()
         self.addCleanup(page.deleteLater)
@@ -211,30 +243,55 @@ class SettingGroupHeaderTest(TestCase):
         self.app.processEvents()
         group = page.aiMarkdownGroup
         group._setCollapsed(True)
-        QTest.qWait(group.collapseAnimation.duration())
+        group.collapseAnimation.setCurrentTime(group.collapseAnimation.duration())
+        group.expandButton.rotateAnimation.setCurrentTime(
+            group.expandButton.rotateAnimation.duration()
+        )
+
+        def toggleAndWait():
+            finished = QSignalSpy(group.expandButton.rotateAnimation.finished)
+            group._onExpandClicked()
+            self.assertTrue(finished.wait(1000))
+            self.app.processEvents()
 
         page.setSearchText("AI")
 
         self.assertTrue(group.isCollapsed)
         self.assertEqual(group.cardContainer.maximumHeight(), QWIDGETSIZE_MAX)
-        self.assertIs(group.expandButton._icon, FluentIcon.CHEVRON_DOWN_MED)
+        self.assertAlmostEqual(group.expandButton.angle, 90, delta=0.01)
 
-        group._onExpandClicked()
+        toggleAndWait()
         self.assertTrue(group.isCollapsed)
-        QTest.qWait(group.collapseAnimation.duration())
         self.assertEqual(group.cardContainer.maximumHeight(), 0)
-        self.assertIs(group.expandButton._icon, FluentIcon.CHEVRON_RIGHT_MED)
+        self.assertAlmostEqual(group.expandButton.angle, 0, delta=0.01)
 
-        group._onExpandClicked()
-        QTest.qWait(group.collapseAnimation.duration())
+        toggleAndWait()
         self.assertTrue(group.isCollapsed)
         self.assertGreater(group.cardContainer.height(), 0)
-        self.assertIs(group.expandButton._icon, FluentIcon.CHEVRON_DOWN_MED)
+        self.assertAlmostEqual(group.expandButton.angle, 90, delta=0.01)
 
         page.setSearchText("")
 
         self.assertEqual(group.cardContainer.maximumHeight(), 0)
-        self.assertIs(group.expandButton._icon, FluentIcon.CHEVRON_RIGHT_MED)
+        self.assertEqual(group.expandButton.angle, 0)
+
+    @patch("app.view.pages.setting_page.threading.Thread")
+    def testSettingGroupArrowRotatesDuringExpansion(self, _):
+        page = SettingPage()
+        self.addCleanup(page.deleteLater)
+        group = page.personalGroup
+        group._setCollapsed(True)
+        group.collapseAnimation.setCurrentTime(group.collapseAnimation.duration())
+
+        group._setCollapsed(False)
+        self.assertEqual(
+            group.expandButton.rotateAnimation.state(),
+            QPropertyAnimation.State.Running,
+        )
+        group.expandButton.rotateAnimation.setCurrentTime(100)
+
+        self.assertGreater(group.expandButton.angle, 0)
+        self.assertLess(group.expandButton.angle, 90)
 
     def testNewPromptSettingsDefaultToSafeValues(self):
         self.assertFalse(cfg.broadcastMarkdownEnabled.defaultValue)

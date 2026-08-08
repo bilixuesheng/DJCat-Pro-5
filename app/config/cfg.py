@@ -59,6 +59,7 @@ class Config(QConfig):
         "CustomThemeColor",
         QColor(*THEME_COLOR_PRESETS[0][1]),
     )
+    windowTitle = ConfigItem("Personalization", "WindowTitle", "")
     trayTooltip = ConfigItem("Personalization", "TrayTooltip", "电教猫 Pro 5")
 
     showBanner = ConfigItem("Banner", "ShowBanner", True, BoolValidator())

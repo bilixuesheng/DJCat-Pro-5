@@ -1,4 +1,6 @@
 import os
+import tempfile
+from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -9,6 +11,8 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import MSFluentWindow
 
+from app.config.cfg import cfg
+from app.config.constants import APP_NAME
 from app.view.pages.setting_page import SettingPage
 from app.view.windows.main_window import MainWindow
 
@@ -19,6 +23,10 @@ class SettingSearchTest(TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        self.tempDir = tempfile.TemporaryDirectory()
+        self.configFile = cfg.file
+        self.windowTitle = cfg.windowTitle.value
+        cfg.file = Path(self.tempDir.name) / "config.json"
         self.quotaPatcher = patch.object(SettingPage, "_refreshAIQuota")
         self.quotaPatcher.start()
         with (
@@ -35,6 +43,9 @@ class SettingSearchTest(TestCase):
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.app.processEvents()
         self.quotaPatcher.stop()
+        cfg.set(cfg.windowTitle, self.windowTitle)
+        cfg.file = self.configFile
+        self.tempDir.cleanup()
 
     def testSearchVisibilityUpdatesWhenNavigationStarts(self):
         self.assertTrue(self.window.searchEdit.isHidden())
@@ -71,6 +82,17 @@ class SettingSearchTest(TestCase):
             self.window.switchTo(self.window.settingPage)
 
         switchTo.assert_called_once_with(self.window, self.window.settingPage)
+
+    def testCustomWindowTitleUpdatesAndBlankRestoresDefault(self):
+        titleEdit = self.window.settingPage.windowTitleCard.lineEdit
+        titleEdit.setText("值班控制台")
+        titleEdit.editingFinished.emit()
+        self.assertEqual(cfg.windowTitle.value, "值班控制台")
+        self.assertEqual(self.window.windowTitle(), "值班控制台")
+
+        titleEdit.setText("   ")
+        titleEdit.editingFinished.emit()
+        self.assertEqual(self.window.windowTitle(), APP_NAME)
 
     def testRepeatedQueuedDestinationRunsOnlyOnce(self):
         changes = []

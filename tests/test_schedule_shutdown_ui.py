@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent, QPoint, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
@@ -316,6 +316,27 @@ class ScheduleShutdownUiTest(TestCase):
             self.assertTrue(QScroller.hasScroller(column.viewport()))
 
         column = columns[0]
+        scroller = QScroller.scroller(column.viewport())
+        startValue = column.verticalScrollBar().value()
+        start = QPointF(column.viewport().rect().center())
+        scroller.handleInput(QScroller.Input.InputPress, start, 0)
+        self.assertTrue(
+            scroller.handleInput(
+                QScroller.Input.InputMove,
+                start - QPointF(0, 60),
+                30,
+            )
+        )
+        QTest.qWait(30)
+        self.assertEqual(scroller.state(), QScroller.State.Dragging)
+        self.assertNotEqual(column.verticalScrollBar().value(), startValue)
+        scroller.handleInput(
+            QScroller.Input.InputRelease,
+            start - QPointF(0, 60),
+            50,
+        )
+        scroller.stop()
+
         column.verticalScrollBar().setValue(
             column.verticalScrollBar().value() + 74
         )

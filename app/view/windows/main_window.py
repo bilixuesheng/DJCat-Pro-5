@@ -149,6 +149,7 @@ class MainWindow(MSFluentWindow):
         setThemeColor(cfg.customThemeColor.value)
         self._toggleTheme(cfg.customThemeMode.value)
         cfg.customThemeMode.valueChanged.connect(self._toggleTheme)
+        cfg.windowTitle.valueChanged.connect(self._updateWindowTitle)
 
         self.initWindow()
         if not isSilent:
@@ -190,7 +191,7 @@ class MainWindow(MSFluentWindow):
             cfg.set(cfg.aiMarkdownMachineCode, machineCode)
 
     def initWindow(self):
-        self.setWindowTitle(APP_NAME)
+        self._updateWindowTitle(cfg.windowTitle.value)
         self.setWindowIcon(QIcon(str(ASSET_DIR / "logo.png")))
         self.setMinimumSize(700, 400)
 
@@ -223,6 +224,9 @@ class MainWindow(MSFluentWindow):
         self.scheduleTimer.start(1000)
         self.last_triggered_time = ""
         self.last_shutdown_triggered_time = ""
+
+    def _updateWindowTitle(self, title):
+        self.setWindowTitle(title.strip() or APP_NAME)
 
     def initSplashScreen(self):
         self.splashScreen = CustomSplashScreen(
