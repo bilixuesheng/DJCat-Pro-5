@@ -39,8 +39,21 @@ class TouchTimePicker(TimePicker):
 
     def _showPanel(self):
         super()._showPanel()
-        for view in self.findChildren(QAbstractItemView):
+        views = self.findChildren(QAbstractItemView)
+        if not views:
+            return
+
+        panel = views[0].window()
+        panel.itemMaskWidget.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents
+        )
+        panel.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+        for view in views:
             viewport = view.viewport()
+            viewport.setAttribute(
+                Qt.WidgetAttribute.WA_AcceptTouchEvents
+            )
             if QScroller.hasScroller(viewport):
                 continue
             QScroller.grabGesture(
@@ -53,7 +66,6 @@ class TouchTimePicker(TimePicker):
                     state,
                 )
             )
-            view.window().setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
     @staticmethod
     def _settleColumn(column, state):

@@ -5,7 +5,13 @@ from unittest.mock import MagicMock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import (
+    QEventPoint,
+    QImage,
+    QInputDevice,
+    QPixmap,
+    QTouchEvent,
+)
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import (
     QApplication,
@@ -326,33 +332,103 @@ class ScheduleShutdownUiTest(TestCase):
         self.assertEqual(len(columns), 3)
         for column in columns:
             self.assertTrue(QScroller.hasScroller(column.viewport()))
+            self.assertTrue(
+                column.viewport().testAttribute(
+                    Qt.WidgetAttribute.WA_AcceptTouchEvents
+                )
+            )
 
-        column = columns[0]
-        scroller = QScroller.scroller(column.viewport())
-        scrollBar = column.verticalScrollBar()
-        startValue = scrollBar.value()
-        scrollSpy = QSignalSpy(scrollBar.valueChanged)
-        start = QPointF(column.viewport().rect().center())
-        scroller.handleInput(QScroller.Input.InputPress, start, 0)
+        panel = columns[0].window()
         self.assertTrue(
-            scroller.handleInput(
-                QScroller.Input.InputMove,
-                start - QPointF(0, 60),
-                30,
+            panel.itemMaskWidget.testAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents
             )
         )
-        QTest.qWait(30)
-        self.assertEqual(scroller.state(), QScroller.State.Dragging)
-        if scrollBar.value() == startValue:
-            self.assertTrue(scrollSpy.wait(250))
-        self.assertNotEqual(scrollBar.value(), startValue)
-        scroller.handleInput(
-            QScroller.Input.InputRelease,
-            start - QPointF(0, 60),
-            50,
+        panel.ani.setCurrentTime(panel.ani.duration())
+        QApplication.processEvents()
+        device = QTest.createTouchDevice(
+            QInputDevice.DeviceType.TouchScreen
         )
-        scroller.stop()
 
+        def sendTouch(target, viewport, eventType, state, position):
+            globalPosition = QPointF(
+                viewport.mapToGlobal(position.toPoint())
+            )
+            point = QEventPoint(0, state, position, globalPosition)
+            event = QTouchEvent(
+                eventType,
+                device,
+                Qt.KeyboardModifier.NoModifier,
+                [point],
+            )
+            QApplication.sendEvent(target, event)
+
+        for columnIndex, column in enumerate(columns):
+            viewport = column.viewport()
+            starts = {
+                "top": 70,
+                "middle": viewport.height() // 2,
+                "bottom": viewport.height() - 70,
+            }
+            for startName, startY in starts.items():
+                for direction, deltaY in (("up", -50), ("down", 50)):
+                    scroller = QScroller.scroller(viewport)
+                    scroller.stop()
+                    QTest.qWait(20)
+                    start = QPointF(viewport.width() // 2, startY)
+                    end = start + QPointF(0, deltaY)
+                    target = QApplication.widgetAt(
+                        viewport.mapToGlobal(start.toPoint())
+                    )
+                    scrollBar = column.verticalScrollBar()
+                    startValue = scrollBar.value()
+
+                    with self.subTest(
+                        column=columnIndex,
+                        start=startName,
+                        direction=direction,
+                    ):
+                        self.assertIs(target, viewport)
+                        sendTouch(
+                            target,
+                            viewport,
+                            QEvent.Type.TouchBegin,
+                            QEventPoint.State.Pressed,
+                            start,
+                        )
+                        QTest.qWait(30)
+                        sendTouch(
+                            target,
+                            viewport,
+                            QEvent.Type.TouchUpdate,
+                            QEventPoint.State.Updated,
+                            end,
+                        )
+                        QTest.qWait(30)
+                        self.assertEqual(
+                            scroller.state(),
+                            QScroller.State.Dragging,
+                        )
+                        if deltaY < 0:
+                            self.assertGreater(
+                                scrollBar.value(),
+                                startValue,
+                            )
+                        else:
+                            self.assertLess(
+                                scrollBar.value(),
+                                startValue,
+                            )
+                        sendTouch(
+                            target,
+                            viewport,
+                            QEvent.Type.TouchEnd,
+                            QEventPoint.State.Released,
+                            end,
+                        )
+                        scroller.stop()
+
+        column = columns[0]
         column.verticalScrollBar().setValue(
             column.verticalScrollBar().value() + 74
         )
@@ -360,7 +436,6 @@ class ScheduleShutdownUiTest(TestCase):
         TouchTimePicker._settleColumn(column, QScroller.State.Inactive)
         self.assertIs(column.currentItem(), centeredItem)
 
-        panel = columns[0].window()
         panel.close()
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.assertFalse(isValid(panel))
