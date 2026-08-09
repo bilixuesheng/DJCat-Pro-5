@@ -6,7 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtTest import QTest
+from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -138,13 +138,15 @@ class ScheduleShutdownUiTest(TestCase):
             headerPosition = header.mapTo(card, QPoint())
             self.assertIsNotNone(expandCard.view.graphicsEffect())
 
+            revealSpy = QSignalSpy(expandCard.revealAnimation.valueChanged)
             expandCard.setExpand(True)
             with self.subTest(card=type(card).__name__, frame="initial"):
                 self.assertEqual(expandCard.revealHeight, 0)
                 self.assertIsNotNone(expandCard.view.graphicsEffect())
 
             self.app.processEvents()
-            QTest.qWait(80)
+            if expandCard.view.graphicsEffect() is not None:
+                self.assertTrue(revealSpy.wait(250))
             with self.subTest(card=type(card).__name__, frame="expanding"):
                 self.assertIsNone(expandCard.view.graphicsEffect())
                 self.assertEqual(header.iconLabel.mapTo(card, QPoint()), iconPosition)
@@ -288,17 +290,27 @@ class ScheduleShutdownUiTest(TestCase):
         )
         startLoader.assert_called_once()
 
-    def testBothTaskFormsUseTouchTimePicker(self):
+    def testNewAndExistingTaskFormsUseTouchTimePicker(self):
         broadcastForm, broadcastWidgets = create_task_form(None)
         shutdownForm, shutdownWidgets = create_shutdown_form(None)
+        broadcastCard = TaskCard(broadcast_task())
+        shutdownCard = ShutdownTaskCard(shutdown_task())
         self.addCleanup(broadcastForm.deleteLater)
         self.addCleanup(shutdownForm.deleteLater)
+        self.addCleanup(broadcastCard.deleteLater)
+        self.addCleanup(shutdownCard.deleteLater)
 
         self.assertIsInstance(
             broadcastWidgets["timePicker"], TouchTimePicker
         )
         self.assertIsInstance(
             shutdownWidgets["timePicker"], TouchTimePicker
+        )
+        self.assertIsInstance(
+            broadcastCard.formWidgets["timePicker"], TouchTimePicker
+        )
+        self.assertIsInstance(
+            shutdownCard.formWidgets["timePicker"], TouchTimePicker
         )
 
     def testTimePickerPopupColumnsEnableTouchScrolling(self):
@@ -317,7 +329,9 @@ class ScheduleShutdownUiTest(TestCase):
 
         column = columns[0]
         scroller = QScroller.scroller(column.viewport())
-        startValue = column.verticalScrollBar().value()
+        scrollBar = column.verticalScrollBar()
+        startValue = scrollBar.value()
+        scrollSpy = QSignalSpy(scrollBar.valueChanged)
         start = QPointF(column.viewport().rect().center())
         scroller.handleInput(QScroller.Input.InputPress, start, 0)
         self.assertTrue(
@@ -329,7 +343,9 @@ class ScheduleShutdownUiTest(TestCase):
         )
         QTest.qWait(30)
         self.assertEqual(scroller.state(), QScroller.State.Dragging)
-        self.assertNotEqual(column.verticalScrollBar().value(), startValue)
+        if scrollBar.value() == startValue:
+            self.assertTrue(scrollSpy.wait(250))
+        self.assertNotEqual(scrollBar.value(), startValue)
         scroller.handleInput(
             QScroller.Input.InputRelease,
             start - QPointF(0, 60),

@@ -113,6 +113,7 @@ class UpdateDialog(MessageBoxBase):
 class MainWindow(MSFluentWindow):
     def __init__(self, isSilent: bool = False):
         self.searchEdit = None
+        self._geometryApplied = False
         super().__init__(parent=None)
         self.splashScreen = None
         self._updateInfoBar = None
@@ -185,16 +186,6 @@ class MainWindow(MSFluentWindow):
         self._updateWindowTitle(cfg.windowTitle.value)
         self.setWindowIcon(QIcon(str(ASSET_DIR / "logo.png")))
         self.setMinimumSize(700, 400)
-
-        geometry = cfg.geometry.value
-        if geometry.isEmpty() or geometry.width() <= 0:
-            self.resize(800, 450)
-            desktop = QApplication.primaryScreen().availableGeometry()
-            w, h = desktop.width(), desktop.height()
-            self.move(w // 2 - self.width() // 2, h // 2 - self.height() // 2)
-        else:
-            self.resize(geometry.width(), geometry.height())
-            self.move(geometry.x(), geometry.y())
 
         self.player = QMediaPlayer(self)
         self.audioOutput = QAudioOutput(self)
@@ -916,7 +907,7 @@ class MainWindow(MSFluentWindow):
         QApplication.quit()
 
     def requestQuit(self):
-        cfg.set(cfg.geometry, self.geometry())
+        self._saveGeometry()
         self._shutdownResources()
         if self._downloadWorker is not None:
             self._quitAfterDownload = True
@@ -950,8 +941,29 @@ class MainWindow(MSFluentWindow):
         if self.searchEdit is not None and self.searchEdit.isVisible():
             self._refreshSearchEditGeometry()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._geometryApplied:
+            return
+        self._geometryApplied = True
+        geometry = cfg.geometry.value
+        if (
+            geometry.isValid()
+            and QApplication.screenAt(geometry.center()) is not None
+        ):
+            self.setGeometry(geometry)
+            return
+
+        self.resize(800, 450)
+        desktop = QApplication.primaryScreen().availableGeometry()
+        self.move(desktop.center() - self.rect().center())
+
+    def _saveGeometry(self):
+        if not self.isMaximized():
+            cfg.set(cfg.geometry, self.geometry())
+
     def closeEvent(self, event):
-        cfg.set(cfg.geometry, self.geometry())
+        self._saveGeometry()
         event.ignore()
         self.hide()
         QTimer.singleShot(0, self, emptyWorkingSet)

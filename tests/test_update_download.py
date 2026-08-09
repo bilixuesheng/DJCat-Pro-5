@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent
+from PySide6.QtCore import QEvent, QRect, QSize
 from PySide6.QtWidgets import QApplication
 
 import djcat
@@ -21,6 +21,7 @@ from app.common.update_download import (
     UpdateDownloadWorker,
     clearUpdateDirectory,
 )
+from app.config.cfg import cfg
 from app.config.constants import DOWNLOAD_URL
 from app.view.pages.setting_page import SettingPage
 from app.view.shell.tray import SystemTrayIcon
@@ -417,6 +418,45 @@ class UpdateWindowLifecycleTest(TestCase):
         self.assertIn("32 线程", self.window._downloadStateToolTip.content)
         workerFactory.assert_called_once()
         self.assertEqual(workerFactory.call_args.args[0], DOWNLOAD_URL)
+
+    def testSilentStartupRestoresGeometryWhenFirstShown(self):
+        savedGeometry = QRect(80, 60, 900, 520)
+        originalGeometry = cfg.geometry.value
+        cfg.geometry.value = savedGeometry
+        self.addCleanup(setattr, cfg.geometry, "value", originalGeometry)
+
+        self.assertFalse(self.window._geometryApplied)
+        self.window.show()
+        self.app.processEvents()
+
+        self.assertTrue(self.window._geometryApplied)
+        self.assertEqual(self.window.geometry(), savedGeometry)
+
+        self.window.setGeometry(100, 90, 820, 480)
+        self.window.hide()
+        self.window.show()
+        self.app.processEvents()
+        self.assertEqual(self.window.geometry(), QRect(100, 90, 820, 480))
+
+    def testOffscreenGeometryFallsBackToDefaultSize(self):
+        originalGeometry = cfg.geometry.value
+        cfg.geometry.value = QRect(5000, 5000, 900, 520)
+        self.addCleanup(setattr, cfg.geometry, "value", originalGeometry)
+
+        with patch.object(QApplication, "screenAt", return_value=None):
+            self.window.show()
+            self.app.processEvents()
+
+        self.assertEqual(self.window.size(), QSize(800, 450))
+
+    def testMaximizedWindowDoesNotOverwriteNormalGeometry(self):
+        with (
+            patch.object(self.window, "isMaximized", return_value=True),
+            patch("app.view.windows.main_window.cfg.set") as setConfig,
+        ):
+            self.window._saveGeometry()
+
+        setConfig.assert_not_called()
 
     def testClosingWindowDoesNotCancelDownload(self):
         worker = DownloadWorkerStub("", Path())
