@@ -15,6 +15,7 @@
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
+@view-transition { navigation: auto; }
 body { margin: 0; background: var(--cream); color: var(--ink); line-height: 1.6; -webkit-font-smoothing: antialiased; }
 body::after {
     content: "";
@@ -43,9 +44,12 @@ header { padding-top: 34px; }
 .nav-button { padding: 8px 0 8px 20px; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--ink-soft); font-size: 13px; }
 .nav-button:hover { color: var(--clay); }
 
-.notice { margin-top: 22px; padding: 12px 15px; border: 1px solid; font-size: 13px; }
+.notice { padding: 12px 15px; border: 1px solid; background: var(--card); font-size: 13px; box-shadow: 0 14px 40px #2b2a2818; animation: toast-in .35s cubic-bezier(.22, 1, .36, 1) both, toast-out .35s ease 4.65s forwards; }
 .notice.success { border-color: #bfd6c4; background: #eef6ef; color: #44704d; }
 .notice.error { border-color: #e1beb6; background: #fbefec; color: #954c3e; }
+.toast-stack { position: fixed; right: 24px; bottom: 24px; z-index: 1000; width: min(360px, calc(100% - 48px)); display: grid; gap: 10px; pointer-events: none; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(14px); } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(8px); visibility: hidden; } }
 
 .hero { position: relative; padding: 92px 0 76px; overflow: hidden; }
 .eyebrow, .section-label, .card-num, .hero-meta, .section-note, .login-domain {
@@ -258,6 +262,25 @@ footer a:hover { color: var(--clay); }
 .prompt-field textarea { width: 100%; min-height: 340px; padding: 15px; resize: vertical; border: 1px solid var(--line); border-radius: 0; outline: 0; background: var(--card); color: var(--ink); font-family: Consolas, "Microsoft YaHei", monospace; font-size: 12px; line-height: 1.65; transition: border-color .2s, box-shadow .2s; }
 .prompt-field span { color: #8c857d; font-size: 11px; }
 
+.compact-hero { padding-bottom: 46px !important; }
+.admin-records { display: grid; gap: 14px; }
+.admin-record { border: 1px solid var(--line); background: var(--card); animation: rise .45s cubic-bezier(.22, 1, .36, 1) both; }
+.admin-record summary { min-height: 72px; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; gap: 24px; cursor: pointer; list-style: none; }
+.admin-record summary::-webkit-details-marker { display: none; }
+.admin-record summary span { display: grid; gap: 2px; }
+.admin-record summary b { font-family: Georgia, "Microsoft YaHei", serif; font-size: 18px; font-weight: 500; }
+.admin-record summary small, .admin-record summary em { color: var(--ink-soft); font-size: 11px; font-style: normal; }
+.admin-record[open] summary { border-bottom: 1px solid var(--line); }
+.record-body { padding: 24px; }
+.component-section { margin-top: 30px; padding-top: 28px; border-top: 1px solid var(--line); }
+.component-section h3 { margin: 0 0 16px; font-size: 22px; font-weight: 400; }
+.component-form { padding: 14px 0; display: grid; grid-template-columns: 1fr 1.5fr 110px 1.3fr; gap: 10px; border-top: 1px solid var(--line); }
+.component-form textarea { grid-column: 1 / -2; resize: vertical; }
+.new-component { margin-top: 14px; background: #f7f3ec; }
+.inline-delete { margin-top: -8px; padding-bottom: 12px; }
+.record-delete { margin-top: 26px; display: flex; justify-content: flex-end; }
+.ad-record .record-body { padding-top: 28px; }
+
 @media (max-width: 820px) {
     .nav-links { display: none; }
     .hero { padding: 72px 0 62px; }
@@ -279,6 +302,8 @@ footer a:hover { color: var(--clay); }
     .page-main { width: min(100% - 48px, 1180px); }
     .metrics-compact { grid-template-columns: repeat(2, 1fr); }
     .feature-grid { grid-template-columns: 1fr; }
+    .component-form { grid-template-columns: 1fr 1fr; }
+    .component-form textarea { grid-column: 1 / -1; }
 }
 
 @media (max-width: 560px) {
@@ -303,6 +328,9 @@ footer a:hover { color: var(--clay); }
     .admin-page .hero { padding: 46px 0 42px; }
     .feature-card { min-height: 360px; padding: 22px; }
     .feature-meta { grid-template-columns: 1fr 1fr; }
+    .component-form { grid-template-columns: 1fr; }
+    .component-form textarea { grid-column: auto; }
+    .toast-stack { right: 16px; bottom: 16px; width: calc(100% - 32px); }
 }
 
 @media (prefers-reduced-motion: reduce) {

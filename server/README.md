@@ -90,3 +90,13 @@ location = /admin/login {
 ## 公网防滥用边界
 
 机器码用于匿名额度统计，不是不可伪造的许可证。开源客户端中的任何固定密钥都能被提取，恶意调用者仍可能伪造新的机器标识。公网部署时应在 Nginx 或 Cloudflare 对 `POST /ai/markdown` 和注册接口增加符合实际机器数量的 IP/WAF 速率限制；若需要严格阻止额度绕过，则必须增加账号、授权码或人工审批注册，单靠机器码无法做到。
+
+## 应用市场
+
+同一 Flask 服务还提供：
+
+- `https://api.djcatpro.top/app-store/catalog`：桌面端使用的公开只读目录；
+- `https://dash.djcatpro.top/admin/app-store/apps/`：软件和主页预设卡片管理；
+- `https://dash.djcatpro.top/admin/app-store/ads/`：广告管理。
+
+下载、图标和广告地址必须使用 HTTPS。程序动作只能填写应用安装目录内的相对 `.exe` 路径，参数在后台按一行一个填写；网址动作只允许 HTTPS。应用的安装目录名创建后不能在后台修改，若需更换目录应新建应用记录。

@@ -1,0 +1,100 @@
+{% extends "admin_base.html" %}
+
+{% block title %}软件管理 · 电教猫管理面板{% endblock %}
+{% block page_name %}软件管理{% endblock %}
+{% block page_actions %}<a href="#new-app">新增软件</a>{% endblock %}
+
+{% macro action_fields(action=None) %}
+<label>动作类型
+    <select name="action_type" required>
+        <option value="program" {% if not action or action.type == 'program' %}selected{% endif %}>运行程序</option>
+        <option value="url" {% if action and action.type == 'url' %}selected{% endif %}>打开网址</option>
+    </select>
+</label>
+<label>动作目标
+    <input name="action_target" value="{{ action.target if action else '' }}" placeholder="App.exe 或 https://…" required>
+</label>
+<label class="full">程序参数（一行一个）
+    <textarea name="action_arguments" rows="3">{{ action.arguments|join('\n') if action else '' }}</textarea>
+</label>
+{% endmacro %}
+
+{% block content %}
+<section class="hero compact-hero">
+    <div class="eyebrow">App store · Applications</div>
+    <h1>管理软件与<br><em>主页组件<svg class="underline-draw" viewBox="0 0 210 14" preserveAspectRatio="none" aria-hidden="true"><path d="M2 9 C 52 3, 158 11, 208 5" /></svg></em>。</h1>
+    <p class="hero-desc">安装目录创建后保持不变；修改版本文本会让已安装客户端出现更新提示。</p>
+</section>
+
+<section class="panel" id="new-app">
+    <div class="panel-title"><div><div class="section-label">01 · New application</div><h2>新增软件</h2></div></div>
+    <form class="settings-grid" method="post" action="{{ url_for('adminCreateApplication') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>应用名称<input name="name" maxlength="100" required></label>
+        <label>开发者<input name="developer" maxlength="100" required></label>
+        <label class="full">简介<textarea name="description" maxlength="500" rows="3" required></textarea></label>
+        <label>版本文本<input name="version" maxlength="100" required></label>
+        <label>安装目录名<input name="install_dir" maxlength="64" pattern="[A-Za-z0-9._-]+" required></label>
+        <label class="full">ZIP 下载链接<input type="url" name="download_url" required></label>
+        <label class="full">图标链接<input type="url" name="icon_url" required></label>
+        {{ action_fields() }}
+        <label class="full check"><input type="checkbox" name="recommended" value="1">设为推荐应用</label>
+        <div class="full actions"><button class="btn btn-primary" type="submit">添加软件</button></div>
+    </form>
+</section>
+
+<section class="panel">
+    <div class="panel-title"><div><div class="section-label">02 · Applications</div><h2>已发布软件</h2></div><span class="section-note">{{ applications|length }} 项</span></div>
+    <div class="admin-records">
+    {% for app in applications %}
+        <details class="admin-record">
+            <summary><span><b>#{{ app.id }} · {{ app.name }}</b><small>{{ app.developer }} · {{ app.version }}</small></span><em>{{ '推荐' if app.recommended else '全部' }}</em></summary>
+            <div class="record-body">
+                <form class="settings-grid" method="post" action="{{ url_for('adminEditApplication', appId=app.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <label>应用名称<input name="name" maxlength="100" value="{{ app.name }}" required></label>
+                    <label>开发者<input name="developer" maxlength="100" value="{{ app.developer }}" required></label>
+                    <label class="full">简介<textarea name="description" maxlength="500" rows="3" required>{{ app.description }}</textarea></label>
+                    <label>版本文本<input name="version" maxlength="100" value="{{ app.version }}" required></label>
+                    <label>安装目录名<input value="{{ app.install_dir }}" disabled></label>
+                    <label class="full">ZIP 下载链接<input type="url" name="download_url" value="{{ app.download_url }}" required></label>
+                    <label class="full">图标链接<input type="url" name="icon_url" value="{{ app.icon_url }}" required></label>
+                    {{ action_fields(app.open_action) }}
+                    <label class="full check"><input type="checkbox" name="recommended" value="1" {% if app.recommended %}checked{% endif %}>设为推荐应用</label>
+                    <div class="full actions"><button class="btn btn-primary" type="submit">保存软件</button></div>
+                </form>
+
+                <div class="component-section">
+                    <div class="section-label">Preset cards</div>
+                    <h3>主页预设卡片</h3>
+                    {% for component in app.components %}
+                    <form class="component-form" method="post" action="{{ url_for('adminEditAppComponent', componentId=component.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input name="title" maxlength="100" value="{{ component.title }}" aria-label="卡片标题" required>
+                        <input name="description" maxlength="300" value="{{ component.description }}" aria-label="卡片简介" required>
+                        <select name="action_type" aria-label="动作类型"><option value="program" {% if component.action.type == 'program' %}selected{% endif %}>程序</option><option value="url" {% if component.action.type == 'url' %}selected{% endif %}>网址</option></select>
+                        <input name="action_target" value="{{ component.action.target }}" aria-label="动作目标" required>
+                        <textarea name="action_arguments" rows="2" aria-label="程序参数">{{ component.action.arguments|join('\n') }}</textarea>
+                        <button class="btn btn-ghost" type="submit">保存卡片</button>
+                    </form>
+                    <form class="inline-delete" method="post" action="{{ url_for('adminDeleteAppComponent', componentId=component.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="danger-link" type="submit">删除卡片 #{{ component.id }}</button></form>
+                    {% endfor %}
+                    <form class="component-form new-component" method="post" action="{{ url_for('adminCreateAppComponent', appId=app.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input name="title" maxlength="100" placeholder="新卡片标题" required>
+                        <input name="description" maxlength="300" placeholder="新卡片简介" required>
+                        <select name="action_type"><option value="program">程序</option><option value="url">网址</option></select>
+                        <input name="action_target" placeholder="App.exe 或 https://…" required>
+                        <textarea name="action_arguments" rows="2" placeholder="程序参数，一行一个"></textarea>
+                        <button class="btn btn-ghost" type="submit">添加卡片</button>
+                    </form>
+                </div>
+                <form class="record-delete" method="post" action="{{ url_for('adminDeleteApplication', appId=app.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn btn-danger" type="submit">删除软件及关联内容</button></form>
+            </div>
+        </details>
+    {% else %}
+        <div class="empty">尚未发布软件</div>
+    {% endfor %}
+    </div>
+</section>
+{% endblock %}

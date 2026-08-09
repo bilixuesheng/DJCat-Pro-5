@@ -3,6 +3,7 @@ import os
 from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
+    QIcon,
     QLinearGradient,
     QPainter,
     QPainterPath,
@@ -22,6 +23,8 @@ from qfluentwidgets import (
     BodyLabel,
     CardWidget,
     FlowLayout,
+    InfoBar,
+    InfoBarPosition,
     IconWidget,
     SubtitleLabel,
     TitleLabel,
@@ -36,6 +39,8 @@ from app.config.cfg import (
     cfg,
 )
 from app.config.paths import ASSET_DIR
+from app.common.app_store import cachedImagePath, executeAction
+from app.signal_bus import signalBus
 from app.view.components.scroll_area import ScrollArea
 
 
@@ -44,12 +49,13 @@ class ActionCard(CardWidget):
     dragMoved = Signal(object, QPoint)
     dragFinished = Signal(object)
 
-    def __init__(self, icon, title, content, parent=None):
+    def __init__(self, icon, title, content, parent=None, deletable=False):
         # CardWidget 构造期间可能进入 event()，拖动状态需先初始化。
         self._editing = False
         self._dragging = False
         self._drag_position = QPoint()
         self._press_position = None
+        self._deletable = deletable
         super().__init__(parent)
         self.setFixedSize(210, 120)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -65,8 +71,8 @@ class ActionCard(CardWidget):
         title_label = TitleLabel(title, self)
         self.deleteButton = ToolButton(FIF.DELETE, self)
         self.deleteButton.setFixedSize(24, 24)
-        self.deleteButton.setEnabled(False)
-        self.deleteButton.setToolTip("系统卡片不可删除")
+        self.deleteButton.setEnabled(deletable)
+        self.deleteButton.setToolTip("删除主页卡片" if deletable else "系统卡片不可删除")
         self.deleteButton.setAccessibleName(f"删除{title}")
         self.deleteButton.setStyleSheet("""
             ToolButton {
@@ -386,9 +392,9 @@ class HomePage(ScrollArea):
             )
         }
         for card in self.all_cards.values():
-            card.dragStarted.connect(self._startCardDrag)
-            card.dragMoved.connect(self._moveCard)
-            card.dragFinished.connect(self._finishCardDrag)
+            self._connectCard(card)
+        self._syncPinnedCards(render=False)
+        signalBus.homeCardsChanged.connect(self._syncPinnedCards)
 
         self._renderCards()
         self.vBoxLayout.addStretch(1)
@@ -402,6 +408,69 @@ class HomePage(ScrollArea):
             Qt.WidgetAttribute.WA_TransparentForMouseEvents
         )
         self.dragPreview.hide()
+
+    def _connectCard(self, card):
+        card.dragStarted.connect(self._startCardDrag)
+        card.dragMoved.connect(self._moveCard)
+        card.dragFinished.connect(self._finishCardDrag)
+
+    def _syncPinnedCards(self, render=True):
+        builtinKeys = {"全屏投送", "考试倒计时", "定时播报", "定时关机"}
+        for key in [key for key in self.all_cards if key not in builtinKeys]:
+            card = self.all_cards.pop(key)
+            self.flowLayout.removeWidget(card)
+            card.deleteLater()
+
+        for item in cfg.pinnedHomeCards.value:
+            key = str(item.get("key", ""))
+            if not key or key in self.all_cards:
+                continue
+            try:
+                path = cachedImagePath(item.get("icon_url", ""))
+            except ValueError:
+                path = None
+            icon = QIcon(str(path)) if path and path.is_file() else FIF.APPLICATION
+            card = ActionCard(
+                icon,
+                item.get("title", "应用卡片"),
+                item.get("description", ""),
+                self.cardsWidget,
+                deletable=True,
+            )
+            card.clicked.connect(lambda checked=False, data=item: self._openPinnedCard(data))
+            card.deleteButton.clicked.connect(
+                lambda checked=False, cardKey=key: self._removePinnedCard(cardKey)
+            )
+            self._connectCard(card)
+            card.setEditing(self._editing_cards)
+            self.all_cards[key] = card
+        if render:
+            self._renderCards()
+
+    def _openPinnedCard(self, item):
+        application = {
+            "id": item.get("app_id"),
+            "name": item.get("name", ""),
+            "install_dir": item.get("install_dir", ""),
+        }
+        try:
+            executeAction(application, item.get("action", {}))
+        except (OSError, ValueError) as error:
+            InfoBar.error(
+                "无法执行主页卡片",
+                str(error),
+                duration=4000,
+                position=InfoBarPosition.TOP_RIGHT,
+                parent=self.window(),
+            )
+
+    def _removePinnedCard(self, key):
+        cfg.set(
+            cfg.pinnedHomeCards,
+            [item for item in cfg.pinnedHomeCards.value if item.get("key") != key],
+        )
+        cfg.set(cfg.homeCardOrder, [item for item in self._card_order if item != key])
+        self._syncPinnedCards()
 
     def _renderCards(self):
         current_order = [

@@ -1,0 +1,54 @@
+{% extends "admin_base.html" %}
+
+{% block title %}广告管理 · 电教猫管理面板{% endblock %}
+{% block page_name %}广告管理{% endblock %}
+{% block page_actions %}<a href="#new-ad">新增广告</a>{% endblock %}
+
+{% macro app_options(selected=None) %}
+{% for app in applications %}<option value="{{ app.id }}" {% if app.id == selected %}selected{% endif %}>#{{ app.id }} · {{ app.name }}</option>{% endfor %}
+{% endmacro %}
+
+{% block content %}
+<section class="hero compact-hero">
+    <div class="eyebrow">App store · Advertisements</div>
+    <h1>管理市场的<br><em>广告轮播<svg class="underline-draw" viewBox="0 0 210 14" preserveAspectRatio="none" aria-hidden="true"><path d="M2 9 C 52 3, 158 11, 208 5" /></svg></em>。</h1>
+    <p class="hero-desc">每个广告绑定一个软件编号，客户端按钮会直接进入对应详情页。</p>
+</section>
+
+<section class="panel" id="new-ad">
+    <div class="panel-title"><div><div class="section-label">01 · New advertisement</div><h2>新增广告</h2></div></div>
+    {% if applications %}
+    <form class="settings-grid" method="post" action="{{ url_for('adminCreateAdvertisement') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>广告标题<input name="title" maxlength="100" required></label>
+        <label>目标软件<select name="app_id" required>{{ app_options() }}</select></label>
+        <label class="full">简介<textarea name="description" maxlength="300" rows="3" required></textarea></label>
+        <label class="full">图片链接<input type="url" name="image_url" required></label>
+        <label>显示顺序<input type="number" name="sort_order" value="0" required></label>
+        <div class="full actions"><button class="btn btn-primary" type="submit">添加广告</button></div>
+    </form>
+    {% else %}<div class="empty">请先添加软件，再创建广告。</div>{% endif %}
+</section>
+
+<section class="panel">
+    <div class="panel-title"><div><div class="section-label">02 · Advertisements</div><h2>当前广告</h2></div><span class="section-note">{{ advertisements|length }} 项</span></div>
+    <div class="admin-records">
+    {% for ad in advertisements %}
+        <article class="admin-record ad-record">
+            <div class="record-body">
+                <form class="settings-grid" method="post" action="{{ url_for('adminEditAdvertisement', advertisementId=ad.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <label>广告标题<input name="title" maxlength="100" value="{{ ad.title }}" required></label>
+                    <label>目标软件<select name="app_id" required>{{ app_options(ad.app_id) }}</select></label>
+                    <label class="full">简介<textarea name="description" maxlength="300" rows="3" required>{{ ad.description }}</textarea></label>
+                    <label class="full">图片链接<input type="url" name="image_url" value="{{ ad.image_url }}" required></label>
+                    <label>显示顺序<input type="number" name="sort_order" value="{{ ad.sort_order }}" required></label>
+                    <div class="full actions"><button class="btn btn-primary" type="submit">保存广告 #{{ ad.id }}</button></div>
+                </form>
+                <form class="record-delete" method="post" action="{{ url_for('adminDeleteAdvertisement', advertisementId=ad.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn btn-danger" type="submit">删除广告</button></form>
+            </div>
+        </article>
+    {% else %}<div class="empty">尚未设置广告</div>{% endfor %}
+    </div>
+</section>
+{% endblock %}

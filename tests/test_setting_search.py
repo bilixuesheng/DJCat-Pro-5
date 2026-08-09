@@ -221,6 +221,55 @@ class SettingSearchTest(TestCase):
                 self.window._navToHome()
                 QTest.qWait(500)
 
+    def testAppStoreContentAndSearchLoadOnlyOnFirstNavigation(self):
+        self.assertFalse(self.window.appStorePage.isLoaded)
+
+        with patch(
+            "app.view.pages.app_store_page.fetchCatalog",
+            return_value={"apps": [], "ads": []},
+        ) as fetchCatalog:
+            self.window.switchTo(self.window.appStorePage)
+            self.assertFalse(self.window.searchEdit.isHidden())
+            self.assertEqual(self.window.searchEdit.placeholderText(), "搜索应用")
+            QTest.qWait(800)
+
+        self.assertTrue(self.window.appStorePage.isLoaded)
+        fetchCatalog.assert_called_once_with()
+        self.window.searchEdit.setText("课表")
+        self.assertEqual(self.window.appStorePage._searchText, "课表")
+
+    def testSearchTextStaysInSyncBetweenSettingsAndAppStore(self):
+        self.window.switchTo(self.window.settingPage)
+        QTest.qWait(500)
+        self.window.searchEdit.setText("主题")
+
+        with patch(
+            "app.view.pages.app_store_page.fetchCatalog",
+            return_value={"apps": [], "ads": []},
+        ):
+            self.window.switchTo(self.window.appStorePage)
+
+        self.assertEqual(self.window.appStorePage._searchText, "主题")
+
+    def testAboutPageCanClearTheAppStoreImageCache(self):
+        previous = cfg.appStoreCacheLastCleanup.value
+        try:
+            cfg.set(cfg.appStoreCacheLastCleanup, 0)
+            with patch(
+                "app.view.pages.setting_page.clearImageCache",
+                return_value=1024 * 1024,
+            ) as clearCache:
+                self.window.settingPage._onClearAppStoreCache()
+                QTest.qWait(100)
+
+            clearCache.assert_called_once_with()
+            self.assertGreater(cfg.appStoreCacheLastCleanup.value, 0)
+            self.assertTrue(
+                self.window.settingPage.clearAppStoreCacheCard.button.isEnabled()
+            )
+        finally:
+            cfg.set(cfg.appStoreCacheLastCleanup, previous)
+
     def testBackgroundSchedulesDoNotLoadManagementPages(self):
         broadcastTask = {"type": "系统TTS", "content": "测试"}
         shutdownTask = {"notify": False}

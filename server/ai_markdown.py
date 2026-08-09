@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import re
 import secrets
@@ -7,7 +8,8 @@ import threading
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from urllib.parse import urlparse
 
 import requests
 from cryptography.fernet import Fernet, InvalidToken
@@ -148,6 +150,7 @@ def _connect():
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     database = sqlite3.connect(DATABASE_PATH, timeout=10)
     database.row_factory = sqlite3.Row
+    database.execute("PRAGMA foreign_keys = ON")
     databaseKey = str(DATABASE_PATH.resolve())
     if databaseKey not in _initializedDatabases:
         with _databaseInitLock:
@@ -182,6 +185,39 @@ def _connect():
         CREATE INDEX IF NOT EXISTS request_log_day_idx ON request_log(day);
         CREATE INDEX IF NOT EXISTS request_log_machine_idx
             ON request_log(machine_id);
+        CREATE TABLE IF NOT EXISTS applications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            developer TEXT NOT NULL,
+            description TEXT NOT NULL,
+            version TEXT NOT NULL,
+            download_url TEXT NOT NULL,
+            icon_url TEXT NOT NULL,
+            install_dir TEXT NOT NULL UNIQUE,
+            recommended INTEGER NOT NULL DEFAULT 0,
+            action_type TEXT NOT NULL,
+            action_target TEXT NOT NULL,
+            action_arguments TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE IF NOT EXISTS app_components (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            app_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            action_type TEXT NOT NULL,
+            action_target TEXT NOT NULL,
+            action_arguments TEXT NOT NULL DEFAULT '[]',
+            FOREIGN KEY (app_id) REFERENCES applications(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS advertisements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            image_url TEXT NOT NULL,
+            app_id INTEGER NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (app_id) REFERENCES applications(id) ON DELETE CASCADE
+        );
         INSERT OR IGNORE INTO machines(machine_id, registered_at, last_seen_at)
         SELECT
             machine_id,
@@ -193,6 +229,128 @@ def _connect():
                 )
                 _initializedDatabases.add(databaseKey)
     return database
+
+
+def _httpsUrl(value):
+    value = value.strip()
+    parsed = urlparse(value)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise ValueError("链接必须是有效的 HTTPS 地址")
+    return value
+
+
+def _installDir(value):
+    value = value.strip()
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", value) or value in {".", ".."}:
+        raise ValueError("安装目录名格式无效")
+    return value
+
+
+def _programTarget(value):
+    value = value.strip().replace("\\", "/")
+    path = PurePosixPath(value)
+    if (
+        not value
+        or path.is_absolute()
+        or ".." in path.parts
+        or any(":" in part for part in path.parts)
+        or path.suffix.lower() != ".exe"
+    ):
+        raise ValueError("程序动作必须是应用目录内的相对 EXE 路径")
+    return value
+
+
+def _actionFromForm(form):
+    actionType = form.get("action_type", "").strip()
+    target = form.get("action_target", "").strip()
+    if actionType == "program":
+        target = _programTarget(target)
+        arguments = [
+            line.strip()
+            for line in form.get("action_arguments", "").splitlines()
+            if line.strip()
+        ]
+    elif actionType == "url":
+        target = _httpsUrl(target)
+        arguments = []
+    else:
+        raise ValueError("动作类型无效")
+    if len(arguments) > 32 or any(len(argument) > 500 for argument in arguments):
+        raise ValueError("动作参数过多或过长")
+    return actionType, target, json.dumps(arguments, ensure_ascii=False)
+
+
+def _requiredText(form, key, label, maximum):
+    value = form.get(key, "").strip()
+    if not value or len(value) > maximum:
+        raise ValueError(f"{label}不能为空且不能超过 {maximum} 个字符")
+    return value
+
+
+def _actionJson(row, prefix="action_"):
+    return {
+        "type": row[f"{prefix}type"],
+        "target": row[f"{prefix}target"],
+        "arguments": json.loads(row[f"{prefix}arguments"]),
+    }
+
+
+def _appStoreCatalog():
+    with closing(_connect()) as database:
+        applications = database.execute(
+            "SELECT * FROM applications ORDER BY name COLLATE NOCASE, id"
+        ).fetchall()
+        componentRows = database.execute(
+            "SELECT * FROM app_components ORDER BY id"
+        ).fetchall()
+        advertisementRows = database.execute(
+            "SELECT * FROM advertisements ORDER BY sort_order, id"
+        ).fetchall()
+
+    components = {}
+    for row in componentRows:
+        components.setdefault(row["app_id"], []).append(
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "description": row["description"],
+                "action": _actionJson(row),
+            }
+        )
+    return {
+        "apps": [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "developer": row["developer"],
+                "description": row["description"],
+                "version": row["version"],
+                "download_url": row["download_url"],
+                "icon_url": row["icon_url"],
+                "install_dir": row["install_dir"],
+                "recommended": bool(row["recommended"]),
+                "open_action": _actionJson(row),
+                "components": components.get(row["id"], []),
+            }
+            for row in applications
+        ],
+        "ads": [
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "description": row["description"],
+                "image_url": row["image_url"],
+                "app_id": row["app_id"],
+                "sort_order": row["sort_order"],
+            }
+            for row in advertisementRows
+        ],
+    }
 
 
 def _setting(key, default=None):
@@ -720,6 +878,13 @@ def secureResponses(response):
     return response
 
 
+@app.get("/app-store/catalog")
+def appStoreCatalog():
+    response = jsonify(_appStoreCatalog())
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return response
+
+
 @app.get("/")
 def adminRoot():
     if not _onAdminHost():
@@ -752,6 +917,7 @@ def adminLogin():
 @app.get("/admin/")
 @_loginRequired
 def adminDashboard():
+    catalog = _appStoreCatalog()
     return render_template(
         "admin_dashboard.html",
         csrf_token=_csrfToken(),
@@ -760,6 +926,8 @@ def adminDashboard():
         daily_limit=_dailyLimit(),
         peak_enabled=_setting("peak_enabled", "1") == "1",
         model=_deepseekModel(),
+        application_count=len(catalog["apps"]),
+        advertisement_count=len(catalog["ads"]),
         ai_configured=bool(
             _setting("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY")
         ),
@@ -788,6 +956,269 @@ def adminAIMarkdown():
         system_prompt=_setting("system_prompt", SYSTEM_PROMPT),
         max_system_prompt_length=MAX_SYSTEM_PROMPT_LENGTH,
     )
+
+
+@app.post("/admin/app-store/apps/new")
+@_loginRequired
+def adminCreateApplication():
+    _checkCsrf()
+    try:
+        actionType, actionTarget, actionArguments = _actionFromForm(request.form)
+        values = (
+            _requiredText(request.form, "name", "应用名称", 100),
+            _requiredText(request.form, "developer", "开发者", 100),
+            _requiredText(request.form, "description", "应用简介", 500),
+            _requiredText(request.form, "version", "版本", 100),
+            _httpsUrl(request.form.get("download_url", "")),
+            _httpsUrl(request.form.get("icon_url", "")),
+            _installDir(request.form.get("install_dir", "")),
+            bool(request.form.get("recommended")),
+            actionType,
+            actionTarget,
+            actionArguments,
+        )
+        with closing(_connect()) as database:
+            database.execute(
+                """
+                INSERT INTO applications(
+                    name, developer, description, version, download_url,
+                    icon_url, install_dir, recommended, action_type,
+                    action_target, action_arguments
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                values,
+            )
+            database.commit()
+        flash("软件已添加", "success")
+    except (ValueError, sqlite3.IntegrityError) as error:
+        flash(str(error), "error")
+    return redirect(url_for("adminApplications"))
+
+
+@app.get("/admin/app-store/apps/")
+@_loginRequired
+def adminApplications():
+    return render_template(
+        "admin_app_store_apps.html",
+        csrf_token=_csrfToken(),
+        current_page="applications",
+        applications=_appStoreCatalog()["apps"],
+    )
+
+
+@app.post("/admin/app-store/apps/<int:appId>/edit")
+@_loginRequired
+def adminEditApplication(appId):
+    _checkCsrf()
+    try:
+        actionType, actionTarget, actionArguments = _actionFromForm(request.form)
+        values = (
+            _requiredText(request.form, "name", "应用名称", 100),
+            _requiredText(request.form, "developer", "开发者", 100),
+            _requiredText(request.form, "description", "应用简介", 500),
+            _requiredText(request.form, "version", "版本", 100),
+            _httpsUrl(request.form.get("download_url", "")),
+            _httpsUrl(request.form.get("icon_url", "")),
+            bool(request.form.get("recommended")),
+            actionType,
+            actionTarget,
+            actionArguments,
+            appId,
+        )
+        with closing(_connect()) as database:
+            result = database.execute(
+                """
+                UPDATE applications SET
+                    name = ?, developer = ?, description = ?, version = ?,
+                    download_url = ?, icon_url = ?, recommended = ?,
+                    action_type = ?, action_target = ?, action_arguments = ?
+                WHERE id = ?
+                """,
+                values,
+            )
+            if result.rowcount != 1:
+                raise ValueError("未找到软件")
+            database.commit()
+        flash("软件已更新", "success")
+    except ValueError as error:
+        flash(str(error), "error")
+    return redirect(url_for("adminApplications"))
+
+
+@app.post("/admin/app-store/apps/<int:appId>/delete")
+@_loginRequired
+def adminDeleteApplication(appId):
+    _checkCsrf()
+    with closing(_connect()) as database:
+        result = database.execute("DELETE FROM applications WHERE id = ?", (appId,))
+        database.commit()
+    flash("软件已删除" if result.rowcount == 1 else "未找到软件", "success")
+    return redirect(url_for("adminApplications"))
+
+
+@app.post("/admin/app-store/apps/<int:appId>/components/new")
+@_loginRequired
+def adminCreateAppComponent(appId):
+    _checkCsrf()
+    try:
+        actionType, actionTarget, actionArguments = _actionFromForm(request.form)
+        values = (
+            appId,
+            _requiredText(request.form, "title", "卡片标题", 100),
+            _requiredText(request.form, "description", "卡片简介", 300),
+            actionType,
+            actionTarget,
+            actionArguments,
+        )
+        with closing(_connect()) as database:
+            database.execute(
+                """
+                INSERT INTO app_components(
+                    app_id, title, description, action_type,
+                    action_target, action_arguments
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                values,
+            )
+            database.commit()
+        flash("预设卡片已添加", "success")
+    except (ValueError, sqlite3.IntegrityError) as error:
+        flash(str(error), "error")
+    return redirect(url_for("adminApplications"))
+
+
+@app.post("/admin/app-store/components/<int:componentId>/edit")
+@_loginRequired
+def adminEditAppComponent(componentId):
+    _checkCsrf()
+    try:
+        actionType, actionTarget, actionArguments = _actionFromForm(request.form)
+        values = (
+            _requiredText(request.form, "title", "卡片标题", 100),
+            _requiredText(request.form, "description", "卡片简介", 300),
+            actionType,
+            actionTarget,
+            actionArguments,
+            componentId,
+        )
+        with closing(_connect()) as database:
+            result = database.execute(
+                """
+                UPDATE app_components SET title = ?, description = ?,
+                    action_type = ?, action_target = ?, action_arguments = ?
+                WHERE id = ?
+                """,
+                values,
+            )
+            if result.rowcount != 1:
+                raise ValueError("未找到预设卡片")
+            database.commit()
+        flash("预设卡片已更新", "success")
+    except ValueError as error:
+        flash(str(error), "error")
+    return redirect(url_for("adminApplications"))
+
+
+@app.post("/admin/app-store/components/<int:componentId>/delete")
+@_loginRequired
+def adminDeleteAppComponent(componentId):
+    _checkCsrf()
+    with closing(_connect()) as database:
+        result = database.execute(
+            "DELETE FROM app_components WHERE id = ?", (componentId,)
+        )
+        database.commit()
+    flash(
+        "预设卡片已删除" if result.rowcount == 1 else "未找到预设卡片",
+        "success",
+    )
+    return redirect(url_for("adminApplications"))
+
+
+@app.post("/admin/app-store/ads/new")
+@_loginRequired
+def adminCreateAdvertisement():
+    _checkCsrf()
+    try:
+        appId = int(request.form.get("app_id", ""))
+        sortOrder = int(request.form.get("sort_order", "0"))
+        values = (
+            _requiredText(request.form, "title", "广告标题", 100),
+            _requiredText(request.form, "description", "广告简介", 300),
+            _httpsUrl(request.form.get("image_url", "")),
+            appId,
+            sortOrder,
+        )
+        with closing(_connect()) as database:
+            database.execute(
+                """
+                INSERT INTO advertisements(
+                    title, description, image_url, app_id, sort_order
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                values,
+            )
+            database.commit()
+        flash("广告已添加", "success")
+    except (ValueError, sqlite3.IntegrityError) as error:
+        flash(str(error), "error")
+    return redirect(url_for("adminAdvertisements"))
+
+
+@app.get("/admin/app-store/ads/")
+@_loginRequired
+def adminAdvertisements():
+    catalog = _appStoreCatalog()
+    return render_template(
+        "admin_app_store_ads.html",
+        csrf_token=_csrfToken(),
+        current_page="advertisements",
+        applications=catalog["apps"],
+        advertisements=catalog["ads"],
+    )
+
+
+@app.post("/admin/app-store/ads/<int:advertisementId>/edit")
+@_loginRequired
+def adminEditAdvertisement(advertisementId):
+    _checkCsrf()
+    try:
+        values = (
+            _requiredText(request.form, "title", "广告标题", 100),
+            _requiredText(request.form, "description", "广告简介", 300),
+            _httpsUrl(request.form.get("image_url", "")),
+            int(request.form.get("app_id", "")),
+            int(request.form.get("sort_order", "0")),
+            advertisementId,
+        )
+        with closing(_connect()) as database:
+            result = database.execute(
+                """
+                UPDATE advertisements SET title = ?, description = ?,
+                    image_url = ?, app_id = ?, sort_order = ? WHERE id = ?
+                """,
+                values,
+            )
+            if result.rowcount != 1:
+                raise ValueError("未找到广告")
+            database.commit()
+        flash("广告已更新", "success")
+    except (ValueError, sqlite3.IntegrityError) as error:
+        flash(str(error), "error")
+    return redirect(url_for("adminAdvertisements"))
+
+
+@app.post("/admin/app-store/ads/<int:advertisementId>/delete")
+@_loginRequired
+def adminDeleteAdvertisement(advertisementId):
+    _checkCsrf()
+    with closing(_connect()) as database:
+        result = database.execute(
+            "DELETE FROM advertisements WHERE id = ?", (advertisementId,)
+        )
+        database.commit()
+    flash("广告已删除" if result.rowcount == 1 else "未找到广告", "success")
+    return redirect(url_for("adminAdvertisements"))
 
 
 @app.post("/admin/ai/markdown/settings")
