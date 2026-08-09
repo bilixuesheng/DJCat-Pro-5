@@ -20,6 +20,7 @@ MIN_REASSIGN_SIZE = 64 * 1024
 CHUNK_SIZE = 64 * 1024
 REQUEST_TIMEOUT = (10, 30)
 MAX_RETRIES = 3
+DOWNLOAD_RETRY_COUNT = 3
 PERMANENT_STATUS = frozenset({400, 401, 403, 404, 405, 410, 451})
 
 
@@ -127,6 +128,7 @@ class UpdateDownloadWorker(QObject):
     """
 
     progressChanged = Signal(int, int, int, int)
+    retrying = Signal(int, int, str)
     finished = Signal(str, str, bool)
 
     def __init__(self, url: str, targetPath: Path):
@@ -152,57 +154,79 @@ class UpdateDownloadWorker(QObject):
         self._closeResponses()
 
     def run(self) -> None:
-        succeeded = False
         resultPath = ""
         errorMessage = ""
         canceled = False
 
-        try:
-            self.targetPath.parent.mkdir(parents=True, exist_ok=True)
-            self._removeFile(self.partialPath)
-            self._removeFile(self.targetPath)
-
-            effectiveUrl, total, supportsRange = self._probeDownload()
-            if self._cancelEvent.is_set():
-                raise DownloadCanceled()
-
-            if supportsRange and total > 0:
-                try:
-                    self._downloadRanged(effectiveUrl, total)
-                except RangeNotSupportedError:
-                    if self._cancelEvent.is_set():
-                        raise DownloadCanceled()
-                    self._rangeStopEvent.clear()
-                    self._resetProgress()
-                    self._downloadSingle(effectiveUrl, total)
-            else:
-                self._downloadSingle(effectiveUrl, total)
-
-            if self._cancelEvent.is_set():
-                raise DownloadCanceled()
-
-            with self.partialPath.open("rb") as file:
-                if file.read(2) != b"MZ":
-                    raise ValueError("下载文件不是有效的 Windows 安装程序")
-
-            self.partialPath.replace(self.targetPath)
-            succeeded = True
-            resultPath = str(self.targetPath)
-        except DownloadCanceled:
-            canceled = True
-        except Exception as error:
-            if self._cancelEvent.is_set():
+        for retry in range(DOWNLOAD_RETRY_COUNT + 1):
+            try:
+                self._prepareAttempt()
+                resultPath = self._downloadAttempt()
+                errorMessage = ""
+                break
+            except DownloadCanceled:
                 canceled = True
-            else:
+                break
+            except Exception as error:
+                if self._cancelEvent.is_set():
+                    canceled = True
+                    break
                 errorMessage = str(error)
-        finally:
-            self._rangeStopEvent.set()
-            self._closeResponses()
-            if not succeeded:
-                self._removeFile(self.partialPath)
-                self._removeFile(self.targetPath)
+                if retry == DOWNLOAD_RETRY_COUNT:
+                    break
+                self.retrying.emit(
+                    retry + 1,
+                    DOWNLOAD_RETRY_COUNT,
+                    errorMessage,
+                )
+                if self._cancelEvent.wait(1):
+                    canceled = True
+                    errorMessage = ""
+                    break
+            finally:
+                self._rangeStopEvent.set()
+                self._closeResponses()
+                if not resultPath:
+                    self._removeFile(self.partialPath)
+                    self._removeFile(self.targetPath)
 
         self.finished.emit(resultPath, errorMessage, canceled)
+
+    def _prepareAttempt(self) -> None:
+        self._rangeStopEvent.clear()
+        self._segments = []
+        self._activeWorkers = 0
+        self._resetProgress()
+        self.targetPath.parent.mkdir(parents=True, exist_ok=True)
+        self._removeFile(self.partialPath)
+        self._removeFile(self.targetPath)
+
+    def _downloadAttempt(self) -> str:
+        effectiveUrl, total, supportsRange = self._probeDownload()
+        if self._cancelEvent.is_set():
+            raise DownloadCanceled()
+
+        if supportsRange and total > 0:
+            try:
+                self._downloadRanged(effectiveUrl, total)
+            except RangeNotSupportedError:
+                if self._cancelEvent.is_set():
+                    raise DownloadCanceled()
+                self._rangeStopEvent.clear()
+                self._resetProgress()
+                self._downloadSingle(effectiveUrl, total)
+        else:
+            self._downloadSingle(effectiveUrl, total)
+
+        if self._cancelEvent.is_set():
+            raise DownloadCanceled()
+
+        with self.partialPath.open("rb") as file:
+            if file.read(2) != b"MZ":
+                raise ValueError("下载文件不是有效的 Windows 安装程序")
+
+        self.partialPath.replace(self.targetPath)
+        return str(self.targetPath)
 
     def _probeDownload(self) -> tuple[str, int, bool]:
         statusCode, headers, effectiveUrl = self._requestProbe("bytes=1-1")

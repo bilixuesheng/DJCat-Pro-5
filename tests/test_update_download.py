@@ -7,6 +7,8 @@ from pathlib import Path
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
+import requests
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QRect, QSize
@@ -14,6 +16,7 @@ from PySide6.QtWidgets import QApplication
 
 import djcat
 from app.common.update_download import (
+    DOWNLOAD_RETRY_COUNT,
     INITIAL_THREAD_COUNT,
     MIN_REASSIGN_SIZE,
     SMART_THREAD_STEP,
@@ -93,6 +96,12 @@ class InfoBarStub:
     def show(self):
         self.shown = True
 
+    @classmethod
+    def info(cls, *args, **kwargs):
+        infoBar = cls(*args, **kwargs)
+        infoBar.show()
+        return infoBar
+
 
 class ButtonStub:
     def __init__(self, *_, **__):
@@ -116,12 +125,18 @@ class StateToolTipStub:
         self.closedSignal = SignalStub()
         self.destroyed = SignalStub()
         self.deleted = False
+        self.position = (0, 0)
+        self.suitablePosCalls = 0
 
     def getSuitablePos(self):
+        self.suitablePosCalls += 1
         return (0, 0)
 
-    def move(self, _):
-        pass
+    def move(self, *position):
+        if len(position) == 1:
+            self.position = position[0]
+        else:
+            self.position = position
 
     def show(self):
         self.shown = True
@@ -144,12 +159,16 @@ class StateToolTipStub:
     def width(self):
         return self.fixedWidth
 
+    def y(self):
+        return self.position[1]
+
 
 class DownloadWorkerStub:
     def __init__(self, url, targetPath):
         self.url = url
         self.targetPath = targetPath
         self.progressChanged = SignalStub()
+        self.retrying = SignalStub()
         self.finished = SignalStub()
         self.canceled = False
         self.deleted = False
@@ -225,6 +244,40 @@ class UpdateDownloadTest(TestCase):
                 "bytes=1-1",
             )
             self.assertTrue(DOWNLOAD_URL.endswith("/DJCat-Pro.exe"))
+
+    def testWholeDownloadRetriesThreeTimesBeforeSucceeding(self):
+        content = b"MZ" + b"installer-data"
+        probe = FakeResponse([], len(content))
+        response = FakeResponse([content], len(content))
+
+        with tempfile.TemporaryDirectory() as tempDir:
+            target = Path(tempDir) / "Updata" / "DJCat-Pro.exe"
+            worker = UpdateDownloadWorker(DOWNLOAD_URL, target)
+            retries = []
+            results = []
+            worker.retrying.connect(lambda *args: retries.append(args))
+            worker.finished.connect(lambda *args: results.append(args))
+
+            with (
+                patch(
+                    "app.common.update_download.requests.get",
+                    side_effect=[
+                        requests.ConnectionError("temporary")
+                        for _ in range(DOWNLOAD_RETRY_COUNT)
+                    ]
+                    + [probe, response],
+                ) as get,
+                patch.object(worker._cancelEvent, "wait", return_value=False),
+            ):
+                worker.run()
+
+            self.assertEqual(target.read_bytes(), content)
+            self.assertEqual(results, [(str(target), "", False)])
+            self.assertEqual(
+                [retry[:2] for retry in retries],
+                [(1, 3), (2, 3), (3, 3)],
+            )
+            self.assertEqual(get.call_count, 5)
 
     def testCanceledDownloadDeletesPartialAndFinalFilesBeforeFinishing(self):
         with tempfile.TemporaryDirectory() as tempDir:
@@ -409,13 +462,19 @@ class UpdateWindowLifecycleTest(TestCase):
             versionBar = InfoBarStub.instances[-1]
             versionBar.widgets[0].clicked.emit()
             worker.progressChanged.emit(50, 100, 1024, 32)
+            firstY = self.window._downloadStateToolTip.y()
+            worker.retrying.emit(1, 3, "temporary")
+            self.assertIn("正在重试 1/3", self.window._downloadStateToolTip.content)
+            worker.progressChanged.emit(60, 100, 2048, 32)
 
         self.assertTrue(versionBar.closed)
         self.assertIsNone(self.window._updateInfoBar)
         self.assertTrue(thread.started)
         self.assertTrue(self.window._downloadStateToolTip.shown)
-        self.assertIn("50%", self.window._downloadStateToolTip.content)
+        self.assertIn("60%", self.window._downloadStateToolTip.content)
         self.assertIn("32 线程", self.window._downloadStateToolTip.content)
+        self.assertEqual(self.window._downloadStateToolTip.y(), firstY)
+        self.assertEqual(self.window._downloadStateToolTip.suitablePosCalls, 1)
         workerFactory.assert_called_once()
         self.assertEqual(workerFactory.call_args.args[0], DOWNLOAD_URL)
 
@@ -564,6 +623,56 @@ class UpdateWindowLifecycleTest(TestCase):
             results,
             [(17, {"latest_version": "9999.0.0"}, "")],
         )
+
+    def testUpdateCheckRetriesThreeTimesBeforeSucceeding(self):
+        response = Mock()
+        response.json.return_value = {"latest_version": "9999.0.0"}
+        results = []
+        worker = UpdateWorker(18)
+        worker.finished.connect(lambda *args: results.append(args))
+
+        with (
+            patch(
+                "app.view.windows.main_window.requests.get",
+                side_effect=[
+                    requests.ConnectionError("temporary")
+                    for _ in range(worker.RETRY_COUNT)
+                ]
+                + [response],
+            ) as get,
+            patch("app.view.windows.main_window.time.sleep") as sleep,
+        ):
+            worker.run()
+
+        self.assertEqual(get.call_count, 4)
+        self.assertEqual(sleep.call_count, 3)
+        self.assertEqual(
+            results,
+            [(18, {"latest_version": "9999.0.0"}, "")],
+        )
+
+    def testManualCheckClosesPendingBarBeforeShowingResult(self):
+        order = []
+        checkBar = Mock()
+        checkBar.close.side_effect = lambda: order.append("close")
+        worker = Mock()
+        self.window._updateRequestId = 1
+        self.window._updateCheckInfoBar = checkBar
+        self.window._updateJobs = {1: (worker, Mock(), True)}
+
+        with patch.object(
+            self.window,
+            "_onUpdateChecked",
+            side_effect=lambda *_: order.append("result"),
+        ):
+            self.window._onUpdateCheckFinished(
+                1,
+                {"latest_version": "9999.0.0"},
+                "",
+            )
+
+        self.assertEqual(order, ["close", "result"])
+        self.assertIsNone(self.window._updateCheckInfoBar)
 
     def testUpdateDialogIsScheduledForDeletionAfterClosing(self):
         dialog = Mock()

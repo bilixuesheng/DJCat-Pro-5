@@ -1,5 +1,6 @@
 import re
 import threading
+import time
 from pathlib import Path
 
 import requests
@@ -73,18 +74,25 @@ class CustomSplashScreen(SplashScreen):
 class UpdateWorker(QObject):
     finished = Signal(int, dict, str)
 
+    RETRY_COUNT = 3
+
     def __init__(self, requestId):
         super().__init__()
         self.requestId = requestId
 
     def run(self):
-        try:
-            response = requests.get(UPDATE_API, timeout=5)
-            response.raise_for_status()
-            data = response.json()
-            self.finished.emit(self.requestId, data, "")
-        except (requests.RequestException, ValueError) as error:
-            self.finished.emit(self.requestId, {}, str(error))
+        for retry in range(self.RETRY_COUNT + 1):
+            try:
+                response = requests.get(UPDATE_API, timeout=5)
+                response.raise_for_status()
+                data = response.json()
+                self.finished.emit(self.requestId, data, "")
+                return
+            except (requests.RequestException, ValueError) as error:
+                if retry == self.RETRY_COUNT:
+                    self.finished.emit(self.requestId, {}, str(error))
+                    return
+                time.sleep(1)
 
 
 class MachineRegistrationWorker(QObject):
@@ -117,6 +125,7 @@ class MainWindow(MSFluentWindow):
         super().__init__(parent=None)
         self.splashScreen = None
         self._updateInfoBar = None
+        self._updateCheckInfoBar = None
         self._downloadStateToolTip = None
         self._downloadWorker = None
         self._downloadThread = None
@@ -617,13 +626,17 @@ class MainWindow(MSFluentWindow):
         if self._resourcesShutdown:
             return
         if manual:
-            InfoBar.info(
+            self._closeUpdateCheckInfoBar()
+            infoBar = InfoBar.info(
                 "检查更新",
                 "正在检查更新...",
-                duration=1500,
+                isClosable=False,
+                duration=-1,
                 position=InfoBarPosition.BOTTOM_RIGHT,
                 parent=self,
             )
+            self._updateCheckInfoBar = infoBar
+            infoBar.destroyed.connect(self._clearUpdateCheckInfoBar)
         self._updateRequestId += 1
         requestId = self._updateRequestId
         worker = UpdateWorker(requestId)
@@ -641,7 +654,20 @@ class MainWindow(MSFluentWindow):
         worker.deleteLater()
         if requestId != self._updateRequestId or self._resourcesShutdown:
             return
+        if manual:
+            self._closeUpdateCheckInfoBar()
         self._onUpdateChecked(data, error, manual)
+
+    def _closeUpdateCheckInfoBar(self):
+        infoBar = self._updateCheckInfoBar
+        if infoBar is None:
+            return
+        self._updateCheckInfoBar = None
+        infoBar.close()
+
+    def _clearUpdateCheckInfoBar(self, infoBar=None):
+        if infoBar is None or self._updateCheckInfoBar is infoBar:
+            self._updateCheckInfoBar = None
 
     def _onUpdateChecked(self, data, error, manual):
         if error:
@@ -748,6 +774,7 @@ class MainWindow(MSFluentWindow):
         self._downloadWorker.progressChanged.connect(
             self._onUpdateDownloadProgress
         )
+        self._downloadWorker.retrying.connect(self._onUpdateDownloadRetrying)
         self._downloadWorker.finished.connect(self._onUpdateDownloadFinished)
         self._downloadThread = threading.Thread(
             target=self._downloadWorker.run,
@@ -779,8 +806,15 @@ class MainWindow(MSFluentWindow):
             19,
         )
         self._downloadStateToolTip.move(
-            self._downloadStateToolTip.getSuitablePos()
+            self.width() - self._downloadStateToolTip.width() - 24,
+            self._downloadStateToolTip.y(),
         )
+
+    def _onUpdateDownloadRetrying(self, retry, retryCount, _error):
+        if self._downloadStateToolTip is not None:
+            self._downloadStateToolTip.setContent(
+                f"下载失败，正在重试 {retry}/{retryCount}..."
+            )
 
     def _onDownloadStateToolTipClosed(self):
         toolTip = self._downloadStateToolTip
@@ -934,6 +968,7 @@ class MainWindow(MSFluentWindow):
         if self._updateInfoBar is not None:
             self._updateInfoBar.close()
             self._updateInfoBar = None
+        self._closeUpdateCheckInfoBar()
         self._disposeDownloadStateToolTip()
 
     def resizeEvent(self, event):
