@@ -5,13 +5,7 @@ from unittest.mock import MagicMock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import (
-    QEventPoint,
-    QImage,
-    QInputDevice,
-    QPixmap,
-    QTouchEvent,
-)
+from PySide6.QtGui import QImage, QPixmap, QWheelEvent
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import (
     QApplication,
@@ -332,7 +326,7 @@ class ScheduleShutdownUiTest(TestCase):
         self.assertEqual(len(columns), 3)
         for column in columns:
             self.assertTrue(QScroller.hasScroller(column.viewport()))
-            self.assertTrue(
+            self.assertFalse(
                 column.viewport().testAttribute(
                     Qt.WidgetAttribute.WA_AcceptTouchEvents
                 )
@@ -346,22 +340,6 @@ class ScheduleShutdownUiTest(TestCase):
         )
         panel.ani.setCurrentTime(panel.ani.duration())
         QApplication.processEvents()
-        device = QTest.createTouchDevice(
-            QInputDevice.DeviceType.TouchScreen
-        )
-
-        def sendTouch(target, viewport, eventType, state, position):
-            globalPosition = QPointF(
-                viewport.mapToGlobal(position.toPoint())
-            )
-            point = QEventPoint(0, state, position, globalPosition)
-            event = QTouchEvent(
-                eventType,
-                device,
-                Qt.KeyboardModifier.NoModifier,
-                [point],
-            )
-            QApplication.sendEvent(target, event)
 
         for columnIndex, column in enumerate(columns):
             viewport = column.viewport()
@@ -375,10 +353,10 @@ class ScheduleShutdownUiTest(TestCase):
                     scroller = QScroller.scroller(viewport)
                     scroller.stop()
                     QTest.qWait(20)
-                    start = QPointF(viewport.width() // 2, startY)
-                    end = start + QPointF(0, deltaY)
+                    start = QPoint(viewport.width() // 2, startY)
+                    end = start + QPoint(0, deltaY)
                     target = QApplication.widgetAt(
-                        viewport.mapToGlobal(start.toPoint())
+                        viewport.mapToGlobal(start)
                     )
                     scrollBar = column.verticalScrollBar()
                     startValue = scrollBar.value()
@@ -389,20 +367,16 @@ class ScheduleShutdownUiTest(TestCase):
                         direction=direction,
                     ):
                         self.assertIs(target, viewport)
-                        sendTouch(
+                        QTest.mousePress(
                             target,
-                            viewport,
-                            QEvent.Type.TouchBegin,
-                            QEventPoint.State.Pressed,
-                            start,
+                            Qt.MouseButton.LeftButton,
+                            pos=start,
                         )
                         QTest.qWait(30)
-                        sendTouch(
+                        QTest.mouseMove(
                             target,
-                            viewport,
-                            QEvent.Type.TouchUpdate,
-                            QEventPoint.State.Updated,
                             end,
+                            delay=30,
                         )
                         QTest.qWait(30)
                         self.assertEqual(
@@ -419,16 +393,42 @@ class ScheduleShutdownUiTest(TestCase):
                                 scrollBar.value(),
                                 startValue,
                             )
-                        sendTouch(
+                        QTest.mouseRelease(
                             target,
-                            viewport,
-                            QEvent.Type.TouchEnd,
-                            QEventPoint.State.Released,
-                            end,
+                            Qt.MouseButton.LeftButton,
+                            pos=end,
                         )
                         scroller.stop()
 
         column = columns[0]
+        viewport = column.viewport()
+        center = viewport.rect().center()
+        globalCenter = viewport.mapToGlobal(center)
+        startIndex = column.currentIndex()
+        QApplication.sendEvent(
+            viewport,
+            QWheelEvent(
+                QPointF(center),
+                QPointF(globalCenter),
+                QPoint(),
+                QPoint(0, -120),
+                Qt.MouseButton.NoButton,
+                Qt.KeyboardModifier.NoModifier,
+                Qt.ScrollPhase.ScrollUpdate,
+                False,
+            ),
+        )
+        self.assertEqual(column.currentIndex(), startIndex + 1)
+
+        QTest.qWait(300)
+        clickedItem = column.itemAt(center + QPoint(0, 37))
+        QTest.mouseClick(
+            viewport,
+            Qt.MouseButton.LeftButton,
+            pos=center + QPoint(0, 37),
+        )
+        self.assertIs(column.currentItem(), clickedItem)
+
         column.verticalScrollBar().setValue(
             column.verticalScrollBar().value() + 74
         )

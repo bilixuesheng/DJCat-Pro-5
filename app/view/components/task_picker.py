@@ -51,14 +51,14 @@ class TouchTimePicker(TimePicker):
 
         for view in views:
             viewport = view.viewport()
+            # Let Qt synthesize mouse drags so both inputs share one scroller.
             viewport.setAttribute(
-                Qt.WidgetAttribute.WA_AcceptTouchEvents
+                Qt.WidgetAttribute.WA_AcceptTouchEvents,
+                False,
             )
-            if QScroller.hasScroller(viewport):
-                continue
             QScroller.grabGesture(
                 viewport,
-                QScroller.ScrollerGestureType.TouchGesture,
+                QScroller.ScrollerGestureType.LeftMouseButtonGesture,
             )
             QScroller.scroller(viewport).stateChanged.connect(
                 lambda state, column=view: self._settleColumn(
