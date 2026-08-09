@@ -776,20 +776,17 @@ class MainWindow(MSFluentWindow):
 
         self._downloadVersion = str(version)
         self._quitAfterDownload = False
-        self._downloadStateToolTip = StateToolTip(
+        toolTip = StateToolTip(
             "正在下载更新",
             "正在连接下载服务器...",
             self,
         )
-        self._downloadStateToolTip.move(
-            self._downloadStateToolTip.getSuitablePos()
-        )
-        self._downloadStateToolTip.show()
-        self._downloadStateToolTip.closedSignal.connect(
-            self._onDownloadStateToolTipClosed
-        )
-        self._downloadStateToolTip.destroyed.connect(
-            self._clearDownloadStateToolTip
+        self._downloadStateToolTip = toolTip
+        toolTip.move(toolTip.getSuitablePos())
+        toolTip.show()
+        toolTip.closedSignal.connect(self._onDownloadStateToolTipClosed)
+        toolTip.destroyed.connect(
+            lambda: self._clearDownloadStateToolTip(toolTip)
         )
 
         self._downloadWorker = UpdateDownloadWorker(
