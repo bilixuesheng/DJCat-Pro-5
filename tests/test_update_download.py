@@ -13,6 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QRect, QSize
 from PySide6.QtWidgets import QApplication
+from shiboken6 import delete
 
 import djcat
 from app.common.update_download import (
@@ -713,6 +714,27 @@ class UpdateWindowLifecycleTest(TestCase):
         disposeToolTip.assert_called_once_with()
         self.assertIsNone(self.window._navigationTarget)
         self.assertIsNone(self.window._pendingNavigation)
+
+    def testCompletedDownloadToolTipClearsReferenceWhenDeleted(self):
+        worker = DownloadWorkerStub("", Path())
+        thread = ThreadStub(lambda: None, True)
+        with (
+            patch(
+                "app.view.windows.main_window.UpdateDownloadWorker",
+                return_value=worker,
+            ),
+            patch(
+                "app.view.windows.main_window.threading.Thread",
+                return_value=thread,
+            ),
+        ):
+            self.window._startUpdateDownload("9999.0.0")
+
+        toolTip = self.window._downloadStateToolTip
+        delete(toolTip)
+
+        self.assertIsNone(self.window._downloadStateToolTip)
+        self.window._shutdownResources()
 
     def testInstallerStartsBeforeApplicationQuits(self):
         infoBar = Mock()

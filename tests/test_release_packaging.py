@@ -50,6 +50,8 @@ def test_pe_arch_verifier_rejects_mislabeled_build(tmp_path: Path):
 def test_installer_is_single_language_and_architecture_aware():
     script = (REPO / "scripts" / "DJCat-Pro-5.iss").read_text(encoding="utf-8")
 
+    assert "DefaultDirName={autopf}\\DJCat Pro\n" in script
+    assert "DefaultDirName={autopf}\\DJCat Pro 5" not in script
     assert 'Name: "chinesesimplified"' in script
     assert 'MessagesFile: "scripts\\ChineseSimplified.isl"' in script
     assert 'Name: "english"' not in script
