@@ -29,7 +29,12 @@ from qfluentwidgets import (
 )
 
 from app.common.ai_markdown import PEAK_HOURS_TEXT, fetchQuota
-from app.config.cfg import THEME_COLOR_PRESETS, cfg
+from app.config.cfg import (
+    BANNER_IMAGE_PRESETS,
+    BANNER_PRESET_SCALE_MODES,
+    THEME_COLOR_PRESETS,
+    cfg,
+)
 from app.config.constants import APP_NAME, AUTHOR, AUTHOR_URL, VERSION, YEAR
 from app.signal_bus import signalBus
 from app.view.components.scroll_area import ScrollArea
@@ -332,7 +337,7 @@ class SettingPage(ScrollArea):
                     FluentIcon.IMAGE_EXPORT,
                     "主页图片来源",
                     "选择使用预设图片还是自定义图片",
-                    texts=["预设: 树人门", "自定义"],
+                    texts=[*BANNER_IMAGE_PRESETS, "自定义"],
                 ),
                 self.chooseImageCard,
                 RangeSettingCard(
@@ -524,9 +529,17 @@ class SettingPage(ScrollArea):
         self.autoRunCard.checkedChanged.connect(self._onAutoRunChanged)
         self.aboutCard.clicked.connect(self._onAboutCardClicked)
         self.aiQuotaReceived.connect(self._onAIQuotaReceived)
+        cfg.bannerImageSource.valueChanged.connect(
+            self._onBannerImageSourceChanged
+        )
         cfg.aiMarkdownMachineCode.valueChanged.connect(
             self._onMachineCodeChanged
         )
+
+    def _onBannerImageSourceChanged(self, source: str) -> None:
+        scaleMode = BANNER_PRESET_SCALE_MODES.get(source)
+        if scaleMode is not None:
+            cfg.set(cfg.bannerScaleMode, scaleMode)
 
     def _onChooseImageClicked(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

@@ -11,8 +11,13 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import MSFluentWindow
 
-from app.config.cfg import cfg
+from app.config.cfg import (
+    BANNER_IMAGE_PRESETS,
+    BANNER_PRESET_SCALE_MODES,
+    cfg,
+)
 from app.config.constants import APP_NAME
+from app.config.paths import ASSET_DIR
 from app.view.pages.setting_page import SettingPage
 from app.view.windows.main_window import MainWindow
 
@@ -93,6 +98,50 @@ class SettingSearchTest(TestCase):
         titleEdit.setText("   ")
         titleEdit.editingFinished.emit()
         self.assertEqual(self.window.windowTitle(), APP_NAME)
+
+    def testBannerPresetsUseExpectedAssetsAndDefault(self):
+        self.assertEqual(
+            BANNER_IMAGE_PRESETS,
+            {
+                "预设: 树人门": "home.png",
+                "预设: 罗小黑": "luoxiaoheimiao.jpg",
+                "预设: 罗小黑（2）": "luoxiaoheimiao2.jpg",
+                "预设: 罗小黑（3）": "luoxiaoheimiao3.jpg",
+            },
+        )
+        self.assertEqual(
+            cfg.bannerImageSource.defaultValue,
+            "预设: 罗小黑",
+        )
+        for filename in BANNER_IMAGE_PRESETS.values():
+            self.assertTrue((ASSET_DIR / filename).is_file())
+
+    def testBannerPresetsUseExpectedScaleModes(self):
+        source = cfg.bannerImageSource.value
+        scaleMode = cfg.bannerScaleMode.value
+        try:
+            for preset, expectedScaleMode in BANNER_PRESET_SCALE_MODES.items():
+                with self.subTest(preset=preset):
+                    cfg.set(cfg.bannerImageSource, "自定义")
+                    cfg.set(
+                        cfg.bannerScaleMode,
+                        "缩放(中)"
+                        if expectedScaleMode == "缩放(下)"
+                        else "缩放(下)",
+                    )
+                    cfg.set(cfg.bannerImageSource, preset)
+
+                    self.assertEqual(
+                        cfg.bannerScaleMode.value,
+                        expectedScaleMode,
+                    )
+                    self.assertEqual(
+                        self.window.homePage.banner.get_image_path(),
+                        str(ASSET_DIR / BANNER_IMAGE_PRESETS[preset]),
+                    )
+        finally:
+            cfg.set(cfg.bannerImageSource, source)
+            cfg.set(cfg.bannerScaleMode, scaleMode)
 
     def testRepeatedQueuedDestinationRunsOnlyOnce(self):
         changes = []

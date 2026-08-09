@@ -30,7 +30,11 @@ from qfluentwidgets import (
 )
 from qfluentwidgets import FluentIcon as FIF
 
-from app.config.cfg import cfg
+from app.config.cfg import (
+    BANNER_IMAGE_PRESETS,
+    DEFAULT_BANNER_IMAGE_SOURCE,
+    cfg,
+)
 from app.config.paths import ASSET_DIR
 from app.view.components.scroll_area import ScrollArea
 
@@ -218,14 +222,16 @@ class BannerWidget(QWidget):
         self.update()  # 触发布局重绘
 
     def get_image_path(self):
-        preset_path = str(ASSET_DIR / "home.png")
-        if cfg.bannerImageSource.value == "预设: 树人门":
-            return preset_path
-        else:
-            path = cfg.bannerImagePath.value
-            if not path or not os.path.exists(path):
-                return preset_path
+        source = cfg.bannerImageSource.value
+        if source in BANNER_IMAGE_PRESETS:
+            return str(ASSET_DIR / BANNER_IMAGE_PRESETS[source])
+
+        path = cfg.bannerImagePath.value
+        if path and os.path.exists(path):
             return path
+        return str(
+            ASSET_DIR / BANNER_IMAGE_PRESETS[DEFAULT_BANNER_IMAGE_SOURCE]
+        )
 
     def _invalidate_cache(self):
         self._cached_pixmap = None

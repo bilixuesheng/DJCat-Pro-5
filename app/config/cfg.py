@@ -19,6 +19,19 @@ THEME_COLOR_PRESETS = (
     ("树人绿", (49, 101, 49)),
     ("系统蓝", (76, 194, 255)),
 )
+BANNER_IMAGE_PRESETS = {
+    "预设: 树人门": "home.png",
+    "预设: 罗小黑": "luoxiaoheimiao.jpg",
+    "预设: 罗小黑（2）": "luoxiaoheimiao2.jpg",
+    "预设: 罗小黑（3）": "luoxiaoheimiao3.jpg",
+}
+DEFAULT_BANNER_IMAGE_SOURCE = "预设: 罗小黑"
+BANNER_PRESET_SCALE_MODES = {
+    "预设: 树人门": "缩放(中)",
+    "预设: 罗小黑": "缩放(中)",
+    "预设: 罗小黑（2）": "缩放(下)",
+    "预设: 罗小黑（3）": "缩放(中)",
+}
 
 
 class GeometryValidator(ConfigValidator):
@@ -66,8 +79,8 @@ class Config(QConfig):
     bannerImageSource = OptionsConfigItem(
         "Banner",
         "BannerImageSource",
-        "预设: 树人门",
-        OptionsValidator(["预设: 树人门", "自定义"]),
+        DEFAULT_BANNER_IMAGE_SOURCE,
+        OptionsValidator([*BANNER_IMAGE_PRESETS, "自定义"]),
     )
     bannerImagePath = ConfigItem("Banner", "BannerImagePath", "")
     bannerBrightness = RangeConfigItem(
