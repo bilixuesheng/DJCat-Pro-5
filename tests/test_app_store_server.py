@@ -218,6 +218,47 @@ class AppStoreServerTest(TestCase):
             ["打开主页", "查看文档"],
         )
 
+    def test_missing_application_actions_return_to_the_published_list(self):
+        dashboard = self._login()
+        csrfToken = self._csrf(dashboard)
+        application = {
+            "csrf_token": csrfToken,
+            "name": "Missing",
+            "developer": "Developer",
+            "description": "No longer exists",
+            "version": "1",
+            "download_url": "https://example.com/app.zip",
+            "icon_url": "https://example.com/icon.png",
+            "action_type": "program",
+            "action_target": "App.exe",
+        }
+
+        edited = self.client.post(
+            "/admin/app-store/apps/999/edit",
+            base_url="https://dash.djcatpro.top",
+            data=application,
+            follow_redirects=True,
+        )
+        component = self.client.post(
+            "/admin/app-store/apps/999/components/new",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(edited),
+                "title": "Missing",
+                "description": "No parent application",
+                "action_type": "program",
+                "action_target": "App.exe",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(edited.status_code, 200)
+        self.assertEqual(edited.request.path, "/admin/app-store/apps/")
+        self.assertIn("未找到软件", edited.get_data(as_text=True))
+        self.assertEqual(component.status_code, 200)
+        self.assertEqual(component.request.path, "/admin/app-store/apps/")
+        self.assertIn("未找到软件", component.get_data(as_text=True))
+
     def test_admin_validates_edits_and_cascades_application_deletion(self):
         dashboard = self._login()
         csrfToken = self._csrf(dashboard)
