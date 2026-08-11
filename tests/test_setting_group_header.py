@@ -57,8 +57,8 @@ class SettingGroupHeaderTest(TestCase):
                 "personalization",
                 "banner",
                 "broadcast",
-                "aiMarkdown",
                 "countdown",
+                "aiMarkdown",
                 "software",
                 "about",
             ],
@@ -68,6 +68,20 @@ class SettingGroupHeaderTest(TestCase):
                 self.assertFalse(
                     group.headerWidget.findChildren(TransparentToolButton)
                 )
+
+    @patch("app.view.pages.setting_page.threading.Thread")
+    def testAppStoreCacheCardBelongsToSoftwareGroup(self, _):
+        page = SettingPage()
+        self.addCleanup(page.deleteLater)
+
+        self.assertIn(
+            page.clearAppStoreCacheCard,
+            page.softwareGroup.settingCards(),
+        )
+        self.assertNotIn(
+            page.clearAppStoreCacheCard,
+            page.aboutGroup.settingCards(),
+        )
 
     @patch("app.view.pages.setting_page.threading.Thread")
     def testHeaderGeometryStaysFixedDuringExpandAnimation(self, _):

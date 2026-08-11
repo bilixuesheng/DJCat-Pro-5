@@ -571,6 +571,12 @@ class SettingPage(ScrollArea):
             "在系统启动时静默运行电教猫 Pro",
             cfg.autoRun,
         )
+        self.clearAppStoreCacheCard = PushSettingCard(
+            "清理应用市场缓存",
+            FluentIcon.DELETE,
+            "图标与广告缓存",
+            "删除超过 7 天未使用的图片缓存，也可以随时手动清理。",
+        )
         self.softwareGroup.addSettingCards(
             [
                 SwitchSettingCard(
@@ -580,6 +586,7 @@ class SettingPage(ScrollArea):
                     cfg.checkUpdateAtStartUp,
                 ),
                 self.autoRunCard,
+                self.clearAppStoreCacheCard,
             ]
         )
 
@@ -588,12 +595,6 @@ class SettingPage(ScrollArea):
             FluentIcon.INFO,
             "关于",
             f"© Copyright {YEAR}, {AUTHOR}. Version {VERSION}。Beta 版仅接收 Beta 通道的更新",
-        )
-        self.clearAppStoreCacheCard = PushSettingCard(
-            "清理应用市场缓存",
-            FluentIcon.DELETE,
-            "图标与广告缓存",
-            "删除超过 7 天未使用的图片缓存，也可以随时手动清理。",
         )
         self.errorLogCard = PushSettingCard(
             "查看错误日志",
@@ -611,7 +612,6 @@ class SettingPage(ScrollArea):
                     f"发现更多 {AUTHOR} 的作品",
                 ),
                 self.aboutCard,
-                self.clearAppStoreCacheCard,
                 self.errorLogCard,
             ]
         )
@@ -620,8 +620,8 @@ class SettingPage(ScrollArea):
         self.addSettingGroup(self.personalGroup)
         self.addSettingGroup(self.bannerGroup)
         self.addSettingGroup(self.broadcastGroup)
-        self.addSettingGroup(self.aiMarkdownGroup)
         self.addSettingGroup(self.countdownGroup)
+        self.addSettingGroup(self.aiMarkdownGroup)
         self.addSettingGroup(self.softwareGroup)
         self.addSettingGroup(self.aboutGroup)
 
