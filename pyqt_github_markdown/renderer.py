@@ -36,7 +36,7 @@ def _leadingText(node: SyntaxTreeNode) -> str:
 def _setupTextLabel(label: QLabel) -> None:
     label.setTextFormat(Qt.RichText)
     label.setWordWrap(True)
-    label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
+    label.setTextInteractionFlags(Qt.LinksAccessibleByMouse)
 
 
 def _cellAlign(cell: SyntaxTreeNode) -> Qt.AlignmentFlag:

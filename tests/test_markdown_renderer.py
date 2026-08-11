@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QBuffer, QIODevice, QPoint, Qt
 from PySide6.QtGui import QImage, QInputDevice
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QScroller, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QScroller, QTextEdit, QWidget
 
 from app.view.components.markdown_view import MarkdownView
 from app.view.pages.broadcast_page import BroadcastWindow
@@ -134,6 +134,57 @@ class MarkdownRendererTest(TestCase):
         ).commit()
         self.assertGreater(scrollBar.value(), 0)
         view.deleteLater()
+
+    def testMarkdownDisablesSelectionAndUsesBroadcastTypography(self):
+        window = BroadcastWindow()
+        window.setContent("title", "普通正文", is_markdown=False)
+        plainFont = window.contentEdit.font()
+
+        window.setContent(
+            "title",
+            "# 标题\n\n正文\n\n[链接](https://example.com)\n\n"
+            "| A | B |\n|---|---|\n| 1 | 2 |\n\n"
+            "```python\nprint(1)\n```",
+            is_markdown=True,
+        )
+        self.app.processEvents()
+
+        paragraph = next(
+            label
+            for label in window.markdownView.findChildren(QLabel)
+            if label.objectName() == "paragraph"
+        )
+        heading = next(
+            label
+            for label in window.markdownView.findChildren(QLabel)
+            if label.objectName() == "h1"
+        )
+        self.assertEqual(plainFont.pointSizeF(), 26.0)
+        self.assertEqual(paragraph.font().pointSizeF(), 26.0)
+        self.assertEqual(heading.font().pointSizeF(), 49.0)
+        self.assertIn("Microsoft YaHei", paragraph.font().families())
+
+        labels = window.markdownView.findChildren(QLabel)
+        self.assertTrue(
+            all(
+                not label.textInteractionFlags()
+                & Qt.TextInteractionFlag.TextSelectableByMouse
+                for label in labels
+            )
+        )
+        link = next(label for label in labels if 'href="https://example.com"' in label.text())
+        self.assertTrue(
+            link.textInteractionFlags() & Qt.TextInteractionFlag.LinksAccessibleByMouse
+        )
+        editor = window.markdownView.findChild(QTextEdit, "code-editor")
+        self.assertIsNotNone(editor)
+        self.assertEqual(
+            editor.textInteractionFlags(), Qt.TextInteractionFlag.NoTextInteraction
+        )
+        self.assertIsNotNone(window.markdownView._scrollDelegate)
+        self.assertIsNotNone(window.contentScrollDelegate)
+        self.assertIsNotNone(editor.parentWidget()._scrollDelegate)
+        window.close()
 
     def testLinksOnlyOpenHttpAndHttps(self):
         view = MarkdownView()

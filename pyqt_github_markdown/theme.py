@@ -22,7 +22,7 @@ _QSS = Template(
 #markdown, #markdown QWidget {
     background: $bg;
     color: $text;
-    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
     font-size: 16px;
 }
 QLabel#h1 { font-size: 30px; font-weight: 600; border-bottom: 1px solid $border; padding-bottom: 6px; }

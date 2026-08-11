@@ -29,6 +29,7 @@ from qfluentwidgets import (
     PrimaryPushButton,
     PushButton,
     RoundMenu,
+    SmoothScrollDelegate,
     SubtitleLabel,
     TextEdit,
     TitleLabel,
@@ -324,6 +325,7 @@ class BroadcastWindow(FramelessWindow):
         self.contentEdit.setReadOnly(True)
         self.contentEdit.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         self.contentEdit.setStyleSheet("border: none; background: transparent;")
+        self.contentScrollDelegate = SmoothScrollDelegate(self.contentEdit, True)
         self.contentEdit.viewport().installEventFilter(self)
 
         self.markdownView = MarkdownView(

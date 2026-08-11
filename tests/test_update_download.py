@@ -478,6 +478,27 @@ class UpdateWindowLifecycleTest(TestCase):
         workerFactory.assert_called_once()
         self.assertEqual(workerFactory.call_args.args[0], DOWNLOAD_URL)
 
+    def testDestroyedUpdateInfoBarClearsCapturedReference(self):
+        InfoBarStub.instances.clear()
+
+        with (
+            patch("app.view.windows.main_window.InfoBar", InfoBarStub),
+            patch("app.view.windows.main_window.PrimaryPushButton", ButtonStub),
+            patch("app.view.windows.main_window.PushButton", ButtonStub),
+        ):
+            self.window._onUpdateChecked(
+                {"latest_version": "9999.0.0", "update_note": "note"},
+                "",
+                False,
+            )
+            infoBar = InfoBarStub.instances[-1]
+            infoBar.destroyed.emit(object())
+
+        self.assertIsNone(self.window._updateInfoBar)
+        with patch("app.view.windows.main_window.QApplication.quit") as quitApp:
+            self.window.requestQuit()
+        quitApp.assert_called_once_with()
+
     def testSilentStartupRestoresGeometryWhenFirstShown(self):
         savedGeometry = QRect(80, 60, 900, 520)
         originalGeometry = cfg.geometry.value
@@ -695,6 +716,8 @@ class UpdateWindowLifecycleTest(TestCase):
         with (
             patch.object(self.window, "_cancelPendingEdgeTts") as cancelEdge,
             patch.object(self.window, "_cleanupEdgeTtsFile") as cleanupEdge,
+            patch.object(self.window.homePage, "shutdown") as homeShutdown,
+            patch.object(self.window.appStorePage, "shutdown") as appStoreShutdown,
             patch.object(
                 self.window,
                 "_disposeDownloadStateToolTip",
@@ -710,6 +733,8 @@ class UpdateWindowLifecycleTest(TestCase):
         self.window.player.stop.assert_called_once_with()
         cleanupEdge.assert_called_once_with()
         downloadWorker.cancel.assert_called_once_with()
+        homeShutdown.assert_called_once_with()
+        appStoreShutdown.assert_called_once_with()
         disposeToolTip.assert_called_once_with()
         self.assertIsNone(self.window._navigationTarget)
         self.assertIsNone(self.window._pendingNavigation)

@@ -27,6 +27,7 @@ class WindowBackgroundTest(TestCase):
         self.configFile = cfg.file
         cfg.file = Path(self.tempDir.name) / "config.json"
         self.items = (
+            cfg.bannerImageSource,
             cfg.broadcastBackgroundMode,
             cfg.broadcastBackgroundColor,
             cfg.broadcastBackgroundImagePath,
@@ -119,3 +120,64 @@ class WindowBackgroundTest(TestCase):
 
         self.assertEqual(cfg.broadcastBackgroundImagePath.value, "C:/background.png")
         self.assertEqual(cfg.broadcastBackgroundMode.value, "图片")
+
+    def testSettingCardsFollowSelectedImageAndBackgroundTypes(self):
+        page = SettingPage()
+        self.addCleanup(page.deleteLater)
+
+        cfg.set(cfg.bannerImageSource, "预设: 罗小黑", save=False)
+        self.assertTrue(page.chooseImageCard.isHidden())
+        cfg.set(cfg.bannerImageSource, "自定义", save=False)
+        self.assertFalse(page.chooseImageCard.isHidden())
+
+        for mode, colorVisible, imageVisible in (
+            ("主题色", False, False),
+            ("纯色", True, False),
+            ("图片", False, True),
+        ):
+            with self.subTest(mode=mode):
+                cfg.set(cfg.broadcastBackgroundMode, mode, save=False)
+                cfg.set(cfg.countdownBackgroundMode, mode, save=False)
+                self.app.processEvents()
+                self.assertEqual(
+                    page.broadcastBackgroundColorCard.isHidden(),
+                    not colorVisible,
+                )
+                self.assertEqual(
+                    page.broadcastBackgroundImageCard.isHidden(),
+                    not imageVisible,
+                )
+                self.assertEqual(
+                    page.broadcastBackgroundScaleCard.isHidden(),
+                    not imageVisible,
+                )
+                self.assertEqual(
+                    page.countdownBackgroundColorCard.isHidden(),
+                    not colorVisible,
+                )
+                self.assertEqual(
+                    page.countdownBackgroundImageCard.isHidden(),
+                    not imageVisible,
+                )
+                self.assertEqual(
+                    page.countdownBackgroundScaleCard.isHidden(),
+                    not imageVisible,
+                )
+
+        cfg.set(cfg.broadcastBackgroundMode, "主题色", save=False)
+        page.setSearchText("背景颜色")
+        self.assertTrue(page.broadcastBackgroundColorCard.isHidden())
+        cfg.set(cfg.broadcastBackgroundMode, "纯色", save=False)
+        self.assertFalse(page.broadcastBackgroundColorCard.isHidden())
+        page.setSearchText("")
+
+    @patch("app.view.pages.setting_page.ColorDialog")
+    def testBackgroundColorDialogUsesChineseTitle(self, colorDialog):
+        page = SettingPage()
+        self.addCleanup(page.deleteLater)
+
+        page.broadcastBackgroundColorCard._showColorDialog()
+
+        self.assertEqual(colorDialog.call_args.args[1], "选择背景颜色")
+        self.assertNotIn("Choose", colorDialog.call_args.args[1])
+        colorDialog.return_value.deleteLater.assert_called_once_with()

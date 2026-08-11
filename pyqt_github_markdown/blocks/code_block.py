@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from qfluentwidgets import SmoothScrollDelegate
 
 
 def toHighlightedHtml(code: str, lang: str, style: str) -> str:
@@ -55,11 +56,13 @@ class CodeBlock(QWidget):
         self._copyButton.setCursor(Qt.PointingHandCursor)
         self._editor.setObjectName("code-editor")
         self._editor.setReadOnly(True)
+        self._editor.setTextInteractionFlags(Qt.NoTextInteraction)
         self._editor.setFrameShape(QFrame.NoFrame)
         self._editor.setLineWrapMode(QTextEdit.NoWrap)
         self._editor.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._editor.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._editor.setHtml(toHighlightedHtml(self._code, self._lang, self._codeStyle))
+        self._scrollDelegate = SmoothScrollDelegate(self._editor, True)
         # Code blocks grow with content rather than scrolling vertically (GitHub behaviour).
         self._editor.document().setDocumentMargin(10)
         height = int(self._editor.document().size().height())

@@ -202,9 +202,15 @@ class SettingGroupHeaderTest(TestCase):
 
         self.assertEqual(len(group._itemSeparators), len(group.settingCards()))
         self.assertIsNone(group._itemSeparators[0])
-        for separator in group._itemSeparators[1:]:
+        visibleCards = [card for card in group.settingCards() if not card.isHidden()]
+        visibleSeparators = [
+            separator
+            for separator in group._itemSeparators[1:]
+            if not separator.isHidden()
+        ]
+        self.assertEqual(len(visibleSeparators), max(len(visibleCards) - 1, 0))
+        for separator in visibleSeparators:
             with self.subTest(separator=separator):
-                self.assertFalse(separator.isHidden())
                 image = QImage(separator.size(), QImage.Format.Format_ARGB32)
                 image.fill(Qt.GlobalColor.transparent)
                 separator.render(image)

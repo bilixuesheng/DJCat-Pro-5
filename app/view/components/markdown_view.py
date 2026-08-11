@@ -1,20 +1,20 @@
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QWidget
-from qfluentwidgets import isDarkTheme
+from qfluentwidgets import SmoothScrollDelegate, isDarkTheme
 
 from pyqt_github_markdown import DARK, LIGHT, MarkdownWidget, Theme
 
 _LARGE_TEXT_QSS = """
-#markdown, #markdown QWidget { font-size: 26px; }
-QLabel#h1 { font-size: 49px; }
-QLabel#h2 { font-size: 36px; }
-QLabel#h3 { font-size: 29px; }
-QLabel#h4 { font-size: 26px; }
-QLabel#h5 { font-size: 23px; }
-QLabel#h6 { font-size: 21px; }
-QLabel#paragraph { font-size: 26px; }
-QLabel#code-lang { font-size: 19px; }
+#markdown, #markdown QWidget { font-size: 26pt; }
+QLabel#h1 { font-size: 49pt; }
+QLabel#h2 { font-size: 36pt; }
+QLabel#h3 { font-size: 29pt; }
+QLabel#h4 { font-size: 26pt; }
+QLabel#h5 { font-size: 23pt; }
+QLabel#h6 { font-size: 21pt; }
+QLabel#paragraph { font-size: 26pt; }
+QLabel#code-lang { font-size: 19pt; }
 """
 _TRANSPARENT_QSS = """
 #markdown, #markdown QWidget { background: transparent; }
@@ -38,6 +38,7 @@ class MarkdownView(MarkdownWidget):
         super().__init__(DARK if isDarkTheme() else LIGHT, parent)
         self._largeText = largeText
         self._transparentBackground = transparentBackground
+        self._scrollDelegate = SmoothScrollDelegate(self._scroll, True)
         if transparentBackground:
             for widget in (self._scroll, self._scroll.viewport(), self._content):
                 widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)

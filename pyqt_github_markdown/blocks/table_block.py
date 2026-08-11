@@ -38,7 +38,5 @@ class TableBlock(QWidget):
         label.setProperty("role", role)
         label.setProperty("odd", odd)
         label.setAlignment(align | Qt.AlignVCenter)
-        label.setTextInteractionFlags(
-            Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse
-        )
+        label.setTextInteractionFlags(Qt.LinksAccessibleByMouse)
         return label

@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     BodyLabel,
     ColorDialog,
-    ColorSettingCard,
+    ColorSettingCard as FluentColorSettingCard,
     ComboBoxSettingCard,
     FluentIcon,
     HyperlinkCard,
@@ -87,6 +87,27 @@ class LineEditSettingCard(SettingCard):
         self.lineEdit.editingFinished.connect(
             lambda: cfg.set(self.configItem, self.lineEdit.text())
         )
+
+
+class LocalizedColorSettingCard(FluentColorSettingCard):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.colorPicker.clicked.disconnect()
+        self.colorPicker.clicked.connect(self._showColorDialog)
+
+    def _showColorDialog(self) -> None:
+        dialog = ColorDialog(
+            self.colorPicker.color,
+            f"选择{self.titleLabel.text()}",
+            self.window(),
+            self.colorPicker.enableAlpha,
+        )
+        dialog.colorChanged.connect(self.colorPicker.setColor)
+        dialog.colorChanged.connect(self.colorPicker.colorChanged)
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
 
 
 class ThemeColorSettingCard(CollapsibleSettingCard):
@@ -218,6 +239,7 @@ class SettingPage(ScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._aiQuotaLoading = False
+        self._searchText = ""
         self.container = QWidget()
         self.vBoxLayout = QVBoxLayout(self.container)
         self.vBoxLayout.setContentsMargins(11, 0, 11, 36)
@@ -374,6 +396,19 @@ class SettingPage(ScrollArea):
             ]
         )
 
+        self.broadcastBackgroundColorCard = LocalizedColorSettingCard(
+            cfg.broadcastBackgroundColor,
+            FluentIcon.PALETTE,
+            "背景颜色",
+            "纯色背景使用的颜色",
+        )
+        self.broadcastBackgroundScaleCard = ComboBoxSettingCard(
+            cfg.broadcastBackgroundScaleMode,
+            FluentIcon.ZOOM_IN,
+            "图片缩放模式",
+            "设置背景图片的缩放和对齐方式",
+            texts=WINDOW_BACKGROUND_SCALE_MODES,
+        )
         self.broadcastGroup.addSettingCards(
             [
                 ComboBoxSettingCard(
@@ -383,20 +418,9 @@ class SettingPage(ScrollArea):
                     "选择主题色、纯色或图片背景",
                     texts=WINDOW_BACKGROUND_MODES,
                 ),
-                ColorSettingCard(
-                    cfg.broadcastBackgroundColor,
-                    FluentIcon.PALETTE,
-                    "背景颜色",
-                    "纯色背景使用的颜色",
-                ),
+                self.broadcastBackgroundColorCard,
                 self.broadcastBackgroundImageCard,
-                ComboBoxSettingCard(
-                    cfg.broadcastBackgroundScaleMode,
-                    FluentIcon.ZOOM_IN,
-                    "图片缩放模式",
-                    "设置背景图片的缩放和对齐方式",
-                    texts=WINDOW_BACKGROUND_SCALE_MODES,
-                ),
+                self.broadcastBackgroundScaleCard,
                 SwitchSettingCard(
                     FluentIcon.APPLICATION,
                     "显示任务栏",
@@ -469,6 +493,19 @@ class SettingPage(ScrollArea):
             [self.aiStyleCard, self.aiQuotaCard, self.aiMachineCodeCard]
         )
 
+        self.countdownBackgroundColorCard = LocalizedColorSettingCard(
+            cfg.countdownBackgroundColor,
+            FluentIcon.PALETTE,
+            "背景颜色",
+            "纯色背景使用的颜色",
+        )
+        self.countdownBackgroundScaleCard = ComboBoxSettingCard(
+            cfg.countdownBackgroundScaleMode,
+            FluentIcon.ZOOM_IN,
+            "图片缩放模式",
+            "设置背景图片的缩放和对齐方式",
+            texts=WINDOW_BACKGROUND_SCALE_MODES,
+        )
         self.countdownGroup.addSettingCards(
             [
                 ComboBoxSettingCard(
@@ -478,20 +515,9 @@ class SettingPage(ScrollArea):
                     "选择主题色、纯色或图片背景",
                     texts=WINDOW_BACKGROUND_MODES,
                 ),
-                ColorSettingCard(
-                    cfg.countdownBackgroundColor,
-                    FluentIcon.PALETTE,
-                    "背景颜色",
-                    "纯色背景使用的颜色",
-                ),
+                self.countdownBackgroundColorCard,
                 self.countdownBackgroundImageCard,
-                ComboBoxSettingCard(
-                    cfg.countdownBackgroundScaleMode,
-                    FluentIcon.ZOOM_IN,
-                    "图片缩放模式",
-                    "设置背景图片的缩放和对齐方式",
-                    texts=WINDOW_BACKGROUND_SCALE_MODES,
-                ),
+                self.countdownBackgroundScaleCard,
                 SwitchSettingCard(
                     FluentIcon.APPLICATION,
                     "显示任务栏",
@@ -612,14 +638,44 @@ class SettingPage(ScrollArea):
         cfg.bannerImageSource.valueChanged.connect(
             self._onBannerImageSourceChanged
         )
+        cfg.bannerImageSource.valueChanged.connect(
+            self._refreshConditionalCards
+        )
+        cfg.broadcastBackgroundMode.valueChanged.connect(
+            self._refreshConditionalCards
+        )
+        cfg.countdownBackgroundMode.valueChanged.connect(
+            self._refreshConditionalCards
+        )
         cfg.aiMarkdownMachineCode.valueChanged.connect(
             self._onMachineCodeChanged
         )
+        self._refreshConditionalCards()
 
     def _onBannerImageSourceChanged(self, source: str) -> None:
         scaleMode = BANNER_PRESET_SCALE_MODES.get(source)
         if scaleMode is not None:
             cfg.set(cfg.bannerScaleMode, scaleMode)
+
+    def _conditionalCardVisibility(self) -> dict[QWidget, bool]:
+        return {
+            self.chooseImageCard: cfg.bannerImageSource.value == "自定义",
+            self.broadcastBackgroundColorCard: cfg.broadcastBackgroundMode.value
+            == "纯色",
+            self.broadcastBackgroundImageCard: cfg.broadcastBackgroundMode.value
+            == "图片",
+            self.broadcastBackgroundScaleCard: cfg.broadcastBackgroundMode.value
+            == "图片",
+            self.countdownBackgroundColorCard: cfg.countdownBackgroundMode.value
+            == "纯色",
+            self.countdownBackgroundImageCard: cfg.countdownBackgroundMode.value
+            == "图片",
+            self.countdownBackgroundScaleCard: cfg.countdownBackgroundMode.value
+            == "图片",
+        }
+
+    def _refreshConditionalCards(self, _value=None) -> None:
+        self.setSearchText(self._searchText)
 
     def _onChooseBackgroundImageClicked(self, pathItem, modeItem) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -678,17 +734,21 @@ class SettingPage(ScrollArea):
             signalBus.catchException.emit(str(error))
 
     def setSearchText(self, text: str) -> None:
-        text = text.strip().lower()
+        self._searchText = text.strip().lower()
+        conditionalVisibility = self._conditionalCardVisibility()
         for group in self._settingGroups():
             groupHasMatch = False
             for card in group.settingCards():
                 target = card.card if isinstance(card, CollapsibleSettingCard) else card
                 labels = (target.titleLabel.text(), target.contentLabel.text())
-                matched = not text or any(text in label.lower() for label in labels)
-                group.setSettingCardVisible(card, matched)
-                groupHasMatch |= matched
+                matched = not self._searchText or any(
+                    self._searchText in label.lower() for label in labels
+                )
+                visible = conditionalVisibility.get(card, True) and matched
+                group.setSettingCardVisible(card, visible)
+                groupHasMatch |= visible
             group.setVisible(groupHasMatch)
-            group.setSearchExpanded(bool(text))
+            group.setSearchExpanded(bool(self._searchText))
 
     def showEvent(self, event) -> None:
         self._refreshAIQuota()

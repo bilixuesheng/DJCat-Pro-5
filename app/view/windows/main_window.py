@@ -137,6 +137,10 @@ class LazyAppStorePage(QWidget):
     def executePinnedCard(self, item):
         self.ensureLoaded().executePinnedCard(item)
 
+    def shutdown(self):
+        if self.page is not None:
+            self.page.shutdown()
+
 
 class UpdateDialog(MessageBoxBase):
     def __init__(self, version, note, parent=None):
@@ -719,7 +723,11 @@ class MainWindow(MSFluentWindow):
                 parent=self,
             )
             self._updateCheckInfoBar = infoBar
-            infoBar.destroyed.connect(self._clearUpdateCheckInfoBar)
+            infoBar.destroyed.connect(
+                lambda _=None, current=infoBar: self._clearUpdateCheckInfoBar(
+                    current
+                )
+            )
         self._updateRequestId += 1
         requestId = self._updateRequestId
         worker = UpdateWorker(requestId)
@@ -751,6 +759,12 @@ class MainWindow(MSFluentWindow):
     def _clearUpdateCheckInfoBar(self, infoBar=None):
         if infoBar is None or self._updateCheckInfoBar is infoBar:
             self._updateCheckInfoBar = None
+
+    def _closeUpdateInfoBar(self):
+        infoBar = self._updateInfoBar
+        self._updateInfoBar = None
+        if infoBar is not None:
+            infoBar.close()
 
     def _onUpdateChecked(self, data, error, manual):
         if error:
@@ -786,8 +800,7 @@ class MainWindow(MSFluentWindow):
         note = note.replace("\\n", "\n")
         note = re.sub(r"\n+", "\n\n", note)
 
-        if self._updateInfoBar is not None:
-            self._updateInfoBar.close()
+        self._closeUpdateInfoBar()
 
         infoBar = InfoBar(
             icon=FIF.UPDATE,
@@ -809,11 +822,13 @@ class MainWindow(MSFluentWindow):
         detailButton.clicked.connect(lambda: self._showUpdateLog(latest_version, note))
         infoBar.addWidget(detailButton)
         self._updateInfoBar = infoBar
-        infoBar.destroyed.connect(self._clearUpdateInfoBar)
+        infoBar.destroyed.connect(
+            lambda _=None, current=infoBar: self._clearUpdateInfoBar(current)
+        )
         infoBar.show()
 
-    def _clearUpdateInfoBar(self, infoBar):
-        if self._updateInfoBar is infoBar:
+    def _clearUpdateInfoBar(self, infoBar=None):
+        if infoBar is None or self._updateInfoBar is infoBar:
             self._updateInfoBar = None
 
     def _showUpdateLog(self, version, note):
@@ -828,9 +843,7 @@ class MainWindow(MSFluentWindow):
         if self._downloadWorker is not None:
             return
 
-        if self._updateInfoBar is not None:
-            self._updateInfoBar.close()
-            self._updateInfoBar = None
+        self._closeUpdateInfoBar()
 
         self._downloadVersion = str(version)
         self._quitAfterDownload = False
@@ -1045,12 +1058,16 @@ class MainWindow(MSFluentWindow):
         self.tts.stop()
         self.player.stop()
         self._cleanupEdgeTtsFile()
+        for page in (
+            getattr(self, "homePage", None),
+            getattr(self, "appStorePage", None),
+        ):
+            if page is not None:
+                page.shutdown()
         if self._downloadWorker is not None:
             self._downloadWorker.cancel()
 
-        if self._updateInfoBar is not None:
-            self._updateInfoBar.close()
-            self._updateInfoBar = None
+        self._closeUpdateInfoBar()
         self._closeUpdateCheckInfoBar()
         self._disposeDownloadStateToolTip()
 
