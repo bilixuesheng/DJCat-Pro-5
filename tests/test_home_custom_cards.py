@@ -10,19 +10,25 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import QInputDevice
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget
-from qfluentwidgets import RoundMenu
+from PySide6.QtWidgets import QApplication, QScroller, QWidget
+from qfluentwidgets import FluentIcon as FIF
+from qfluentwidgets import RoundMenu, ToolButton, ToolTipFilter
 
 from app.common.home_cards import (
-    ActionSequenceWorker,
     DEFAULT_HOME_CARD_NAMES,
+    ActionSequenceWorker,
     execute_action,
     extract_icon_images,
     normalize_custom_cards,
     validate_action,
 )
 from app.config.cfg import cfg
-from app.view.components.home_card_dialog import CustomCardDialog
+from app.view.components.home_card_dialog import (
+    ActionEditorDialog,
+    CustomCardDialog,
+    IconPickerDialog,
+)
+from app.view.components.scroll_area import ScrollArea
 from app.view.pages.home_page import HomePage
 
 
@@ -79,8 +85,122 @@ class HomeCustomCardTest(TestCase):
         self.assertEqual(menu.actions()[0].text(), "自定义")
 
     def testNewButtonUsesOnlyIconAndMatchesEditButton(self):
+        expected_size = ToolButton(FIF.EDIT).sizeHint()
         self.assertEqual(self.page.addBtn.text(), "")
-        self.assertEqual(self.page.addBtn.size(), self.page.sortBtn.size())
+        self.assertEqual(self.page.addBtn.size(), expected_size)
+        self.assertEqual(self.page.sortBtn.size(), expected_size)
+        card = self.page.all_cards[DEFAULT_HOME_CARD_NAMES[0]]
+        self.assertEqual(card.editButton.size().toTuple(), (24, 24))
+        self.assertEqual(card.deleteButton.size().toTuple(), (24, 24))
+
+    def testNewControlsUseFluentTooltips(self):
+        card = self.page.all_cards[DEFAULT_HOME_CARD_NAMES[0]]
+        for widget in (
+            self.page.addBtn,
+            self.page.sortBtn,
+            card.editButton,
+            card.deleteButton,
+        ):
+            with self.subTest(widget=widget.accessibleName()):
+                self.assertTrue(widget.findChildren(ToolTipFilter))
+
+    def testDialogsFitSmallWindowAndUseTouchScrollAreas(self):
+        parent = QWidget()
+        parent.resize(520, 360)
+        parent.show()
+        dialogs = (
+            ActionEditorDialog(parent=parent),
+            CustomCardDialog(parent=parent),
+            IconPickerDialog(parent),
+        )
+        try:
+            for dialog in dialogs:
+                dialog.show()
+                self.app.processEvents()
+                with self.subTest(dialog=type(dialog).__name__):
+                    self.assertLessEqual(dialog.widget.width(), dialog.width() - 16)
+                    self.assertLessEqual(dialog.widget.height(), dialog.height() - 16)
+                    self.assertIsInstance(dialog.scrollArea, ScrollArea)
+                    self.assertGreater(
+                        dialog.scrollArea.verticalScrollBar().maximum(),
+                        0,
+                    )
+                    self.assertGreater(
+                        QScroller.grabbedGesture(dialog.scrollArea.viewport()).value,
+                        0,
+                    )
+                    self.assertTrue(dialog.yesButton.isVisible())
+                    self.assertTrue(dialog.cancelButton.isVisible())
+                    self.assertLessEqual(
+                        dialog.buttonGroup.geometry().bottom(),
+                        dialog.widget.height(),
+                    )
+        finally:
+            for dialog in dialogs:
+                dialog.deleteLater()
+            parent.deleteLater()
+
+    def testCancelledDialogsAreDeleted(self):
+        with mock.patch.object(CustomCardDialog, "exec", return_value=0):
+            for _ in range(10):
+                self.page._createCustomCard()
+        self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.app.processEvents()
+        self.assertEqual(self.page.findChildren(CustomCardDialog), [])
+
+        parent = QWidget()
+        parent.resize(900, 700)
+        dialog = CustomCardDialog(parent=parent)
+        with mock.patch.object(IconPickerDialog, "exec", return_value=0):
+            for _ in range(10):
+                dialog._chooseIcon()
+        with mock.patch.object(ActionEditorDialog, "exec", return_value=0):
+            for _ in range(10):
+                dialog._addAction()
+        self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.app.processEvents()
+        self.assertEqual(parent.findChildren(IconPickerDialog), [])
+        self.assertEqual(parent.findChildren(ActionEditorDialog), [])
+        dialog.deleteLater()
+        parent.deleteLater()
+
+    def testIconPickerClearsLayoutAndShowsSelectionImmediately(self):
+        parent = QWidget()
+        parent.resize(900, 700)
+        dialog = IconPickerDialog(parent)
+        try:
+            dialog._selectFluent("ADD")
+            self.assertEqual(dialog.previewLabel.text(), "ADD")
+            self.assertEqual(
+                sum(button.isChecked() for button in dialog._buttons),
+                1,
+            )
+            dialog._clearGrid()
+            self.assertEqual(dialog.grid.count(), 0)
+        finally:
+            dialog.deleteLater()
+            parent.deleteLater()
+
+    def testDialogIconControlsUseFluentTooltips(self):
+        parent = QWidget()
+        parent.resize(900, 700)
+        card_dialog = CustomCardDialog(parent=parent)
+        icon_dialog = IconPickerDialog(parent)
+        try:
+            row = card_dialog.actionList.rows[0]
+            for widget in (
+                card_dialog.iconButton,
+                row.dragHandle,
+                row.editButton,
+                row.deleteButton,
+                icon_dialog._buttons[0],
+            ):
+                with self.subTest(widget=widget.toolTip()):
+                    self.assertTrue(widget.findChildren(ToolTipFilter))
+        finally:
+            card_dialog.deleteLater()
+            icon_dialog.deleteLater()
+            parent.deleteLater()
 
     def testCustomCardPersistsAndUsesStableKey(self):
         data = {
@@ -172,7 +292,6 @@ class HomeCustomCardTest(TestCase):
             calls.append(action["id"])
             if action["id"] == "one":
                 state["actions"] = [second, added]
-            return None
 
         worker = ActionSequenceWorker("card", get_actions)
         with mock.patch("app.common.home_cards.execute_action", side_effect=fake_execute):

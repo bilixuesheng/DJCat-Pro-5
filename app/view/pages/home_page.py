@@ -5,12 +5,12 @@ from threading import RLock
 from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
+    QIcon,
     QLinearGradient,
     QPainter,
     QPainterPath,
     QPen,
     QPixmap,
-    QIcon,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -22,38 +22,39 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from qfluentwidgets import (
+    Action,
     BodyLabel,
     CardWidget,
     FlowLayout,
     IconWidget,
+    InfoBar,
+    InfoBarPosition,
     MessageBox,
+    RoundMenu,
     SubtitleLabel,
     TitleLabel,
     ToolButton,
-    RoundMenu,
-    Action,
-    InfoBar,
-    InfoBarPosition,
+    ToolTipFilter,
+    ToolTipPosition,
     qconfig,
 )
 from qfluentwidgets import FluentIcon as FIF
 
+from app.common.home_cards import (
+    DEFAULT_HOME_CARD_NAMES,
+    ActionSequenceWorker,
+    icon_for_data,
+    normalize_custom_cards,
+    remove_cached_icon,
+)
 from app.config.cfg import (
     BANNER_IMAGE_PRESETS,
     DEFAULT_BANNER_IMAGE_SOURCE,
     cfg,
 )
 from app.config.paths import ASSET_DIR
-from app.common.home_cards import (
-    ActionSequenceWorker,
-    DEFAULT_HOME_CARD_NAMES,
-    icon_for_data,
-    normalize_custom_cards,
-    remove_cached_icon,
-)
 from app.view.components.home_card_dialog import CustomCardDialog
 from app.view.components.scroll_area import ScrollArea
-
 
 DEFAULT_CARD_INFO = {
     "全屏投送": (FIF.FULL_SCREEN, "将信息以大字全屏展示"),
@@ -61,6 +62,13 @@ DEFAULT_CARD_INFO = {
     "定时播报": (FIF.MEGAPHONE, "设置每日定点语音播报时间或播放音频"),
     "定时关机": (FIF.POWER_BUTTON, "设置指定时间提示或自动关闭计算机"),
 }
+
+
+def _set_tooltip(widget, text):
+    widget.setToolTip(text)
+    widget.installEventFilter(
+        ToolTipFilter(widget, showDelay=300, position=ToolTipPosition.TOP)
+    )
 
 
 class ActionCard(CardWidget):
@@ -88,19 +96,20 @@ class ActionCard(CardWidget):
         icon_widget = IconWidget(icon, self)
         icon_widget.setFixedSize(18, 18)
         title_label = TitleLabel(title, self)
+        _set_tooltip(title_label, title)
         self.iconWidget = icon_widget
         self.titleLabel = title_label
         self.contentLabel = BodyLabel(content, self)
         self.contentLabel.setWordWrap(True)
         self.editButton = ToolButton(FIF.EDIT, self)
-        self.editButton.setFixedSize(40, 40)
-        self.editButton.setToolTip("编辑主页卡片")
+        self.editButton.setFixedSize(24, 24)
+        _set_tooltip(self.editButton, "编辑主页卡片")
         self.editButton.setAccessibleName("编辑主页卡片")
         self.editButton.hide()
         self.deleteButton = ToolButton(FIF.DELETE, self)
-        self.deleteButton.setFixedSize(40, 40)
+        self.deleteButton.setFixedSize(24, 24)
         self.deleteButton.setEnabled(False)
-        self.deleteButton.setToolTip("删除主页卡片")
+        _set_tooltip(self.deleteButton, "删除主页卡片")
         self.deleteButton.setAccessibleName(f"删除{title}")
         self.deleteButton.setStyleSheet("""
             ToolButton {
@@ -400,15 +409,14 @@ class HomePage(ScrollArea):
         self.editHint = BodyLabel("拖动卡片调整位置", self.container)
         self.editHint.hide()
         self.addBtn = ToolButton(FIF.ADD, self.container)
-        self.addBtn.setFixedSize(40, 40)
-        self.addBtn.setToolTip("新建主页卡片")
+        _set_tooltip(self.addBtn, "新建主页卡片")
         self.addBtn.setAccessibleName("新建主页卡片")
         self.addBtn.hide()
         self.addBtn.clicked.connect(self._showAddMenu)
         self.sortBtn = ToolButton(FIF.EDIT, self.container)
-        self.sortBtn.setFixedSize(40, 40)
-        self.sortBtn.setToolTip("调整卡片顺序")
+        _set_tooltip(self.sortBtn, "调整卡片顺序")
         self.sortBtn.setAccessibleName("调整卡片顺序")
+        self.addBtn.setFixedSize(self.sortBtn.sizeHint())
         self.sortBtn.clicked.connect(self._toggleCardEditing)
         self.headerLayout.addWidget(self.subTitle)
         self.headerLayout.addStretch(1)
@@ -622,9 +630,13 @@ class HomePage(ScrollArea):
 
     def _createCustomCard(self):
         dialog = CustomCardDialog(parent=self.window())
-        if not dialog.exec():
-            return
-        card = self._addCustomCard(dialog.getData())
+        try:
+            if not dialog.exec():
+                return
+            data = dialog.getData()
+        finally:
+            dialog.deleteLater()
+        card = self._addCustomCard(data)
         if card is not None:
             card.setEditing(self._editing_cards)
             self._renderCards()
@@ -636,9 +648,12 @@ class HomePage(ScrollArea):
         if data is None:
             return
         dialog = CustomCardDialog(data, self.window())
-        if not dialog.exec():
-            return
-        updated = dialog.getData()
+        try:
+            if not dialog.exec():
+                return
+            updated = dialog.getData()
+        finally:
+            dialog.deleteLater()
         old_icon = data.get("icon")
         new_icon = updated.get("icon")
         if old_icon != new_icon:
@@ -680,9 +695,12 @@ class HomePage(ScrollArea):
 
     def _runCustomCard(self, card_id):
         workers = self._customWorkers.setdefault(card_id, [])
-        if workers:
-            if not MessageBox("卡片正在运行", "是否再运行一遍该卡片的动作？", self.window()).exec():
-                return
+        if workers and not MessageBox(
+            "卡片正在运行",
+            "是否再运行一遍该卡片的动作？",
+            self.window(),
+        ).exec():
+            return
         worker = ActionSequenceWorker(card_id, self._getCustomActions)
         worker.finished.connect(self._customSequenceFinished)
         workers.append(worker)

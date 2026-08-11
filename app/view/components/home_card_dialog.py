@@ -17,19 +17,22 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     BodyLabel,
+    CaptionLabel,
     CardWidget,
     CheckBox,
     ComboBox,
     FlowLayout,
+    IconWidget,
     LineEdit,
     MessageBoxBase,
     PlainTextEdit,
     PushButton,
     SearchLineEdit,
-    ScrollArea,
     SpinBox,
     SubtitleLabel,
     ToolButton,
+    ToolTipFilter,
+    ToolTipPosition,
 )
 from qfluentwidgets import FluentIcon as FIF
 
@@ -43,7 +46,7 @@ from app.common.home_cards import (
     save_icon_image,
     validate_action,
 )
-
+from app.view.components.scroll_area import ScrollArea
 
 ACTION_LABELS = {
     "program": "直接启动程序",
@@ -52,6 +55,38 @@ ACTION_LABELS = {
     "path": "打开文件或文件夹",
     "delay": "等待",
 }
+
+
+def _set_tooltip(widget, text):
+    widget.setToolTip(text)
+    widget.installEventFilter(
+        ToolTipFilter(widget, showDelay=300, position=ToolTipPosition.TOP)
+    )
+
+
+def _dialog_host(widget):
+    window = widget.window()
+    return window.parentWidget() or window
+
+
+class _ResponsiveMessageBox(MessageBoxBase):
+    def __init__(self, parent=None):
+        self._preferred_width = 0
+        super().__init__(parent)
+
+    def setPreferredWidth(self, width):
+        self._preferred_width = width
+        self._updatePanelSize(self.size())
+
+    def _updatePanelSize(self, size):
+        if not self._preferred_width or size.width() <= 0:
+            return
+        self.widget.setFixedWidth(min(self._preferred_width, max(0, size.width() - 32)))
+        self.widget.setMaximumHeight(max(0, size.height() - 16))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._updatePanelSize(event.size())
 
 
 class DragHandleButton(ToolButton):
@@ -63,7 +98,7 @@ class DragHandleButton(ToolButton):
         super().__init__(parent)
         self.setIcon(FIF.MOVE)
         self.setFixedSize(44, 44)
-        self.setToolTip("拖动调整动作顺序")
+        _set_tooltip(self, "拖动调整动作顺序")
         self.setAccessibleName("拖动调整动作顺序")
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
         self._press_position = None
@@ -154,7 +189,7 @@ class ActionRow(CardWidget):
             (self.deleteButton, "删除动作"),
         ):
             button.setFixedSize(44, 44)
-            button.setToolTip(name)
+            _set_tooltip(button, name)
             button.setAccessibleName(name)
         self.editButton.clicked.connect(self.editRequested)
         self.deleteButton.clicked.connect(self.deleteRequested)
@@ -188,7 +223,10 @@ class ActionRow(CardWidget):
         else:
             detail = f"{self.action['seconds']} 秒"
         self.detail.setText(detail)
-        self.detail.setToolTip(detail)
+        if not self.detail.findChildren(ToolTipFilter):
+            _set_tooltip(self.detail, detail)
+        else:
+            self.detail.setToolTip(detail)
 
     def mousePressEvent(self, event):
         event.ignore()
@@ -263,10 +301,15 @@ class ActionListWidget(QWidget):
         return [deepcopy(row.action) for row in self.rows]
 
     def _editRow(self, row):
-        dialog = ActionEditorDialog(row.action, self.window())
-        if dialog.exec():
-            row.setData(dialog.getData())
-            self.orderChanged.emit()
+        dialog = ActionEditorDialog(row.action, _dialog_host(self))
+        try:
+            if not dialog.exec():
+                return
+            action = dialog.getData()
+        finally:
+            dialog.deleteLater()
+        row.setData(action)
+        self.orderChanged.emit()
 
     def _deleteRow(self, row):
         self.rows.remove(row)
@@ -363,7 +406,7 @@ class ActionListWidget(QWidget):
         super().hideEvent(event)
 
 
-class ActionEditorDialog(MessageBoxBase):
+class ActionEditorDialog(_ResponsiveMessageBox):
     def __init__(self, action=None, parent=None):
         super().__init__(parent)
         self.titleLabel = SubtitleLabel("配置动作", self)
@@ -371,14 +414,20 @@ class ActionEditorDialog(MessageBoxBase):
         for action_type in ACTION_TYPES:
             self.typeCombo.addItem(ACTION_LABELS[action_type])
         self.stack = QStackedWidget(self)
+        self.scrollArea = ScrollArea(self.widget)
+        self.scrollArea.setWidgetResizable(True)
+        self.scrollArea.enableTransparentBackground()
+        self.scrollArea.setMinimumHeight(100)
+        self.scrollArea.setMaximumHeight(360)
+        self.scrollArea.setWidget(self.stack)
         self._pages = {}
         self._widgets = {}
         self._buildPages()
         self.typeCombo.currentIndexChanged.connect(self._onTypeChanged)
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(self.typeCombo)
-        self.viewLayout.addWidget(self.stack)
-        self.widget.setMinimumWidth(560)
+        self.viewLayout.addWidget(self.scrollArea)
+        self.setPreferredWidth(560)
         self._action = normalize_action(action) if action else None
         self._load(self._action)
         self.yesButton.setText("保存")
@@ -386,6 +435,7 @@ class ActionEditorDialog(MessageBoxBase):
 
     def _form_page(self):
         page = QWidget(self.stack)
+        page.setStyleSheet("background: transparent;")
         layout = QFormLayout(page)
         layout.setContentsMargins(0, 8, 0, 0)
         layout.setVerticalSpacing(10)
@@ -531,7 +581,7 @@ class ActionEditorDialog(MessageBoxBase):
         return True
 
 
-class IconPickerDialog(MessageBoxBase):
+class IconPickerDialog(_ResponsiveMessageBox):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.titleLabel = SubtitleLabel("选择图标", self)
@@ -542,12 +592,16 @@ class IconPickerDialog(MessageBoxBase):
         self.searchEdit.setPlaceholderText("搜索图标名称")
         self.browseButton = PushButton(FIF.FOLDER, "选择文件", self)
         self.browseButton.setMinimumHeight(40)
-        self.scrollArea = ScrollArea(self)
+        self.previewIcon = IconWidget(FIF.APPLICATION, self)
+        self.previewIcon.setFixedSize(40, 40)
+        self.previewLabel = CaptionLabel("APPLICATION", self)
+        self.scrollArea = ScrollArea(self.widget)
         self.scrollArea.setWidgetResizable(True)
-        self.scrollArea.setMinimumWidth(620)
-        self.scrollArea.setMinimumHeight(300)
+        self.scrollArea.enableTransparentBackground()
+        self.scrollArea.setMinimumHeight(60)
+        self.scrollArea.setMaximumHeight(460)
         self.gridWidget = QWidget(self.scrollArea)
-        self.gridWidget.setMinimumWidth(600)
+        self.gridWidget.setStyleSheet("background: transparent;")
         self.grid = FlowLayout(self.gridWidget, needAni=False)
         self.grid.setContentsMargins(8, 8, 8, 8)
         self.scrollArea.setWidget(self.gridWidget)
@@ -563,11 +617,15 @@ class IconPickerDialog(MessageBoxBase):
         toolbar.addWidget(self.searchEdit, 1)
         toolbar.addWidget(self.browseButton)
         self.viewLayout.addLayout(toolbar)
+        previewLayout = QHBoxLayout()
+        previewLayout.addWidget(self.previewIcon)
+        previewLayout.addWidget(self.previewLabel)
+        previewLayout.addStretch(1)
+        self.viewLayout.addLayout(previewLayout)
         self.viewLayout.addWidget(self.scrollArea)
-        self.widget.setMinimumWidth(650)
+        self.setPreferredWidth(650)
         self.yesButton.setText("选择")
         self.cancelButton.setText("取消")
-        self._renderFluentIcons()
         self._sourceChanged()
 
     def _renderFluentIcons(self):
@@ -576,13 +634,16 @@ class IconPickerDialog(MessageBoxBase):
             button = ToolButton(icon, self.gridWidget)
             button.setFixedSize(52, 52)
             button.setCheckable(True)
-            button.setToolTip(name)
+            _set_tooltip(button, name)
             button.setAccessibleName(name)
             button.clicked.connect(lambda _checked=False, name=name: self._selectFluent(name))
             self.grid.addWidget(button)
             self._buttons.append(button)
+        name = self._selected.get("name", "APPLICATION")
+        self._selectFluent(name if name in FIF.__members__ else "APPLICATION")
 
     def _clearGrid(self):
+        self.grid.removeAllWidgets()
         for button in self._buttons:
             button.deleteLater()
         self._buttons.clear()
@@ -605,6 +666,8 @@ class IconPickerDialog(MessageBoxBase):
     def _selectFluent(self, name):
         self._selected = {"type": "fluent", "name": name}
         self._external_image = None
+        self.previewIcon.setIcon(getattr(FIF, name, FIF.APPLICATION))
+        self.previewLabel.setText(name)
         for button in self._buttons:
             button.setChecked(button.toolTip() == name)
 
@@ -629,7 +692,7 @@ class IconPickerDialog(MessageBoxBase):
             button = ToolButton(QIcon(QPixmap.fromImage(image)), self.gridWidget)
             button.setFixedSize(52, 52)
             button.setCheckable(True)
-            button.setToolTip(f"图标 {index + 1}")
+            _set_tooltip(button, f"图标 {index + 1}")
             button.clicked.connect(
                 lambda _checked=False, image=image, button=button: self._selectImage(image, button)
             )
@@ -640,6 +703,10 @@ class IconPickerDialog(MessageBoxBase):
     def _selectImage(self, image, selected_button=None):
         self._external_image = image.copy()
         self._selected = {"type": "image"}
+        self.previewIcon.setIcon(QIcon(QPixmap.fromImage(image)))
+        self.previewLabel.setText(
+            selected_button.toolTip() if selected_button else "自定义图标"
+        )
         for button in self._buttons:
             button.setChecked(button is selected_button)
 
@@ -647,7 +714,7 @@ class IconPickerDialog(MessageBoxBase):
         return deepcopy(self._selected), self._external_image.copy() if self._external_image else None
 
 
-class CustomCardDialog(MessageBoxBase):
+class CustomCardDialog(_ResponsiveMessageBox):
     def __init__(self, data=None, parent=None):
         super().__init__(parent)
         data = deepcopy(data) if isinstance(data, dict) else {}
@@ -664,7 +731,7 @@ class CustomCardDialog(MessageBoxBase):
         self.iconButton = ToolButton(self)
         self.iconButton.setFixedSize(56, 56)
         self.iconButton.setIcon(icon_for_data(self._icon))
-        self.iconButton.setToolTip("当前图标")
+        _set_tooltip(self.iconButton, "当前图标")
         self.iconSelectButton = PushButton(FIF.PALETTE, "选择图标", self)
         self.iconSelectButton.setMinimumHeight(44)
         self.iconSelectButton.clicked.connect(self._chooseIcon)
@@ -675,12 +742,13 @@ class CustomCardDialog(MessageBoxBase):
         self.addActionButton = PushButton(FIF.ADD, "添加动作", self)
         self.addActionButton.setMinimumHeight(44)
         self.addActionButton.clicked.connect(self._addAction)
-        self.scrollArea = ScrollArea(self)
+        self.scrollArea = ScrollArea(self.widget)
         self.scrollArea.setWidgetResizable(True)
-        self.scrollArea.setMinimumWidth(620)
-        self.scrollArea.setMinimumHeight(300)
+        self.scrollArea.enableTransparentBackground()
+        self.scrollArea.setMinimumHeight(100)
+        self.scrollArea.setMaximumHeight(520)
         self.form = QWidget(self.scrollArea)
-        self.form.setMinimumWidth(600)
+        self.form.setStyleSheet("background: transparent;")
         form_layout = QVBoxLayout(self.form)
         form_layout.setContentsMargins(4, 4, 4, 4)
         fields = QFormLayout()
@@ -700,7 +768,7 @@ class CustomCardDialog(MessageBoxBase):
         self.scrollArea.setWidget(self.form)
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(self.scrollArea)
-        self.widget.setMinimumWidth(680)
+        self.setPreferredWidth(680)
         self.titleEdit.setText(str(data.get("title", "")))
         self.descriptionEdit.setText(str(data.get("description", "")))
         self.yesButton.setText("保存")
@@ -708,10 +776,13 @@ class CustomCardDialog(MessageBoxBase):
         self.actionList.setScrollArea(self.scrollArea)
 
     def _chooseIcon(self):
-        dialog = IconPickerDialog(self)
-        if not dialog.exec():
-            return
-        selected, image = dialog.selected()
+        dialog = IconPickerDialog(_dialog_host(self))
+        try:
+            if not dialog.exec():
+                return
+            selected, image = dialog.selected()
+        finally:
+            dialog.deleteLater()
         if selected["type"] == "fluent":
             self._icon = selected
             self._staged_image = None
@@ -722,9 +793,14 @@ class CustomCardDialog(MessageBoxBase):
             self.iconButton.setIcon(QIcon(QPixmap.fromImage(image)))
 
     def _addAction(self):
-        dialog = ActionEditorDialog(parent=self)
-        if dialog.exec():
-            self.actionList.addAction(dialog.getData())
+        dialog = ActionEditorDialog(parent=_dialog_host(self))
+        try:
+            if not dialog.exec():
+                return
+            action = dialog.getData()
+        finally:
+            dialog.deleteLater()
+        self.actionList.addAction(action)
 
     def validate(self) -> bool:
         title = self.titleEdit.text().strip()
