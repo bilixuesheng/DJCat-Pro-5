@@ -34,7 +34,7 @@
         <span>1 项服务</span>
     </div>
     <a class="service-card" href="{{ url_for('adminAIMarkdown') }}">
-        <span class="service-icon" aria-hidden="true">Md</span>
+                <span class="service-icon"><img src="{{ url_for('static', filename='logo.png') }}" alt=""></span>
         <div class="service-copy">
             <div class="service-title"><h3>AI 写 Markdown</h3><span class="status-chip {% if not ai_configured %}waiting{% endif %}"><i></i>{{ 'API 已配置' if ai_configured else '待配置 API' }}</span></div>
             <p>把作业清单或任务转换为适合屏幕展示的标准 Markdown。</p>

@@ -118,7 +118,8 @@ button:active:not(:disabled) { transform: translateY(1px) scale(.985); }
 
 .service-card { min-height: 142px; padding: 22px 24px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 20px; border: 1px solid var(--line); border-radius: var(--radius-large); background: var(--surface); transition: border-color .18s, box-shadow .18s, transform .18s; }
 .service-card:hover { border-color: var(--clay); box-shadow: 0 12px 30px #1414130b; transform: translateY(-2px); }
-.service-icon { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 12px; background: var(--clay-soft); color: var(--clay); font-family: Georgia, serif; font-size: 18px; }
+.service-icon { width: 48px; height: 48px; display: block; overflow: hidden; border-radius: 12px; background: var(--clay-soft); }
+.service-icon img { width: 100%; height: 100%; display: block; border-radius: inherit; object-fit: cover; }
 .service-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .service-title h3 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 25px; font-weight: 400; }
 .service-copy p { margin: 5px 0 0; color: var(--ink-secondary); font-size: 13px; }

@@ -103,6 +103,7 @@ class AIAdminTest(TestCase):
         )
         logo.close()
         self.assertIn("主页", dashboard)
+        self.assertIn('class="service-icon"><img src="/static/logo.png"', dashboard)
         self.assertIn("AI 写 Markdown", dashboard)
         self.assertNotIn("AI 管理", dashboard)
         self.assertNotIn("注册机器</h2>", dashboard)
