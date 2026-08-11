@@ -1124,8 +1124,7 @@ def adminEditApplication(appId):
                 values,
             )
             if result.rowcount != 1:
-                flash("未找到软件", "error")
-                return redirect(url_for("adminApplications"))
+                raise ValueError("未找到软件")
             database.commit()
         flash("软件已更新", "success")
     except ValueError as error:
@@ -1148,13 +1147,6 @@ def adminDeleteApplication(appId):
 @_loginRequired
 def adminCreateAppComponent(appId):
     _checkCsrf()
-    with closing(_connect()) as database:
-        application = database.execute(
-            "SELECT 1 FROM applications WHERE id = ?", (appId,)
-        ).fetchone()
-    if application is None:
-        flash("未找到软件", "error")
-        return redirect(url_for("adminApplications"))
     try:
         actionType, actionTarget, actionArguments = _actionFromForm(request.form)
         values = (
