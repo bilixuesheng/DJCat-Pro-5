@@ -8,10 +8,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QObject, QPoint, QThread, Qt, Signal
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QStackedLayout
 from qfluentwidgets import DrillInTransitionStackedWidget
 
-from app.view.pages.app_store_page import AppStorePage, ApplicationCard
+from app.view.pages.app_store_page import AppStorePage, ApplicationCard, CatalogWorker
 
 
 class _Store:
@@ -34,6 +34,17 @@ class _CancelableWorker(QObject):
 
     def cancel(self):
         self.cancelEvent.set()
+
+
+class _BlockingCatalogStore:
+    def __init__(self):
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def fetchCatalog(self):
+        self.started.set()
+        self.release.wait()
+        return {"apps": [], "ads": []}
 
 
 def _apps(count):
@@ -93,18 +104,78 @@ class AppStorePageTest(TestCase):
         self.assertFalse(card.actionButton.isEnabled())
         self.assertFalse(card.removeButton.isEnabled())
 
+    def testRerenderHidesCardsBeforeDeferredDeletion(self):
+        self.page._renderGrid(self.page.allGrid, _apps(1))
+        oldCard = self.page.allGrid.itemAtPosition(0, 0).widget()
+
+        self.page._renderGrid(self.page.allGrid, _apps(1))
+
+        self.assertTrue(oldCard.isHidden())
+
     def testResponsiveGridUsesThreeColumnsAtDesktopWidth(self):
         apps = _apps(3)
-        self.page.allGridWidget.resize(950, 600)
+        self.page.resize(1000, 600)
+        self.page.show()
+        self.qtApp.processEvents()
         self.page._renderGrid(self.page.allGrid, apps)
 
         self.assertIsInstance(self.page.allGrid.itemAtPosition(0, 2).widget(), ApplicationCard)
 
     def testResponsiveGridUsesTwoAndOneColumnsOnNarrowTouchLayouts(self):
-        self.page.allGridWidget.resize(700, 600)
-        self.assertEqual(self.page._columnCount(self.page.allGrid), 2)
-        self.page.allGridWidget.resize(500, 600)
-        self.assertEqual(self.page._columnCount(self.page.allGrid), 1)
+        self.page.resize(700, 600)
+        self.page.show()
+        self.qtApp.processEvents()
+        self.assertEqual(self.page._columnCount(), 2)
+        self.page.resize(600, 600)
+        self.qtApp.processEvents()
+        self.assertEqual(self.page._columnCount(), 1)
+
+    def testHiddenAllPageUsesVisibleContentWidth(self):
+        self.page.resize(1000, 800)
+        self.page.show()
+        self.qtApp.processEvents()
+
+        self.page._renderGrid(self.page.allGrid, _apps(3))
+
+        self.assertIsInstance(
+            self.page.allGrid.itemAtPosition(0, 2).widget(),
+            ApplicationCard,
+        )
+
+    def testCatalogTabsDoNotShareTheDetailAnimationStack(self):
+        self.assertEqual(self.page.stack.count(), 2)
+
+    def testNoAdCategoryPivotKeepsItsCompactHeight(self):
+        self.page.resize(1000, 800)
+        self.page.show()
+        self.page._prepareAds()
+        self.page._switchCatalogTab(1)
+        self.qtApp.processEvents()
+
+        self.assertLessEqual(
+            self.page.categoryPivot.height(),
+            self.page.categoryPivot.sizeHint().height() + 2,
+        )
+
+    def testInstalledContentStartsDirectlyBelowCompactTabs(self):
+        apps = _apps(1)
+        apps[0]["installed"] = True
+        self.page.catalog = apps
+        self.page.resize(1000, 800)
+        self.page.show()
+        self.page._renderInstalled()
+        self.qtApp.processEvents()
+        card = self.page.installedGrid.itemAtPosition(0, 0).widget()
+        titleBottom = self.page.installedTitle.mapTo(
+            self.page.container,
+            QPoint(0, self.page.installedTitle.height()),
+        ).y()
+        cardTop = card.mapTo(self.page.container, QPoint()).y()
+        margins = self.page.rootLayout.contentsMargins()
+
+        self.assertLessEqual(margins.left(), 16)
+        self.assertLessEqual(margins.top(), 12)
+        self.assertLessEqual(cardTop - titleBottom, 24)
 
     def testDetailStackUsesDrillInTransition(self):
         self.assertIsInstance(self.page.stack, DrillInTransitionStackedWidget)
@@ -124,6 +195,66 @@ class AppStorePageTest(TestCase):
 
         self.assertEqual(clicks, [])
         card.deleteLater()
+
+    def testCardButtonsKeepTouchFriendlyTargets(self):
+        card = ApplicationCard()
+
+        self.assertGreaterEqual(card.actionButton.height(), 40)
+        self.assertGreaterEqual(card.removeButton.height(), 40)
+        self.assertGreaterEqual(card.removeButton.width(), 40)
+        card.deleteLater()
+
+    def testAdsOnlyAdvanceOnVisibleAllAppsPage(self):
+        self.page.ads = [{"id": 1, "title": "Ad", "image_url": ""}]
+        self.page.show()
+        self.page._prepareAds()
+        self.assertFalse(self.page.adTimer.isActive())
+
+        self.page._switchCatalogTab(1)
+        self.assertTrue(self.page.adTimer.isActive())
+
+        self.page._showDetail(_apps(1)[0])
+        self.assertFalse(self.page.adTimer.isActive())
+
+    def testAdvertisementOverlayIsVisibleAndSupportsTouchSwipe(self):
+        self.page.ads = [
+            {"id": 1, "title": "First", "image_url": ""},
+            {"id": 2, "title": "Second", "image_url": ""},
+        ]
+        self.page.resize(1000, 800)
+        self.page.show()
+        self.page._switchCatalogTab(1)
+        self.page._prepareAds()
+        self.qtApp.processEvents()
+
+        self.assertEqual(
+            self.page.adStack.stackingMode(),
+            QStackedLayout.StackingMode.StackAll,
+        )
+        self.assertTrue(self.page.adOverlay.isVisible())
+        start = QPoint(self.page.adOverlay.width() - 30, 40)
+        end = QPoint(30, 40)
+        QTest.mousePress(self.page.adOverlay, Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(self.page.adOverlay, end)
+        QTest.mouseRelease(self.page.adOverlay, Qt.MouseButton.LeftButton, pos=end)
+
+        self.assertEqual(self.page.adFlipView.currentIndex(), 1)
+
+    def testCanceledCatalogWorkerDoesNotEmitLateResult(self):
+        store = _BlockingCatalogStore()
+        worker = CatalogWorker(store)
+        results = []
+        worker.finished.connect(lambda *result: results.append(result))
+        thread = threading.Thread(target=worker.run)
+        thread.start()
+        self.assertTrue(store.started.wait(1))
+
+        worker.cancel()
+        store.release.set()
+        thread.join(1)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(results, [])
 
     def testShutdownWaitsForActiveDownloadThread(self):
         worker = _CancelableWorker()

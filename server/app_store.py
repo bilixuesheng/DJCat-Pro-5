@@ -18,6 +18,7 @@ from flask import Blueprint, abort, jsonify, redirect, render_template, request
 
 ARCHITECTURES = ("x86_64", "arm64")
 _INSTALL_DIR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_DOWNLOAD_TOKEN = re.compile(r"^[a-f0-9]{32}$")
 _DANGEROUS_SCHEMES = {
     "cmd",
     "data",
@@ -180,6 +181,13 @@ def _ensureSchema(connect):
             );
             CREATE INDEX IF NOT EXISTS market_download_events_time_idx
                 ON market_download_events(downloaded_at);
+            CREATE TABLE IF NOT EXISTS market_download_requests (
+                token TEXT PRIMARY KEY,
+                app_id INTEGER NOT NULL REFERENCES market_applications(id) ON DELETE CASCADE,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS market_download_requests_time_idx
+                ON market_download_requests(created_at);
             """
         )
         database.commit()
@@ -216,18 +224,22 @@ def marketplaceStats(connect, day):
     }
 
 
+def _actionArguments(value):
+    try:
+        arguments = json.loads(value or "{}")
+    except (TypeError, ValueError):
+        arguments = {}
+    return arguments if isinstance(arguments, dict) else {}
+
+
 def _rowAction(row, prefix="open"):
     actionType = row[f"{prefix}_action_type"]
     if not actionType:
         return None
-    try:
-        arguments = json.loads(row[f"{prefix}_action_arguments"] or "{}")
-    except ValueError:
-        arguments = {}
     return {
         "type": actionType,
         "target": row[f"{prefix}_action_target"] or "",
-        "arguments": arguments if isinstance(arguments, dict) else {},
+        "arguments": _actionArguments(row[f"{prefix}_action_arguments"]),
     }
 
 
@@ -267,7 +279,7 @@ def _appPayload(database, row):
                 "action": {
                     "type": preset["action_type"],
                     "target": preset["action_target"],
-                    "arguments": json.loads(preset["action_arguments"] or "{}"),
+                    "arguments": _actionArguments(preset["action_arguments"]),
                 },
             }
             for preset in presets
@@ -293,6 +305,12 @@ def _adminFormData(database, appId=None):
     form["packages"] = packages
     form["open_action_arguments"] = _argumentsText(form["open_action_arguments"])
     return row, form
+
+
+def _applicationExists(database, appId):
+    return appId is None or database.execute(
+        "SELECT 1 FROM market_applications WHERE id = ?", (appId,)
+    ).fetchone() is not None
 
 
 def register_app_store(
@@ -377,7 +395,21 @@ def register_app_store(
             if not url:
                 return jsonify(message="安装包链接配置无效"), 503
             rangeHeader = request.headers.get("Range", "").strip()
-            if not rangeHeader or rangeHeader == "bytes=1-1":
+            token = request.args.get("token", "").strip().lower()
+            shouldCount = not rangeHeader or rangeHeader == "bytes=1-1"
+            if _DOWNLOAD_TOKEN.fullmatch(token):
+                database.execute(
+                    "DELETE FROM market_download_requests "
+                    "WHERE created_at < datetime('now', '-1 day')"
+                )
+                shouldCount = bool(
+                    database.execute(
+                        "INSERT OR IGNORE INTO market_download_requests(token, app_id) "
+                        "VALUES (?, ?)",
+                        (token, app_id),
+                    ).rowcount
+                )
+            if shouldCount:
                 database.execute(
                     "UPDATE market_applications SET download_count = download_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (app_id,),
@@ -660,6 +692,13 @@ def register_app_store(
                 return admin_response("广告标题和 HTTPS 图片链接不能为空", "error", "app_store.adminAds", 400)
             _ensureSchema(connect)
             with closing(connect()) as database:
+                if not _applicationExists(database, appId):
+                    return admin_response(
+                        "绑定的软件不存在",
+                        "error",
+                        "app_store.adminAds",
+                        400,
+                    )
                 database.execute(
                     "INSERT INTO market_advertisements(title, description, image_url, app_id, sort_order, enabled) VALUES (?, ?, ?, ?, ?, ?)",
                     (title, description, imageUrl, appId, sortOrder, int(bool(request.form.get("enabled")))),
@@ -704,6 +743,13 @@ def register_app_store(
         if not title or not imageUrl:
             return admin_response("广告标题和 HTTPS 图片链接不能为空", "error", "app_store.adminAds", 400)
         with closing(connect()) as database:
+            if not _applicationExists(database, appId):
+                return admin_response(
+                    "绑定的软件不存在",
+                    "error",
+                    "app_store.adminAds",
+                    400,
+                )
             database.execute(
                 "UPDATE market_advertisements SET title=?, description=?, image_url=?, app_id=?, sort_order=?, enabled=? WHERE id=?",
                 (title, description, imageUrl, appId, sortOrder, int(bool(request.form.get("enabled"))), ad_id),

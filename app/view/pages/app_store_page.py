@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QSizePolicy,
     QStackedLayout,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -48,10 +49,16 @@ class CatalogWorker(QObject):
     def __init__(self, store: ApplicationStore):
         super().__init__()
         self.store = store
+        self._cancelEvent = threading.Event()
+
+    def cancel(self):
+        self._cancelEvent.set()
 
     def run(self):
         try:
             payload = self.store.fetchCatalog()
+            if self._cancelEvent.is_set():
+                return
             imagePaths = {}
             urls = {
                 item.get("icon_url", "")
@@ -59,15 +66,19 @@ class CatalogWorker(QObject):
             }
             urls.update(item.get("image_url", "") for item in payload.get("ads", []))
             for url in urls:
+                if self._cancelEvent.is_set():
+                    return
                 if not url:
                     continue
                 try:
                     imagePaths[url] = str(self.store.imagePath(url))
                 except Exception:
                     continue
-            self.finished.emit(payload, imagePaths, "")
+            if not self._cancelEvent.is_set():
+                self.finished.emit(payload, imagePaths, "")
         except Exception as error:
-            self.finished.emit({}, {}, str(error))
+            if not self._cancelEvent.is_set():
+                self.finished.emit({}, {}, str(error))
 
 
 class ApplicationCard(CardWidget):
@@ -97,9 +108,9 @@ class ApplicationCard(CardWidget):
         self.titleLabel.installEventFilter(self._elideFilter)
         self.descriptionLabel.installEventFilter(self._elideFilter)
         self.actionButton = PrimaryPushButton(self)
-        self.actionButton.setFixedHeight(34)
+        self.actionButton.setFixedHeight(40)
         self.removeButton = ToolButton(FIF.DELETE, self)
-        self.removeButton.setFixedSize(34, 34)
+        self.removeButton.setFixedSize(40, 40)
         self.removeButton.setToolTip("卸载")
         self.removeButton.setStyleSheet(
             "ToolButton { color: #d13438; border: 1px solid #d13438; border-radius: 8px; }"
@@ -189,6 +200,30 @@ class AdvertisementFrame(QWidget):
         super().leaveEvent(event)
 
 
+class AdvertisementOverlay(QWidget):
+    previousRequested = Signal()
+    nextRequested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._pressPosition = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._pressPosition = event.position().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._pressPosition is not None:
+            distance = event.position().toPoint().x() - self._pressPosition.x()
+            self._pressPosition = None
+            if abs(distance) >= QApplication.startDragDistance():
+                (self.previousRequested if distance > 0 else self.nextRequested).emit()
+                event.accept()
+                return
+        super().mouseReleaseEvent(event)
+
+
 class AppStorePage(ScrollArea):
     pinnedCardsChanged = Signal(object)
     _downloadProgressSignal = Signal(int, int, int)
@@ -228,10 +263,11 @@ class AppStorePage(ScrollArea):
     def _buildUi(self):
         self.container = QWidget()
         self.rootLayout = QVBoxLayout(self.container)
-        self.rootLayout.setContentsMargins(30, 24, 30, 36)
-        self.rootLayout.setSpacing(12)
+        self.rootLayout.setContentsMargins(12, 8, 20, 24)
+        self.rootLayout.setSpacing(8)
 
         self.pivot = Pivot(self.container)
+        self.pivot.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.pivot.addItem("installed", "已安装", lambda: self._switchCatalogTab(0))
         self.pivot.addItem("all", "全部应用", lambda: self._switchCatalogTab(1))
         self.pivot.setCurrentItem("installed")
@@ -246,9 +282,17 @@ class AppStorePage(ScrollArea):
         self.rootLayout.addLayout(header)
 
         self.stack = DrillInTransitionStackedWidget(self.container)
-        self.overview = QWidget(self.stack)
+        self.catalogPage = QWidget(self.stack)
+        catalogLayout = QVBoxLayout(self.catalogPage)
+        catalogLayout.setContentsMargins(0, 0, 0, 0)
+        self.catalogStack = QStackedWidget(self.catalogPage)
+        catalogLayout.addWidget(self.catalogStack)
+
+        self.overview = QWidget(self.catalogStack)
         overviewLayout = QVBoxLayout(self.overview)
         overviewLayout.setContentsMargins(0, 0, 0, 0)
+        overviewLayout.setSpacing(8)
+        overviewLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.installedTitle = BodyLabel("已安装的软件", self.overview)
         overviewLayout.addWidget(self.installedTitle)
         self.installedEmpty = BodyLabel("还没有已安装的应用。可以切换到“全部应用”开始下载。", self.overview)
@@ -257,18 +301,20 @@ class AppStorePage(ScrollArea):
         self.installedGridWidget, self.installedGrid = self._createGrid(self.overview)
         overviewLayout.addWidget(self.installedGridWidget)
 
-        self.allPage = QWidget(self.stack)
+        self.allPage = QWidget(self.catalogStack)
         allLayout = QVBoxLayout(self.allPage)
         allLayout.setContentsMargins(0, 0, 0, 0)
+        allLayout.setSpacing(8)
+        allLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.adFrame = AdvertisementFrame(self.allPage)
         self.adFrame.setMinimumHeight(238)
         self.adFrame.setMaximumHeight(300)
-        adStack = QStackedLayout(self.adFrame)
+        self.adStack = QStackedLayout(self.adFrame)
+        self.adStack.setStackingMode(QStackedLayout.StackingMode.StackAll)
         self.adFlipView = HorizontalFlipView(self.adFrame)
         self.adFlipView.setMouseTracking(True)
-        adStack.addWidget(self.adFlipView)
-        self.adOverlay = QWidget(self.adFrame)
-        self.adOverlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        self.adStack.addWidget(self.adFlipView)
+        self.adOverlay = AdvertisementOverlay(self.adFrame)
         self.adOverlay.setStyleSheet(
             "background: qlineargradient(y1: 0, y2: 1, stop: 0 transparent, stop: 1 rgba(0,0,0,220));"
         )
@@ -293,10 +339,13 @@ class AppStorePage(ScrollArea):
             button.setStyleSheet("color: white; background: rgba(0,0,0,100); border-radius: 8px;")
         self.adPrevious.clicked.connect(self._previousAd)
         self.adNext.clicked.connect(self._nextAd)
+        self.adOverlay.previousRequested.connect(self._previousAd)
+        self.adOverlay.nextRequested.connect(self._nextAd)
         adActions.addWidget(self.adPrevious)
         adActions.addWidget(self.adNext)
         overlayLayout.addLayout(adActions)
-        adStack.addWidget(self.adOverlay)
+        self.adStack.addWidget(self.adOverlay)
+        self.adStack.setCurrentWidget(self.adOverlay)
         self.adFrame.entered.connect(self._pauseAds)
         self.adFrame.left.connect(self._resumeAds)
         self.adTimer = QTimer(self)
@@ -306,6 +355,7 @@ class AppStorePage(ScrollArea):
         allLayout.addWidget(self.adFrame)
 
         self.categoryPivot = Pivot(self.allPage)
+        self.categoryPivot.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.categoryPivot.addItem("recommended", "推荐", lambda: self._switchCategory(0))
         self.categoryPivot.addItem("all", "全部", lambda: self._switchCategory(1))
         self.categoryPivot.setCurrentItem("recommended")
@@ -316,8 +366,9 @@ class AppStorePage(ScrollArea):
         self.pager.currentIndexChanged.connect(self._onPageChanged)
         allLayout.addWidget(self.pager, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        self.stack.addWidget(self.overview)
-        self.stack.addWidget(self.allPage)
+        self.catalogStack.addWidget(self.overview)
+        self.catalogStack.addWidget(self.allPage)
+        self.stack.addWidget(self.catalogPage)
         self.rootLayout.addWidget(self.stack)
 
         self.detail = QWidget(self.stack)
@@ -335,6 +386,7 @@ class AppStorePage(ScrollArea):
         layout.setContentsMargins(0, 6, 0, 6)
         layout.setHorizontalSpacing(12)
         layout.setVerticalSpacing(12)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         return widget, layout
 
     def _buildDetail(self):
@@ -389,10 +441,12 @@ class AppStorePage(ScrollArea):
         layout.addLayout(columns)
 
     def _switchCatalogTab(self, index: int):
-        self.stack.setCurrentIndex(index)
+        self.catalogStack.setCurrentIndex(index)
         if index == 1:
             self._renderAll()
+            self._resumeAds()
         else:
+            self._pauseAds()
             self._renderInstalled()
 
     def _switchCategory(self, index: int):
@@ -401,9 +455,11 @@ class AppStorePage(ScrollArea):
 
     def setSearchText(self, text: str):
         self.searchText = text.strip().lower()
-        if self.stack.currentIndex() == 0:
+        if self.stack.currentWidget() is self.detail:
+            return
+        if self.catalogStack.currentIndex() == 0:
             self._renderInstalled()
-        elif self.stack.currentIndex() == 1:
+        else:
             self._renderAll()
 
     def showEvent(self, event):
@@ -422,6 +478,8 @@ class AppStorePage(ScrollArea):
         self._progressTimer.stop()
         self._pendingProgress.clear()
         self._catalogLoading = False
+        if self._catalogWorker is not None:
+            self._catalogWorker.cancel()
         self._catalogWorker = None
         self._catalogThread = None
 
@@ -505,10 +563,12 @@ class AppStorePage(ScrollArea):
         while layout.count():
             item = layout.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
 
-    def _columnCount(self, layout):
-        width = layout.parentWidget().width()
+    def _columnCount(self):
+        margins = self.rootLayout.contentsMargins()
+        width = self.viewport().width() - margins.left() - margins.right()
         if width >= 900:
             return 3
         if width >= 640:
@@ -539,7 +599,7 @@ class AppStorePage(ScrollArea):
 
     def _renderGrid(self, layout, apps, installedPage=False):
         self._clearGrid(layout)
-        columns = self._columnCount(layout)
+        columns = self._columnCount()
         for index, app in enumerate(apps):
             card = ApplicationCard(self)
             card.setApplication(app, self.imagePaths.get(app.get("icon_url", ""), ""))
@@ -558,7 +618,7 @@ class AppStorePage(ScrollArea):
             item = layout.takeAt(0)
             if item.widget():
                 widgets.append(item.widget())
-        columns = self._columnCount(layout)
+        columns = self._columnCount()
         for index, widget in enumerate(widgets):
             row, column = divmod(index, columns)
             layout.addWidget(widget, row, column)
@@ -665,11 +725,17 @@ class AppStorePage(ScrollArea):
         self.adTimer.stop()
 
     def _resumeAds(self):
-        if self.isVisible() and self.ads:
+        if (
+            self.isVisible()
+            and self.ads
+            and self.currentApp is None
+            and self.catalogStack.currentIndex() == 1
+        ):
             self.adTimer.start()
 
     def _showDetail(self, app):
         self.currentApp = app
+        self._pauseAds()
         self.pivot.hide()
         self.stack.setCurrentWidget(self.detail)
         self.detailName.setText(str(app.get("name", "")))
@@ -689,11 +755,13 @@ class AppStorePage(ScrollArea):
         self.currentApp = None
         self.pivot.show()
         target = 0 if self.pivot.currentRouteKey() == "installed" else 1
-        self.stack.setCurrentIndex(target, isBack=True)
+        self.catalogStack.setCurrentIndex(target)
+        self.stack.setCurrentIndex(0, isBack=True)
         if target == 0:
             self._renderInstalled()
         else:
             self._renderAll()
+            self._resumeAds()
 
     def _updateDetailAction(self):
         if not self.currentApp:
@@ -895,6 +963,7 @@ class AppStorePage(ScrollArea):
         while self.presetCards.count():
             item = self.presetCards.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
         announcement = str(app.get("announcement", "")).strip()
         self.announcementLabel.setText(announcement)

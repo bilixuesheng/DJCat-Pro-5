@@ -216,6 +216,29 @@ class AppStoreServerTest(TestCase):
         self.assertEqual(stats["today"]["market_downloads"], 1)
         self.assertEqual(stats["all"]["market_downloads"], 1)
 
+    def testDownloadRetriesWithSameTokenCountOnce(self):
+        self._createApp()
+        path = "/app-store/apps/1/download?arch=x86_64&token=" + "a" * 32
+        for _ in range(2):
+            response = self.client.get(
+                path,
+                base_url="https://api.djcatpro.top",
+                headers={"Range": "bytes=1-1"},
+            )
+            self.assertEqual(response.status_code, 302)
+
+        with closing(ai_markdown._connect()) as database:
+            self.assertEqual(
+                database.execute(
+                    "SELECT download_count FROM market_applications WHERE id = 1"
+                ).fetchone()[0],
+                1,
+            )
+            self.assertEqual(
+                database.execute("SELECT COUNT(*) FROM market_download_events").fetchone()[0],
+                1,
+            )
+
     def testPresetRejectsUnsafeTargets(self):
         self._createApp()
         response = self.client.post(
@@ -231,6 +254,64 @@ class AppStoreServerTest(TestCase):
             },
         )
         self.assertEqual(response.status_code, 400)
+
+    def testAdvertisementRejectsMissingApplicationTarget(self):
+        self._login()
+        response = self.client.post(
+            "/admin/app-store/ads/",
+            base_url="https://dash.djcatpro.top",
+            headers={"Accept": "application/json"},
+            data={
+                "csrf_token": self._csrf(),
+                "title": "Missing app",
+                "image_url": "https://cdn.example.test/ad.png",
+                "app_id": "999",
+                "enabled": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def testDeletingAppCleansUpRelatedMarketData(self):
+        self._createApp()
+        with closing(ai_markdown._connect()) as database:
+            database.execute(
+                "INSERT INTO market_presets(app_id, title, action_type, action_target) "
+                "VALUES (1, 'Open', 'program', 'demo.exe')"
+            )
+            database.execute(
+                "INSERT INTO market_advertisements(title, image_url, app_id) "
+                "VALUES ('Demo', 'https://cdn.example.test/ad.png', 1)"
+            )
+            database.commit()
+
+        response = self.client.post(
+            "/admin/app-store/apps/1/delete",
+            base_url="https://dash.djcatpro.top",
+            data={"csrf_token": self._csrf()},
+        )
+        self.assertEqual(response.status_code, 302)
+        with closing(ai_markdown._connect()) as database:
+            self.assertEqual(database.execute("SELECT COUNT(*) FROM market_packages").fetchone()[0], 0)
+            self.assertEqual(database.execute("SELECT COUNT(*) FROM market_presets").fetchone()[0], 0)
+            self.assertIsNone(database.execute("SELECT app_id FROM market_advertisements").fetchone()[0])
+
+    def testCatalogSurvivesInvalidStoredPresetArguments(self):
+        self._createApp()
+        with closing(ai_markdown._connect()) as database:
+            database.execute(
+                "INSERT INTO market_presets"
+                "(app_id, title, action_type, action_target, action_arguments) "
+                "VALUES (1, 'Open', 'program', 'demo.exe', '{broken')"
+            )
+            database.commit()
+
+        response = self.client.get(
+            "/app-store/catalog",
+            base_url="https://api.djcatpro.top",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["apps"][0]["presets"][0]["action"]["arguments"], {})
 
     def testNewAppFormDefaultsBothArchitecturesAndUsesEditButton(self):
         self._login()

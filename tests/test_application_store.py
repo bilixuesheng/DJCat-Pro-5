@@ -5,6 +5,7 @@ import time
 import zipfile
 from pathlib import Path
 from unittest import TestCase
+from urllib.parse import parse_qs, urlparse
 
 from app.common.application_store import (
     ApplicationStore,
@@ -117,6 +118,14 @@ class ApplicationStoreTest(TestCase):
             slots.acquire()
         slots.release()
         slots.acquire()
+
+    def testDownloadUrlUsesOneUniqueTokenPerTask(self):
+        first = parse_qs(urlparse(self.store.downloadUrl(self._app())).query)
+        second = parse_qs(urlparse(self.store.downloadUrl(self._app())).query)
+
+        self.assertEqual(first["arch"], [self.store.architecture])
+        self.assertRegex(first["token"][0], r"^[a-f0-9]{32}$")
+        self.assertNotEqual(first["token"], second["token"])
 
     def testVersionComparison(self):
         self.assertTrue(isUpdateAvailable("1.0.0", "1.1.0"))

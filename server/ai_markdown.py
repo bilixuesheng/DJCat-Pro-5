@@ -148,6 +148,7 @@ def _connect():
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     database = sqlite3.connect(DATABASE_PATH, timeout=10)
     database.row_factory = sqlite3.Row
+    database.execute("PRAGMA foreign_keys = ON")
     databaseKey = str(DATABASE_PATH.resolve())
     if databaseKey not in _initializedDatabases:
         with _databaseInitLock:

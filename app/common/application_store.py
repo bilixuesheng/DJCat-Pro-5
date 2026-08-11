@@ -320,7 +320,8 @@ class ApplicationStore:
     def downloadUrl(self, app: dict) -> str:
         return urljoin(
             self.apiBaseUrl,
-            f"app-store/apps/{int(app['id'])}/download?arch={self.architecture}",
+            f"app-store/apps/{int(app['id'])}/download"
+            f"?arch={self.architecture}&token={uuid.uuid4().hex}",
         )
 
     def installZip(self, app: dict, zipPath: Path) -> InstalledApplication:
