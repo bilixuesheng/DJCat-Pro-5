@@ -12,6 +12,7 @@ import requests
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QRect, QSize
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 import djcat
@@ -434,6 +435,8 @@ class UpdateWindowLifecycleTest(TestCase):
 
     def testClickingDownloadClosesVersionBarAndStartsStateToolTip(self):
         InfoBarStub.instances.clear()
+        self.window.show()
+        self.app.processEvents()
         worker = DownloadWorkerStub("", Path())
         thread = ThreadStub(lambda: None, True)
 
@@ -480,6 +483,8 @@ class UpdateWindowLifecycleTest(TestCase):
 
     def testDestroyedUpdateInfoBarClearsCapturedReference(self):
         InfoBarStub.instances.clear()
+        self.window.show()
+        self.app.processEvents()
 
         with (
             patch("app.view.windows.main_window.InfoBar", InfoBarStub),
@@ -517,6 +522,54 @@ class UpdateWindowLifecycleTest(TestCase):
         self.window.show()
         self.app.processEvents()
         self.assertEqual(self.window.geometry(), QRect(100, 90, 820, 480))
+
+    def testHiddenUpdateInfoBarWaitsForTrayShowAndUsesRestoredGeometry(self):
+        savedGeometry = QRect(80, 60, 900, 520)
+        originalGeometry = cfg.geometry.value
+        cfg.geometry.value = savedGeometry
+        self.addCleanup(setattr, cfg.geometry, "value", originalGeometry)
+
+        self.window._onUpdateChecked(
+            {"latest_version": "9999.0.0", "update_note": "note"},
+            "",
+            False,
+        )
+
+        self.assertIsNone(self.window._updateInfoBar)
+
+        tray = Mock()
+        tray.parent.return_value = self.window
+        SystemTrayIcon._onShowActionTriggered(tray)
+        self.app.processEvents()
+        QTest.qWait(250)
+        self.app.processEvents()
+
+        infoBar = self.window._updateInfoBar
+        self.assertIsNotNone(infoBar)
+        self.assertEqual(
+            infoBar.x(),
+            self.window.width() - infoBar.width() - 24,
+        )
+
+    def testVisibleUpdateInfoBarUsesCurrentGeometry(self):
+        self.window.show()
+        self.app.processEvents()
+
+        self.window._onUpdateChecked(
+            {"latest_version": "9999.0.0", "update_note": "note"},
+            "",
+            False,
+        )
+        self.app.processEvents()
+        QTest.qWait(250)
+        self.app.processEvents()
+
+        infoBar = self.window._updateInfoBar
+        self.assertIsNotNone(infoBar)
+        self.assertEqual(
+            infoBar.x(),
+            self.window.width() - infoBar.width() - 24,
+        )
 
     def testOffscreenGeometryFallsBackToDefaultSize(self):
         originalGeometry = cfg.geometry.value

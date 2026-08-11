@@ -165,6 +165,7 @@ class MainWindow(MSFluentWindow):
         self.splashScreen = None
         self._updateInfoBar = None
         self._updateCheckInfoBar = None
+        self._pendingUpdateNotification = None
         self._downloadStateToolTip = None
         self._downloadWorker = None
         self._downloadThread = None
@@ -800,6 +801,14 @@ class MainWindow(MSFluentWindow):
         note = note.replace("\\n", "\n")
         note = re.sub(r"\n+", "\n\n", note)
 
+        if not manual and (not self.isVisible() or not self._geometryApplied):
+            self._closeUpdateInfoBar()
+            self._pendingUpdateNotification = (latest_version, note)
+            return
+
+        self._showUpdateInfoBar(latest_version, note)
+
+    def _showUpdateInfoBar(self, latest_version, note):
         self._closeUpdateInfoBar()
 
         infoBar = InfoBar(
@@ -1069,6 +1078,7 @@ class MainWindow(MSFluentWindow):
 
         self._closeUpdateInfoBar()
         self._closeUpdateCheckInfoBar()
+        self._pendingUpdateNotification = None
         self._disposeDownloadStateToolTip()
 
     def resizeEvent(self, event):
@@ -1078,20 +1088,23 @@ class MainWindow(MSFluentWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
-        if self._geometryApplied:
-            return
-        self._geometryApplied = True
-        geometry = cfg.geometry.value
-        if (
-            geometry.isValid()
-            and QApplication.screenAt(geometry.center()) is not None
-        ):
-            self.setGeometry(geometry)
-            return
+        if not self._geometryApplied:
+            self._geometryApplied = True
+            geometry = cfg.geometry.value
+            if (
+                geometry.isValid()
+                and QApplication.screenAt(geometry.center()) is not None
+            ):
+                self.setGeometry(geometry)
+            else:
+                self.resize(800, 450)
+                desktop = QApplication.primaryScreen().availableGeometry()
+                self.move(desktop.center() - self.rect().center())
 
-        self.resize(800, 450)
-        desktop = QApplication.primaryScreen().availableGeometry()
-        self.move(desktop.center() - self.rect().center())
+        pending = self._pendingUpdateNotification
+        self._pendingUpdateNotification = None
+        if pending is not None and not self._resourcesShutdown:
+            self._showUpdateInfoBar(*pending)
 
     def _saveGeometry(self):
         if not self.isMaximized():
