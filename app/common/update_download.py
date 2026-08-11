@@ -6,6 +6,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
+from urllib.parse import urlparse
 
 import requests
 from PySide6.QtCore import QObject, Signal
@@ -131,10 +133,18 @@ class UpdateDownloadWorker(QObject):
     retrying = Signal(int, int, str)
     finished = Signal(str, str, bool)
 
-    def __init__(self, url: str, targetPath: Path):
+    def __init__(
+        self,
+        url: str,
+        targetPath: Path,
+        validator: Callable[[Path], None] | None = None,
+        requireHttps: bool = False,
+    ):
         super().__init__()
         self.url = url
         self.targetPath = Path(targetPath)
+        self.validator = validator or self._validateExecutable
+        self.requireHttps = requireHttps
         self.partialPath = self.targetPath.with_suffix(
             f"{self.targetPath.suffix}.part"
         )
@@ -203,6 +213,8 @@ class UpdateDownloadWorker(QObject):
 
     def _downloadAttempt(self) -> str:
         effectiveUrl, total, supportsRange = self._probeDownload()
+        if self.requireHttps and urlparse(effectiveUrl).scheme.lower() != "https":
+            raise OSError("下载链接必须保持 HTTPS")
         if self._cancelEvent.is_set():
             raise DownloadCanceled()
 
@@ -221,9 +233,7 @@ class UpdateDownloadWorker(QObject):
         if self._cancelEvent.is_set():
             raise DownloadCanceled()
 
-        with self.partialPath.open("rb") as file:
-            if file.read(2) != b"MZ":
-                raise ValueError("下载文件不是有效的 Windows 安装程序")
+        self.validator(self.partialPath)
 
         self.partialPath.replace(self.targetPath)
         return str(self.targetPath)
@@ -587,3 +597,9 @@ class UpdateDownloadWorker(QObject):
             path.unlink()
         except FileNotFoundError:
             pass
+
+    @staticmethod
+    def _validateExecutable(path: Path) -> None:
+        with path.open("rb") as file:
+            if file.read(2) != b"MZ":
+                raise ValueError("下载文件不是有效的 Windows 安装程序")

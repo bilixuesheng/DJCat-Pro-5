@@ -8,6 +8,7 @@ from PySide6.QtGui import (
     QPainterPath,
     QPen,
     QPixmap,
+    QIcon,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -88,6 +89,10 @@ class ActionCard(CardWidget):
         layout.addLayout(top_layout)
         layout.addWidget(content_label)
         layout.addStretch(1)
+
+    def setRemovable(self, removable: bool) -> None:
+        self.deleteButton.setEnabled(removable)
+        self.deleteButton.setToolTip("删除主页预设卡片" if removable else "系统卡片不可删除")
 
     def setEditing(self, editing):
         self._editing = editing
@@ -313,12 +318,17 @@ class BannerWidget(QWidget):
 
 
 class HomePage(ScrollArea):
+    applicationCardRemoved = Signal(object)
+    applicationCardClicked = Signal(object)
+
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self._editing_cards = False
         self._card_order = []
         self._drag_offset = QPoint()
         self._drag_target = None
+        self._applicationCardKeys = set()
+        self._applicationCardData = {}
         self.setObjectName("HomePage")
         self.container = QWidget()
         self.vBoxLayout = QVBoxLayout(self.container)
@@ -402,6 +412,51 @@ class HomePage(ScrollArea):
             Qt.WidgetAttribute.WA_TransparentForMouseEvents
         )
         self.dragPreview.hide()
+
+    def setApplicationCards(self, cards) -> None:
+        for key in tuple(self._applicationCardKeys):
+            card = self.all_cards.pop(key, None)
+            if card is not None:
+                card.deleteLater()
+        self._applicationCardKeys.clear()
+        self._applicationCardData.clear()
+        for item in cards or []:
+            key = f"app:{item['app_id']}:{item['preset_id']}"
+            icon = QIcon(item["icon_path"]) if item.get("icon_path") else FIF.APPLICATION
+            card = ActionCard(
+                icon,
+                item.get("title", "应用预设"),
+                item.get("description", ""),
+                self.cardsWidget,
+            )
+            card.setRemovable(True)
+            card.deleteButton.clicked.connect(
+                lambda _checked=False, cardKey=key: self._removeApplicationCard(cardKey)
+            )
+            card.clicked.connect(
+                lambda cardData=item: self.applicationCardClicked.emit(cardData)
+            )
+            card.dragStarted.connect(self._startCardDrag)
+            card.dragMoved.connect(self._moveCard)
+            card.dragFinished.connect(self._finishCardDrag)
+            self.all_cards[key] = card
+            self._applicationCardKeys.add(key)
+            self._applicationCardData[key] = dict(item)
+        self._renderCards()
+
+    def _removeApplicationCard(self, key: str) -> None:
+        item = self._applicationCardData.get(key)
+        card = self.all_cards.pop(key, None)
+        self._applicationCardKeys.discard(key)
+        self._applicationCardData.pop(key, None)
+        if card is None:
+            return
+        card.deleteLater()
+        self._card_order = [name for name in self._card_order if name != key]
+        self._saveCardOrder()
+        self._renderCards()
+        if item is not None:
+            self.applicationCardRemoved.emit(item)
 
     def _renderCards(self):
         current_order = [

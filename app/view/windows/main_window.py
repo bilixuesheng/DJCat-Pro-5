@@ -18,7 +18,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QIcon
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtTextToSpeech import QTextToSpeech
-from PySide6.QtWidgets import QApplication, QGraphicsOpacityEffect, QWidget
+from PySide6.QtWidgets import QApplication, QGraphicsOpacityEffect, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import (
     DrillInTransitionStackedWidget,
@@ -100,6 +100,42 @@ class MachineRegistrationWorker(QObject):
 
     def run(self):
         self.finished.emit(registerMachine() or "")
+
+
+class LazyAppStorePage(QWidget):
+    pinnedCardsChanged = Signal(object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("AppStorePage")
+        self.page = None
+        self._searchText = ""
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+
+    def ensureLoaded(self):
+        if self.page is not None:
+            return self.page
+        from app.view.pages.app_store_page import AppStorePage
+
+        self.page = AppStorePage(self)
+        self.page.pinnedCardsChanged.connect(self.pinnedCardsChanged)
+        self.layout.addWidget(self.page)
+        if self._searchText:
+            self.page.setSearchText(self._searchText)
+        return self.page
+
+    def showEvent(self, event):
+        self.ensureLoaded()
+        super().showEvent(event)
+
+    def setSearchText(self, text):
+        self._searchText = text
+        if self.page is not None:
+            self.page.setSearchText(text)
+
+    def executePinnedCard(self, item):
+        self.ensureLoaded().executePinnedCard(item)
 
 
 class UpdateDialog(MessageBoxBase):
@@ -429,6 +465,7 @@ class MainWindow(MSFluentWindow):
 
     def initNavigation(self):
         self.homePage = HomePage(self)
+        self.appStorePage = LazyAppStorePage(self)
         self.creditsPage = CreditsPage(self)
         self.settingPage = SettingPage(self)
         self.broadcastEditPage = None
@@ -440,10 +477,11 @@ class MainWindow(MSFluentWindow):
         self.searchEdit.setPlaceholderText("搜索设置")
         self.searchEdit.hide()
         self.searchEdit.raise_()
-        self.searchEdit.textChanged.connect(self.settingPage.setSearchText)
+        self.searchEdit.textChanged.connect(self._onSearchTextChanged)
         self.stackedWidget.currentChanged.connect(self._updateSearchEdit)
         self.stackedWidget.currentChanged.connect(self._onNavigationCompleted)
         self.addSubInterface(self.homePage, FIF.HOME, "主页")
+        self.addSubInterface(self.appStorePage, FIF.APPLICATION, "应用下载")
         self.addSubInterface(
             self.creditsPage,
             FIF.HEART,
@@ -466,7 +504,26 @@ class MainWindow(MSFluentWindow):
         if "定时关机" in self.homePage.all_cards:
             self.homePage.all_cards["定时关机"].clicked.connect(self._navToShutdown)
 
+        self.appStorePage.pinnedCardsChanged.connect(self._setPinnedHomeCards)
+        self.homePage.applicationCardClicked.connect(self._onPinnedHomeCardClicked)
+        self.homePage.applicationCardRemoved.connect(self._onPinnedHomeCardRemoved)
+        self._setPinnedHomeCards(cfg.pinnedHomeCards.value)
         self._updateSearchEdit()
+
+    def _setPinnedHomeCards(self, cards):
+        self.homePage.setApplicationCards(cards)
+
+    def _onPinnedHomeCardClicked(self, item):
+        self.appStorePage.executePinnedCard(item)
+
+    def _onPinnedHomeCardRemoved(self, item):
+        key = (int(item.get("app_id", -1)), int(item.get("preset_id", -1)))
+        cards = [
+            card for card in cfg.pinnedHomeCards.value
+            if not isinstance(card, dict)
+            or (int(card.get("app_id", -1)), int(card.get("preset_id", -1))) != key
+        ]
+        cfg.set(cfg.pinnedHomeCards, cards)
 
     def _getTaskPage(self, attribute, pageClass, objectName):
         page = getattr(self, attribute)
@@ -530,7 +587,10 @@ class MainWindow(MSFluentWindow):
         )
         interface = pendingTarget or self.stackedWidget.currentWidget()
         isSettingPage = interface is self.settingPage
-        self._setSearchEditVisible(isSettingPage)
+        self._setSearchEditVisible(
+            isSettingPage,
+            interface is self.appStorePage,
+        )
 
     def _onNavigationCompleted(self, *args):
         if self.stackedWidget.currentWidget() is not self._navigationTarget:
@@ -542,11 +602,32 @@ class MainWindow(MSFluentWindow):
         if pending is not None:
             QTimer.singleShot(0, self, lambda: self._navigateTo(*pending))
 
-    def _setSearchEditVisible(self, isSettingPage: bool) -> None:
-        if not isSettingPage:
+    def _onSearchTextChanged(self, text: str) -> None:
+        pendingTarget = (
+            self._pendingNavigation[0]
+            if self._pendingNavigation is not None
+            else self._navigationTarget
+        )
+        interface = pendingTarget or self.stackedWidget.currentWidget()
+        if interface is self.settingPage:
+            self.settingPage.setSearchText(text)
+        elif interface is self.appStorePage:
+            self.appStorePage.setSearchText(text)
+
+    def _setSearchEditVisible(
+        self,
+        isSettingPage: bool,
+        isAppStorePage: bool = False,
+    ) -> None:
+        isSearchPage = isSettingPage or isAppStorePage
+        placeholder = "搜索设置" if isSettingPage else "搜索应用"
+        if self.searchEdit.placeholderText() != placeholder:
             self.searchEdit.clear()
-        self.searchEdit.setVisible(isSettingPage)
-        if isSettingPage:
+            self.searchEdit.setPlaceholderText(placeholder)
+        if not isSearchPage:
+            self.searchEdit.clear()
+        self.searchEdit.setVisible(isSearchPage)
+        if isSearchPage:
             self._refreshSearchEditGeometry()
 
     def switchTo(self, interface: QWidget) -> None:
@@ -558,7 +639,10 @@ class MainWindow(MSFluentWindow):
         # the in-flight snapshots in an inconsistent state.
         if self._resourcesShutdown:
             return
-        self._setSearchEditVisible(interface is self.settingPage)
+        self._setSearchEditVisible(
+            interface is self.settingPage,
+            interface is self.appStorePage,
+        )
         if interface is self._navigationTarget:
             self._pendingNavigation = None
             return

@@ -65,3 +65,19 @@ class StartupTest(TestCase):
             result.stdout.strip().splitlines()[-1],
             "[False, False, False, False]",
         )
+
+    def testMainWindowImportDefersApplicationStorePage(self):
+        repo = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; import app.view.windows.main_window; "
+                "print('app.view.pages.app_store_page' in sys.modules)",
+            ],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.stdout.strip().splitlines()[-1], "False")

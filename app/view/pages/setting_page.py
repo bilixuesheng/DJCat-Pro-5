@@ -15,6 +15,8 @@ from qfluentwidgets import (
     ComboBoxSettingCard,
     FluentIcon,
     HyperlinkCard,
+    InfoBar,
+    InfoBarPosition,
     LineEdit,
     PrimaryPushSettingCard,
     PushSettingCard,
@@ -29,6 +31,7 @@ from qfluentwidgets import (
 )
 
 from app.common.ai_markdown import PEAK_HOURS_TEXT, fetchQuota
+from app.common.application_store import ImageCache
 from app.config.cfg import (
     BANNER_IMAGE_PRESETS,
     BANNER_PRESET_SCALE_MODES,
@@ -502,6 +505,12 @@ class SettingPage(ScrollArea):
             "关于",
             f"© Copyright {YEAR}, {AUTHOR}. Version {VERSION}。Beta 版仅接收 Beta 通道的更新",
         )
+        self.clearAppStoreCacheCard = PushSettingCard(
+            "清理应用市场缓存",
+            FluentIcon.DELETE,
+            "图标与广告缓存",
+            "删除超过 7 天未使用的图片缓存，也可以随时手动清理。",
+        )
         self.aboutGroup.addSettingCards(
             [
                 HyperlinkCard(
@@ -512,6 +521,7 @@ class SettingPage(ScrollArea):
                     f"发现更多 {AUTHOR} 的作品",
                 ),
                 self.aboutCard,
+                self.clearAppStoreCacheCard,
             ]
         )
 
@@ -528,6 +538,7 @@ class SettingPage(ScrollArea):
         self.chooseImageCard.clicked.connect(self._onChooseImageClicked)
         self.autoRunCard.checkedChanged.connect(self._onAutoRunChanged)
         self.aboutCard.clicked.connect(self._onAboutCardClicked)
+        self.clearAppStoreCacheCard.clicked.connect(self._onClearAppStoreCache)
         self.aiQuotaReceived.connect(self._onAIQuotaReceived)
         cfg.bannerImageSource.valueChanged.connect(
             self._onBannerImageSourceChanged
@@ -555,6 +566,26 @@ class SettingPage(ScrollArea):
 
     def _onAboutCardClicked(self) -> None:
         self.window().checkForUpdates(manual=True)
+
+    def _onClearAppStoreCache(self) -> None:
+        try:
+            ImageCache().clear()
+        except OSError as error:
+            InfoBar.error(
+                "清理失败",
+                str(error),
+                duration=4000,
+                position=InfoBarPosition.BOTTOM_RIGHT,
+                parent=self.window(),
+            )
+            return
+        InfoBar.success(
+            "缓存已清理",
+            "应用市场的图标和广告图片缓存已删除。",
+            duration=3000,
+            position=InfoBarPosition.BOTTOM_RIGHT,
+            parent=self.window(),
+        )
 
     def _onAutoRunChanged(self, enabled: bool) -> None:
         from app.platform.run_at_login import setRunAtLogin

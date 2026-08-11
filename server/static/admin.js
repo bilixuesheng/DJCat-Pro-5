@@ -167,7 +167,7 @@
     };
 
     let activeConfirm = null;
-    const showConfirm = (form) => {
+    const showConfirm = (form, submitter = null) => {
         if (activeConfirm) return;
         const previousFocus = document.activeElement;
         const backdrop = document.createElement("div");
@@ -192,7 +192,7 @@
         cancelButton.textContent = "取消";
         confirmButton.className = "button button-danger";
         confirmButton.type = "button";
-        confirmButton.textContent = "确认重置";
+        confirmButton.textContent = submitter?.textContent?.trim() || "确认";
         actions.append(cancelButton, confirmButton);
         dialog.append(title, message, actions);
         backdrop.append(dialog);
@@ -211,8 +211,9 @@
         cancelButton.addEventListener("click", close);
         confirmButton.addEventListener("click", () => {
             form.dataset.confirmed = "true";
+            if (submitter) submitter.dataset.confirmed = "true";
             close();
-            form.requestSubmit();
+            form.requestSubmit(submitter || undefined);
         });
         backdrop.addEventListener("click", (event) => {
             if (event.target === backdrop) close();
@@ -226,6 +227,19 @@
             if (form.dataset.confirmed === "true") return;
             event.preventDefault();
             showConfirm(form);
+        });
+    });
+
+    document.querySelectorAll("button[data-confirm]").forEach((button) => {
+        const form = button.form;
+        if (!form) return;
+        button.addEventListener("click", (event) => {
+            if (button.dataset.confirmed === "true") {
+                delete button.dataset.confirmed;
+                return;
+            }
+            event.preventDefault();
+            showConfirm(form, button);
         });
     });
 

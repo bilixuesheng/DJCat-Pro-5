@@ -165,6 +165,8 @@ class Config(QConfig):
         "HomePage", "CardOrder", ["全屏投送", "考试倒计时", "定时关机", "定时播报"]
     )
 
+    pinnedHomeCards = ConfigItem("HomePage", "PinnedApplicationCards", [])
+
     broadcastTasks = ConfigItem("Schedule", "Tasks", [])
     shutdownTasks = ConfigItem("Schedule", "ShutdownTasks", [])
 

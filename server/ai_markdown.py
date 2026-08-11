@@ -946,5 +946,20 @@ def adminLogout():
     return redirect(url_for("adminLogin"))
 
 
+try:
+    from .app_store import register_app_store
+except ImportError:
+    from app_store import register_app_store
+
+register_app_store(
+    app,
+    connect=_connect,
+    login_required=_loginRequired,
+    csrf_token=_csrfToken,
+    check_csrf=_checkCsrf,
+    admin_response=_adminResponse,
+)
+
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=int(os.environ.get("PORT", "18080")))

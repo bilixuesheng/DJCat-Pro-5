@@ -35,6 +35,15 @@
                         注册机器
                     </a>
                 </div>
+                <div class="side-group">
+                    <div class="side-group-title"><span>应用市场</span><i></i></div>
+                    <a class="side-link side-child {% if current_page == 'app_store_apps' %}active{% endif %}" href="{{ url_for('app_store.adminApps') }}" {% if current_page == 'app_store_apps' %}aria-current="page"{% endif %}>
+                        软件
+                    </a>
+                    <a class="side-link side-child {% if current_page == 'app_store_ads' %}active{% endif %}" href="{{ url_for('app_store.adminAds') }}" {% if current_page == 'app_store_ads' %}aria-current="page"{% endif %}>
+                        广告
+                    </a>
+                </div>
             </nav>
             <form class="sidebar-logout" method="post" action="{{ url_for('adminLogout') }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
