@@ -32,6 +32,8 @@ BANNER_PRESET_SCALE_MODES = {
     "预设: 罗小黑（2）": "缩放(下)",
     "预设: 罗小黑（3）": "缩放(中)",
 }
+WINDOW_BACKGROUND_MODES = ("主题色", "纯色", "图片")
+WINDOW_BACKGROUND_SCALE_MODES = ("拉伸", "缩放(上)", "缩放(中)", "缩放(下)")
 
 
 class GeometryValidator(ConfigValidator):
@@ -117,6 +119,22 @@ class Config(QConfig):
     broadcastMarkdownEnabled = ConfigItem(
         "Broadcast", "MarkdownEnabled", False, BoolValidator()
     )
+    broadcastBackgroundMode = OptionsConfigItem(
+        "Broadcast",
+        "BackgroundMode",
+        "主题色",
+        OptionsValidator(WINDOW_BACKGROUND_MODES),
+    )
+    broadcastBackgroundColor = ColorConfigItem(
+        "Broadcast", "BackgroundColor", QColor(*THEME_COLOR_PRESETS[0][1])
+    )
+    broadcastBackgroundImagePath = ConfigItem("Broadcast", "BackgroundImagePath", "")
+    broadcastBackgroundScaleMode = OptionsConfigItem(
+        "Broadcast",
+        "BackgroundScaleMode",
+        "缩放(中)",
+        OptionsValidator(WINDOW_BACKGROUND_SCALE_MODES),
+    )
 
     aiMarkdownCustomStyleEnabled = ConfigItem(
         "AIMarkdown", "CustomStyleEnabled", False, BoolValidator()
@@ -147,6 +165,22 @@ class Config(QConfig):
     )
     confirmBeforeResetCountdown = ConfigItem(
         "Countdown", "ConfirmBeforeReset", True, BoolValidator()
+    )
+    countdownBackgroundMode = OptionsConfigItem(
+        "Countdown",
+        "BackgroundMode",
+        "主题色",
+        OptionsValidator(WINDOW_BACKGROUND_MODES),
+    )
+    countdownBackgroundColor = ColorConfigItem(
+        "Countdown", "BackgroundColor", QColor(*THEME_COLOR_PRESETS[0][1])
+    )
+    countdownBackgroundImagePath = ConfigItem("Countdown", "BackgroundImagePath", "")
+    countdownBackgroundScaleMode = OptionsConfigItem(
+        "Countdown",
+        "BackgroundScaleMode",
+        "缩放(中)",
+        OptionsValidator(WINDOW_BACKGROUND_SCALE_MODES),
     )
 
     autoRun = ConfigItem("Software", "AutoRun", False, BoolValidator())

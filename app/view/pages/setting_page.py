@@ -1,7 +1,7 @@
 import threading
 
 from loguru import logger
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     BodyLabel,
     ColorDialog,
+    ColorSettingCard,
     ComboBoxSettingCard,
     FluentIcon,
     HyperlinkCard,
@@ -36,6 +37,8 @@ from app.config.cfg import (
     BANNER_IMAGE_PRESETS,
     BANNER_PRESET_SCALE_MODES,
     THEME_COLOR_PRESETS,
+    WINDOW_BACKGROUND_MODES,
+    WINDOW_BACKGROUND_SCALE_MODES,
     cfg,
 )
 from app.config.constants import APP_NAME, AUTHOR, AUTHOR_URL, VERSION, YEAR
@@ -327,6 +330,18 @@ class SettingPage(ScrollArea):
             "自定义主页图片",
             "选择本地图片（需将主页图片来源设为“自定义”）",
         )
+        self.broadcastBackgroundImageCard = PushSettingCard(
+            "选择图片",
+            FluentIcon.FOLDER,
+            "自定义投送背景",
+            "选择全屏投送使用的本地背景图片",
+        )
+        self.countdownBackgroundImageCard = PushSettingCard(
+            "选择图片",
+            FluentIcon.FOLDER,
+            "自定义倒计时背景",
+            "选择考试倒计时使用的本地背景图片",
+        )
         self.bannerGroup.addSettingCards(
             [
                 SwitchSettingCard(
@@ -361,6 +376,27 @@ class SettingPage(ScrollArea):
 
         self.broadcastGroup.addSettingCards(
             [
+                ComboBoxSettingCard(
+                    cfg.broadcastBackgroundMode,
+                    FluentIcon.PHOTO,
+                    "背景类型",
+                    "选择主题色、纯色或图片背景",
+                    texts=WINDOW_BACKGROUND_MODES,
+                ),
+                ColorSettingCard(
+                    cfg.broadcastBackgroundColor,
+                    FluentIcon.PALETTE,
+                    "背景颜色",
+                    "纯色背景使用的颜色",
+                ),
+                self.broadcastBackgroundImageCard,
+                ComboBoxSettingCard(
+                    cfg.broadcastBackgroundScaleMode,
+                    FluentIcon.ZOOM_IN,
+                    "图片缩放模式",
+                    "设置背景图片的缩放和对齐方式",
+                    texts=WINDOW_BACKGROUND_SCALE_MODES,
+                ),
                 SwitchSettingCard(
                     FluentIcon.APPLICATION,
                     "显示任务栏",
@@ -435,6 +471,27 @@ class SettingPage(ScrollArea):
 
         self.countdownGroup.addSettingCards(
             [
+                ComboBoxSettingCard(
+                    cfg.countdownBackgroundMode,
+                    FluentIcon.PHOTO,
+                    "背景类型",
+                    "选择主题色、纯色或图片背景",
+                    texts=WINDOW_BACKGROUND_MODES,
+                ),
+                ColorSettingCard(
+                    cfg.countdownBackgroundColor,
+                    FluentIcon.PALETTE,
+                    "背景颜色",
+                    "纯色背景使用的颜色",
+                ),
+                self.countdownBackgroundImageCard,
+                ComboBoxSettingCard(
+                    cfg.countdownBackgroundScaleMode,
+                    FluentIcon.ZOOM_IN,
+                    "图片缩放模式",
+                    "设置背景图片的缩放和对齐方式",
+                    texts=WINDOW_BACKGROUND_SCALE_MODES,
+                ),
                 SwitchSettingCard(
                     FluentIcon.APPLICATION,
                     "显示任务栏",
@@ -536,6 +593,18 @@ class SettingPage(ScrollArea):
 
     def _bind(self) -> None:
         self.chooseImageCard.clicked.connect(self._onChooseImageClicked)
+        self.broadcastBackgroundImageCard.clicked.connect(
+            lambda: self._onChooseBackgroundImageClicked(
+                cfg.broadcastBackgroundImagePath,
+                cfg.broadcastBackgroundMode,
+            )
+        )
+        self.countdownBackgroundImageCard.clicked.connect(
+            lambda: self._onChooseBackgroundImageClicked(
+                cfg.countdownBackgroundImagePath,
+                cfg.countdownBackgroundMode,
+            )
+        )
         self.autoRunCard.checkedChanged.connect(self._onAutoRunChanged)
         self.aboutCard.clicked.connect(self._onAboutCardClicked)
         self.clearAppStoreCacheCard.clicked.connect(self._onClearAppStoreCache)
@@ -551,6 +620,18 @@ class SettingPage(ScrollArea):
         scaleMode = BANNER_PRESET_SCALE_MODES.get(source)
         if scaleMode is not None:
             cfg.set(cfg.bannerScaleMode, scaleMode)
+
+    def _onChooseBackgroundImageClicked(self, pathItem, modeItem) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择背景图片",
+            "",
+            "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp)",
+        )
+        if not path:
+            return
+        cfg.set(pathItem, path)
+        cfg.set(modeItem, "图片")
 
     def _onChooseImageClicked(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

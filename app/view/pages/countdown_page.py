@@ -1,5 +1,5 @@
 from PySide6.QtCore import QPropertyAnimation, QSize, Qt, QTime, QTimer, QUrl, Signal
-from PySide6.QtGui import QFontMetrics
+from PySide6.QtGui import QColor, QFontMetrics
 from PySide6.QtMultimedia import QSoundEffect
 from PySide6.QtWidgets import (
     QApplication,
@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import (
     LineEdit,
     MessageBox,
@@ -21,13 +22,13 @@ from qfluentwidgets import (
     TitleLabel,
     ToolButton,
 )
-from qfluentwidgets import FluentIcon as FIF
 from qframelesswindow import FramelessWindow
 
 from app.config.cfg import cfg
 from app.config.paths import ASSET_DIR
 from app.view.components.setting_card_group import QWIDGETSIZE_MAX
 from app.view.components.task_picker import TouchTimePicker
+from app.view.components.window_background import WindowBackground
 from app.view.pages.broadcast_page import (
     VerticalButton,
     showActionConfirmation,
@@ -66,6 +67,16 @@ class CountdownWindow(FramelessWindow):
         self.titleBar.hide()
         # 顶层窗口的 QSS 边框需要该属性才会绘制
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        self.background = WindowBackground(
+            cfg.countdownBackgroundMode,
+            cfg.countdownBackgroundColor,
+            cfg.countdownBackgroundImagePath,
+            cfg.countdownBackgroundScaleMode,
+            lambda: QColor("black"),
+            self,
+        )
+        self.background.lower()
+        self.background.setGeometry(self.rect())
         # 固定布局窗口，任何模式下都不允许边缘拉伸
         self.setResizeEnabled(False)
 
@@ -338,7 +349,7 @@ class CountdownWindow(FramelessWindow):
         self.setWindowFlags(flags)
 
         border = "border: 1px solid #808080;" if self.is_windowed else ""
-        self.setStyleSheet(f"CountdownWindow {{ background-color: black; {border} }}")
+        self.setStyleSheet(f"CountdownWindow {{ background-color: transparent; {border} }}")
         self.titleLabel.setVisible(not self.is_windowed)
 
         if self.is_windowed:
@@ -388,6 +399,7 @@ class CountdownWindow(FramelessWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self.background.setGeometry(self.rect())
         self._applyFonts(self.height())
         self._updateBtnPosition()
 

@@ -44,6 +44,7 @@ from app.config.cfg import cfg
 from app.config.constants import AI_MARKDOWN_API
 from app.config.paths import ASSET_DIR
 from app.view.components.markdown_view import MarkdownView
+from app.view.components.window_background import WindowBackground
 
 
 def showActionConfirmation(
@@ -300,6 +301,17 @@ class BroadcastWindow(FramelessWindow):
         self._is_editing = False
         self._isTracking = False
         self._closeFlyout = None
+        self.background = WindowBackground(
+            cfg.broadcastBackgroundMode,
+            cfg.broadcastBackgroundColor,
+            cfg.broadcastBackgroundImagePath,
+            cfg.broadcastBackgroundScaleMode,
+            self._themeBackgroundColor,
+            self,
+        )
+        self.background.lower()
+        self.background.setGeometry(self.rect())
+        cfg.customThemeMode.valueChanged.connect(self.background.refresh)
 
         self.vBoxLayout = QVBoxLayout(self)
         self.vBoxLayout.setContentsMargins(40, 20, 40, 20)
@@ -314,7 +326,11 @@ class BroadcastWindow(FramelessWindow):
         self.contentEdit.setStyleSheet("border: none; background: transparent;")
         self.contentEdit.viewport().installEventFilter(self)
 
-        self.markdownView = MarkdownView(self, largeText=True)
+        self.markdownView = MarkdownView(
+            self,
+            largeText=True,
+            transparentBackground=True,
+        )
         self.markdownView.hide()
         self.markdownView.viewport().installEventFilter(self)
 
@@ -359,12 +375,19 @@ class BroadcastWindow(FramelessWindow):
                 self._isTracking = False
         return super().eventFilter(obj, event)
 
+    def _themeBackgroundColor(self):
+        is_dark = (
+            isDarkTheme()
+            if cfg.customThemeMode.value == "System"
+            else cfg.customThemeMode.value == "Dark"
+        )
+        return QColor("#202020" if is_dark else "#FFFFFF")
+
     def _applyStyle(self):
         is_dark = isDarkTheme() if cfg.customThemeMode.value == "System" else cfg.customThemeMode.value == "Dark"
-        bg_color = "#202020" if is_dark else "#FFFFFF"
         text_color = "white" if is_dark else "black"
         border = "border: 1px solid #808080;" if self.is_windowed else ""
-        self.setStyleSheet(f"BroadcastWindow {{ background-color: {bg_color}; {border} }} QTextEdit {{ color: {text_color}; }}")
+        self.setStyleSheet(f"BroadcastWindow {{ background-color: transparent; {border} }} QTextEdit {{ color: {text_color}; background: transparent; }}")
 
     def setContent(self, title, text, is_markdown=False):
         self._applyStyle()
@@ -405,6 +428,7 @@ class BroadcastWindow(FramelessWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self.background.setGeometry(self.rect())
         self._updateBtnPosition()
 
     def _updateBtnPosition(self):
