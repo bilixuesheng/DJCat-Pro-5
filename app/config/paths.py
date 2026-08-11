@@ -9,6 +9,7 @@ APP_DIR = (
     if getattr(sys, "frozen", False) or "__compiled__" in globals()
     else Path(__file__).resolve().parents[2]
 )
+LOG_DIR = APP_DIR / "Log"
 APP_DATA_DIR = Path(
     QStandardPaths.writableLocation(
         QStandardPaths.StandardLocation.GenericDataLocation

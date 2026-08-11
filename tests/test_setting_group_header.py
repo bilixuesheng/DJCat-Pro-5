@@ -4,8 +4,8 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, QPropertyAnimation, Qt
-from PySide6.QtGui import QImage
+from PySide6.QtCore import QPoint, QPropertyAnimation, QUrl, Qt
+from PySide6.QtGui import QDesktopServices, QImage
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import TransparentToolButton
@@ -13,6 +13,7 @@ from shiboken6 import delete
 
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
+from app.config.paths import LOG_DIR
 from app.view.components.setting_card_group import QWIDGETSIZE_MAX
 from app.view.pages.setting_page import SettingPage
 
@@ -347,6 +348,16 @@ class SettingGroupHeaderTest(TestCase):
     def testNewPromptSettingsDefaultToSafeValues(self):
         self.assertFalse(cfg.broadcastMarkdownEnabled.defaultValue)
         self.assertTrue(cfg.confirmBeforeResetCountdown.defaultValue)
+
+    @patch("app.view.pages.setting_page.threading.Thread")
+    def testErrorLogCardOpensLogDirectory(self, _):
+        page = SettingPage()
+        self.addCleanup(page.deleteLater)
+
+        with patch.object(QDesktopServices, "openUrl") as openUrl:
+            page.errorLogCard.clicked.emit()
+
+        openUrl.assert_called_once_with(QUrl.fromLocalFile(str(LOG_DIR)))
 
     @patch("app.view.pages.setting_page.fetchQuota", return_value=None)
     def testQuotaResultIsIgnoredAfterSettingPageIsDestroyed(self, _):

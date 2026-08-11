@@ -1,8 +1,8 @@
 import threading
 
 from loguru import logger
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QUrl, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFileDialog,
@@ -42,6 +42,7 @@ from app.config.cfg import (
     cfg,
 )
 from app.config.constants import APP_NAME, AUTHOR, AUTHOR_URL, VERSION, YEAR
+from app.config.paths import LOG_DIR
 from app.signal_bus import signalBus
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import (
@@ -594,6 +595,12 @@ class SettingPage(ScrollArea):
             "图标与广告缓存",
             "删除超过 7 天未使用的图片缓存，也可以随时手动清理。",
         )
+        self.errorLogCard = PushSettingCard(
+            "查看错误日志",
+            FluentIcon.FOLDER,
+            "错误日志",
+            "打开应用保存错误日志的文件夹。",
+        )
         self.aboutGroup.addSettingCards(
             [
                 HyperlinkCard(
@@ -605,6 +612,7 @@ class SettingPage(ScrollArea):
                 ),
                 self.aboutCard,
                 self.clearAppStoreCacheCard,
+                self.errorLogCard,
             ]
         )
 
@@ -634,6 +642,7 @@ class SettingPage(ScrollArea):
         self.autoRunCard.checkedChanged.connect(self._onAutoRunChanged)
         self.aboutCard.clicked.connect(self._onAboutCardClicked)
         self.clearAppStoreCacheCard.clicked.connect(self._onClearAppStoreCache)
+        self.errorLogCard.clicked.connect(self._onOpenErrorLogClicked)
         self.aiQuotaReceived.connect(self._onAIQuotaReceived)
         cfg.bannerImageSource.valueChanged.connect(
             self._onBannerImageSourceChanged
@@ -703,6 +712,10 @@ class SettingPage(ScrollArea):
 
     def _onAboutCardClicked(self) -> None:
         self.window().checkForUpdates(manual=True)
+
+    def _onOpenErrorLogClicked(self) -> None:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(LOG_DIR)))
 
     def _onClearAppStoreCache(self) -> None:
         try:

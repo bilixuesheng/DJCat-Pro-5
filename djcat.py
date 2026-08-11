@@ -33,9 +33,10 @@ def startApp(isSilent: bool = False):
 
 def configureLogging():
     from loguru import logger
+    from app.config.paths import LOG_DIR
 
     logger.add(
-        "Log/djcatpro日志_{time:YYYY-MM-DD}.log",
+        str(LOG_DIR / "djcatpro日志_{time:YYYY-MM-DD}.log"),
         rotation="00:00",
         retention="14 days",
         enqueue=True,
