@@ -212,6 +212,7 @@ class MarkdownRendererTest(TestCase):
         pixmap = image.findChild(QLabel).pixmap()
         self.assertFalse(pixmap.isNull())
         self.assertLessEqual(pixmap.width(), 760)
+        self.assertEqual(image._data, bytearray())
         image.deleteLater()
 
     def testRemoteImageDecoderRejectsOversizedImages(self):

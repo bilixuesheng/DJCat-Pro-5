@@ -578,8 +578,7 @@ class HomePage(ScrollArea):
         for worker in workers:
             worker.cancel()
         for worker in workers:
-            if worker._thread is not None:
-                worker._thread.join()
+            worker.wait()
             worker.deleteLater()
         self._customWorkers.clear()
 

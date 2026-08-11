@@ -465,10 +465,14 @@ class UpdateWindowLifecycleTest(TestCase):
             versionBar = InfoBarStub.instances[-1]
             versionBar.widgets[0].clicked.emit()
             worker.progressChanged.emit(50, 100, 1024, 32)
+            QTest.qWait(120)
+            self.app.processEvents()
             firstY = self.window._downloadStateToolTip.y()
             worker.retrying.emit(1, 3, "temporary")
             self.assertIn("正在重试 1/3", self.window._downloadStateToolTip.content)
             worker.progressChanged.emit(60, 100, 2048, 32)
+            QTest.qWait(120)
+            self.app.processEvents()
 
         self.assertTrue(versionBar.closed)
         self.assertIsNone(self.window._updateInfoBar)
@@ -480,6 +484,18 @@ class UpdateWindowLifecycleTest(TestCase):
         self.assertEqual(self.window._downloadStateToolTip.suitablePosCalls, 1)
         workerFactory.assert_called_once()
         self.assertEqual(workerFactory.call_args.args[0], DOWNLOAD_URL)
+
+    def testDownloadProgressIsCoalescedBeforeUpdatingTooltip(self):
+        toolTip = StateToolTipStub("", "", self.window)
+        self.window._downloadStateToolTip = toolTip
+
+        with patch.object(self.window, "_onUpdateDownloadProgress") as update:
+            self.window._queueUpdateDownloadProgress(10, 100, 1, 4)
+            self.window._queueUpdateDownloadProgress(20, 100, 2, 4)
+            QTest.qWait(120)
+            self.app.processEvents()
+
+        update.assert_called_once_with(20, 100, 2, 4)
 
     def testDestroyedUpdateInfoBarClearsCapturedReference(self):
         InfoBarStub.instances.clear()

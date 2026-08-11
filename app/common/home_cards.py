@@ -258,11 +258,10 @@ def validate_action(action: dict) -> str:
 def _wait_process(
     process,
     cancel: threading.Event,
-    terminate_if_already_cancelled: bool = False,
 ) -> str | None:
     while process.poll() is None:
         if cancel.wait(0.1):
-            if terminate_if_already_cancelled and process.poll() is None:
+            if process.poll() is None:
                 process.terminate()
                 try:
                     process.wait(timeout=2)
@@ -321,7 +320,7 @@ def execute_action(action: dict, cancel: threading.Event) -> str | None:
     except (OSError, ValueError) as error:
         return str(error)
     if action["wait"]:
-        return _wait_process(process, cancel, cancel.is_set())
+        return _wait_process(process, cancel)
     return None
 
 
@@ -341,6 +340,10 @@ class ActionSequenceWorker(QObject):
 
     def cancel(self) -> None:
         self.cancel_event.set()
+
+    def wait(self) -> None:
+        if self._thread is not None:
+            self._thread.join()
 
     def _run(self) -> None:
         executed = set()

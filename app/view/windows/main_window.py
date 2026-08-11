@@ -169,6 +169,7 @@ class MainWindow(MSFluentWindow):
         self._downloadStateToolTip = None
         self._downloadWorker = None
         self._downloadThread = None
+        self._pendingDownloadProgress = None
         self._downloadVersion = ""
         self._quitAfterDownload = False
         self._navigationTarget = None
@@ -253,6 +254,9 @@ class MainWindow(MSFluentWindow):
         self.scheduleTimer = QTimer(self)
         self.scheduleTimer.timeout.connect(self._checkSchedule)
         self.scheduleTimer.start(1000)
+        self._downloadProgressTimer = QTimer(self)
+        self._downloadProgressTimer.setInterval(100)
+        self._downloadProgressTimer.timeout.connect(self._flushDownloadProgress)
         self.last_triggered_time = ""
         self.last_shutdown_triggered_time = ""
 
@@ -877,7 +881,7 @@ class MainWindow(MSFluentWindow):
             UPDATE_INSTALLER_PATH,
         )
         self._downloadWorker.progressChanged.connect(
-            self._onUpdateDownloadProgress
+            self._queueUpdateDownloadProgress
         )
         self._downloadWorker.retrying.connect(self._onUpdateDownloadRetrying)
         self._downloadWorker.finished.connect(self._onUpdateDownloadFinished)
@@ -886,6 +890,19 @@ class MainWindow(MSFluentWindow):
             daemon=True,
         )
         self._downloadThread.start()
+
+    def _queueUpdateDownloadProgress(self, downloaded, total, speed, threads):
+        self._pendingDownloadProgress = (downloaded, total, speed, threads)
+        if not self._downloadProgressTimer.isActive():
+            self._downloadProgressTimer.start()
+
+    def _flushDownloadProgress(self):
+        progress = self._pendingDownloadProgress
+        self._pendingDownloadProgress = None
+        if progress is None:
+            self._downloadProgressTimer.stop()
+            return
+        self._onUpdateDownloadProgress(*progress)
 
     def _onUpdateDownloadProgress(self, downloaded, total, speed, threads):
         if self._downloadStateToolTip is None:
@@ -951,6 +968,8 @@ class MainWindow(MSFluentWindow):
         return f"{value:.1f} GB"
 
     def _onUpdateDownloadFinished(self, installerPath, error, canceled):
+        self._pendingDownloadProgress = None
+        self._downloadProgressTimer.stop()
         worker = self._downloadWorker
         self._downloadWorker = None
         self._downloadThread = None
@@ -1067,6 +1086,8 @@ class MainWindow(MSFluentWindow):
         self.tts.stop()
         self.player.stop()
         self._cleanupEdgeTtsFile()
+        self._pendingDownloadProgress = None
+        self._downloadProgressTimer.stop()
         for page in (
             getattr(self, "homePage", None),
             getattr(self, "appStorePage", None),
