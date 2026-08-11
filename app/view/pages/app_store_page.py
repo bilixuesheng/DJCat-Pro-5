@@ -206,9 +206,12 @@ class AppStorePage(ScrollArea):
         self._catalogLoading = False
         self._catalogThread = None
         self._catalogWorker = None
+        self._shuttingDown = False
         self._downloadJobs = {}
         self._downloadStates = {}
         self._installing = set()
+        self._installationThreads = set()
+        self._installationLock = threading.Lock()
         self._pendingProgress = {}
         self._progressTimer = QTimer(self)
         self._progressTimer.setInterval(100)
@@ -411,8 +414,49 @@ class AppStorePage(ScrollArea):
         self._pauseAds()
         super().hideEvent(event)
 
+    def shutdown(self):
+        if self._shuttingDown:
+            return
+        self._shuttingDown = True
+        self._pauseAds()
+        self._progressTimer.stop()
+        self._pendingProgress.clear()
+        self._catalogLoading = False
+        self._catalogWorker = None
+        self._catalogThread = None
+
+        jobs = tuple(self._downloadJobs.items())
+        for _appId, (thread, worker) in jobs:
+            worker.cancel()
+            thread.quit()
+        for appId, (thread, worker) in jobs:
+            if thread.isRunning():
+                thread.wait()
+            if self._downloadJobs.pop(appId, None) is not None:
+                self.store.downloadSlots.release()
+            self._downloadStates.pop(appId, None)
+            for attribute in ("targetPath", "partialPath"):
+                path = getattr(worker, attribute, None)
+                if path:
+                    try:
+                        Path(path).unlink(missing_ok=True)
+                    except OSError:
+                        pass
+
+        with self._installationLock:
+            installationThreads = tuple(self._installationThreads)
+        for thread in installationThreads:
+            thread.join()
+        for _appId in tuple(self._installing):
+            self.store.downloadSlots.release()
+        self._installing.clear()
+
+    def closeEvent(self, event):
+        self.shutdown()
+        super().closeEvent(event)
+
     def _loadCatalog(self):
-        if self._catalogLoading:
+        if self._shuttingDown or self._catalogLoading:
             return
         self._catalogLoading = True
         self.refreshButton.setEnabled(False)
@@ -428,6 +472,8 @@ class AppStorePage(ScrollArea):
         self.refreshButton.setEnabled(True)
         self._catalogWorker = None
         self._catalogThread = None
+        if self._shuttingDown:
+            return
         if error:
             InfoBar.error("应用目录加载失败", error, duration=5000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
             return
@@ -755,6 +801,8 @@ class AppStorePage(ScrollArea):
         InfoBar.warning("下载重试", message, duration=2000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
 
     def _onDownloadFinished(self, app, path, error, canceled):
+        if self._shuttingDown:
+            return
         appId = int(app["id"])
         if self._downloadJobs.pop(appId, None) is None:
             return
@@ -773,27 +821,36 @@ class AppStorePage(ScrollArea):
         self._downloadStates[appId] = "安装中"
         self._updateVisibleCardState(appId)
         self._updateDetailAction()
-        threading.Thread(
+        thread = threading.Thread(
             target=self._installInBackground,
             args=(app, Path(path)),
             daemon=True,
-        ).start()
+        )
+        with self._installationLock:
+            self._installationThreads.add(thread)
+        thread.start()
 
     def _installInBackground(self, app, path):
         try:
             installed = self.store.installZip(app, path)
-            self._installFinished.emit(int(app["id"]), installed, "")
+            if not self._shuttingDown:
+                self._installFinished.emit(int(app["id"]), installed, "")
         except Exception as error:
-            self._installFinished.emit(int(app["id"]), None, str(error))
+            if not self._shuttingDown:
+                self._installFinished.emit(int(app["id"]), None, str(error))
         finally:
             try:
                 path.unlink(missing_ok=True)
             except OSError:
                 pass
+            with self._installationLock:
+                self._installationThreads.discard(threading.current_thread())
 
     _installFinished = Signal(int, object, str)
 
     def _onInstallFinished(self, appId, installed, error):
+        if self._shuttingDown:
+            return
         if appId not in self._installing:
             return
         self._installing.discard(appId)

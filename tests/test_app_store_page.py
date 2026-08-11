@@ -1,11 +1,12 @@
 import os
 import sys
+import threading
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QObject, QPoint, QThread, Qt, Signal
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import DrillInTransitionStackedWidget
@@ -18,6 +19,21 @@ class _Store:
 
     def mergeInstalled(self, apps):
         return list(apps)
+
+
+class _CancelableWorker(QObject):
+    finished = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.cancelEvent = threading.Event()
+
+    def run(self):
+        self.cancelEvent.wait()
+        self.finished.emit()
+
+    def cancel(self):
+        self.cancelEvent.set()
 
 
 def _apps(count):
@@ -108,3 +124,22 @@ class AppStorePageTest(TestCase):
 
         self.assertEqual(clicks, [])
         card.deleteLater()
+
+    def testShutdownWaitsForActiveDownloadThread(self):
+        worker = _CancelableWorker()
+        thread = QThread(self.page)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(thread.quit)
+        thread.start()
+        QTest.qWait(20)
+
+        self.page.store.downloadSlots = Mock()
+        self.page._downloadJobs[1] = (thread, worker)
+
+        self.page.shutdown()
+
+        self.assertFalse(thread.isRunning())
+        self.assertNotIn(1, self.page._downloadJobs)
+        self.page.store.downloadSlots.release.assert_called_once_with()

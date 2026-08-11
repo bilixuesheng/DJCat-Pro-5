@@ -98,16 +98,18 @@ class ImagePlaceholder(QWidget):
         if reply is None:
             return
         self._data.extend(bytes(reply.readAll()))
+        data = bytes(self._data)
+        self._data.clear()
         failed = (
             reply.error() != QNetworkReply.NetworkError.NoError
-            or len(self._data) > _MAX_BYTES
+            or len(data) > _MAX_BYTES
         )
         reply.deleteLater()
         if failed:
             self._setPlaceholder(f"\U0001f5bc  {self._alt or self._src}")
             return
 
-        pixmap = self._decode(bytes(self._data))
+        pixmap = self._decode(data)
         if pixmap is None:
             self._setPlaceholder(f"\U0001f5bc  {self._alt or self._src}")
             return
