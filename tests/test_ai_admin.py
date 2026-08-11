@@ -378,6 +378,7 @@ class AIAdminTest(TestCase):
         self.assertIn("prefers-reduced-motion", css)
         self.assertIn("button:active:not(:disabled)", css)
         self.assertIn(".button-danger:hover", css)
+        self.assertIn("background: var(--danger); color: #fff", css)
 
         javascriptResponse = self.client.get(
             "/static/admin.js", base_url="https://dash.djcatpro.top"

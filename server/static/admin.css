@@ -183,7 +183,7 @@ input[type="checkbox"] { width: 17px; min-height: 17px; accent-color: var(--clay
 .button-secondary { border-color: var(--line-strong); background: var(--surface); color: var(--ink); }
 .button-secondary:hover { border-color: var(--clay); color: var(--clay); }
 .button-danger { border-color: #e4beb4; background: transparent; color: var(--danger); }
-.button-danger:hover { border-color: var(--danger); background: #fff; color: var(--danger); }
+.button-danger:hover { border-color: var(--danger); background: var(--danger); color: #fff; }
 .button.is-loading, .table-action.is-loading { cursor: wait; }
 .button-spinner { width: 13px; height: 13px; display: inline-block; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: button-spin .7s linear infinite; }
 .button.is-loading { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
