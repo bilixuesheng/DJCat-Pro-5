@@ -8,61 +8,67 @@
 {% endblock %}
 
 {% block content %}
-<header class="page-header">
-    <div>
-        <div class="eyebrow">应用市场 / 软件</div>
-        <h1>{{ '编辑软件' if app else '新增软件' }}</h1>
-        <p>每个软件可以分别提供 x86_64 和 ARM64 安装包，客户端只会展示当前架构可用的操作。</p>
-    </div>
-</header>
-
-<form class="config-form" method="post" action="{{ url_for('app_store.adminApp', app_id=app.id) if app else url_for('app_store.adminNewApp') }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <section class="form-section">
-        <div class="form-section-title"><span>01</span><div><h2>基本信息</h2><p>用于目录卡片和详情页。</p></div></div>
-        <div class="form-fields two-columns">
-            <label>软件名称<input name="name" maxlength="120" value="{{ form.name if app else '' }}" required></label>
-            <label>开发者<input name="developer" maxlength="120" value="{{ form.developer if app else '' }}"></label>
-            <label>版本号<input name="version" maxlength="64" value="{{ form.version if app else '' }}" required></label>
-            <label>安装目录<input name="install_dir" maxlength="64" value="{{ form.install_dir if app else '' }}" placeholder="例如 classisland" required><small>客户端会安装到 Program/该目录，不能填写路径分隔符。</small></label>
-            <label class="full">简介<textarea name="description" maxlength="1000" rows="3">{{ form.description if app else '' }}</textarea></label>
-            <label class="full">图标 HTTPS 链接<input type="url" name="icon_url" value="{{ form.icon_url if app else '' }}"></label>
-            <label class="option-row full"><span><strong>设为推荐</strong><small>显示在全部应用的推荐分类。</small></span><input type="checkbox" name="recommended" value="1" {% if app and form.recommended %}checked{% endif %}></label>
+<div class="market-page">
+    <header class="page-header">
+        <div>
+            <div class="eyebrow">应用市场 / 软件管理</div>
+            <h1>{{ '编辑软件' if app else '新增软件' }}</h1>
+            <p>每个软件可以分别提供 x86_64 和 ARM64 安装包，客户端只会展示当前架构可用的操作。</p>
         </div>
-    </section>
+    </header>
 
-    <section class="form-section">
-        <div class="form-section-title"><span>02</span><div><h2>安装包</h2><p>下载链接必须是 HTTPS，服务端不会替你托管文件。</p></div></div>
-        <div class="form-fields">
-        {% for architecture in architectures %}
-            {% set package = form.packages.get(architecture) if app else none %}
-            <div class="option-list">
-                <div class="option-row"><span><strong>{{ architecture }}</strong><small>按客户端架构提供 ZIP 安装包。</small></span><input type="checkbox" name="{{ architecture }}_enabled" value="1" {% if package and package.enabled %}checked{% endif %}></div>
-                <label style="padding:13px 14px">ZIP 下载 HTTPS 链接<input type="url" name="{{ architecture }}_url" value="{{ package.download_url if package else '' }}"></label>
+    <form class="config-form" method="post" action="{{ url_for('app_store.adminApp', app_id=app.id) if app else url_for('app_store.adminNewApp') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <section class="form-section">
+            <div class="form-section-title"><span>01</span><div><h2>基本信息</h2><p>用于目录卡片和详情页。</p></div></div>
+            <div class="form-fields two-columns">
+                <label>软件名称<input name="name" maxlength="120" value="{{ form.name if app else '' }}" required></label>
+                <label>开发者<input name="developer" maxlength="120" value="{{ form.developer if app else '' }}"></label>
+                <label>版本号<input name="version" maxlength="64" value="{{ form.version if app else '' }}" required></label>
+                <label>安装目录<input name="install_dir" maxlength="64" value="{{ form.install_dir if app else '' }}" placeholder="例如 classisland" required><small>客户端会安装到 Program/该目录，不能填写路径分隔符。</small></label>
+                <label class="full">简介<textarea name="description" maxlength="1000" rows="3">{{ form.description if app else '' }}</textarea></label>
+                <label class="full">图标 HTTPS 链接<input type="url" name="icon_url" value="{{ form.icon_url if app else '' }}"></label>
+                <label class="option-row full"><span><strong>设为推荐</strong><small>显示在全部应用的推荐分类。</small></span><input type="checkbox" name="recommended" value="1" {% if app and form.recommended %}checked{% endif %}></label>
             </div>
-        {% endfor %}
-        </div>
-    </section>
+        </section>
 
-    <section class="form-section">
-        <div class="form-section-title"><span>03</span><div><h2>打开动作</h2><p>安装后卡片和详情页的“打开”按钮使用。</p></div></div>
-        <div class="form-fields two-columns">
-            <label>类型<select name="open_action_type"><option value="">不设置</option><option value="program" {% if app and form.open_action_type == 'program' %}selected{% endif %}>程序</option><option value="url" {% if app and form.open_action_type == 'url' %}selected{% endif %}>HTTPS 网页</option><option value="uri" {% if app and form.open_action_type == 'uri' %}selected{% endif %}>系统协议</option></select></label>
-            <label>目标<input name="open_action_target" value="{{ form.open_action_target if app else '' }}" placeholder="例如 classisland.exe 或 https://..."></label>
-            <label class="full">参数 JSON<input name="open_action_arguments" value="{{ form.open_action_arguments if app else '{}' }}" placeholder='{"args": []}'><small>程序参数由客户端按安全规则解析。</small></label>
-        </div>
-    </section>
+        <section class="form-section">
+            <div class="form-section-title"><span>02</span><div><h2>安装包</h2><p>下载链接必须是 HTTPS，服务端不会替你托管文件；没有对应架构时请取消勾选。</p></div></div>
+            <div class="form-fields">
+            {% for architecture in architectures %}
+                {% set package = form.packages.get(architecture) if app else none %}
+                <div class="option-list package-option">
+                    <div class="option-row"><span><strong>{{ architecture }}</strong><small>按客户端架构提供 ZIP 安装包。</small></span><input type="checkbox" name="{{ architecture }}_enabled" value="1" {% if (not app) or (package and package.enabled) %}checked{% endif %}></div>
+                    <label class="package-url-field">ZIP 下载 HTTPS 链接<input type="url" name="{{ architecture }}_url" value="{{ package.download_url if package else '' }}" placeholder="https://下载域名/软件/{{ architecture }}.zip"><small>示例：<code>https://cdn.example.com/classisland-x86_64.zip</code></small></label>
+                </div>
+            {% endfor %}
+            </div>
+        </section>
 
-    <section class="form-section">
-        <div class="form-section-title"><span>04</span><div><h2>详情页公告</h2><p>公告固定显示在预设卡片上方，每次进入详情页都会显示。</p></div></div>
-        <div class="form-fields"><label>公告内容<textarea name="announcement" maxlength="1000" rows="3">{{ form.announcement if app else '' }}</textarea></label></div>
-    </section>
+        <section class="form-section">
+            <div class="form-section-title"><span>03</span><div><h2>打开动作</h2><p>安装后卡片和详情页的“打开”按钮使用。</p></div></div>
+            <div class="form-fields two-columns" data-action-form>
+                <label>类型<select name="open_action_type" data-action-type><option value="">不设置</option><option value="program" {% if app and form.open_action_type == 'program' %}selected{% endif %}>程序</option><option value="url" {% if app and form.open_action_type == 'url' %}selected{% endif %}>HTTPS 网页</option><option value="uri" {% if app and form.open_action_type == 'uri' %}selected{% endif %}>系统协议</option></select></label>
+                <label>目标<input name="open_action_target" data-action-target value="{{ form.open_action_target if app else '' }}" placeholder="classisland.exe 或 https://example.com"></label>
+                <label class="full" data-action-arguments-wrapper>程序参数<textarea name="open_action_arguments" data-action-arguments rows="3" placeholder="--minimized\n--profile default">{{ form.open_action_arguments if app else '' }}</textarea><small>仅程序动作使用；每行填写一个参数。例如 <code>--minimized</code>。</small></label>
+                <p class="action-help full" data-action-help>程序目标只能是安装目录内的相对 EXE；网页必须使用 HTTPS；系统协议会按客户端安全规则校验。</p>
+            </div>
+        </section>
 
-    <section class="form-section">
-        <div class="form-section-title"><span>05</span><div><h2>预设卡片</h2><p>使用 JSON 数组维护，动作类型为 program、url 或 uri。</p></div></div>
-        <div class="form-fields"><label>预设卡片 JSON<textarea name="presets_json" rows="10" placeholder='[{"title":"打开主程序","description":"启动软件","action_type":"program","action_target":"classisland.exe","action_arguments":{}}]'>{{ form.presets|tojson(indent=2) if app else '[]' }}</textarea><small>程序目标只能是安装目录内的相对 EXE；网页必须 HTTPS；危险协议会被拒绝。</small></label></div>
-    </section>
+        <section class="form-section">
+            <div class="form-section-title"><span>04</span><div><h2>详情页公告</h2><p>公告固定显示在预设卡片上方，每次进入详情页都会显示。</p></div></div>
+            <div class="form-fields"><label>公告内容<textarea name="announcement" maxlength="1000" rows="3">{{ form.announcement if app else '' }}</textarea></label></div>
+        </section>
 
-    <div class="form-actions"><span>{% if app %}下载次数：{{ app.download_count }}{% else %}保存后客户端即可拉取目录。{% endif %}</span><button class="button button-primary" type="submit">保存软件</button></div>
-</form>
+        <section class="form-section">
+            <div class="form-section-title"><span>05</span><div><h2>预设卡片</h2><p>预设卡片在独立页面图形化维护，不再填写 JSON。</p></div></div>
+            <div class="market-callout">
+                <p>为这个软件添加启动程序、网页或系统协议卡片，安装后可以固定到客户端主页。</p>
+                <a class="button button-secondary" href="{{ url_for('app_store.adminPresets') }}">打开预设卡片管理</a>
+            </div>
+        </section>
+
+        <div class="form-actions"><span>{% if app %}下载次数：{{ app.download_count }}{% else %}保存后客户端即可拉取目录。{% endif %}</span><button class="button button-primary" type="submit">保存软件</button></div>
+    </form>
+</div>
 {% endblock %}

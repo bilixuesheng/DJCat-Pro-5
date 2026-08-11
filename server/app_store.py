@@ -90,38 +90,32 @@ def _safeAction(actionType, target, arguments=""):
     }
 
 
-def _parsePresets(value):
-    if not value:
-        return []
+def _formArguments(actionType, value):
+    if actionType != "program":
+        return "{}"
+    value = (value or "").strip()
     try:
-        presets = json.loads(value) if isinstance(value, str) else value
+        parsed = json.loads(value) if value else {}
     except (TypeError, ValueError):
-        return None
-    if not isinstance(presets, list) or len(presets) > 30:
-        return None
-    result = []
-    for preset in presets:
-        if not isinstance(preset, dict):
-            return None
-        title = str(preset.get("title", "")).strip()
-        description = str(preset.get("description", "")).strip()
-        action = _safeAction(
-            preset.get("action_type"),
-            preset.get("action_target"),
-            json.dumps(preset.get("action_arguments", {}), ensure_ascii=False),
-        )
-        if not title or not action:
-            return None
-        result.append(
-            {
-                "title": title[:80],
-                "description": description[:240],
-                "action_type": action["type"],
-                "action_target": action["target"],
-                "action_arguments": action["arguments"],
-            }
-        )
-    return result
+        parsed = None
+    if isinstance(parsed, dict) and isinstance(parsed.get("args"), list):
+        arguments = [str(argument) for argument in parsed["args"]]
+    else:
+        arguments = [line for line in value.splitlines() if line.strip()]
+    return json.dumps({"args": arguments[:50]}, ensure_ascii=False)
+
+
+def _argumentsText(value):
+    try:
+        parsed = json.loads(value or "{}") if isinstance(value, str) else value
+    except (TypeError, ValueError):
+        return ""
+    arguments = parsed.get("args", []) if isinstance(parsed, dict) else []
+    return "\n".join(str(argument) for argument in arguments if isinstance(argument, str))
+
+
+def _formAction(actionType, target, arguments):
+    return _safeAction(actionType, target, _formArguments(actionType, arguments))
 
 
 def _ensureSchema(connect):
@@ -178,9 +172,48 @@ def _ensureSchema(connect):
             );
             CREATE INDEX IF NOT EXISTS market_ads_order_idx
                 ON market_advertisements(enabled, sort_order, id);
+            CREATE TABLE IF NOT EXISTS market_download_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                app_id INTEGER NOT NULL REFERENCES market_applications(id) ON DELETE CASCADE,
+                architecture TEXT NOT NULL CHECK (architecture IN ('x86_64', 'arm64')),
+                downloaded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS market_download_events_time_idx
+                ON market_download_events(downloaded_at);
             """
         )
         database.commit()
+
+
+def marketplaceStats(connect, day):
+    """Return marketplace totals for the dashboard without changing catalog data."""
+
+    _ensureSchema(connect)
+    with closing(connect()) as database:
+        todayDownloads = database.execute(
+            "SELECT COUNT(*) FROM market_download_events "
+            "WHERE date(downloaded_at, '+8 hours') = ?",
+            (day,),
+        ).fetchone()[0]
+        totalDownloads = database.execute(
+            "SELECT COALESCE(SUM(download_count), 0) FROM market_applications"
+        ).fetchone()[0]
+        appCount = database.execute(
+            "SELECT COUNT(*) FROM market_applications"
+        ).fetchone()[0]
+        adCount = database.execute(
+            "SELECT COUNT(*) FROM market_advertisements WHERE enabled = 1"
+        ).fetchone()[0]
+        presetCount = database.execute(
+            "SELECT COUNT(*) FROM market_presets"
+        ).fetchone()[0]
+    return {
+        "today_downloads": todayDownloads,
+        "downloads": totalDownloads,
+        "apps": appCount,
+        "ads": adCount,
+        "presets": presetCount,
+    }
 
 
 def _rowAction(row, prefix="open"):
@@ -244,37 +277,21 @@ def _appPayload(database, row):
 
 def _adminFormData(database, appId=None):
     if appId is None:
-        return None, {"packages": {}, "presets": []}
+        return None, {"packages": {}, "open_action_arguments": ""}
     row = database.execute(
         "SELECT * FROM market_applications WHERE id = ?", (appId,)
     ).fetchone()
     if not row:
-        return None, {"packages": {}, "presets": []}
+        return None, {"packages": {}, "open_action_arguments": ""}
     packages = {
         package["architecture"]: package
         for package in database.execute(
             "SELECT * FROM market_packages WHERE app_id = ?", (appId,)
         )
     }
-    presets = database.execute(
-        """
-        SELECT title, description, action_type, action_target, action_arguments
-        FROM market_presets WHERE app_id = ? ORDER BY sort_order, id
-        """,
-        (appId,),
-    ).fetchall()
     form = dict(row)
     form["packages"] = packages
-    form["presets"] = [
-        {
-            "title": preset["title"],
-            "description": preset["description"],
-            "action_type": preset["action_type"],
-            "action_target": preset["action_target"],
-            "action_arguments": json.loads(preset["action_arguments"] or "{}"),
-        }
-        for preset in presets
-    ]
+    form["open_action_arguments"] = _argumentsText(form["open_action_arguments"])
     return row, form
 
 
@@ -365,6 +382,10 @@ def register_app_store(
                     "UPDATE market_applications SET download_count = download_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (app_id,),
                 )
+                database.execute(
+                    "INSERT INTO market_download_events(app_id, architecture) VALUES (?, ?)",
+                    (app_id, architecture),
+                )
                 database.commit()
         return redirect(url, code=302)
 
@@ -429,12 +450,13 @@ def register_app_store(
             errors.append("安装目录只能包含字母、数字、点、下划线和短横线")
         if request.form.get("icon_url", "").strip() and not values["icon_url"]:
             errors.append("图标链接必须是 HTTPS 地址")
-        action = _safeAction(
-            request.form.get("open_action_type"),
+        actionType = request.form.get("open_action_type", "").strip().lower()
+        action = _formAction(
+            actionType,
             request.form.get("open_action_target"),
             request.form.get("open_action_arguments", ""),
         )
-        if request.form.get("open_action_type") and not action:
+        if actionType and not action:
             errors.append("打开动作配置无效")
         packages = {}
         for architecture in ARCHITECTURES:
@@ -444,9 +466,6 @@ def register_app_store(
                 errors.append(f"{architecture} 安装包启用时必须填写 HTTPS 链接")
             if url:
                 packages[architecture] = (enabled, url)
-        presets = _parsePresets(request.form.get("presets_json", ""))
-        if presets is None:
-            errors.append("预设卡片必须是有效的 JSON 数组，且每项包含合法动作")
         if errors:
             for error in errors:
                 from flask import flash
@@ -495,25 +514,9 @@ def register_app_store(
                         ),
                     )
                     database.execute("DELETE FROM market_packages WHERE app_id = ?", (appId,))
-                    database.execute("DELETE FROM market_presets WHERE app_id = ?", (appId,))
                 database.executemany(
                     "INSERT INTO market_packages(app_id, architecture, enabled, download_url) VALUES (?, ?, ?, ?)",
                     [(appId, architecture, int(enabled), url) for architecture, (enabled, url) in packages.items()],
-                )
-                database.executemany(
-                    """
-                    INSERT INTO market_presets
-                    (app_id, title, description, action_type, action_target, action_arguments, sort_order)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    [
-                        (
-                            appId, preset["title"], preset["description"],
-                            preset["action_type"], preset["action_target"],
-                            json.dumps(preset["action_arguments"], ensure_ascii=False), index,
-                        )
-                        for index, preset in enumerate(presets or [])
-                    ],
                 )
                 database.commit()
             except sqlite3.IntegrityError as error:
@@ -535,6 +538,110 @@ def register_app_store(
             database.execute("DELETE FROM market_applications WHERE id = ?", (app_id,))
             database.commit()
         return admin_response("软件已删除", "success", "app_store.adminApps")
+
+    def _renderPresets():
+        _ensureSchema(connect)
+        with closing(connect()) as database:
+            rows = database.execute(
+                """
+                SELECT p.*, a.name AS app_name
+                FROM market_presets p
+                JOIN market_applications a ON a.id = p.app_id
+                ORDER BY a.name COLLATE NOCASE, p.sort_order, p.id
+                """
+            ).fetchall()
+            apps = database.execute(
+                "SELECT id, name FROM market_applications ORDER BY name COLLATE NOCASE"
+            ).fetchall()
+        presets = []
+        for row in rows:
+            preset = dict(row)
+            preset["action_arguments"] = _argumentsText(preset["action_arguments"])
+            presets.append(preset)
+        return render_template(
+            "admin_app_store_presets.html",
+            csrf_token=csrf_token(),
+            current_page="app_store_presets",
+            presets=presets,
+            apps=apps,
+        )
+
+    @blueprint.route("/admin/app-store/presets/", methods=["GET", "POST"])
+    @login_required
+    def adminPresets():
+        if request.method == "POST":
+            return _savePreset(None)
+        return _renderPresets()
+
+    @blueprint.post("/admin/app-store/presets/<int:preset_id>")
+    @login_required
+    def adminPreset(preset_id):
+        return _savePreset(preset_id)
+
+    def _savePreset(presetId):
+        check_csrf()
+        title = request.form.get("preset_title", "").strip()
+        description = request.form.get("preset_description", "").strip()
+        actionType = request.form.get("preset_action_type", "").strip().lower()
+        action = _formAction(
+            actionType,
+            request.form.get("preset_action_target"),
+            request.form.get("preset_action_arguments", ""),
+        )
+        try:
+            appId = int(request.form.get("preset_app_id"))
+            sortOrder = int(request.form.get("preset_sort_order", "0"))
+        except (TypeError, ValueError):
+            appId, sortOrder = None, 0
+        if request.form.get("delete"):
+            _ensureSchema(connect)
+            with closing(connect()) as database:
+                database.execute("DELETE FROM market_presets WHERE id = ?", (presetId,))
+                database.commit()
+            return admin_response("预设卡片已删除", "success", "app_store.adminPresets")
+        errors = []
+        if appId is None:
+            errors.append("请选择软件")
+        if not title:
+            errors.append("卡片标题不能为空")
+        if not action:
+            errors.append("预设卡片动作配置无效")
+        if errors:
+            return admin_response("；".join(errors), "error", "app_store.adminPresets", 400)
+        _ensureSchema(connect)
+        with closing(connect()) as database:
+            if not database.execute("SELECT 1 FROM market_applications WHERE id = ?", (appId,)).fetchone():
+                return admin_response("选择的软件不存在", "error", "app_store.adminPresets", 400)
+            values = (
+                appId,
+                title[:80],
+                description[:240],
+                action["type"],
+                action["target"],
+                json.dumps(action["arguments"], ensure_ascii=False),
+                sortOrder,
+            )
+            if presetId is None:
+                database.execute(
+                    """
+                    INSERT INTO market_presets
+                    (app_id, title, description, action_type, action_target, action_arguments, sort_order)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    values,
+                )
+                message = "预设卡片已新增"
+            else:
+                database.execute(
+                    """
+                    UPDATE market_presets SET app_id=?, title=?, description=?, action_type=?,
+                    action_target=?, action_arguments=?, sort_order=? WHERE id=?
+                    """,
+                    values + (presetId,),
+                )
+                message = "预设卡片已保存"
+            database.commit()
+        return admin_response(message, "success", "app_store.adminPresets")
 
     @blueprint.route("/admin/app-store/ads/", methods=["GET", "POST"])
     @login_required

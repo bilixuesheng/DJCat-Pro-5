@@ -651,6 +651,32 @@ def _dashboardStats():
         consumed = database.execute(
             "SELECT COALESCE(SUM(count), 0) FROM usage WHERE day = ?", (day,)
         ).fetchone()[0]
+        allRequests = database.execute(
+            "SELECT COUNT(*) FROM request_log"
+        ).fetchone()[0]
+        allByStatus = {
+            row["status"]: row["count"]
+            for row in database.execute(
+                "SELECT status, COUNT(*) AS count FROM request_log GROUP BY status"
+            )
+        }
+        allConsumed = database.execute(
+            "SELECT COALESCE(SUM(CASE WHEN status IN ('success', 'processing') "
+            "THEN cost ELSE 0 END), 0) FROM request_log"
+        ).fetchone()[0]
+    market = marketplaceStats(_connect, day)
+    today = {
+        "ai_requests": sum(requestsByStatus.values()),
+        "ai_success": requestsByStatus.get("success", 0),
+        "ai_failed": requestsByStatus.get("failed", 0),
+        "market_downloads": market["today_downloads"],
+    }
+    allData = {
+        "ai_requests": allRequests,
+        "ai_success": allByStatus.get("success", 0),
+        "ai_failed": allByStatus.get("failed", 0),
+        "market_downloads": market["downloads"],
+    }
     return {
         "machines": machines,
         "requests": sum(requestsByStatus.values()),
@@ -658,6 +684,10 @@ def _dashboardStats():
         "failed": requestsByStatus.get("failed", 0),
         "processing": requestsByStatus.get("processing", 0),
         "consumed": consumed,
+        "today": today,
+        "all": allData,
+        "all_consumed": allConsumed,
+        "market": market,
     }
 
 
@@ -947,9 +977,9 @@ def adminLogout():
 
 
 try:
-    from .app_store import register_app_store
+    from .app_store import marketplaceStats, register_app_store
 except ImportError:
-    from app_store import register_app_store
+    from app_store import marketplaceStats, register_app_store
 
 register_app_store(
     app,

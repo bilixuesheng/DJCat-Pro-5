@@ -3,50 +3,55 @@
 {% block title %}应用市场 · 软件{% endblock %}
 {% block page_name %}软件{% endblock %}
 
-{% block page_actions %}
-<a class="button button-primary" href="{{ url_for('app_store.adminNewApp') }}">新增软件</a>
-{% endblock %}
-
 {% block content %}
-<header class="page-header">
-    <div>
-        <div class="eyebrow">应用市场 / 软件</div>
-        <h1>软件目录</h1>
-        <p>管理客户端展示信息、分架构安装包、预设卡片和打开动作。</p>
-    </div>
-    <div class="machine-count"><strong>{{ apps|length }}</strong><span>个软件</span></div>
-</header>
+<div class="market-page">
+    <header class="page-header">
+        <div>
+            <div class="eyebrow">应用市场 / 软件管理</div>
+            <h1>软件目录</h1>
+            <p>管理客户端展示信息、分架构安装包、打开动作和版本号。</p>
+        </div>
+        <div class="machine-count"><strong>{{ apps|length }}</strong><span>个软件</span></div>
+    </header>
 
-<section class="section-block" aria-labelledby="apps-title">
-    <div class="section-heading">
-        <div><span class="section-index">01</span><h2 id="apps-title">已发布软件</h2></div>
-        <a href="{{ url_for('app_store.adminAds') }}">管理广告 →</a>
-    </div>
-    <div class="table-wrap">
-        <table>
-            <thead><tr><th>编号</th><th>名称</th><th>版本</th><th>安装目录</th><th>推荐</th><th>下载次数</th><th>更新时间</th><th></th></tr></thead>
-            <tbody>
-            {% for app in apps %}
-                <tr>
-                    <td><code>{{ app.id }}</code></td>
-                    <td><a class="table-action" href="{{ url_for('app_store.adminApp', app_id=app.id) }}">{{ app.name }}</a><br><small>{{ app.developer or '未填写开发者' }}</small></td>
-                    <td>{{ app.version }}</td>
-                    <td><code>{{ app.install_dir }}</code></td>
-                    <td>{{ '是' if app.recommended else '否' }}</td>
-                    <td>{{ app.download_count }}</td>
-                    <td>{{ app.updated_at }}</td>
-                    <td>
-                        <form method="post" action="{{ url_for('app_store.adminDeleteApp', app_id=app.id) }}" data-async-form data-confirm="确认删除 {{ app.name }} 吗？">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                            <button class="table-action" type="submit">删除</button>
-                        </form>
-                    </td>
-                </tr>
-            {% else %}
-                <tr><td class="empty" colspan="8">还没有软件，先新增一个。</td></tr>
-            {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</section>
+    <section class="section-block" aria-labelledby="apps-title">
+        <div class="section-heading">
+            <div><span class="section-index">01</span><h2 id="apps-title">已发布软件</h2></div>
+            <div class="section-heading-actions">
+                <a class="button button-primary" href="{{ url_for('app_store.adminNewApp') }}">新增软件</a>
+                <a href="{{ url_for('app_store.adminPresets') }}">管理预设卡片 →</a>
+                <a href="{{ url_for('app_store.adminAds') }}">管理广告 →</a>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>编号</th><th>名称</th><th>版本</th><th>安装目录</th><th>推荐</th><th>下载次数</th><th>更新时间</th><th>操作</th></tr></thead>
+                <tbody>
+                {% for app in apps %}
+                    <tr>
+                        <td><code>{{ app.id }}</code></td>
+                        <td><span>{{ app.name }}</span><br><small>{{ app.developer or '未填写开发者' }}</small></td>
+                        <td>{{ app.version }}</td>
+                        <td><code>{{ app.install_dir }}</code></td>
+                        <td>{{ '是' if app.recommended else '否' }}</td>
+                        <td>{{ app.download_count }}</td>
+                        <td>{{ app.updated_at }}</td>
+                        <td>
+                            <div class="table-actions">
+                                <a class="table-action" href="{{ url_for('app_store.adminApp', app_id=app.id) }}">编辑</a>
+                                <form method="post" action="{{ url_for('app_store.adminDeleteApp', app_id=app.id) }}" data-async-form data-confirm="确认删除 {{ app.name }} 吗？">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <button class="table-action" type="submit">删除</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                {% else %}
+                    <tr><td class="empty" colspan="8">还没有软件，先新增一个。</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
 {% endblock %}

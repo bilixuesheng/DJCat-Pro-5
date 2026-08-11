@@ -30,6 +30,35 @@
         });
     }
 
+    const syncActionFields = (form) => {
+        const type = form.querySelector("[data-action-type]");
+        const argumentsWrapper = form.querySelector("[data-action-arguments-wrapper]");
+        const target = form.querySelector("[data-action-target]");
+        const help = form.querySelector("[data-action-help]");
+        if (!type) return;
+        const isProgram = type.value === "program";
+        if (argumentsWrapper) argumentsWrapper.hidden = !isProgram;
+        if (target) {
+            target.placeholder = type.value === "url"
+                ? "https://example.com"
+                : type.value === "uri"
+                    ? "例如：mailto:hello@example.com"
+                    : "例如：classisland.exe 或 bin/classisland.exe";
+        }
+        if (help) {
+            help.textContent = type.value === "url"
+                ? "网页目标必须使用 HTTPS。"
+                : type.value === "uri"
+                    ? "系统协议会按客户端安全规则校验，危险协议会被拒绝。"
+                    : "程序目标只能是安装目录内的相对 EXE；每行填写一个启动参数。";
+        }
+    };
+
+    document.querySelectorAll("[data-action-form]").forEach((form) => {
+        form.querySelector("[data-action-type]")?.addEventListener("change", () => syncActionFields(form));
+        syncActionFields(form);
+    });
+
     const dismissToast = (toast) => {
         if (toast.classList.contains("is-leaving")) return;
         toast.classList.add("is-leaving");

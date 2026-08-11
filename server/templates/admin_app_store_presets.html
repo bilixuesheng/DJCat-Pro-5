@@ -1,0 +1,58 @@
+{% extends "admin_base.html" %}
+
+{% block title %}应用市场 · 预设卡片{% endblock %}
+{% block page_name %}预设卡片管理{% endblock %}
+
+{% block content %}
+<div class="market-page">
+    <header class="page-header">
+        <div>
+            <div class="eyebrow">应用市场 / 预设卡片管理</div>
+            <h1>主页预设</h1>
+            <p>用图形化表单配置安装后可执行的程序、网页和系统协议操作。</p>
+        </div>
+        <div class="machine-count"><strong>{{ presets|length }}</strong><span>张卡片</span></div>
+    </header>
+
+    <form class="config-form" method="post" action="{{ url_for('app_store.adminPresets') }}" data-action-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <section class="form-section">
+            <div class="form-section-title"><span>01</span><div><h2>新增预设卡片</h2><p>安装后用户可以把卡片固定到主页。</p></div></div>
+            <div class="form-fields two-columns">
+                <label>所属软件<select name="preset_app_id" required><option value="">请选择软件</option>{% for app in apps %}<option value="{{ app.id }}">{{ app.name }}</option>{% endfor %}</select></label>
+                <label>排序<input type="number" name="preset_sort_order" value="0"></label>
+                <label>卡片标题<input name="preset_title" maxlength="80" placeholder="例如：打开 ClassIsland" required></label>
+                <label>卡片简介<input name="preset_description" maxlength="240" placeholder="安装后点击卡片启动主程序"></label>
+                <label>卡片类型（操作）<select name="preset_action_type" data-action-type><option value="program">程序</option><option value="url">HTTPS 网页</option><option value="uri">系统协议</option></select></label>
+                <label>操作目标<input name="preset_action_target" data-action-target placeholder="classisland.exe 或 https://example.com" required></label>
+                <label class="full" data-action-arguments-wrapper>程序参数<textarea name="preset_action_arguments" data-action-arguments rows="3" placeholder="--minimized\n--profile default"></textarea><small>仅程序动作使用，每行一个参数；程序目标必须是安装目录内的相对 EXE。</small></label>
+                <p class="action-help full" data-action-help>网页必须使用 HTTPS；系统协议会按客户端安全规则校验。</p>
+            </div>
+            <div class="form-actions"><span>保存后客户端下次拉取目录即可看到。</span><button class="button button-primary" type="submit">新增卡片</button></div>
+        </section>
+    </form>
+
+    <section class="section-block">
+        <div class="section-heading"><div><span class="section-index">02</span><h2>已配置卡片</h2></div></div>
+        {% for preset in presets %}
+        <form class="form-section" method="post" action="{{ url_for('app_store.adminPreset', preset_id=preset.id) }}" data-action-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="form-section-title"><span>{{ '%02d'|format(loop.index) }}</span><div><h2>{{ preset.title }}</h2><p>{{ preset.app_name }}</p></div></div>
+            <div class="form-fields two-columns">
+                <label>所属软件<select name="preset_app_id" required>{% for app in apps %}<option value="{{ app.id }}" {% if app.id == preset.app_id %}selected{% endif %}>{{ app.name }}</option>{% endfor %}</select></label>
+                <label>排序<input type="number" name="preset_sort_order" value="{{ preset.sort_order }}"></label>
+                <label>卡片标题<input name="preset_title" maxlength="80" value="{{ preset.title }}" required></label>
+                <label>卡片简介<input name="preset_description" maxlength="240" value="{{ preset.description }}"></label>
+                <label>卡片类型（操作）<select name="preset_action_type" data-action-type><option value="program" {% if preset.action_type == 'program' %}selected{% endif %}>程序</option><option value="url" {% if preset.action_type == 'url' %}selected{% endif %}>HTTPS 网页</option><option value="uri" {% if preset.action_type == 'uri' %}selected{% endif %}>系统协议</option></select></label>
+                <label>操作目标<input name="preset_action_target" data-action-target value="{{ preset.action_target }}" required></label>
+                <label class="full" data-action-arguments-wrapper>程序参数<textarea name="preset_action_arguments" data-action-arguments rows="3">{{ preset.action_arguments }}</textarea><small>每行一个参数。</small></label>
+                <p class="action-help full" data-action-help>网页必须使用 HTTPS；系统协议会按客户端安全规则校验。</p>
+            </div>
+            <div class="form-actions full"><span>编号 {{ preset.id }} · {{ preset.action_type }}</span><span><button class="button button-danger" type="submit" name="delete" value="1" data-confirm="确认删除这张预设卡片吗？">删除</button> <button class="button button-secondary" type="submit">保存</button></span></div>
+        </form>
+        {% else %}
+        <div class="notice">还没有预设卡片，请先新增一张。</div>
+        {% endfor %}
+    </section>
+</div>
+{% endblock %}

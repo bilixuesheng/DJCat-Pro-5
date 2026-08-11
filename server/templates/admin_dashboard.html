@@ -8,7 +8,7 @@
     <div>
         <div class="eyebrow">Control center</div>
         <h1>服务总览</h1>
-        <p>查看电教猫服务端今天的运行数据和可用功能。</p>
+        <p>查看电教猫服务端的实时功能状态、今日运行数据和累计数据。</p>
     </div>
     <div class="refresh-note"><strong>北京时间</strong><span>每天 00:00 刷新</span></div>
 </header>
@@ -19,19 +19,35 @@
         <span>所有时间按北京时间计算</span>
     </div>
     <div class="metric-grid" aria-label="今日统计">
-        <article class="metric-card metric-card-accent"><span>今日请求</span><strong>{{ stats.requests }}</strong><small>REQUESTS TODAY</small></article>
-        <article class="metric-card"><span>成功</span><strong>{{ stats.success }}</strong><small>COMPLETED</small></article>
-        <article class="metric-card"><span>失败</span><strong>{{ stats.failed }}</strong><small>FAILED</small></article>
-        <article class="metric-card"><span>处理中</span><strong>{{ stats.processing }}</strong><small>PROCESSING</small></article>
-        <article class="metric-card"><span>消耗额度</span><strong>{{ stats.consumed }}</strong><small>QUOTA USED</small></article>
-        <article class="metric-card"><span>注册机器</span><strong>{{ stats.machines }}</strong><small>REGISTERED</small></article>
+        <article class="metric-card metric-card-accent"><span>今日 AI 请求</span><strong>{{ stats.today.ai_requests }}</strong><small>AI REQUESTS TODAY</small></article>
+        <article class="metric-card"><span>今日应用下载</span><strong>{{ stats.today.market_downloads }}</strong><small>APP DOWNLOADS TODAY</small></article>
+        <article class="metric-card"><span>今日成功</span><strong>{{ stats.today.ai_success }}</strong><small>COMPLETED TODAY</small></article>
+        <article class="metric-card"><span>今日失败</span><strong>{{ stats.today.ai_failed }}</strong><small>FAILED TODAY</small></article>
+    </div>
+</section>
+
+<section class="section-block" aria-labelledby="all-data-title">
+    <div class="section-heading">
+        <div><span class="section-index">02</span><h2 id="all-data-title">全部数据</h2></div>
+        <span>从服务启用以来累计</span>
+    </div>
+    <div class="metric-grid" aria-label="累计统计">
+        <article class="metric-card"><span>AI 请求</span><strong>{{ stats.all.ai_requests }}</strong><small>ALL AI REQUESTS</small></article>
+        <article class="metric-card"><span>AI 成功</span><strong>{{ stats.all.ai_success }}</strong><small>ALL COMPLETED</small></article>
+        <article class="metric-card"><span>AI 失败</span><strong>{{ stats.all.ai_failed }}</strong><small>ALL FAILED</small></article>
+        <article class="metric-card"><span>应用下载</span><strong>{{ stats.all.market_downloads }}</strong><small>ALL APP DOWNLOADS</small></article>
+        <article class="metric-card"><span>额度消耗</span><strong>{{ stats.all_consumed }}</strong><small>ALL QUOTA USED</small></article>
+        <article class="metric-card"><span>已发布软件</span><strong>{{ stats.market.apps }}</strong><small>PUBLISHED APPS</small></article>
+        <article class="metric-card"><span>启用广告</span><strong>{{ stats.market.ads }}</strong><small>ACTIVE ADS</small></article>
+        <article class="metric-card"><span>预设卡片</span><strong>{{ stats.market.presets }}</strong><small>MARKET PRESETS</small></article>
+        <article class="metric-card"><span>注册机器</span><strong>{{ stats.machines }}</strong><small>REGISTERED MACHINES</small></article>
     </div>
 </section>
 
 <section class="section-block" aria-labelledby="services-title">
     <div class="section-heading">
-        <div><span class="section-index">02</span><h2 id="services-title">在线功能</h2></div>
-        <span>1 项服务</span>
+        <div><span class="section-index">03</span><h2 id="services-title">在线功能</h2></div>
+        <span>2 项服务</span>
     </div>
     <a class="service-card" href="{{ url_for('adminAIMarkdown') }}">
                 <span class="service-icon"><img src="{{ url_for('static', filename='logo.png') }}" alt=""></span>
@@ -42,6 +58,19 @@
                 <div><dt>模型</dt><dd>{{ model }}</dd></div>
                 <div><dt>单机额度</dt><dd>{{ daily_limit }} 次 / 天</dd></div>
                 <div><dt>高峰扣除</dt><dd>{{ '双倍' if peak_enabled else '标准' }}</dd></div>
+            </dl>
+        </div>
+        <span class="service-arrow" aria-hidden="true">→</span>
+    </a>
+    <a class="service-card" href="{{ url_for('app_store.adminApps') }}">
+        <span class="service-icon"><img src="{{ url_for('static', filename='logo.png') }}" alt=""></span>
+        <div class="service-copy">
+            <div class="service-title"><h3>应用市场</h3><span class="status-chip"><i></i>目录在线</span></div>
+            <p>向客户端提供软件、广告和主页预设卡片，支持分架构安装包。</p>
+            <dl class="service-meta">
+                <div><dt>已发布</dt><dd>{{ stats.market.apps }} 个软件</dd></div>
+                <div><dt>启用广告</dt><dd>{{ stats.market.ads }} 条</dd></div>
+                <div><dt>累计下载</dt><dd>{{ stats.market.downloads }}</dd></div>
             </dl>
         </div>
         <span class="service-arrow" aria-hidden="true">→</span>

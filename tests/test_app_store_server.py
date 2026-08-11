@@ -69,9 +69,11 @@ class AppStoreServerTest(TestCase):
                 "icon_url": "https://cdn.example.test/demo.png",
                 "recommended": "1",
                 "announcement": "维护公告",
+                "open_action_type": "program",
+                "open_action_target": "demo.exe",
+                "open_action_arguments": "--minimized\n--profile default",
                 "x86_64_enabled": "1",
                 "x86_64_url": "https://cdn.example.test/demo-x64.zip",
-                "presets_json": '[{"title":"打开","description":"启动","action_type":"program","action_target":"demo.exe","action_arguments":{}}]',
             },
         )
         self.assertEqual(response.status_code, 302)
@@ -94,10 +96,27 @@ class AppStoreServerTest(TestCase):
 
     def testAdminCanManageAppAndPublicDownloadIncrementsCount(self):
         self._createApp()
+        preset = self.client.post(
+            "/admin/app-store/presets/",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(),
+                "preset_app_id": "1",
+                "preset_title": "打开",
+                "preset_description": "启动",
+                "preset_action_type": "program",
+                "preset_action_target": "demo.exe",
+                "preset_action_arguments": "--minimized",
+                "preset_sort_order": "0",
+            },
+        )
+        self.assertEqual(preset.status_code, 302)
         catalog = self.client.get("/app-store/catalog", base_url="https://api.djcatpro.top")
         app = catalog.json["apps"][0]
         self.assertEqual(app["announcement"], "维护公告")
         self.assertEqual(app["presets"][0]["action"]["target"], "demo.exe")
+        self.assertEqual(app["presets"][0]["action"]["arguments"], {"args": ["--minimized"]})
+        self.assertEqual(app["open_action"]["arguments"], {"args": ["--minimized", "--profile default"]})
         self.assertTrue(app["recommended"])
 
         redirect = self.client.get(
@@ -108,6 +127,7 @@ class AppStoreServerTest(TestCase):
         self.assertEqual(redirect.location, "https://cdn.example.test/demo-x64.zip")
         with closing(ai_markdown._connect()) as database:
             self.assertEqual(database.execute("SELECT download_count FROM market_applications WHERE id = 1").fetchone()[0], 1)
+            self.assertEqual(database.execute("SELECT COUNT(*) FROM market_download_events").fetchone()[0], 1)
         self.client.get(
             "/app-store/apps/1/download?arch=x86_64",
             base_url="https://api.djcatpro.top",
@@ -119,6 +139,113 @@ class AppStoreServerTest(TestCase):
         page = self.client.get("/admin/app-store/apps/1", base_url="https://dash.djcatpro.top")
         self.assertEqual(page.status_code, 200)
         self.assertIn("预设卡片", page.get_data(as_text=True))
+        self.assertNotIn("presets_json", page.get_data(as_text=True))
+        self.assertIn("打开预设卡片管理", page.get_data(as_text=True))
+        presets = self.client.get("/admin/app-store/presets/", base_url="https://dash.djcatpro.top")
+        self.assertIn("预设卡片管理", presets.get_data(as_text=True))
+        self.assertIn("--minimized", presets.get_data(as_text=True))
+
+        edited = self.client.post(
+            "/admin/app-store/presets/1",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(),
+                "preset_app_id": "1",
+                "preset_title": "打开网页",
+                "preset_description": "访问文档",
+                "preset_action_type": "url",
+                "preset_action_target": "https://docs.example.test",
+                "preset_action_arguments": "",
+                "preset_sort_order": "1",
+            },
+        )
+        self.assertEqual(edited.status_code, 302)
+        self.assertEqual(
+            self.client.get("/app-store/catalog", base_url="https://api.djcatpro.top").json["apps"][0]["presets"][0]["action"]["target"],
+            "https://docs.example.test",
+        )
+        self.client.post(
+            "/admin/app-store/apps/1",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(),
+                "name": "Demo",
+                "developer": "DJCat",
+                "description": "Updated",
+                "version": "1.3.0",
+                "install_dir": "demo",
+                "icon_url": "https://cdn.example.test/demo.png",
+                "recommended": "1",
+                "announcement": "维护公告",
+                "open_action_type": "program",
+                "open_action_target": "demo.exe",
+                "open_action_arguments": "--minimized",
+                "x86_64_enabled": "1",
+                "x86_64_url": "https://cdn.example.test/demo-x64.zip",
+            },
+        )
+        self.assertEqual(
+            len(self.client.get("/app-store/catalog", base_url="https://api.djcatpro.top").json["apps"][0]["presets"]),
+            1,
+        )
+        deleted = self.client.post(
+            "/admin/app-store/presets/1",
+            base_url="https://dash.djcatpro.top",
+            data={"csrf_token": self._csrf(), "delete": "1"},
+        )
+        self.assertEqual(deleted.status_code, 302)
+        self.assertEqual(
+            self.client.get("/app-store/catalog", base_url="https://api.djcatpro.top").json["apps"][0]["presets"],
+            [],
+        )
+
+    def testDashboardIncludesMarketServiceAndCumulativeData(self):
+        self._createApp()
+        self.client.get(
+            "/app-store/apps/1/download?arch=x86_64",
+            base_url="https://api.djcatpro.top",
+        )
+        dashboard = self.client.get("/admin/", base_url="https://dash.djcatpro.top")
+        self.assertEqual(dashboard.status_code, 200)
+        body = dashboard.get_data(as_text=True)
+        self.assertIn("今日应用下载", body)
+        self.assertIn("全部数据", body)
+        self.assertIn("应用市场", body)
+        self.assertIn("累计下载", body)
+        stats = ai_markdown._dashboardStats()
+        self.assertEqual(stats["today"]["market_downloads"], 1)
+        self.assertEqual(stats["all"]["market_downloads"], 1)
+
+    def testPresetRejectsUnsafeTargets(self):
+        self._createApp()
+        response = self.client.post(
+            "/admin/app-store/presets/",
+            base_url="https://dash.djcatpro.top",
+            headers={"Accept": "application/json"},
+            data={
+                "csrf_token": self._csrf(),
+                "preset_app_id": "1",
+                "preset_title": "危险动作",
+                "preset_action_type": "program",
+                "preset_action_target": "../demo.exe",
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def testNewAppFormDefaultsBothArchitecturesAndUsesEditButton(self):
+        self._login()
+        page = self.client.get("/admin/app-store/apps/new", base_url="https://dash.djcatpro.top")
+        body = page.get_data(as_text=True)
+        self.assertIn('name="x86_64_enabled" value="1" checked', body)
+        self.assertIn('name="arm64_enabled" value="1" checked', body)
+        self.assertIn("程序参数", body)
+        self.assertNotIn("参数 JSON", body)
+
+        self._createApp()
+        listing = self.client.get("/admin/app-store/apps/", base_url="https://dash.djcatpro.top")
+        body = listing.get_data(as_text=True)
+        self.assertIn(">编辑</a>", body)
+        self.assertNotIn('class="table-action" href="/admin/app-store/apps/1">Demo</a>', body)
 
     def testAdminAndApiHostsDoNotCross(self):
         self.assertEqual(
@@ -132,4 +259,7 @@ class AppStoreServerTest(TestCase):
         self._login()
         page = self.client.get("/admin/app-store/ads/", base_url="https://dash.djcatpro.top")
         self.assertEqual(page.status_code, 200)
-        self.assertIn("广告横幅", page.get_data(as_text=True))
+        body = page.get_data(as_text=True)
+        self.assertIn("广告横幅", body)
+        self.assertIn("广告管理", body)
+        self.assertIn("预设卡片管理", body)
