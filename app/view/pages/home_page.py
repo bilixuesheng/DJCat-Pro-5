@@ -1,4 +1,6 @@
 import os
+from copy import deepcopy
+from threading import RLock
 
 from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QRectF, Qt, Signal
 from PySide6.QtGui import (
@@ -24,9 +26,14 @@ from qfluentwidgets import (
     CardWidget,
     FlowLayout,
     IconWidget,
+    MessageBox,
     SubtitleLabel,
     TitleLabel,
     ToolButton,
+    RoundMenu,
+    Action,
+    InfoBar,
+    InfoBarPosition,
     qconfig,
 )
 from qfluentwidgets import FluentIcon as FIF
@@ -37,7 +44,23 @@ from app.config.cfg import (
     cfg,
 )
 from app.config.paths import ASSET_DIR
+from app.common.home_cards import (
+    ActionSequenceWorker,
+    DEFAULT_HOME_CARD_NAMES,
+    icon_for_data,
+    normalize_custom_cards,
+    remove_cached_icon,
+)
+from app.view.components.home_card_dialog import CustomCardDialog
 from app.view.components.scroll_area import ScrollArea
+
+
+DEFAULT_CARD_INFO = {
+    "全屏投送": (FIF.FULL_SCREEN, "将信息以大字全屏展示"),
+    "考试倒计时": (FIF.CALENDAR, "设定考试时长并全屏显示倒计时"),
+    "定时播报": (FIF.MEGAPHONE, "设置每日定点语音播报时间或播放音频"),
+    "定时关机": (FIF.POWER_BUTTON, "设置指定时间提示或自动关闭计算机"),
+}
 
 
 class ActionCard(CardWidget):
@@ -51,6 +74,7 @@ class ActionCard(CardWidget):
         self._dragging = False
         self._drag_position = QPoint()
         self._press_position = None
+        self._editable = False
         super().__init__(parent)
         self.setFixedSize(210, 120)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -64,10 +88,19 @@ class ActionCard(CardWidget):
         icon_widget = IconWidget(icon, self)
         icon_widget.setFixedSize(18, 18)
         title_label = TitleLabel(title, self)
+        self.iconWidget = icon_widget
+        self.titleLabel = title_label
+        self.contentLabel = BodyLabel(content, self)
+        self.contentLabel.setWordWrap(True)
+        self.editButton = ToolButton(FIF.EDIT, self)
+        self.editButton.setFixedSize(40, 40)
+        self.editButton.setToolTip("编辑主页卡片")
+        self.editButton.setAccessibleName("编辑主页卡片")
+        self.editButton.hide()
         self.deleteButton = ToolButton(FIF.DELETE, self)
-        self.deleteButton.setFixedSize(24, 24)
+        self.deleteButton.setFixedSize(40, 40)
         self.deleteButton.setEnabled(False)
-        self.deleteButton.setToolTip("系统卡片不可删除")
+        self.deleteButton.setToolTip("删除主页卡片")
         self.deleteButton.setAccessibleName(f"删除{title}")
         self.deleteButton.setStyleSheet("""
             ToolButton {
@@ -83,22 +116,32 @@ class ActionCard(CardWidget):
         top_layout.addWidget(icon_widget)
         top_layout.addWidget(title_label)
         top_layout.addStretch(1)
+        top_layout.addWidget(self.editButton)
         top_layout.addWidget(self.deleteButton)
-        content_label = BodyLabel(content, self)
-        content_label.setWordWrap(True)
         layout.addLayout(top_layout)
-        layout.addWidget(content_label)
+        layout.addWidget(self.contentLabel)
         layout.addStretch(1)
 
     def setRemovable(self, removable: bool) -> None:
         self.deleteButton.setEnabled(removable)
-        self.deleteButton.setToolTip("删除主页预设卡片" if removable else "系统卡片不可删除")
+        self.deleteButton.setToolTip("删除主页卡片" if removable else "系统卡片不可删除")
+
+    def setEditable(self, editable: bool) -> None:
+        self._editable = editable
+        self.editButton.setVisible(editable and self._editing)
+
+    def setCardData(self, icon, title: str, content: str) -> None:
+        self.iconWidget.setIcon(icon)
+        self.titleLabel.setText(title)
+        self.titleLabel.setToolTip(title)
+        self.contentLabel.setText(content)
 
     def setEditing(self, editing):
         self._editing = editing
         self._dragging = False
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, editing)
         self.deleteButton.setVisible(editing)
+        self.editButton.setVisible(editing and self._editable)
         self.setCursor(
             Qt.CursorShape.OpenHandCursor
             if editing
@@ -329,6 +372,10 @@ class HomePage(ScrollArea):
         self._drag_target = None
         self._applicationCardKeys = set()
         self._applicationCardData = {}
+        self._customCardKeys = set()
+        self._customCardData = {}
+        self._customWorkers = {}
+        self._cardsLock = RLock()
         self.setObjectName("HomePage")
         self.container = QWidget()
         self.vBoxLayout = QVBoxLayout(self.container)
@@ -352,13 +399,21 @@ class HomePage(ScrollArea):
         self.subTitle = SubtitleLabel("常用功能", self.container)
         self.editHint = BodyLabel("拖动卡片调整位置", self.container)
         self.editHint.hide()
+        self.addBtn = ToolButton(FIF.ADD, self.container)
+        self.addBtn.setFixedSize(40, 40)
+        self.addBtn.setToolTip("新建主页卡片")
+        self.addBtn.setAccessibleName("新建主页卡片")
+        self.addBtn.hide()
+        self.addBtn.clicked.connect(self._showAddMenu)
         self.sortBtn = ToolButton(FIF.EDIT, self.container)
+        self.sortBtn.setFixedSize(40, 40)
         self.sortBtn.setToolTip("调整卡片顺序")
         self.sortBtn.setAccessibleName("调整卡片顺序")
         self.sortBtn.clicked.connect(self._toggleCardEditing)
         self.headerLayout.addWidget(self.subTitle)
         self.headerLayout.addStretch(1)
         self.headerLayout.addWidget(self.editHint)
+        self.headerLayout.addWidget(self.addBtn)
         self.headerLayout.addWidget(self.sortBtn)
         self.vBoxLayout.addLayout(self.headerLayout)
 
@@ -395,10 +450,18 @@ class HomePage(ScrollArea):
                 self.cardsWidget,
             )
         }
-        for card in self.all_cards.values():
+        for name, card in self.all_cards.items():
+            card.setRemovable(True)
+            if name in DEFAULT_CARD_INFO:
+                card.deleteButton.clicked.connect(
+                    lambda _checked=False, cardName=name: self._removeDefaultCard(cardName)
+                )
             card.dragStarted.connect(self._startCardDrag)
             card.dragMoved.connect(self._moveCard)
             card.dragFinished.connect(self._finishCardDrag)
+
+        for data in normalize_custom_cards(cfg.customHomeCards.value):
+            self._addCustomCard(data, persist=False)
 
         self._renderCards()
         self.vBoxLayout.addStretch(1)
@@ -444,6 +507,206 @@ class HomePage(ScrollArea):
             self._applicationCardData[key] = dict(item)
         self._renderCards()
 
+    def _addCustomCard(self, data, persist=True):
+        normalized = normalize_custom_cards([data])
+        if not normalized:
+            return None
+        data = normalized[0]
+        card_id = data["id"]
+        key = f"custom:{card_id}"
+        old_card = self.all_cards.pop(key, None)
+        if old_card is not None:
+            old_card.deleteLater()
+        card = ActionCard(
+            icon_for_data(data.get("icon")),
+            data["title"],
+            data.get("description", ""),
+            self.cardsWidget,
+        )
+        card.setRemovable(True)
+        card.setEditable(True)
+        card.deleteButton.clicked.connect(
+            lambda _checked=False, customId=card_id: self._removeCustomCard(customId)
+        )
+        card.editButton.clicked.connect(
+            lambda _checked=False, customId=card_id: self._editCustomCard(customId)
+        )
+        card.clicked.connect(
+            lambda customId=card_id: self._runCustomCard(customId)
+        )
+        card.dragStarted.connect(self._startCardDrag)
+        card.dragMoved.connect(self._moveCard)
+        card.dragFinished.connect(self._finishCardDrag)
+        self.all_cards[key] = card
+        self._customCardKeys.add(key)
+        with self._cardsLock:
+            self._customCardData[card_id] = data
+        if persist:
+            self._saveCustomCards()
+        return card
+
+    def _saveCustomCards(self):
+        with self._cardsLock:
+            cfg.set(cfg.customHomeCards, deepcopy(list(self._customCardData.values())))
+
+    def _activeCardNames(self):
+        defaults = set(self._defaultCardNames())
+        return defaults | self._customCardKeys | self._applicationCardKeys
+
+    def _defaultCardNames(self):
+        value = cfg.visibleDefaultHomeCards.value
+        if not isinstance(value, list):
+            return list(DEFAULT_HOME_CARD_NAMES)
+        names = []
+        for name in value:
+            if isinstance(name, str) and name in DEFAULT_CARD_INFO and name not in names:
+                names.append(name)
+        return names
+
+    def _saveVisibleDefaults(self, names):
+        cfg.set(
+            cfg.visibleDefaultHomeCards,
+            [name for name in names if isinstance(name, str) and name in DEFAULT_CARD_INFO],
+        )
+
+    def shutdown(self):
+        workers = [
+            worker
+            for cardWorkers in self._customWorkers.values()
+            for worker in cardWorkers
+        ]
+        for worker in workers:
+            worker.cancel()
+        for worker in workers:
+            if worker._thread is not None:
+                worker._thread.join()
+            worker.deleteLater()
+        self._customWorkers.clear()
+
+    def _showAddMenu(self):
+        menu = RoundMenu(parent=self)
+        menu.closedSignal.connect(menu.deleteLater)
+        defaults = RoundMenu("默认", menu)
+        defaults.setIcon(FIF.APPLICATION)
+        visible = set(self._defaultCardNames())
+        for name, (icon, _description) in DEFAULT_CARD_INFO.items():
+            if name in visible:
+                continue
+            action = Action(icon, name, triggered=lambda _checked=False, cardName=name: self._restoreDefaultCard(cardName))
+            defaults.addAction(action)
+        if not defaults.actions():
+            unavailable = Action(FIF.INFO, "已全部添加")
+            unavailable.setEnabled(False)
+            defaults.addAction(unavailable)
+        menu.addMenu(defaults)
+        menu.addAction(Action(FIF.EDIT, "自定义", triggered=self._createCustomCard))
+        menu.exec(self.addBtn.mapToGlobal(QPoint(0, self.addBtn.height())))
+
+    def _restoreDefaultCard(self, name):
+        names = self._defaultCardNames()
+        if name not in DEFAULT_CARD_INFO or name in names:
+            return
+        names.append(name)
+        self._saveVisibleDefaults(names)
+        card = self.all_cards.get(name)
+        if card is not None:
+            card.setEditing(self._editing_cards)
+        self._renderCards()
+        self._saveCardOrder()
+
+    def _removeDefaultCard(self, name):
+        names = [item for item in self._defaultCardNames() if item != name]
+        self._saveVisibleDefaults(names)
+        self._card_order = [item for item in self._card_order if item != name]
+        self._saveCardOrder()
+        self._renderCards()
+
+    def _createCustomCard(self):
+        dialog = CustomCardDialog(parent=self.window())
+        if not dialog.exec():
+            return
+        card = self._addCustomCard(dialog.getData())
+        if card is not None:
+            card.setEditing(self._editing_cards)
+            self._renderCards()
+            self._saveCardOrder()
+
+    def _editCustomCard(self, card_id):
+        with self._cardsLock:
+            data = deepcopy(self._customCardData.get(card_id))
+        if data is None:
+            return
+        dialog = CustomCardDialog(data, self.window())
+        if not dialog.exec():
+            return
+        updated = dialog.getData()
+        old_icon = data.get("icon")
+        new_icon = updated.get("icon")
+        if old_icon != new_icon:
+            remove_cached_icon(old_icon)
+        with self._cardsLock:
+            self._customCardData[card_id] = updated
+        card = self.all_cards.get(f"custom:{card_id}")
+        if card is not None:
+            card.setCardData(icon_for_data(new_icon), updated["title"], updated["description"])
+        self._saveCustomCards()
+        self._renderCards()
+
+    def _removeCustomCard(self, card_id):
+        with self._cardsLock:
+            data = deepcopy(self._customCardData.get(card_id))
+        if data is None:
+            return
+        if not MessageBox("删除主页卡片", f"确定删除“{data['title']}”吗？", self.window()).exec():
+            return
+        for worker in self._customWorkers.get(card_id, []):
+            worker.cancel()
+        remove_cached_icon(data.get("icon"))
+        with self._cardsLock:
+            self._customCardData.pop(card_id, None)
+        key = f"custom:{card_id}"
+        card = self.all_cards.pop(key, None)
+        self._customCardKeys.discard(key)
+        if card is not None:
+            card.deleteLater()
+        self._card_order = [item for item in self._card_order if item != key]
+        self._saveCustomCards()
+        self._saveCardOrder()
+        self._renderCards()
+
+    def _getCustomActions(self, card_id):
+        with self._cardsLock:
+            data = self._customCardData.get(card_id)
+            return deepcopy(data["actions"]) if data else None
+
+    def _runCustomCard(self, card_id):
+        workers = self._customWorkers.setdefault(card_id, [])
+        if workers:
+            if not MessageBox("卡片正在运行", "是否再运行一遍该卡片的动作？", self.window()).exec():
+                return
+        worker = ActionSequenceWorker(card_id, self._getCustomActions)
+        worker.finished.connect(self._customSequenceFinished)
+        workers.append(worker)
+        worker.start()
+
+    def _customSequenceFinished(self, card_id, errors):
+        worker = self.sender()
+        workers = self._customWorkers.get(card_id, [])
+        if worker in workers:
+            workers.remove(worker)
+        if not workers:
+            self._customWorkers.pop(card_id, None)
+        if errors:
+            InfoBar.error(
+                "卡片执行完成但有失败动作",
+                "；".join(errors),
+                duration=5000,
+                position=InfoBarPosition.BOTTOM_RIGHT,
+                parent=self,
+            )
+        if worker is not None:
+            worker.deleteLater()
+
     def _removeApplicationCard(self, key: str) -> None:
         item = self._applicationCardData.get(key)
         card = self.all_cards.pop(key, None)
@@ -459,17 +722,23 @@ class HomePage(ScrollArea):
             self.applicationCardRemoved.emit(item)
 
     def _renderCards(self):
+        active_names = self._activeCardNames()
+        saved_order = cfg.homeCardOrder.value
+        if not isinstance(saved_order, list):
+            saved_order = []
         current_order = [
-            name for name in cfg.homeCardOrder.value if name in self.all_cards
+            name for name in saved_order if isinstance(name, str) and name in active_names
         ]
         for name in self.all_cards:
-            if name not in current_order:
+            if name in active_names and name not in current_order:
                 current_order.append(name)
         self._card_order = current_order
         self._layoutCards()
 
     def _layoutCards(self):
         self.flowLayout.removeAllWidgets()
+        for name, card in self.all_cards.items():
+            card.setVisible(name in self._card_order)
         for name in self._card_order:
             card = self.all_cards[name]
             self.flowLayout.addWidget(card)
@@ -478,6 +747,7 @@ class HomePage(ScrollArea):
     def _toggleCardEditing(self):
         self._editing_cards = not self._editing_cards
         self.editHint.setVisible(self._editing_cards)
+        self.addBtn.setVisible(self._editing_cards)
         self.sortBtn.setIcon(FIF.ACCEPT if self._editing_cards else FIF.EDIT)
         self.sortBtn.setToolTip(
             "完成调整" if self._editing_cards else "调整卡片顺序"
@@ -515,7 +785,7 @@ class HomePage(ScrollArea):
         target = min(
             (
                 other
-                for other in self.all_cards.values()
+                for other in (self.all_cards[name] for name in self._card_order)
                 if other is not card
                 and other.geometry()
                 .adjusted(-hit_margin, -hit_margin, hit_margin, hit_margin)
@@ -558,6 +828,10 @@ class HomePage(ScrollArea):
     def _saveCardOrder(self):
         if cfg.homeCardOrder.value != self._card_order:
             cfg.set(cfg.homeCardOrder, list(self._card_order))
+
+    def closeEvent(self, event):
+        self.shutdown()
+        super().closeEvent(event)
 
     def updateBannerVisibility(self):
         if cfg.showBanner.value:

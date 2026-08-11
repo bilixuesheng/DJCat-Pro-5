@@ -23,11 +23,18 @@ class HomeCardEditTest(TestCase):
         self.tempDir = tempfile.TemporaryDirectory()
         self.configFile = cfg.file
         self.cardOrder = list(cfg.homeCardOrder.value)
+        self.visibleDefaults = list(cfg.visibleDefaultHomeCards.value)
+        self.customCards = list(cfg.customHomeCards.value)
         cfg.file = Path(self.tempDir.name) / "config.json"
         cfg.set(
             cfg.homeCardOrder,
             ["全屏投送", "考试倒计时", "定时关机", "定时播报"],
         )
+        cfg.set(
+            cfg.visibleDefaultHomeCards,
+            ["全屏投送", "考试倒计时", "定时关机", "定时播报"],
+        )
+        cfg.set(cfg.customHomeCards, [])
         self.page = HomePage()
         self.page.resize(800, 500)
         self.page.show()
@@ -36,6 +43,8 @@ class HomeCardEditTest(TestCase):
     def tearDown(self):
         self.page.close()
         cfg.set(cfg.homeCardOrder, self.cardOrder)
+        cfg.set(cfg.visibleDefaultHomeCards, self.visibleDefaults)
+        cfg.set(cfg.customHomeCards, self.customCards)
         cfg.file = self.configFile
         self.tempDir.cleanup()
 
@@ -50,7 +59,7 @@ class HomeCardEditTest(TestCase):
         for card in self.page.all_cards.values():
             self.assertEqual(card.size().toTuple(), (210, 120))
             self.assertTrue(card.deleteButton.isVisible())
-            self.assertFalse(card.deleteButton.isEnabled())
+            self.assertTrue(card.deleteButton.isEnabled())
             self.assertTrue(
                 card.testAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents)
             )
