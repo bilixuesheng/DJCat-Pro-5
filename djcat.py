@@ -2,9 +2,6 @@ import os
 import sys
 import traceback
 
-from PySide6.QtWidgets import QApplication
-
-
 MainWindow = None
 
 
@@ -52,8 +49,22 @@ def main():
     else:
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-    app = QApplication(sys.argv)
+    from app.platform.application import SingletonApplication, raiseWindow
+
+    app = SingletonApplication(sys.argv)
     isSilent = "--silence" in sys.argv
+    activationPending = False
+
+    def onActivationRequested():
+        nonlocal activationPending
+        window = getattr(app, "window", None)
+        if window is None:
+            activationPending = True
+            return
+        activationPending = False
+        raiseWindow(window)
+
+    app.activationRequested.connect(onActivationRequested)
 
     from PySide6.QtGui import QColor
     from qfluentwidgets import qconfig, setThemeColor
@@ -69,6 +80,8 @@ def main():
     setThemeColor(QColor(49, 101, 49))
 
     app.window = startApp(isSilent=isSilent)
+    if activationPending:
+        onActivationRequested()
     app.aboutToQuit.connect(app.window._shutdownResources)
     sys.exit(app.exec())
 
