@@ -33,7 +33,7 @@
             <div class="section-label">Functions</div>
             <h2>功能总览</h2>
         </div>
-        <span class="section-note">当前 2 项在线功能</span>
+        <span class="section-note">当前 1 项在线功能</span>
     </div>
     <div class="feature-grid">
         <a class="feature-card" href="{{ url_for('adminAIMarkdown') }}">
@@ -50,23 +50,6 @@
                 <div><dt>模型</dt><dd>{{ model }}</dd></div>
                 <div><dt>每日额度</dt><dd>{{ daily_limit }}</dd></div>
                 <div><dt>高峰双倍</dt><dd>{{ '已开启' if peak_enabled else '已关闭' }}</dd></div>
-            </dl>
-            <span class="feature-enter">进入管理 <b>→</b></span>
-        </a>
-        <a class="feature-card" href="{{ url_for('adminApplications') }}">
-            <div class="feature-card-top">
-                <span class="feature-icon" aria-hidden="true">APP</span>
-                <span class="feature-status"><i></i>目录已启用</span>
-            </div>
-            <div>
-                <div class="section-label">应用市场 · Catalog</div>
-                <h3>应用与广告</h3>
-                <p>管理软件版本、下载信息、主页预设卡片和市场广告。</p>
-            </div>
-            <dl class="feature-meta">
-                <div><dt>软件</dt><dd>{{ application_count }}</dd></div>
-                <div><dt>广告</dt><dd>{{ advertisement_count }}</dd></div>
-                <div><dt>接口</dt><dd>/app-store/catalog</dd></div>
             </dl>
             <span class="feature-enter">进入管理 <b>→</b></span>
         </a>

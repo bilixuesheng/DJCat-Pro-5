@@ -1,5 +1,4 @@
 import threading
-import time
 
 from loguru import logger
 from PySide6.QtCore import QTimer, Qt, Signal
@@ -16,8 +15,6 @@ from qfluentwidgets import (
     ComboBoxSettingCard,
     FluentIcon,
     HyperlinkCard,
-    InfoBar,
-    InfoBarPosition,
     LineEdit,
     PrimaryPushSettingCard,
     PushSettingCard,
@@ -32,7 +29,6 @@ from qfluentwidgets import (
 )
 
 from app.common.ai_markdown import PEAK_HOURS_TEXT, fetchQuota
-from app.common.app_store import clearImageCache
 from app.config.cfg import (
     BANNER_IMAGE_PRESETS,
     BANNER_PRESET_SCALE_MODES,
@@ -212,7 +208,6 @@ class AIMarkdownStyleSettingCard(CollapsibleSettingCard):
 
 class SettingPage(ScrollArea):
     aiQuotaReceived = Signal(int, int, int, object, str)
-    cacheCleared = Signal(int, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -507,12 +502,6 @@ class SettingPage(ScrollArea):
             "关于",
             f"© Copyright {YEAR}, {AUTHOR}. Version {VERSION}。Beta 版仅接收 Beta 通道的更新",
         )
-        self.clearAppStoreCacheCard = PrimaryPushSettingCard(
-            "清理缓存",
-            FluentIcon.DELETE,
-            "应用市场缓存",
-            "清理已缓存的应用图标和广告图片",
-        )
         self.aboutGroup.addSettingCards(
             [
                 HyperlinkCard(
@@ -522,7 +511,6 @@ class SettingPage(ScrollArea):
                     "了解作者",
                     f"发现更多 {AUTHOR} 的作品",
                 ),
-                self.clearAppStoreCacheCard,
                 self.aboutCard,
             ]
         )
@@ -540,9 +528,7 @@ class SettingPage(ScrollArea):
         self.chooseImageCard.clicked.connect(self._onChooseImageClicked)
         self.autoRunCard.checkedChanged.connect(self._onAutoRunChanged)
         self.aboutCard.clicked.connect(self._onAboutCardClicked)
-        self.clearAppStoreCacheCard.clicked.connect(self._onClearAppStoreCache)
         self.aiQuotaReceived.connect(self._onAIQuotaReceived)
-        self.cacheCleared.connect(self._onCacheCleared)
         cfg.bannerImageSource.valueChanged.connect(
             self._onBannerImageSourceChanged
         )
@@ -569,44 +555,6 @@ class SettingPage(ScrollArea):
 
     def _onAboutCardClicked(self) -> None:
         self.window().checkForUpdates(manual=True)
-
-    def _onClearAppStoreCache(self) -> None:
-        self.clearAppStoreCacheCard.button.setEnabled(False)
-        threading.Thread(target=self._clearAppStoreCache, daemon=True).start()
-
-    def _clearAppStoreCache(self) -> None:
-        try:
-            size = clearImageCache()
-            error = ""
-        except OSError as exception:
-            size = 0
-            error = str(exception)
-        try:
-            self.cacheCleared.emit(size, error)
-        except RuntimeError:
-            pass
-
-    def _onCacheCleared(self, size: int, error: str) -> None:
-        self.clearAppStoreCacheCard.button.setEnabled(True)
-        if error:
-            InfoBar.error(
-                "缓存清理失败",
-                error,
-                duration=4000,
-                position=InfoBarPosition.TOP_RIGHT,
-                parent=self.window(),
-            )
-            return
-        cfg.set(cfg.appStoreCacheLastCleanup, int(time.time()))
-        signalBus.appStoreCacheCleared.emit()
-        signalBus.homeCardsChanged.emit()
-        InfoBar.success(
-            "应用市场缓存已清理",
-            f"已释放 {size / 1024 / 1024:.1f} MB",
-            duration=3000,
-            position=InfoBarPosition.TOP_RIGHT,
-            parent=self.window(),
-        )
 
     def _onAutoRunChanged(self, enabled: bool) -> None:
         from app.platform.run_at_login import setRunAtLogin

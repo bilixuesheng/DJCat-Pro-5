@@ -1,3 +1,0 @@
--r requirements.txt
--r server/requirements.txt
-pytest>=8,<9

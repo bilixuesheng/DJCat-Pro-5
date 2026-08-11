@@ -429,10 +429,7 @@ class MainWindow(MSFluentWindow):
         QProcess.startDetached("shutdown.exe", ["/s", "/t", "0"])
 
     def initNavigation(self):
-        from app.view.pages.app_store_page import AppStorePage
-
         self.homePage = HomePage(self)
-        self.appStorePage = AppStorePage(self)
         self.creditsPage = CreditsPage(self)
         self.settingPage = SettingPage(self)
         self.broadcastEditPage = None
@@ -444,11 +441,10 @@ class MainWindow(MSFluentWindow):
         self.searchEdit.setPlaceholderText("搜索设置")
         self.searchEdit.hide()
         self.searchEdit.raise_()
-        self.searchEdit.textChanged.connect(self._onSearchTextChanged)
+        self.searchEdit.textChanged.connect(self.settingPage.setSearchText)
         self.stackedWidget.currentChanged.connect(self._updateSearchEdit)
         self.stackedWidget.currentChanged.connect(self._onNavigationCompleted)
         self.addSubInterface(self.homePage, FIF.HOME, "主页")
-        self.addSubInterface(self.appStorePage, FIF.DOWNLOAD, "应用下载")
         self.addSubInterface(
             self.creditsPage,
             FIF.HEART,
@@ -534,19 +530,8 @@ class MainWindow(MSFluentWindow):
             else self._navigationTarget
         )
         interface = pendingTarget or self.stackedWidget.currentWidget()
-        self._setSearchEditInterface(interface)
-
-    def _onSearchTextChanged(self, text):
-        pendingTarget = (
-            self._pendingNavigation[0]
-            if self._pendingNavigation is not None
-            else self._navigationTarget
-        )
-        interface = pendingTarget or self.stackedWidget.currentWidget()
-        if interface is self.settingPage:
-            self.settingPage.setSearchText(text)
-        elif interface is self.appStorePage:
-            self.appStorePage.setSearchText(text)
+        isSettingPage = interface is self.settingPage
+        self._setSearchEditVisible(isSettingPage)
 
     def _onNavigationCompleted(self, *args):
         if self.stackedWidget.currentWidget() is not self._navigationTarget:
@@ -558,19 +543,11 @@ class MainWindow(MSFluentWindow):
         if pending is not None:
             QTimer.singleShot(0, self, lambda: self._navigateTo(*pending))
 
-    def _setSearchEditInterface(self, interface) -> None:
-        isSearchPage = interface in (self.settingPage, self.appStorePage)
-        if not isSearchPage:
+    def _setSearchEditVisible(self, isSettingPage: bool) -> None:
+        if not isSettingPage:
             self.searchEdit.clear()
-        self.searchEdit.setPlaceholderText(
-            "搜索应用" if interface is self.appStorePage else "搜索设置"
-        )
-        self.searchEdit.setVisible(isSearchPage)
-        if isSearchPage:
-            if interface is self.settingPage:
-                self.settingPage.setSearchText(self.searchEdit.text())
-            else:
-                self.appStorePage.setSearchText(self.searchEdit.text())
+        self.searchEdit.setVisible(isSettingPage)
+        if isSettingPage:
             self._refreshSearchEditGeometry()
 
     def switchTo(self, interface: QWidget) -> None:
@@ -582,9 +559,7 @@ class MainWindow(MSFluentWindow):
         # the in-flight snapshots in an inconsistent state.
         if self._resourcesShutdown:
             return
-        if interface is self.appStorePage:
-            self.appStorePage.ensureLoaded()
-        self._setSearchEditInterface(interface)
+        self._setSearchEditVisible(interface is self.settingPage)
         if interface is self._navigationTarget:
             self._pendingNavigation = None
             return

@@ -1,6 +1,5 @@
 import os
 import sys
-import time
 import traceback
 
 from PySide6.QtWidgets import QApplication
@@ -48,14 +47,6 @@ def configureLogging():
 
 
 def main():
-    if "--app-maintenance" in sys.argv:
-        index = sys.argv.index("--app-maintenance")
-        if index + 1 >= len(sys.argv):
-            raise SystemExit(2)
-        from app.platform.app_maintenance import maintenanceMain
-
-        raise SystemExit(maintenanceMain(sys.argv[index + 1]))
-
     if getattr(sys, "frozen", False) or "__compiled__" in globals():
         os.chdir(os.path.dirname(sys.executable))
     else:
@@ -68,7 +59,6 @@ def main():
     from qfluentwidgets import qconfig, setThemeColor
 
     from app.common.update_download import clearUpdateDirectory
-    from app.common.app_store import clearImageCache, recoverInterruptedInstalls
     from app.config.cfg import cfg
     from app.config.paths import CONFIG_PATH
 
@@ -76,22 +66,6 @@ def main():
     configureLogging()
     sys.excepthook = exceptionHook
     qconfig.load(CONFIG_PATH, cfg)
-    try:
-        recoverInterruptedInstalls()
-    except OSError:
-        pass
-    now = int(time.time())
-    try:
-        lastCacheCleanup = int(cfg.appStoreCacheLastCleanup.value or 0)
-    except (TypeError, ValueError):
-        lastCacheCleanup = 0
-    if now - lastCacheCleanup >= 7 * 24 * 60 * 60:
-        try:
-            clearImageCache()
-        except OSError:
-            pass
-        else:
-            cfg.set(cfg.appStoreCacheLastCleanup, now)
     setThemeColor(QColor(49, 101, 49))
 
     app.window = startApp(isSilent=isSilent)

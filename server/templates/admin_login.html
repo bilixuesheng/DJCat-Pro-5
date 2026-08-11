@@ -26,6 +26,9 @@
                 <div class="section-label">Administrator access</div>
                 <h2>登录</h2>
                 <p>使用服务端管理员凭据继续。</p>
+                {% for category, message in get_flashed_messages(with_categories=true) %}
+                    <div class="notice {{ category }}">{{ message }}</div>
+                {% endfor %}
                 <form method="post" action="{{ url_for('adminLogin') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <label>用户名
@@ -38,11 +41,6 @@
                 </form>
             </section>
         </main>
-    </div>
-    <div class="toast-stack" role="status" aria-live="polite">
-        {% for category, message in get_flashed_messages(with_categories=true) %}
-            <div class="notice {{ category }}">{{ message }}</div>
-        {% endfor %}
     </div>
 </body>
 </html>

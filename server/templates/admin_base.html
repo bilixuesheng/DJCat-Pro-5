@@ -21,15 +21,6 @@
                         <span class="side-index">02</span>AI 写 Markdown
                     </a>
                 </div>
-                <div class="side-group">
-                    <div class="side-group-title">应用市场</div>
-                    <a class="side-link side-child {% if current_page == 'applications' %}active{% endif %}" href="{{ url_for('adminApplications') }}" {% if current_page == 'applications' %}aria-current="page"{% endif %}>
-                        <span class="side-index">03</span>软件管理
-                    </a>
-                    <a class="side-link side-child {% if current_page == 'advertisements' %}active{% endif %}" href="{{ url_for('adminAdvertisements') }}" {% if current_page == 'advertisements' %}aria-current="page"{% endif %}>
-                        <span class="side-index">04</span>广告管理
-                    </a>
-                </div>
             </nav>
             <form class="sidebar-logout" method="post" action="{{ url_for('adminLogout') }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -47,14 +38,12 @@
             </header>
 
             <main class="page-main">
+                {% for category, message in get_flashed_messages(with_categories=true) %}
+                    <div class="notice {{ category }}">{{ message }}</div>
+                {% endfor %}
                 {% block content %}{% endblock %}
             </main>
         </div>
-    </div>
-    <div class="toast-stack" role="status" aria-live="polite">
-        {% for category, message in get_flashed_messages(with_categories=true) %}
-            <div class="notice {{ category }}">{{ message }}</div>
-        {% endfor %}
     </div>
 </body>
 </html>
