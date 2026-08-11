@@ -5,13 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>登录 · 电教猫服务控制台</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <script defer src="{{ url_for('static', filename='admin.js') }}"></script>
 </head>
 <body class="login-page">
     <main class="login-shell">
         <section class="login-visual" aria-label="电教猫服务控制台">
             <a class="brand login-brand" href="{{ url_for('adminLogin') }}">
-                <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                <span class="brand-mark"><img src="{{ url_for('static', filename='logo.png') }}" alt=""></span>
                 <span><strong>电教猫</strong><small>服务控制台</small></span>
             </a>
             <div class="login-copy">

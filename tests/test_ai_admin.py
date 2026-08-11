@@ -93,6 +93,15 @@ class AIAdminTest(TestCase):
 
     def testAdminSeparatesOverviewAndMarkdownManagement(self):
         dashboard = self._login().get_data(as_text=True)
+        logo = self.client.get(
+            "/static/logo.png", base_url="https://dash.djcatpro.top"
+        )
+        self.assertEqual(logo.status_code, 200)
+        self.assertEqual(
+            logo.data,
+            (Path(__file__).parents[1] / "app" / "assets" / "logo.png").read_bytes(),
+        )
+        logo.close()
         self.assertIn("主页", dashboard)
         self.assertIn("AI 写 Markdown", dashboard)
         self.assertNotIn("AI 管理", dashboard)
