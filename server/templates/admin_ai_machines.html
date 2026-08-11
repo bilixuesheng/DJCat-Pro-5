@@ -16,7 +16,7 @@
 <section class="section-block machine-section" aria-labelledby="machines-title">
     <div class="section-heading machine-heading">
         <div><span class="section-index">01</span><h2 id="machines-title">机器列表</h2></div>
-        <form method="post" action="{{ url_for('adminResetAll') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-danger" type="submit">重置全部今日额度</button></form>
+        <form method="post" action="{{ url_for('adminResetAll') }}" data-confirm="确认重置所有机器的今日额度吗？"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-danger" type="submit">重置全部今日额度</button></form>
     </div>
     <form class="machine-filters" method="get" action="{{ url_for('adminMachines') }}">
         <label><span>搜索</span><input type="search" name="q" value="{{ search }}" placeholder="机器代号或匿名指纹"></label>
@@ -35,7 +35,7 @@
                     <td>{{ machine.last_seen_at }}</td>
                     <td><span class="quota-cell"><meter min="0" max="{{ daily_limit }}" value="{{ machine.remaining }}">{{ machine.remaining }} / {{ daily_limit }}</meter>{{ machine.remaining }} / {{ daily_limit }}</span></td>
                     <td>{{ machine.requests }}</td>
-                    <td><form method="post" action="{{ url_for('adminResetMachine', alias=machine.code) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="table-action" type="submit">重置额度</button></form></td>
+                    <td><form method="post" action="{{ url_for('adminResetMachine', alias=machine.code) }}" data-confirm="确认重置机器 {{ machine.code }} 的今日额度吗？"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="table-action" type="submit">重置额度</button></form></td>
                 </tr>
             {% else %}
                 <tr><td class="empty" colspan="7">没有找到符合条件的注册机器。</td></tr>

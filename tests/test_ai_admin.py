@@ -189,6 +189,9 @@ class AIAdminTest(TestCase):
         ).get_json()
         self.assertFalse(quota["peak_enabled"])
         self.assertEqual(quota["cost"], 1)
+        overview = self._markdownPage().get_data(as_text=True)
+        self.assertNotIn("高峰双倍扣除", overview)
+        self.assertNotIn("高峰时段", overview)
         with closing(ai_markdown._connect()) as database:
             encrypted = database.execute(
                 "SELECT value FROM settings WHERE key = 'deepseek_api_key'"
@@ -241,6 +244,8 @@ class AIAdminTest(TestCase):
         search = self._machinesPage("?q=DJ-000002&sort=code").get_data(as_text=True)
         self.assertIn("DJ-000002", search)
         self.assertNotIn("DJ-000001", search)
+        machines = self._machinesPage().get_data(as_text=True)
+        self.assertGreaterEqual(machines.count("data-confirm="), 2)
 
         reset = self.client.post(
             "/admin/ai/markdown/machines/DJ-000002/reset",
@@ -302,6 +307,8 @@ class AIAdminTest(TestCase):
         self.assertIn("@view-transition", css)
         self.assertIn("::view-transition-new(admin-workspace)", css)
         self.assertIn("prefers-reduced-motion", css)
+        self.assertIn("button:active:not(:disabled)", css)
+        self.assertIn(".button-danger:hover", css)
 
         javascriptResponse = self.client.get(
             "/static/admin.js", base_url="https://dash.djcatpro.top"
@@ -314,3 +321,5 @@ class AIAdminTest(TestCase):
         self.assertIn("sidebar-open", css)
         self.assertIn("translateX(-105%)", css)
         self.assertIn("Escape", javascript)
+        self.assertIn("form[data-confirm]", javascript)
+        self.assertIn("HTMLFormElement.prototype.submit", javascript)

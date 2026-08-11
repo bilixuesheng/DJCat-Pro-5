@@ -106,6 +106,7 @@ class AIMarkdownTest(unittest.TestCase):
 
         self.assertTrue(dialog._quotaTimer.isActive())
         self.assertEqual(dialog._quotaTimer.interval(), 30_000)
+        self.assertNotIn("高峰", dialog.quotaLabel.text())
         self.assertTrue(dialog.rect().contains(dialog.widget.geometry()))
         inputBottom = dialog.inputEdit.mapTo(
             dialog.widget, dialog.inputEdit.rect().bottomLeft()
@@ -130,7 +131,7 @@ class AIMarkdownTest(unittest.TestCase):
         self.assertIn("设置", dialog.quotaLabel.text())
         dialog._onQuotaReceived(-1, 15, 1, None, "")
         self.assertIn("暂时无法获取", dialog.quotaLabel.text())
-        self.assertIn("高峰计费状态正在查询", dialog.quotaLabel.text())
+        self.assertNotIn("高峰", dialog.quotaLabel.text())
         dialog.inputEdit.setPlainText("作业")
         dialog._remaining = None
         dialog._refreshStartButton()
@@ -155,6 +156,7 @@ class AIMarkdownTest(unittest.TestCase):
                     page = SettingPage()
                     page.show()
                 self.addCleanup(page.close)
+                self.assertNotIn("高峰", page.aiQuotaCard.contentLabel.text())
 
                 self.assertEqual(
                     page.aiStyleCard.textEdit.placeholderText(),
@@ -180,15 +182,9 @@ class AIMarkdownTest(unittest.TestCase):
                     page.aiQuotaCard.contentLabel.text(),
                 )
                 page._onAIQuotaReceived(8, 15, 1, False, "")
-                self.assertIn(
-                    "高峰双倍扣除已关闭",
-                    page.aiQuotaCard.contentLabel.text(),
-                )
+                self.assertNotIn("高峰", page.aiQuotaCard.contentLabel.text())
                 page._onAIQuotaReceived(-1, -1, 1, None, "")
-                self.assertIn(
-                    "高峰计费状态暂时无法获取",
-                    page.aiQuotaCard.contentLabel.text(),
-                )
+                self.assertNotIn("高峰", page.aiQuotaCard.contentLabel.text())
             finally:
                 cfg.set(cfg.aiMarkdownCustomStyleEnabled, oldEnabled)
                 cfg.set(cfg.aiMarkdownCustomStyle, oldStyle)

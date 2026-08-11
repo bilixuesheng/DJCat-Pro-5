@@ -38,13 +38,13 @@
             <div><dt>API 状态</dt><dd><span class="inline-dot {% if not ai_configured %}waiting{% endif %}"></span>{{ '已配置' if ai_configured else '待配置' }}</dd></div>
             <div><dt>当前模型</dt><dd><code>{{ model }}</code></dd></div>
             <div><dt>单机每日额度</dt><dd>{{ daily_limit }} 次</dd></div>
-            <div><dt>高峰双倍扣除</dt><dd>{{ '已开启' if peak_enabled else '已关闭' }}</dd></div>
+            {% if peak_enabled %}<div><dt>高峰双倍扣除</dt><dd>已开启</dd></div>{% endif %}
         </dl>
         <div class="quota-panel">
             <span>当前每次请求扣除</span>
             <strong>{{ quota_cost }}</strong>
             <small>个额度单位</small>
-            <p>高峰时段：北京时间 9:00–12:00、14:00–18:00</p>
+            {% if peak_enabled %}<p>高峰时段：北京时间 9:00–12:00、14:00–18:00</p>{% endif %}
         </div>
     </div>
 </section>

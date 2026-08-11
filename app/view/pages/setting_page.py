@@ -402,7 +402,7 @@ class SettingPage(ScrollArea):
         self.aiQuotaCard = SettingCard(
             FluentIcon.HISTORY,
             "额度",
-            f"每天 0 点刷新；{PEAK_HOURS_TEXT} 每次扣 2 次，其余时段扣 1 次",
+            "每天 0 点刷新",
         )
         self.aiQuotaLabel = BodyLabel("正在查询", self.aiQuotaCard)
         self.aiQuotaCard.hBoxLayout.addWidget(
@@ -591,6 +591,7 @@ class SettingPage(ScrollArea):
             return
         self._aiQuotaLoading = True
         self.aiQuotaLabel.setText("正在查询")
+        self.aiQuotaCard.contentLabel.setText("每天 0 点刷新")
         threading.Thread(target=self._fetchAIQuota, daemon=True).start()
 
     def _fetchAIQuota(self) -> None:
@@ -616,16 +617,11 @@ class SettingPage(ScrollArea):
         self.aiQuotaLabel.setText(
             "暂时无法获取" if remaining < 0 else f"{remaining} / {limit}"
         )
-        if peakEnabled is None:
-            self.aiQuotaCard.contentLabel.setText(
-                "每天 0 点刷新；高峰计费状态暂时无法获取"
-            )
-        else:
-            self.aiQuotaCard.contentLabel.setText(
-                f"每天 0 点刷新；{PEAK_HOURS_TEXT} 每次扣 2 次，其余时段扣 1 次"
-                if peakEnabled
-                else "每天 0 点刷新；高峰双倍扣除已关闭"
-            )
+        self.aiQuotaCard.contentLabel.setText(
+            f"每天 0 点刷新；{PEAK_HOURS_TEXT} 每次扣 2 次，其余时段扣 1 次"
+            if peakEnabled
+            else "每天 0 点刷新"
+        )
         if machineCode:
             cfg.set(cfg.aiMarkdownMachineCode, machineCode)
 

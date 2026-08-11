@@ -643,6 +643,8 @@ class AIMarkdownDialog(MessageBoxBase):
         if self._quotaRequestRunning:
             return
         self._quotaRequestRunning = True
+        self._peakEnabled = None
+        self._updateQuotaLabel()
         threading.Thread(target=self._fetchQuota, daemon=True).start()
 
     def _startConversion(self):
@@ -780,18 +782,14 @@ class AIMarkdownDialog(MessageBoxBase):
             remaining = "暂时无法获取"
         else:
             remaining = self._remaining
-        peakText = "高峰计费状态正在查询"
-        if self._peakEnabled is not None:
-            peakText = (
-                f"双倍时段：{PEAK_HOURS_TEXT}"
-                if self._peakEnabled
-                else "高峰双倍扣除已关闭"
-            )
-        self.quotaLabel.setText(
-            f"剩余 {remaining}/{self._limit}　·　当前每次扣 {self._cost} 次"
-            f"　·　{peakText}　·　每天 0 点刷新"
-            "　·　禁止滥用　·　设置中可自定义风格"
-        )
+        quotaParts = [
+            f"剩余 {remaining}/{self._limit}",
+            f"当前每次扣 {self._cost} 次",
+        ]
+        if self._peakEnabled:
+            quotaParts.append(f"双倍时段：{PEAK_HOURS_TEXT}")
+        quotaParts.extend(("每天 0 点刷新", "禁止滥用", "设置中可自定义风格"))
+        self.quotaLabel.setText("　·　".join(quotaParts))
 
     def _refreshStartButton(self):
         if not self._running and not self._finished:
