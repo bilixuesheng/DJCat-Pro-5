@@ -15,11 +15,14 @@ dependencies = [
     "PySide6-Fluent-Widgets>=1.6.0",
     "requests>=2.28.0",
     "loguru",
-    "markdown",
+    "markdown-it-py~=3.0",
+    "linkify-it-py~=2.0",
+    "pygments~=2.18",
+    "emoji~=2.14",
     "nuitka",
     "imageio",
     "edge-tts==7.2.8"
 ]
 
 [tool.setuptools.packages.find]
-include = ["app*"]
+include = ["app*", "pyqt_github_markdown*"]

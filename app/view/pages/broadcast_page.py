@@ -43,6 +43,7 @@ from app.common.ai_markdown import PEAK_HOURS_TEXT, fetchQuota, machineId
 from app.config.cfg import cfg
 from app.config.constants import AI_MARKDOWN_API
 from app.config.paths import ASSET_DIR
+from app.view.components.markdown_view import MarkdownView
 
 
 def showActionConfirmation(
@@ -313,8 +314,13 @@ class BroadcastWindow(FramelessWindow):
         self.contentEdit.setStyleSheet("border: none; background: transparent;")
         self.contentEdit.viewport().installEventFilter(self)
 
+        self.markdownView = MarkdownView(self, largeText=True)
+        self.markdownView.hide()
+        self.markdownView.viewport().installEventFilter(self)
+
         self.vBoxLayout.addWidget(self.titleLabel, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.vBoxLayout.addWidget(self.contentEdit, 1)
+        self.vBoxLayout.addWidget(self.markdownView, 1)
 
         self.btnContainer = QWidget(self)
         self.btnLayout = QHBoxLayout(self.btnContainer)
@@ -338,7 +344,7 @@ class BroadcastWindow(FramelessWindow):
     def eventFilter(self, obj, event):
         if (
             hasattr(self, "contentEdit")
-            and obj == self.contentEdit.viewport()
+            and obj in (self.contentEdit.viewport(), self.markdownView.viewport())
         ):
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 if self.is_windowed:
@@ -372,12 +378,16 @@ class BroadcastWindow(FramelessWindow):
         self.titleLabel.setStyleSheet(f"color: {qconfig.themeColor.value.name()};")
 
         if is_markdown:
-            self.contentEdit.setMarkdown(text)
+            self.contentEdit.hide()
+            self.markdownView.show()
+            self.markdownView.syncTheme()
+            self.markdownView.setMarkdown(text)
         else:
+            self.markdownView.hide()
+            self.contentEdit.show()
             self.contentEdit.setPlainText(text)
-
-        font = QFont(); font.setPointSize(26)
-        self.contentEdit.setFont(font)
+            font = QFont(); font.setPointSize(26)
+            self.contentEdit.setFont(font)
 
     def setupLayout(self):
         while self.btnLayout.count():

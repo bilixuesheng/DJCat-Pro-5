@@ -3,11 +3,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-if sys.platform == "win32":
-    import io
-
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-
 sys.path.append(str(Path(__file__).resolve().parent))
 from app.common.config import VERSION
 from app.config.constants import APP_NAME, AUTHOR, YEAR
@@ -40,10 +35,16 @@ def build_args() -> list[str]:
         "--plugin-enable=pyside6",
         "--assume-yes-for-downloads",
         "--msvc=latest",
+        "--disable-cache=ccache",
         "--include-qt-plugins=multimedia,texttospeech",
         "--include-package=requests",
         "--include-package=loguru",
         "--include-package=edge_tts",
+        "--include-package=pyqt_github_markdown",
+        "--include-package=markdown_it",
+        "--include-package=linkify_it",
+        "--include-package=pygments",
+        "--include-package=emoji",
         "--include-data-dir=app/assets=app/assets",
         "--windows-icon-from-ico=app/assets/logo.png",
         f'--company-name="{AUTHOR}"',
@@ -78,4 +79,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if sys.platform == "win32":
+        import io
+
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     sys.exit(main())

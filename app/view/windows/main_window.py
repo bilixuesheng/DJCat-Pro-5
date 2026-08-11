@@ -33,7 +33,6 @@ from qfluentwidgets import (
     SplashScreen,
     StateToolTip,
     SubtitleLabel,
-    TextEdit,
     Theme,
     setTheme,
     setThemeColor,
@@ -52,6 +51,7 @@ from app.config.constants import (
 from app.config.paths import ASSET_DIR, UPDATE_INSTALLER_PATH
 from app.platform.memory import emptyWorkingSet
 from app.signal_bus import signalBus
+from app.view.components.markdown_view import MarkdownView
 from app.view.pages.credits_page import CreditsPage
 from app.view.pages.home_page import HomePage
 from app.view.pages.setting_page import SettingPage
@@ -106,13 +106,12 @@ class UpdateDialog(MessageBoxBase):
     def __init__(self, version, note, parent=None):
         super().__init__(parent)
         self.titleLabel = SubtitleLabel(f"发现新版本: v{version}", self)
-        self.textEdit = TextEdit(self)
-        self.textEdit.setMarkdown(note)
-        self.textEdit.setReadOnly(True)
-        self.textEdit.setFixedSize(460, 260)
+        self.markdownView = MarkdownView(self)
+        self.markdownView.setMarkdown(note)
+        self.markdownView.setFixedSize(460, 260)
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addSpacing(12)
-        self.viewLayout.addWidget(self.textEdit)
+        self.viewLayout.addWidget(self.markdownView)
         self.yesButton.setText("下载更新")
         self.cancelButton.setText("暂不更新")
         self.widget.setMinimumWidth(500)
