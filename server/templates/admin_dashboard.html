@@ -1,58 +1,50 @@
 {% extends "admin_base.html" %}
 
+{% block title %}服务总览 · 电教猫{% endblock %}
 {% block page_name %}服务总览{% endblock %}
 
 {% block content %}
-<section class="hero">
-    <div class="eyebrow">Overview · Beijing time</div>
-    <h1>所有功能，<br><em>从这里看清楚<svg class="underline-draw" viewBox="0 0 250 14" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M2 9 C 62 3, 188 11, 248 5" /></svg></em>。</h1>
-    <p class="hero-desc">汇总电教猫在线服务的运行数据，再进入对应功能完成配置和管理。</p>
+<header class="page-header">
+    <div>
+        <div class="eyebrow">Control center</div>
+        <h1>服务总览</h1>
+        <p>查看电教猫服务端今天的运行数据和可用功能。</p>
+    </div>
+    <div class="refresh-note"><strong>北京时间</strong><span>每天 00:00 刷新</span></div>
+</header>
+
+<section class="section-block" aria-labelledby="today-title">
+    <div class="section-heading">
+        <div><span class="section-index">01</span><h2 id="today-title">今日数据</h2></div>
+        <span>所有时间按北京时间计算</span>
+    </div>
+    <div class="metric-grid" aria-label="今日统计">
+        <article class="metric-card metric-card-accent"><span>今日请求</span><strong>{{ stats.requests }}</strong><small>REQUESTS TODAY</small></article>
+        <article class="metric-card"><span>成功</span><strong>{{ stats.success }}</strong><small>COMPLETED</small></article>
+        <article class="metric-card"><span>失败</span><strong>{{ stats.failed }}</strong><small>FAILED</small></article>
+        <article class="metric-card"><span>处理中</span><strong>{{ stats.processing }}</strong><small>PROCESSING</small></article>
+        <article class="metric-card"><span>消耗额度</span><strong>{{ stats.consumed }}</strong><small>QUOTA USED</small></article>
+        <article class="metric-card"><span>注册机器</span><strong>{{ stats.machines }}</strong><small>REGISTERED</small></article>
+    </div>
 </section>
 
-<section class="overview-section">
+<section class="section-block" aria-labelledby="services-title">
     <div class="section-heading">
-        <div>
-            <div class="section-label">Today · Summary</div>
-            <h2>今日数据</h2>
-        </div>
-        <span class="section-note">每天 00:00 自动刷新</span>
+        <div><span class="section-index">02</span><h2 id="services-title">在线功能</h2></div>
+        <span>1 项服务</span>
     </div>
-    <div class="metrics" aria-label="今日统计">
-        <article><div class="card-num">01</div><h3>今日请求</h3><strong>{{ stats.requests }}</strong></article>
-        <article><div class="card-num">02</div><h3>成功</h3><strong>{{ stats.success }}</strong></article>
-        <article><div class="card-num">03</div><h3>失败</h3><strong>{{ stats.failed }}</strong></article>
-        <article><div class="card-num">04</div><h3>处理中</h3><strong>{{ stats.processing }}</strong></article>
-        <article><div class="card-num">05</div><h3>消耗额度</h3><strong>{{ stats.consumed }}</strong></article>
-        <article><div class="card-num">06</div><h3>注册机器</h3><strong>{{ stats.machines }}</strong></article>
-    </div>
-</section>
-
-<section class="panel">
-    <div class="section-heading">
-        <div>
-            <div class="section-label">Functions</div>
-            <h2>功能总览</h2>
-        </div>
-        <span class="section-note">当前 1 项在线功能</span>
-    </div>
-    <div class="feature-grid">
-        <a class="feature-card" href="{{ url_for('adminAIMarkdown') }}">
-            <div class="feature-card-top">
-                <span class="feature-icon" aria-hidden="true">AI</span>
-                <span class="feature-status {% if not ai_configured %}pending{% endif %}"><i></i>{{ 'API 已配置' if ai_configured else '待配置 API' }}</span>
-            </div>
-            <div>
-                <div class="section-label">AI 管理 · Markdown</div>
-                <h3>AI 写 Markdown</h3>
-                <p>管理模型、API Key、系统提示词、每日额度和注册机器。</p>
-            </div>
-            <dl class="feature-meta">
+    <a class="service-card" href="{{ url_for('adminAIMarkdown') }}">
+        <span class="service-icon" aria-hidden="true">Md</span>
+        <div class="service-copy">
+            <div class="service-title"><h3>AI 写 Markdown</h3><span class="status-chip {% if not ai_configured %}waiting{% endif %}"><i></i>{{ 'API 已配置' if ai_configured else '待配置 API' }}</span></div>
+            <p>把作业清单或任务转换为适合屏幕展示的标准 Markdown。</p>
+            <dl class="service-meta">
                 <div><dt>模型</dt><dd>{{ model }}</dd></div>
-                <div><dt>每日额度</dt><dd>{{ daily_limit }}</dd></div>
-                <div><dt>高峰双倍</dt><dd>{{ '已开启' if peak_enabled else '已关闭' }}</dd></div>
+                <div><dt>单机额度</dt><dd>{{ daily_limit }} 次 / 天</dd></div>
+                <div><dt>高峰扣除</dt><dd>{{ '双倍' if peak_enabled else '标准' }}</dd></div>
             </dl>
-            <span class="feature-enter">进入管理 <b>→</b></span>
-        </a>
-    </div>
+        </div>
+        <span class="service-arrow" aria-hidden="true">→</span>
+    </a>
 </section>
 {% endblock %}

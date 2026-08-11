@@ -1,0 +1,44 @@
+{% extends "admin_base.html" %}
+
+{% block title %}请求与计费 · AI 写 Markdown{% endblock %}
+{% block page_name %}请求与计费{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <div class="eyebrow">AI 写 Markdown</div>
+        <h1>请求与计费</h1>
+        <p>管理模型、API Key、每台机器的每日额度和高峰扣除规则。</p>
+    </div>
+</header>
+
+<form class="config-form" method="post" action="{{ url_for('adminSettings') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <section class="form-section" aria-labelledby="request-title">
+        <div class="form-section-title"><span>01</span><div><h2 id="request-title">请求基础</h2><p>新的请求会立即使用保存后的配置。</p></div></div>
+        <div class="form-fields two-columns">
+            <label>每台机器每日额度
+                <input type="number" name="daily_limit" min="1" max="10000" value="{{ daily_limit }}" required>
+                <small>每天北京时间 00:00 自动刷新。</small>
+            </label>
+            <label>DeepSeek 模型
+                <input name="model" maxlength="100" value="{{ model }}" required>
+                <small>例如 deepseek-v4-flash。</small>
+            </label>
+            <label class="full">DeepSeek API Key
+                <input type="password" name="api_key" autocomplete="new-password" placeholder="{{ '已配置；留空保持不变' if api_key_configured else '留空则使用服务器环境变量' }}">
+            </label>
+        </div>
+    </section>
+
+    <section class="form-section" aria-labelledby="billing-title">
+        <div class="form-section-title"><span>02</span><div><h2 id="billing-title">计费规则</h2><p>高峰时段由服务端按北京时间统一判断。</p></div></div>
+        <div class="option-list">
+            <label class="option-row"><span><strong>高峰时段双倍扣除</strong><small>北京时间 9:00–12:00、14:00–18:00，每次扣除 2 个额度单位。</small></span><input type="checkbox" name="peak_enabled" value="1" {% if peak_enabled %}checked{% endif %}></label>
+            <label class="option-row"><span><strong>改用环境变量中的 API Key</strong><small>清除面板内加密保存的密钥。</small></span><input type="checkbox" name="clear_api_key" value="1"></label>
+        </div>
+    </section>
+
+    <div class="form-actions"><span>保存后立即生效，无需重启服务。</span><button class="button button-primary" type="submit">保存请求配置</button></div>
+</form>
+{% endblock %}

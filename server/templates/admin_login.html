@@ -3,27 +3,26 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>电教猫管理面板</title>
+    <title>登录 · 电教猫服务控制台</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
 </head>
 <body class="login-page">
-    <div class="login-wrap">
-        <header>
-            <div class="nav">
-                <span class="logo">电教猫<span>·</span>控制台</span>
-                <span class="login-domain">dash.djcatpro.top</span>
-            </div>
-        </header>
-
-        <main class="login-main">
-            <section class="login-copy">
+    <main class="login-shell">
+        <section class="login-visual" aria-label="电教猫服务控制台">
+            <a class="brand login-brand" href="{{ url_for('adminLogin') }}">
+                <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                <span><strong>电教猫</strong><small>服务控制台</small></span>
+            </a>
+            <div class="login-copy">
                 <div class="eyebrow">Private control room</div>
-                <h1>回到你的<br><em>管理面板<svg class="underline-draw" viewBox="0 0 220 14" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M2 9 C 55 3, 165 11, 218 5" /></svg></em>。</h1>
-                <p>模型、额度和注册机器，都安静地放在这里。</p>
-            </section>
-
-            <section class="login-card">
-                <div class="section-label">Administrator access</div>
+                <h1>管理服务，<br><em>保持清楚。</em></h1>
+                <p>模型、额度、提示词和注册机器，都在一个安静的控制台里。</p>
+            </div>
+            <div class="login-detail">dash.djcatpro.top · Beijing time</div>
+        </section>
+        <section class="login-form-panel">
+            <div class="login-card">
+                <div class="eyebrow">Administrator access</div>
                 <h2>登录</h2>
                 <p>使用服务端管理员凭据继续。</p>
                 {% for category, message in get_flashed_messages(with_categories=true) %}
@@ -37,10 +36,10 @@
                     <label>密码
                         <input type="password" name="password" autocomplete="current-password" required>
                     </label>
-                    <button class="btn btn-primary wide" type="submit">进入管理面板</button>
+                    <button class="button button-primary" type="submit">进入管理面板</button>
                 </form>
-            </section>
-        </main>
-    </div>
+            </div>
+        </section>
+    </main>
 </body>
 </html>

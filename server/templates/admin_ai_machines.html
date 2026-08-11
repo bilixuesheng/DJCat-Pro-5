@@ -1,0 +1,47 @@
+{% extends "admin_base.html" %}
+
+{% block title %}注册机器 · AI 写 Markdown{% endblock %}
+{% block page_name %}注册机器{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <div class="eyebrow">AI 写 Markdown</div>
+        <h1>注册机器</h1>
+        <p>搜索已注册设备，查看今日额度，并执行单机或批量重置。</p>
+    </div>
+    <div class="machine-count"><strong>{{ machines|length }}</strong><span>当前结果</span></div>
+</header>
+
+<section class="section-block machine-section" aria-labelledby="machines-title">
+    <div class="section-heading machine-heading">
+        <div><span class="section-index">01</span><h2 id="machines-title">机器列表</h2></div>
+        <form method="post" action="{{ url_for('adminResetAll') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-danger" type="submit">重置全部今日额度</button></form>
+    </div>
+    <form class="machine-filters" method="get" action="{{ url_for('adminMachines') }}">
+        <label><span>搜索</span><input type="search" name="q" value="{{ search }}" placeholder="机器代号或匿名指纹"></label>
+        <label><span>排序</span><select name="sort"><option value="registered" {% if sort == 'registered' %}selected{% endif %}>按注册时间</option><option value="code" {% if sort == 'code' %}selected{% endif %}>按机器码</option></select></label>
+        <button class="button button-secondary" type="submit">查询</button>
+    </form>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>机器码</th><th>匿名指纹</th><th>注册时间</th><th>最后访问</th><th>今日额度</th><th>请求数</th><th></th></tr></thead>
+            <tbody>
+            {% for machine in machines %}
+                <tr>
+                    <td><strong>{{ machine.code }}</strong></td>
+                    <td><code title="{{ machine.fingerprint }}">{{ machine.fingerprint[:12] }}…</code></td>
+                    <td>{{ machine.registered_at }}</td>
+                    <td>{{ machine.last_seen_at }}</td>
+                    <td><span class="quota-cell"><meter min="0" max="{{ daily_limit }}" value="{{ machine.remaining }}">{{ machine.remaining }} / {{ daily_limit }}</meter>{{ machine.remaining }} / {{ daily_limit }}</span></td>
+                    <td>{{ machine.requests }}</td>
+                    <td><form method="post" action="{{ url_for('adminResetMachine', alias=machine.code) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="table-action" type="submit">重置额度</button></form></td>
+                </tr>
+            {% else %}
+                <tr><td class="empty" colspan="7">没有找到符合条件的注册机器。</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "admin_base.html" %}
+
+{% block title %}运行情况 · AI 写 Markdown{% endblock %}
+{% block page_name %}运行情况{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <div class="eyebrow">AI 写 Markdown</div>
+        <h1>运行情况</h1>
+        <p>查看今日请求、额度消耗，以及服务端当前配置。</p>
+    </div>
+    <span class="status-chip {% if not ai_configured %}waiting{% endif %}"><i></i>{{ '服务可调用' if ai_configured else '等待配置 API' }}</span>
+</header>
+
+<section class="section-block" aria-labelledby="runtime-title">
+    <div class="section-heading">
+        <div><span class="section-index">01</span><h2 id="runtime-title">今日运行</h2></div>
+        <span>每天 00:00 刷新</span>
+    </div>
+    <div class="metric-grid">
+        <article class="metric-card metric-card-accent"><span>请求</span><strong>{{ stats.requests }}</strong><small>REQUESTS</small></article>
+        <article class="metric-card"><span>成功</span><strong>{{ stats.success }}</strong><small>COMPLETED</small></article>
+        <article class="metric-card"><span>失败</span><strong>{{ stats.failed }}</strong><small>FAILED</small></article>
+        <article class="metric-card"><span>处理中</span><strong>{{ stats.processing }}</strong><small>PROCESSING</small></article>
+        <article class="metric-card"><span>消耗额度</span><strong>{{ stats.consumed }}</strong><small>QUOTA USED</small></article>
+        <article class="metric-card"><span>注册机器</span><strong>{{ stats.machines }}</strong><small>REGISTERED</small></article>
+    </div>
+</section>
+
+<section class="section-block" aria-labelledby="state-title">
+    <div class="section-heading">
+        <div><span class="section-index">02</span><h2 id="state-title">服务状态</h2></div>
+        <a href="{{ url_for('adminSettings') }}">修改请求配置 →</a>
+    </div>
+    <div class="status-layout">
+        <dl class="status-list">
+            <div><dt>API 状态</dt><dd><span class="inline-dot {% if not ai_configured %}waiting{% endif %}"></span>{{ '已配置' if ai_configured else '待配置' }}</dd></div>
+            <div><dt>当前模型</dt><dd><code>{{ model }}</code></dd></div>
+            <div><dt>单机每日额度</dt><dd>{{ daily_limit }} 次</dd></div>
+            <div><dt>高峰双倍扣除</dt><dd>{{ '已开启' if peak_enabled else '已关闭' }}</dd></div>
+        </dl>
+        <div class="quota-panel">
+            <span>当前每次请求扣除</span>
+            <strong>{{ quota_cost }}</strong>
+            <small>个额度单位</small>
+            <p>高峰时段：北京时间 9:00–12:00、14:00–18:00</p>
+        </div>
+    </div>
+</section>
+{% endblock %}

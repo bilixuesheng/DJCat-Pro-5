@@ -1,0 +1,21 @@
+{% extends "admin_base.html" %}
+
+{% block title %}提示词 · AI 写 Markdown{% endblock %}
+{% block page_name %}提示词{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <div class="eyebrow">AI 写 Markdown</div>
+        <h1>提示词</h1>
+        <p>编辑发送给模型的全局规则；桌面端的自定义风格会在此规则之后追加。</p>
+    </div>
+</header>
+
+<form class="prompt-form" method="post" action="{{ url_for('adminPrompt') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="prompt-header"><div><span class="section-index">01</span><h2>全局系统提示词</h2></div><span>最多 {{ max_system_prompt_length }} 个字符</span></div>
+    <textarea name="system_prompt" rows="26" maxlength="{{ max_system_prompt_length }}" required>{{ system_prompt }}</textarea>
+    <div class="prompt-footer"><p>规则修改会应用于下一次转换请求。请保留示例和输出格式要求，避免加入 API Key 等敏感信息。</p><button class="button button-primary" type="submit">保存提示词</button></div>
+</form>
+{% endblock %}

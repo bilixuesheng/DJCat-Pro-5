@@ -9,16 +9,27 @@
 <body class="admin-page">
     <div class="admin-shell">
         <aside class="admin-sidebar">
-            <a class="logo" href="{{ url_for('adminDashboard') }}">电教猫<span>·</span>控制台</a>
-            <div class="sidebar-kicker">Service control</div>
+            <a class="brand" href="{{ url_for('adminDashboard') }}" aria-label="电教猫服务控制台">
+                <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                <span><strong>电教猫</strong><small>服务控制台</small></span>
+            </a>
             <nav class="side-nav" aria-label="管理面板导航">
                 <a class="side-link {% if current_page == 'home' %}active{% endif %}" href="{{ url_for('adminDashboard') }}" {% if current_page == 'home' %}aria-current="page"{% endif %}>
-                    <span class="side-index">01</span>主页
+                    <span class="side-dot"></span>主页
                 </a>
                 <div class="side-group">
-                    <div class="side-group-title">AI 管理</div>
-                    <a class="side-link side-child {% if current_page == 'ai_markdown' %}active{% endif %}" href="{{ url_for('adminAIMarkdown') }}" {% if current_page == 'ai_markdown' %}aria-current="page"{% endif %}>
-                        <span class="side-index">02</span>AI 写 Markdown
+                    <div class="side-group-title"><span>AI 写 Markdown</span><i></i></div>
+                    <a class="side-link side-child {% if current_page == 'ai_overview' %}active{% endif %}" href="{{ url_for('adminAIMarkdown') }}" {% if current_page == 'ai_overview' %}aria-current="page"{% endif %}>
+                        运行情况
+                    </a>
+                    <a class="side-link side-child {% if current_page == 'ai_settings' %}active{% endif %}" href="{{ url_for('adminSettings') }}" {% if current_page == 'ai_settings' %}aria-current="page"{% endif %}>
+                        请求与计费
+                    </a>
+                    <a class="side-link side-child {% if current_page == 'ai_prompt' %}active{% endif %}" href="{{ url_for('adminPrompt') }}" {% if current_page == 'ai_prompt' %}aria-current="page"{% endif %}>
+                        提示词
+                    </a>
+                    <a class="side-link side-child {% if current_page == 'ai_machines' %}active{% endif %}" href="{{ url_for('adminMachines') }}" {% if current_page == 'ai_machines' %}aria-current="page"{% endif %}>
+                        注册机器
                     </a>
                 </div>
             </nav>
@@ -31,10 +42,10 @@
         <div class="admin-workspace">
             <header class="page-topbar">
                 <div>
-                    <div class="page-context">电教猫服务控制台</div>
+                    <div class="page-context">电教猫 / 服务控制台</div>
                     <strong>{% block page_name %}服务总览{% endblock %}</strong>
                 </div>
-                <div class="page-topbar-actions">{% block page_actions %}<span>dash.djcatpro.top</span>{% endblock %}</div>
+                <div class="page-topbar-actions">{% block page_actions %}<span class="connection-state"><i></i>服务端已连接</span>{% endblock %}</div>
             </header>
 
             <main class="page-main">

@@ -269,6 +269,18 @@ def _saveAISettings(
         database.commit()
 
 
+def _saveSystemPrompt(systemPrompt):
+    with closing(_connect()) as database:
+        database.execute(
+            """
+            INSERT INTO settings(key, value) VALUES ('system_prompt', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (systemPrompt,),
+        )
+        database.commit()
+
+
 def _registerMachine(machineId):
     now = _nowIso()
     with closing(_connect()) as database:
@@ -769,37 +781,45 @@ def adminDashboard():
 @app.get("/admin/ai/markdown/")
 @_loginRequired
 def adminAIMarkdown():
-    search = request.args.get("q", "")
-    sort = request.args.get("sort", "registered")
-    if sort not in {"registered", "code"}:
-        sort = "registered"
+    peakEnabled = _setting("peak_enabled", "1") == "1"
     return render_template(
-        "admin_ai_markdown.html",
+        "admin_ai_overview.html",
         csrf_token=_csrfToken(),
-        current_page="ai_markdown",
+        current_page="ai_overview",
         stats=_dashboardStats(),
-        machines=_machineRows(search, sort),
-        search=search,
-        sort=sort,
         daily_limit=_dailyLimit(),
-        peak_enabled=_setting("peak_enabled", "1") == "1",
+        peak_enabled=peakEnabled,
+        quota_cost=_quotaCost(peakEnabled=peakEnabled),
         model=_deepseekModel(),
-        api_key_configured=bool(_setting("deepseek_api_key")),
-        system_prompt=_setting("system_prompt", SYSTEM_PROMPT),
-        max_system_prompt_length=MAX_SYSTEM_PROMPT_LENGTH,
+        ai_configured=bool(
+            _setting("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY")
+        ),
     )
 
 
-@app.post("/admin/ai/markdown/settings")
+@app.route("/admin/ai/markdown/settings", methods=["GET", "POST"])
 @_loginRequired
 def adminSettings():
+    if request.method == "GET":
+        return render_template(
+            "admin_ai_settings.html",
+            csrf_token=_csrfToken(),
+            current_page="ai_settings",
+            daily_limit=_dailyLimit(),
+            peak_enabled=_setting("peak_enabled", "1") == "1",
+            model=_deepseekModel(),
+            api_key_configured=bool(
+                _setting("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY")
+            ),
+        )
+
     _checkCsrf()
     try:
         dailyLimit = int(request.form.get("daily_limit", ""))
     except ValueError:
         dailyLimit = 0
     model = request.form.get("model", "").strip()
-    systemPrompt = request.form.get("system_prompt", "").strip()
+    systemPrompt = _setting("system_prompt", SYSTEM_PROMPT)
     if not 1 <= dailyLimit <= 10_000:
         flash("每日额度必须在 1 到 10000 之间", "error")
     elif not re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", model):
@@ -821,9 +841,55 @@ def adminSettings():
             )
         except (RuntimeError, sqlite3.Error) as error:
             flash(str(error), "error")
-            return redirect(url_for("adminAIMarkdown"))
+            return redirect(url_for("adminSettings"))
         flash("AI 配置已保存", "success")
-    return redirect(url_for("adminAIMarkdown"))
+    return redirect(url_for("adminSettings"))
+
+
+@app.route("/admin/ai/markdown/prompt", methods=["GET", "POST"])
+@_loginRequired
+def adminPrompt():
+    if request.method == "GET":
+        return render_template(
+            "admin_ai_prompt.html",
+            csrf_token=_csrfToken(),
+            current_page="ai_prompt",
+            system_prompt=_setting("system_prompt", SYSTEM_PROMPT),
+            max_system_prompt_length=MAX_SYSTEM_PROMPT_LENGTH,
+        )
+
+    _checkCsrf()
+    systemPrompt = request.form.get("system_prompt", "").strip()
+    if not systemPrompt:
+        flash("系统提示词不能为空", "error")
+    elif len(systemPrompt) > MAX_SYSTEM_PROMPT_LENGTH:
+        flash(f"系统提示词不能超过 {MAX_SYSTEM_PROMPT_LENGTH} 个字符", "error")
+    else:
+        try:
+            _saveSystemPrompt(systemPrompt)
+        except sqlite3.Error as error:
+            flash(str(error), "error")
+        else:
+            flash("系统提示词已保存", "success")
+    return redirect(url_for("adminPrompt"))
+
+
+@app.get("/admin/ai/markdown/machines/")
+@_loginRequired
+def adminMachines():
+    search = request.args.get("q", "")
+    sort = request.args.get("sort", "registered")
+    if sort not in {"registered", "code"}:
+        sort = "registered"
+    return render_template(
+        "admin_ai_machines.html",
+        csrf_token=_csrfToken(),
+        current_page="ai_machines",
+        machines=_machineRows(search, sort),
+        search=search,
+        sort=sort,
+        daily_limit=_dailyLimit(),
+    )
 
 
 @app.post("/admin/ai/markdown/machines/<alias>/reset")
@@ -831,9 +897,10 @@ def adminSettings():
 def adminResetMachine(alias):
     _checkCsrf()
     flash("机器额度已重置" if _resetMachine(alias) else "未找到该机器", "success")
-    return redirect(url_for("adminAIMarkdown"))
+    return redirect(url_for("adminMachines"))
 
 
+@app.post("/admin/ai/markdown/machines/reset-all")
 @app.post("/admin/ai/markdown/reset-all")
 @_loginRequired
 def adminResetAll():
@@ -842,7 +909,7 @@ def adminResetAll():
         database.execute("DELETE FROM usage WHERE day = ?", (_today(),))
         database.commit()
     flash("所有机器今日额度已重置", "success")
-    return redirect(url_for("adminAIMarkdown"))
+    return redirect(url_for("adminMachines"))
 
 
 @app.post("/admin/logout")
