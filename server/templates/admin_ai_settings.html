@@ -12,7 +12,7 @@
     </div>
 </header>
 
-<form class="config-form" method="post" action="{{ url_for('adminSettings') }}">
+<form class="config-form" method="post" action="{{ url_for('adminSettings') }}" data-async-form>
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <section class="form-section" aria-labelledby="request-title">
         <div class="form-section-title"><span>01</span><div><h2 id="request-title">请求基础</h2><p>新的请求会立即使用保存后的配置。</p></div></div>

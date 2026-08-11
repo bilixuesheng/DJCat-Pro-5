@@ -30,15 +30,141 @@
         });
     }
 
-    const dismiss = (toast) => {
+    const dismissToast = (toast) => {
+        if (toast.classList.contains("is-leaving")) return;
         toast.classList.add("is-leaving");
-        window.setTimeout(() => toast.remove(), 180);
+        window.setTimeout(() => toast.remove(), 280);
     };
 
-    document.querySelectorAll("[data-toast]").forEach((toast) => {
-        toast.querySelector("[data-toast-close]")?.addEventListener("click", () => dismiss(toast));
-        window.setTimeout(() => dismiss(toast), 5000);
-    });
+    const prepareToast = (toast) => {
+        if (toast.dataset.toastReady === "true") return;
+        toast.dataset.toastReady = "true";
+        let timer = window.setTimeout(() => dismissToast(toast), 10_000);
+        const pause = () => {
+            if (timer !== null) {
+                window.clearTimeout(timer);
+                timer = null;
+            }
+            toast.classList.add("is-paused");
+        };
+        toast.addEventListener("mouseenter", pause);
+        toast.querySelector("[data-toast-close]")?.addEventListener("click", () => {
+            dismissToast(toast);
+        });
+    };
+
+    const toastRegion = () => {
+        let region = document.querySelector(".toast-region");
+        if (!region) {
+            region = document.createElement("div");
+            region.className = "toast-region";
+            region.setAttribute("aria-live", "polite");
+            region.setAttribute("aria-atomic", "true");
+            document.body.append(region);
+        }
+        return region;
+    };
+
+    const showToast = (message, category = "info") => {
+        if (!message) return;
+        const toast = document.createElement("div");
+        const mark = document.createElement("span");
+        const text = document.createElement("p");
+        const close = document.createElement("button");
+        const progress = document.createElement("span");
+        const toastCategory = category === "success" || category === "error" ? category : "info";
+
+        toast.className = `toast toast-${toastCategory}`;
+        toast.dataset.toast = "true";
+        toast.setAttribute("role", toastCategory === "error" ? "alert" : "status");
+        mark.className = "toast-mark";
+        mark.setAttribute("aria-hidden", "true");
+        text.textContent = message;
+        close.className = "toast-close";
+        close.type = "button";
+        close.dataset.toastClose = "true";
+        close.setAttribute("aria-label", "关闭提示");
+        close.textContent = "×";
+        progress.className = "toast-progress";
+        progress.dataset.toastProgress = "true";
+        progress.setAttribute("aria-hidden", "true");
+        toast.append(mark, text, close, progress);
+        toastRegion().append(toast);
+        prepareToast(toast);
+    };
+
+    document.querySelectorAll("[data-toast]").forEach(prepareToast);
+
+    const setButtonLoading = (form, loading) => {
+        const button = form.querySelector("button[type=submit]");
+        if (!button) return;
+        if (loading) {
+            button.dataset.originalLabel = button.textContent.trim();
+            button.disabled = true;
+            button.setAttribute("aria-busy", "true");
+            button.classList.add("is-loading");
+            const spinner = document.createElement("span");
+            spinner.className = "button-spinner";
+            spinner.setAttribute("aria-hidden", "true");
+            button.replaceChildren(
+                spinner,
+                document.createTextNode("处理中…"),
+            );
+            return;
+        }
+        button.replaceChildren(document.createTextNode(button.dataset.originalLabel || "提交"));
+        delete button.dataset.originalLabel;
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+        button.classList.remove("is-loading");
+    };
+
+    const updateQuotaLabels = (form) => {
+        const table = form.closest(".machine-section")?.querySelector("table[data-daily-limit]");
+        if (!table) return;
+        const limit = table.dataset.dailyLimit;
+        const labels = form.dataset.resetKind === "all"
+            ? table.querySelectorAll("[data-quota-label]")
+            : form.closest("tr")?.querySelectorAll("[data-quota-label]");
+        labels?.forEach((label) => {
+            label.textContent = `${limit} / ${limit}`;
+            const meter = label.previousElementSibling;
+            if (meter?.tagName === "METER") meter.value = limit;
+        });
+    };
+
+    const submitAsync = async (form) => {
+        if (form.dataset.submitting === "true") return;
+        form.dataset.submitting = "true";
+        setButtonLoading(form, true);
+        try {
+            const response = await fetch(form.action, {
+                method: (form.method || "POST").toUpperCase(),
+                body: new FormData(form),
+                credentials: "same-origin",
+                headers: {
+                    Accept: "application/json",
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+            });
+            let payload = null;
+            try {
+                payload = await response.json();
+            } catch (_) {
+                payload = null;
+            }
+            if (!response.ok || !payload) {
+                throw new Error(payload?.message || "操作失败，请稍后重试");
+            }
+            if (form.dataset.resetKind) updateQuotaLabels(form);
+            showToast(payload?.message || "操作已完成", payload?.category || "success");
+        } catch (error) {
+            showToast(error.message || "操作失败，请稍后重试", "error");
+        } finally {
+            delete form.dataset.submitting;
+            setButtonLoading(form, false);
+        }
+    };
 
     let activeConfirm = null;
     const showConfirm = (form) => {
@@ -86,7 +212,7 @@
         confirmButton.addEventListener("click", () => {
             form.dataset.confirmed = "true";
             close();
-            HTMLFormElement.prototype.submit.call(form);
+            form.requestSubmit();
         });
         backdrop.addEventListener("click", (event) => {
             if (event.target === backdrop) close();
@@ -97,12 +223,17 @@
 
     document.querySelectorAll("form[data-confirm]").forEach((form) => {
         form.addEventListener("submit", (event) => {
-            if (form.dataset.confirmed === "true") {
-                delete form.dataset.confirmed;
-                return;
-            }
+            if (form.dataset.confirmed === "true") return;
             event.preventDefault();
             showConfirm(form);
+        });
+    });
+
+    document.querySelectorAll("form[data-async-form]").forEach((form) => {
+        form.addEventListener("submit", (event) => {
+            if (form.dataset.confirmed === "true") delete form.dataset.confirmed;
+            event.preventDefault();
+            submitAsync(form);
         });
     });
 })();

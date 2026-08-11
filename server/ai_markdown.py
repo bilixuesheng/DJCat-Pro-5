@@ -598,6 +598,19 @@ def _checkCsrf():
         abort(400, "无效的请求令牌")
 
 
+def _isAjaxRequest():
+    return request.headers.get("X-Requested-With") == "XMLHttpRequest" or (
+        request.accept_mimetypes.best == "application/json"
+    )
+
+
+def _adminResponse(message, category, endpoint, status=200):
+    if _isAjaxRequest():
+        return jsonify(message=message, category=category), status
+    flash(message, category)
+    return redirect(url_for(endpoint))
+
+
 def _adminRoute(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -821,13 +834,20 @@ def adminSettings():
     model = request.form.get("model", "").strip()
     systemPrompt = _setting("system_prompt", SYSTEM_PROMPT)
     if not 1 <= dailyLimit <= 10_000:
-        flash("每日额度必须在 1 到 10000 之间", "error")
+        return _adminResponse(
+            "每日额度必须在 1 到 10000 之间", "error", "adminSettings", 400
+        )
     elif not re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", model):
-        flash("模型名称格式无效", "error")
+        return _adminResponse("模型名称格式无效", "error", "adminSettings", 400)
     elif not systemPrompt:
-        flash("系统提示词不能为空", "error")
+        return _adminResponse("系统提示词不能为空", "error", "adminSettings", 400)
     elif len(systemPrompt) > MAX_SYSTEM_PROMPT_LENGTH:
-        flash(f"系统提示词不能超过 {MAX_SYSTEM_PROMPT_LENGTH} 个字符", "error")
+        return _adminResponse(
+            f"系统提示词不能超过 {MAX_SYSTEM_PROMPT_LENGTH} 个字符",
+            "error",
+            "adminSettings",
+            400,
+        )
     else:
         apiKey = request.form.get("api_key", "").strip()
         try:
@@ -840,10 +860,8 @@ def adminSettings():
                 bool(request.form.get("clear_api_key")),
             )
         except (RuntimeError, sqlite3.Error) as error:
-            flash(str(error), "error")
-            return redirect(url_for("adminSettings"))
-        flash("AI 配置已保存", "success")
-    return redirect(url_for("adminSettings"))
+            return _adminResponse(str(error), "error", "adminSettings", 400)
+        return _adminResponse("AI 配置已保存", "success", "adminSettings")
 
 
 @app.route("/admin/ai/markdown/prompt", methods=["GET", "POST"])
@@ -861,17 +879,21 @@ def adminPrompt():
     _checkCsrf()
     systemPrompt = request.form.get("system_prompt", "").strip()
     if not systemPrompt:
-        flash("系统提示词不能为空", "error")
+        return _adminResponse("系统提示词不能为空", "error", "adminPrompt", 400)
     elif len(systemPrompt) > MAX_SYSTEM_PROMPT_LENGTH:
-        flash(f"系统提示词不能超过 {MAX_SYSTEM_PROMPT_LENGTH} 个字符", "error")
+        return _adminResponse(
+            f"系统提示词不能超过 {MAX_SYSTEM_PROMPT_LENGTH} 个字符",
+            "error",
+            "adminPrompt",
+            400,
+        )
     else:
         try:
             _saveSystemPrompt(systemPrompt)
         except sqlite3.Error as error:
-            flash(str(error), "error")
+            return _adminResponse(str(error), "error", "adminPrompt", 400)
         else:
-            flash("系统提示词已保存", "success")
-    return redirect(url_for("adminPrompt"))
+            return _adminResponse("系统提示词已保存", "success", "adminPrompt")
 
 
 @app.get("/admin/ai/markdown/machines/")
@@ -896,8 +918,13 @@ def adminMachines():
 @_loginRequired
 def adminResetMachine(alias):
     _checkCsrf()
-    flash("机器额度已重置" if _resetMachine(alias) else "未找到该机器", "success")
-    return redirect(url_for("adminMachines"))
+    reset = _resetMachine(alias)
+    return _adminResponse(
+        "机器额度已重置" if reset else "未找到该机器",
+        "success" if reset else "error",
+        "adminMachines",
+        200 if reset else 404,
+    )
 
 
 @app.post("/admin/ai/markdown/machines/reset-all")
@@ -908,8 +935,7 @@ def adminResetAll():
     with closing(_connect()) as database:
         database.execute("DELETE FROM usage WHERE day = ?", (_today(),))
         database.commit()
-    flash("所有机器今日额度已重置", "success")
-    return redirect(url_for("adminMachines"))
+    return _adminResponse("所有机器今日额度已重置", "success", "adminMachines")
 
 
 @app.post("/admin/logout")

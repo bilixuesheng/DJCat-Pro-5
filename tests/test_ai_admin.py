@@ -208,6 +208,62 @@ class AIAdminTest(TestCase):
             ).fetchone()[0]
         self.assertNotIn("sk-panel-test", encrypted)
 
+    def testAdminWriteRoutesSupportAjaxResponses(self):
+        self._login()
+        headers = {
+            "Accept": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        settings = self._settingsPage()
+        response = self.client.post(
+            "/admin/ai/markdown/settings",
+            base_url="https://dash.djcatpro.top",
+            headers=headers,
+            data={
+                "csrf_token": self._csrf(settings),
+                "daily_limit": "18",
+                "model": "deepseek-v4-flash",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["category"], "success")
+        self.assertNotIn("Location", response.headers)
+
+        prompt = self._promptPage()
+        response = self.client.post(
+            "/admin/ai/markdown/prompt",
+            base_url="https://dash.djcatpro.top",
+            headers=headers,
+            data={
+                "csrf_token": self._csrf(prompt),
+                "system_prompt": "管理员异步保存的提示词",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["category"], "success")
+
+        registered = self.client.post(
+            "/ai/markdown/register", json={"machine_id": "a" * 64}
+        ).get_json()
+        machines = self._machinesPage()
+        response = self.client.post(
+            f"/admin/ai/markdown/machines/{registered['machine_code']}/reset",
+            base_url="https://dash.djcatpro.top",
+            headers=headers,
+            data={"csrf_token": self._csrf(machines)},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["category"], "success")
+
+        response = self.client.post(
+            "/admin/ai/markdown/reset-all",
+            base_url="https://dash.djcatpro.top",
+            headers=headers,
+            data={"csrf_token": self._csrf(machines)},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["category"], "success")
+
     def testInvalidEncryptionKeyDoesNotPartiallySaveSettings(self):
         self._login()
         settings = self._settingsPage()
@@ -316,6 +372,9 @@ class AIAdminTest(TestCase):
         cssResponse.close()
         self.assertIn("@view-transition", css)
         self.assertIn("::view-transition-new(admin-workspace)", css)
+        self.assertIn("admin-topbar", css)
+        self.assertIn("toast-progress", css)
+        self.assertIn("toast-progress 10s", css)
         self.assertIn("prefers-reduced-motion", css)
         self.assertIn("button:active:not(:disabled)", css)
         self.assertIn(".button-danger:hover", css)
@@ -332,4 +391,6 @@ class AIAdminTest(TestCase):
         self.assertIn("translateX(-105%)", css)
         self.assertIn("Escape", javascript)
         self.assertIn("form[data-confirm]", javascript)
-        self.assertIn("HTMLFormElement.prototype.submit", javascript)
+        self.assertIn("form.requestSubmit", javascript)
+        self.assertIn("form[data-async-form]", javascript)
+        self.assertIn("X-Requested-With", javascript)

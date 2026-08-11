@@ -12,7 +12,7 @@
     </div>
 </header>
 
-<form class="prompt-form" method="post" action="{{ url_for('adminPrompt') }}">
+<form class="prompt-form" method="post" action="{{ url_for('adminPrompt') }}" data-async-form>
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="prompt-header"><div><span class="section-index">01</span><h2>全局系统提示词</h2></div><span>最多 {{ max_system_prompt_length }} 个字符</span></div>
     <textarea name="system_prompt" rows="26" maxlength="{{ max_system_prompt_length }}" required>{{ system_prompt }}</textarea>
