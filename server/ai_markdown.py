@@ -265,14 +265,14 @@ def _programTarget(value):
     return value
 
 
-def _actionValues(actionType, target, argumentsText=""):
-    actionType = actionType.strip()
-    target = target.strip()
+def _actionFromForm(form):
+    actionType = form.get("action_type", "").strip()
+    target = form.get("action_target", "").strip()
     if actionType == "program":
         target = _programTarget(target)
         arguments = [
             line.strip()
-            for line in argumentsText.splitlines()
+            for line in form.get("action_arguments", "").splitlines()
             if line.strip()
         ]
     elif actionType == "url":
@@ -285,63 +285,11 @@ def _actionValues(actionType, target, argumentsText=""):
     return actionType, target, json.dumps(arguments, ensure_ascii=False)
 
 
-def _actionFromForm(form):
-    return _actionValues(
-        form.get("action_type", ""),
-        form.get("action_target", ""),
-        form.get("action_arguments", ""),
-    )
-
-
-def _requiredValue(value, label, maximum):
-    value = value.strip()
+def _requiredText(form, key, label, maximum):
+    value = form.get(key, "").strip()
     if not value or len(value) > maximum:
         raise ValueError(f"{label}不能为空且不能超过 {maximum} 个字符")
     return value
-
-
-def _requiredText(form, key, label, maximum):
-    return _requiredValue(form.get(key, ""), label, maximum)
-
-
-def _componentsFromForm(form):
-    fields = {
-        name: form.getlist(f"component_{name}")
-        for name in (
-            "title",
-            "description",
-            "action_type",
-            "action_target",
-            "action_arguments",
-        )
-    }
-    count = max((len(values) for values in fields.values()), default=0)
-    if count > 20:
-        raise ValueError("一次最多添加 20 张预设卡片")
-    components = []
-    for index in range(count):
-        def value(name):
-            return fields[name][index] if index < len(fields[name]) else ""
-
-        title = value("title")
-        description = value("description")
-        target = value("action_target")
-        arguments = value("action_arguments")
-        if not any(item.strip() for item in (title, description, target, arguments)):
-            continue
-        actionType, actionTarget, actionArguments = _actionValues(
-            value("action_type"), target, arguments
-        )
-        components.append(
-            (
-                _requiredValue(title, "卡片标题", 100),
-                _requiredValue(description, "卡片简介", 300),
-                actionType,
-                actionTarget,
-                actionArguments,
-            )
-        )
-    return components
 
 
 def _actionJson(row, prefix="action_"):
@@ -1010,19 +958,12 @@ def adminAIMarkdown():
     )
 
 
-@app.route("/admin/app-store/apps/new", methods=["GET", "POST"])
+@app.post("/admin/app-store/apps/new")
 @_loginRequired
 def adminCreateApplication():
-    if request.method == "GET":
-        return render_template(
-            "admin_app_store_new.html",
-            csrf_token=_csrfToken(),
-            current_page="applications",
-        )
     _checkCsrf()
     try:
         actionType, actionTarget, actionArguments = _actionFromForm(request.form)
-        components = _componentsFromForm(request.form)
         values = (
             _requiredText(request.form, "name", "应用名称", 100),
             _requiredText(request.form, "developer", "开发者", 100),
@@ -1037,7 +978,7 @@ def adminCreateApplication():
             actionArguments,
         )
         with closing(_connect()) as database:
-            cursor = database.execute(
+            database.execute(
                 """
                 INSERT INTO applications(
                     name, developer, description, version, download_url,
@@ -1047,22 +988,11 @@ def adminCreateApplication():
                 """,
                 values,
             )
-            database.executemany(
-                """
-                INSERT INTO app_components(
-                    app_id, title, description, action_type,
-                    action_target, action_arguments
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                [(cursor.lastrowid, *component) for component in components],
-            )
-            appId = cursor.lastrowid
             database.commit()
         flash("软件已添加", "success")
-        return redirect(url_for("adminApplication", appId=appId))
     except (ValueError, sqlite3.IntegrityError) as error:
         flash(str(error), "error")
-        return redirect(url_for("adminCreateApplication"))
+    return redirect(url_for("adminApplications"))
 
 
 @app.get("/admin/app-store/apps/")
@@ -1073,23 +1003,6 @@ def adminApplications():
         csrf_token=_csrfToken(),
         current_page="applications",
         applications=_appStoreCatalog()["apps"],
-    )
-
-
-@app.get("/admin/app-store/apps/<int:appId>/")
-@_loginRequired
-def adminApplication(appId):
-    application = next(
-        (app for app in _appStoreCatalog()["apps"] if app["id"] == appId),
-        None,
-    )
-    if application is None:
-        abort(404)
-    return render_template(
-        "admin_app_store_app.html",
-        csrf_token=_csrfToken(),
-        current_page="applications",
-        app=application,
     )
 
 
@@ -1129,7 +1042,7 @@ def adminEditApplication(appId):
         flash("软件已更新", "success")
     except ValueError as error:
         flash(str(error), "error")
-    return redirect(url_for("adminApplication", appId=appId))
+    return redirect(url_for("adminApplications"))
 
 
 @app.post("/admin/app-store/apps/<int:appId>/delete")
@@ -1171,20 +1084,13 @@ def adminCreateAppComponent(appId):
         flash("预设卡片已添加", "success")
     except (ValueError, sqlite3.IntegrityError) as error:
         flash(str(error), "error")
-    return redirect(url_for("adminApplication", appId=appId))
+    return redirect(url_for("adminApplications"))
 
 
 @app.post("/admin/app-store/components/<int:componentId>/edit")
 @_loginRequired
 def adminEditAppComponent(componentId):
     _checkCsrf()
-    with closing(_connect()) as database:
-        component = database.execute(
-            "SELECT app_id FROM app_components WHERE id = ?", (componentId,)
-        ).fetchone()
-    if component is None:
-        flash("未找到预设卡片", "error")
-        return redirect(url_for("adminApplications"))
     try:
         actionType, actionTarget, actionArguments = _actionFromForm(request.form)
         values = (
@@ -1210,7 +1116,7 @@ def adminEditAppComponent(componentId):
         flash("预设卡片已更新", "success")
     except ValueError as error:
         flash(str(error), "error")
-    return redirect(url_for("adminApplication", appId=component["app_id"]))
+    return redirect(url_for("adminApplications"))
 
 
 @app.post("/admin/app-store/components/<int:componentId>/delete")
@@ -1218,9 +1124,6 @@ def adminEditAppComponent(componentId):
 def adminDeleteAppComponent(componentId):
     _checkCsrf()
     with closing(_connect()) as database:
-        component = database.execute(
-            "SELECT app_id FROM app_components WHERE id = ?", (componentId,)
-        ).fetchone()
         result = database.execute(
             "DELETE FROM app_components WHERE id = ?", (componentId,)
         )
@@ -1229,9 +1132,7 @@ def adminDeleteAppComponent(componentId):
         "预设卡片已删除" if result.rowcount == 1 else "未找到预设卡片",
         "success",
     )
-    if component is None:
-        return redirect(url_for("adminApplications"))
-    return redirect(url_for("adminApplication", appId=component["app_id"]))
+    return redirect(url_for("adminApplications"))
 
 
 @app.post("/admin/app-store/ads/new")

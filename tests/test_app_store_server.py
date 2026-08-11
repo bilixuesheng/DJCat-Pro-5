@@ -162,62 +162,6 @@ class AppStoreServerTest(TestCase):
             },
         )
 
-    def test_app_list_create_and_settings_are_separate_pages(self):
-        dashboard = self._login()
-        createPage = self.client.get(
-            "/admin/app-store/apps/new",
-            base_url="https://dash.djcatpro.top",
-        )
-        self.assertIn("新增软件", createPage.get_data(as_text=True))
-        self.assertIn("data-component-list", createPage.get_data(as_text=True))
-
-        created = self.client.post(
-            "/admin/app-store/apps/new",
-            base_url="https://dash.djcatpro.top",
-            data={
-                "csrf_token": self._csrf(dashboard),
-                "name": "Component App",
-                "developer": "Developer",
-                "description": "Created with preset cards",
-                "version": "1",
-                "download_url": "https://example.com/app.zip",
-                "icon_url": "https://example.com/icon.png",
-                "install_dir": "component-app",
-                "action_type": "program",
-                "action_target": "App.exe",
-                "component_title": ["打开主页", "查看文档"],
-                "component_description": ["运行主程序", "打开在线文档"],
-                "component_action_type": ["program", "url"],
-                "component_action_target": [
-                    "App.exe",
-                    "https://example.com/docs",
-                ],
-                "component_action_arguments": ["--home", ""],
-            },
-            follow_redirects=True,
-        )
-        self.assertEqual(created.request.path, "/admin/app-store/apps/1/")
-        self.assertIn("软件设置", created.get_data(as_text=True))
-        self.assertIn("打开主页", created.get_data(as_text=True))
-        self.assertIn("查看文档", created.get_data(as_text=True))
-
-        applications = self.client.get(
-            "/admin/app-store/apps/",
-            base_url="https://dash.djcatpro.top",
-        )
-        applicationsHtml = applications.get_data(as_text=True)
-        self.assertIn("已发布软件", applicationsHtml)
-        self.assertIn("/admin/app-store/apps/1/", applicationsHtml)
-        self.assertNotIn('name="install_dir"', applicationsHtml)
-
-        catalog = self.client.get(
-            "/app-store/catalog", base_url="https://api.djcatpro.top"
-        ).get_json()
-        self.assertEqual(
-            [component["title"] for component in catalog["apps"][0]["components"]],
-            ["打开主页", "查看文档"],
-        )
-
     def test_admin_validates_edits_and_cascades_application_deletion(self):
         dashboard = self._login()
         csrfToken = self._csrf(dashboard)

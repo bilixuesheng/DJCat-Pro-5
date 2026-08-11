@@ -51,19 +51,6 @@ Gunicorn 示例：
 
 `api.djcatpro.top` 原有站点继续把 `/ai/markdown` 反代到 `127.0.0.1:18080`，并保持 `proxy_buffering off`。
 
-应用市场目录也必须转发到同一个 Flask 服务，否则客户端会收到 Nginx 的 404：
-
-```nginx
-location /app-store/ {
-    proxy_pass http://127.0.0.1:18080;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-}
-```
-
 在宝塔中新建 `dash.djcatpro.top` 站点、申请 SSL 后，将其反向代理配置为：
 
 ```nginx

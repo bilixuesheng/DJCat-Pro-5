@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     BodyLabel,
-    CaptionLabel,
     CardWidget,
     FlipView,
     FlowLayout,
@@ -90,48 +89,28 @@ class StoreAppCard(CardWidget):
     def __init__(self, application, actionText, actionName, installedPage, parent=None):
         super().__init__(parent)
         self.application = application
-        self.setFixedSize(330, 166)
+        self.setFixedSize(300, 142)
         self.setClickEnabled(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setAccessibleName(application.get("name", "应用"))
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(18, 18, 16, 16)
-        layout.setSpacing(14)
-        self.icon = CachedImageLabel(QSize(58, 58), self)
-        self.icon.setUrl(application.get("icon_url", ""))
-        layout.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignTop)
+        layout.setContentsMargins(16, 16, 14, 14)
+        icon = CachedImageLabel(QSize(52, 52), self)
+        icon.setUrl(application.get("icon_url", ""))
+        layout.addWidget(icon, 0, Qt.AlignmentFlag.AlignTop)
 
         contentLayout = QVBoxLayout()
         contentLayout.setSpacing(4)
-        titleLayout = QHBoxLayout()
-        titleLayout.setSpacing(8)
         title = SubtitleLabel(application.get("name", "未知应用"), self)
-        titleLayout.addWidget(title)
-        if application.get("recommended"):
-            recommended = CaptionLabel("推荐", self)
-            recommended.setStyleSheet(
-                "padding: 2px 6px; border-radius: 6px; "
-                "background: rgba(217, 119, 87, 0.16); color: #c45f3e;"
-            )
-            titleLayout.addWidget(recommended)
-        titleLayout.addStretch(1)
-        self.metaLabel = CaptionLabel(
-            f"{application.get('developer', '未知开发者')} · "
-            f"版本 {application.get('version', '-')}",
-            self,
-        )
         description = BodyLabel(application.get("description", ""), self)
         description.setWordWrap(True)
-        description.setMaximumHeight(40)
-        contentLayout.addLayout(titleLayout)
-        contentLayout.addWidget(self.metaLabel)
+        description.setMaximumHeight(42)
+        contentLayout.addWidget(title)
         contentLayout.addWidget(description)
         contentLayout.addStretch(1)
         buttonLayout = QHBoxLayout()
         buttonLayout.setContentsMargins(0, 2, 0, 0)
         self.primaryButton = PrimaryPushButton(self)
-        self.primaryButton.setMinimumHeight(34)
         self.primaryButton.setText(actionText)
         self.primaryButton.setIcon(
             FIF.UPDATE
@@ -159,12 +138,6 @@ class StoreAppCard(CardWidget):
         contentLayout.addLayout(buttonLayout)
         layout.addLayout(contentLayout, 1)
         self.clicked.connect(lambda: self.detailRequested.emit(self.application))
-
-    def sizeHint(self):
-        return QSize(330, 166)
-
-    def minimumSizeHint(self):
-        return self.sizeHint()
 
 
 class AdOverlay(QWidget):
@@ -381,18 +354,7 @@ class AppStorePage(QWidget):
         self.overviewLayout = QVBoxLayout(self.overviewContainer)
         self.overviewLayout.setContentsMargins(30, 20, 30, 36)
         self.overviewLayout.setSpacing(14)
-        headerLayout = QHBoxLayout()
-        titleLayout = QVBoxLayout()
-        titleLayout.setSpacing(2)
-        titleLayout.addWidget(TitleLabel("应用市场", self.overviewContainer))
-        titleLayout.addWidget(
-            CaptionLabel("发现、安装并管理适合电教场景的软件", self.overviewContainer)
-        )
-        headerLayout.addLayout(titleLayout)
-        headerLayout.addStretch(1)
-        self.marketSummaryLabel = CaptionLabel("正在读取本地应用", self.overviewContainer)
-        headerLayout.addWidget(self.marketSummaryLabel, 0, Qt.AlignmentFlag.AlignBottom)
-        self.overviewLayout.addLayout(headerLayout)
+        self.overviewLayout.addWidget(TitleLabel("应用市场", self.overviewContainer))
         self.topPivot = Pivot(self.overviewContainer)
         self.topPivot.addItem("installed", "已安装")
         self.topPivot.addItem("all", "全部应用")
@@ -440,18 +402,10 @@ class AppStorePage(QWidget):
     def _onCatalogReceived(self, catalog) -> None:
         self._catalogLoading = False
         if catalog is None:
-            self.marketSummaryLabel.setText(
-                f"已安装 {len(self._installed)} · 目录暂不可用"
-            )
-            self._showInfo(
-                "无法获取应用目录",
-                "目录服务暂不可用，将在再次进入应用市场时重试。",
-                error=True,
-            )
+            self._showInfo("无法获取应用目录", "请检查网络后重新进入应用市场。", error=True)
             return
         self._catalogLoaded = True
         self._catalog = catalog
-        self._updateMarketSummary()
         self.carousel.setAdvertisements(catalog.get("ads", []))
         self._renderCurrentSection()
 
@@ -464,19 +418,7 @@ class AppStorePage(QWidget):
     def _refreshInstalled(self) -> None:
         self._installed = installedApplications()
         if self._loaded:
-            self._updateMarketSummary()
             self._renderInstalled()
-
-    def _updateMarketSummary(self) -> None:
-        if not hasattr(self, "marketSummaryLabel"):
-            return
-        installed = len(self._installed)
-        if self._catalogLoaded:
-            self.marketSummaryLabel.setText(
-                f"已安装 {installed} · 全部 {len(self._catalog.get('apps', []))}"
-            )
-        else:
-            self.marketSummaryLabel.setText(f"已安装 {installed} · 正在获取目录")
 
     def _catalogById(self):
         return {int(app["id"]): app for app in self._catalog.get("apps", [])}
@@ -515,24 +457,15 @@ class AppStorePage(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         widget = QWidget()
-        flow = FlowLayout(widget, needAni=False)
+        flow = FlowLayout(widget, needAni=True)
         flow.setContentsMargins(0, 6, 0, 12)
         for card in cards:
             flow.addWidget(card)
         if not cards:
-            emptyCard = CardWidget(widget)
-            emptyCard.setFixedSize(330, 132)
-            emptyLayout = QVBoxLayout(emptyCard)
-            emptyLayout.setContentsMargins(22, 22, 22, 22)
-            emptyLayout.addStretch(1)
-            label = SubtitleLabel(emptyText, emptyCard)
+            label = BodyLabel(emptyText, widget)
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            emptyLayout.addWidget(label)
-            hint = CaptionLabel("更换分类或搜索关键词后再试", emptyCard)
-            hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            emptyLayout.addWidget(hint)
-            emptyLayout.addStretch(1)
-            flow.addWidget(emptyCard)
+            label.setMinimumHeight(120)
+            flow.addWidget(label)
         layout.addWidget(widget)
 
     def _appCard(self, application, installedPage=False):
@@ -635,56 +568,31 @@ class AppStorePage(QWidget):
         layout.addWidget(backButton, 0, Qt.AlignmentFlag.AlignLeft)
         columns = QHBoxLayout()
         columns.setSpacing(28)
-        self.detailInfoCard = CardWidget(container)
-        self.detailInfoCard.setMinimumWidth(280)
-        left = QVBoxLayout(self.detailInfoCard)
-        left.setContentsMargins(24, 24, 24, 24)
-        left.setSpacing(8)
-        icon = CachedImageLabel(QSize(104, 104), self.detailInfoCard)
+        left = QVBoxLayout()
+        icon = CachedImageLabel(QSize(104, 104), container)
         icon.setUrl(application.get("icon_url", ""))
         left.addWidget(icon)
-        left.addSpacing(6)
-        left.addWidget(TitleLabel(application.get("name", ""), self.detailInfoCard))
-        left.addWidget(
-            CaptionLabel(
-                f"{application.get('developer', '')} · 版本 {application.get('version', '')}",
-                self.detailInfoCard,
-            )
-        )
-        detailDescription = BodyLabel(
-            application.get("description", ""), self.detailInfoCard
-        )
-        detailDescription.setWordWrap(True)
-        left.addWidget(detailDescription)
-        left.addStretch(1)
+        left.addWidget(TitleLabel(application.get("name", ""), container))
+        left.addWidget(BodyLabel(f"开发者：{application.get('developer', '')}", container))
+        left.addWidget(BodyLabel(f"版本：{application.get('version', '')}", container))
         actionButton = PrimaryPushButton(
             FIF.PLAY if installed else FIF.DOWNLOAD,
             "打开" if installed else "下载",
-            self.detailInfoCard,
+            container,
         )
-        actionButton.setMinimumHeight(42)
         actionButton.clicked.connect(
             lambda: self._handleAction(application, "open" if installed else "install")
         )
         left.addWidget(actionButton)
-        columns.addWidget(self.detailInfoCard, 1)
-        self.detailComponentsCard = CardWidget(container)
-        right = QVBoxLayout(self.detailComponentsCard)
-        right.setContentsMargins(24, 24, 24, 24)
-        right.setSpacing(12)
-        right.addWidget(SubtitleLabel("预设卡片", self.detailComponentsCard))
-        right.addWidget(
-            CaptionLabel("安装应用后，可将常用操作固定到主页", self.detailComponentsCard)
-        )
+        left.addStretch(1)
+        columns.addLayout(left, 1)
+        right = QVBoxLayout()
+        right.addWidget(SubtitleLabel("预设卡片", container))
         components = application.get("components", [])
         if not components:
-            empty = BodyLabel("该应用暂不支持预设卡片", self.detailComponentsCard)
-            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty.setMinimumHeight(140)
-            right.addWidget(empty)
+            right.addWidget(BodyLabel("该应用暂不支持预设卡片", container))
         for component in components:
-            card = CardWidget(self.detailComponentsCard)
-            card.setMinimumHeight(112)
+            card = CardWidget(container)
             cardLayout = QHBoxLayout(card)
             componentIcon = CachedImageLabel(QSize(48, 48), card)
             componentIcon.setUrl(application.get("icon_url", ""))
@@ -708,7 +616,7 @@ class AppStorePage(QWidget):
             cardLayout.addLayout(componentLayout, 1)
             right.addWidget(card)
         right.addStretch(1)
-        columns.addWidget(self.detailComponentsCard, 2)
+        columns.addLayout(right, 2)
         layout.addLayout(columns, 1)
         self.detailPage.setWidget(container)
         self.detailPage.setWidgetResizable(True)
@@ -816,6 +724,6 @@ class AppStorePage(QWidget):
             title,
             content,
             duration=4000,
-            position=InfoBarPosition.BOTTOM_RIGHT,
+            position=InfoBarPosition.TOP_RIGHT,
             parent=self.window(),
         )

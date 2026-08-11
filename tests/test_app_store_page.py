@@ -9,7 +9,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-from qfluentwidgets import InfoBarPosition
 
 from app.config.cfg import cfg
 from app.view.pages.app_store_page import AppStorePage, StoreAppCard
@@ -106,33 +105,6 @@ class AppStorePageTest(TestCase):
         self.assertEqual(len(cards), 1)
         self.assertEqual(cards[0].primaryButton.text(), "更新")
 
-    def test_market_cards_and_details_expose_clear_information_hierarchy(self):
-        self.page.show()
-        QTest.qWait(100)
-
-        self.assertIn("已安装 1", self.page.marketSummaryLabel.text())
-        cardsWidget = self.page.installedLayout.itemAt(0).widget()
-        card = cardsWidget.findChild(StoreAppCard)
-        self.assertEqual(card.metaLabel.text(), "开发者 · 版本 2")
-
-        self.page.showDetails(card.application)
-
-        self.assertTrue(self.page.detailInfoCard.isVisible())
-        self.assertTrue(self.page.detailComponentsCard.isVisible())
-
-    def test_refined_market_cards_do_not_overlap_in_the_flow_layout(self):
-        self.page.resize(1180, 760)
-        self.page.show()
-        QTest.qWait(100)
-        self.page.topPivot.setCurrentItem("all")
-        QTest.qWait(50)
-        cardsWidget = self.page.catalogCardsSlot.itemAt(0).widget()
-        cards = cardsWidget.findChildren(StoreAppCard)
-
-        for index, card in enumerate(cards):
-            for other in cards[index + 1 :]:
-                self.assertFalse(card.geometry().intersects(other.geometry()))
-
     def test_failed_catalog_load_retries_without_rebuilding_the_page(self):
         self.fetchCatalog.side_effect = [None, self.catalog]
 
@@ -145,15 +117,6 @@ class AppStorePageTest(TestCase):
         self.assertEqual(self.fetchCatalog.call_count, 2)
         self.assertIs(self.page.overview, overview)
         self.assertEqual(len(self.page._catalog["apps"]), 16)
-
-    def test_notifications_are_shown_at_the_bottom_right(self):
-        with patch("app.view.pages.app_store_page.InfoBar.error") as showError:
-            self.page._showInfo("无法获取应用目录", "网络错误", error=True)
-
-        self.assertEqual(
-            showError.call_args.kwargs["position"],
-            InfoBarPosition.BOTTOM_RIGHT,
-        )
 
     def test_update_keeps_the_installed_action_until_install_completes(self):
         self.catalog["apps"][0]["open_action"] = {
