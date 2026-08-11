@@ -275,3 +275,42 @@ class AIAdminTest(TestCase):
             "/admin/ai/markdown/reset-all", base_url="https://dash.djcatpro.top"
         )
         self.assertEqual(response.status_code, 400)
+
+    def testAdminFeedbackUsesToastAndPageMotion(self):
+        self._login()
+        settings = self._settingsPage()
+        response = self.client.post(
+            "/admin/ai/markdown/settings",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(settings),
+                "daily_limit": "0",
+                "model": "deepseek-v4-flash",
+            },
+            follow_redirects=True,
+        )
+        content = response.get_data(as_text=True)
+        self.assertIn('class="toast-region"', content)
+        self.assertIn("每日额度必须在 1 到 10000 之间", content)
+        self.assertNotIn('<main class="page-main">\n                <div class="notice', content)
+
+        cssResponse = self.client.get(
+            "/static/admin.css", base_url="https://dash.djcatpro.top"
+        )
+        css = cssResponse.get_data(as_text=True)
+        cssResponse.close()
+        self.assertIn("@view-transition", css)
+        self.assertIn("::view-transition-new(admin-workspace)", css)
+        self.assertIn("prefers-reduced-motion", css)
+
+        javascriptResponse = self.client.get(
+            "/static/admin.js", base_url="https://dash.djcatpro.top"
+        )
+        javascript = javascriptResponse.get_data(as_text=True)
+        javascriptResponse.close()
+        self.assertIn("[data-toast]", javascript)
+        self.assertIn("data-sidebar-toggle", content)
+        self.assertIn("data-sidebar-close", content)
+        self.assertIn("sidebar-open", css)
+        self.assertIn("translateX(-105%)", css)
+        self.assertIn("Escape", javascript)

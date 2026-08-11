@@ -5,14 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}电教猫管理面板{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
+    <script defer src="{{ url_for('static', filename='admin.js') }}"></script>
 </head>
 <body class="admin-page">
     <div class="admin-shell">
-        <aside class="admin-sidebar">
+        <aside class="admin-sidebar" id="admin-sidebar" data-sidebar>
             <a class="brand" href="{{ url_for('adminDashboard') }}" aria-label="电教猫服务控制台">
                 <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
                 <span><strong>电教猫</strong><small>服务控制台</small></span>
             </a>
+            <button class="sidebar-close" type="button" data-sidebar-close aria-label="关闭导航">×</button>
             <nav class="side-nav" aria-label="管理面板导航">
                 <a class="side-link {% if current_page == 'home' %}active{% endif %}" href="{{ url_for('adminDashboard') }}" {% if current_page == 'home' %}aria-current="page"{% endif %}>
                     <span class="side-dot"></span>主页
@@ -38,23 +40,39 @@
                 <button type="submit">退出登录</button>
             </form>
         </aside>
+        <button class="sidebar-scrim" type="button" data-sidebar-close aria-label="关闭导航"></button>
 
         <div class="admin-workspace">
             <header class="page-topbar">
-                <div>
-                    <div class="page-context">电教猫 / 服务控制台</div>
-                    <strong>{% block page_name %}服务总览{% endblock %}</strong>
+                <div class="page-topbar-lead">
+                    <button class="sidebar-toggle" type="button" data-sidebar-toggle aria-controls="admin-sidebar" aria-expanded="false" aria-label="打开导航">
+                        <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+                    </button>
+                    <div>
+                        <div class="page-context">电教猫 / 服务控制台</div>
+                        <strong>{% block page_name %}服务总览{% endblock %}</strong>
+                    </div>
                 </div>
                 <div class="page-topbar-actions">{% block page_actions %}<span class="connection-state"><i></i>服务端已连接</span>{% endblock %}</div>
             </header>
 
             <main class="page-main">
-                {% for category, message in get_flashed_messages(with_categories=true) %}
-                    <div class="notice {{ category }}">{{ message }}</div>
-                {% endfor %}
                 {% block content %}{% endblock %}
             </main>
         </div>
     </div>
+    {% with flashes = get_flashed_messages(with_categories=true) %}
+        {% if flashes %}
+            <div class="toast-region" aria-live="polite" aria-atomic="true">
+                {% for category, message in flashes %}
+                    <div class="toast toast-{{ category if category in ('success', 'error') else 'info' }}" data-toast role="{{ 'alert' if category == 'error' else 'status' }}">
+                        <span class="toast-mark" aria-hidden="true"></span>
+                        <p>{{ message }}</p>
+                        <button class="toast-close" type="button" data-toast-close aria-label="关闭提示">×</button>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
 </body>
 </html>

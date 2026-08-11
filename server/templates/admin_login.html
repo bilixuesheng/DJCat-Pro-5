@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>登录 · 电教猫服务控制台</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
+    <script defer src="{{ url_for('static', filename='admin.js') }}"></script>
 </head>
 <body class="login-page">
     <main class="login-shell">
@@ -25,9 +26,6 @@
                 <div class="eyebrow">Administrator access</div>
                 <h2>登录</h2>
                 <p>使用服务端管理员凭据继续。</p>
-                {% for category, message in get_flashed_messages(with_categories=true) %}
-                    <div class="notice {{ category }}">{{ message }}</div>
-                {% endfor %}
                 <form method="post" action="{{ url_for('adminLogin') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <label>用户名
@@ -41,5 +39,18 @@
             </div>
         </section>
     </main>
+    {% with flashes = get_flashed_messages(with_categories=true) %}
+        {% if flashes %}
+            <div class="toast-region" aria-live="polite" aria-atomic="true">
+                {% for category, message in flashes %}
+                    <div class="toast toast-{{ category if category in ('success', 'error') else 'info' }}" data-toast role="{{ 'alert' if category == 'error' else 'status' }}">
+                        <span class="toast-mark" aria-hidden="true"></span>
+                        <p>{{ message }}</p>
+                        <button class="toast-close" type="button" data-toast-close aria-label="关闭提示">×</button>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
 </body>
 </html>
