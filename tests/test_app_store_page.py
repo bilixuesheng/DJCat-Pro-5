@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QObject, QPoint, QThread, Qt, Signal
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QStackedLayout
+from PySide6.QtWidgets import QApplication
 from qfluentwidgets import DrillInTransitionStackedWidget, PrimaryPushButton
 
 from app.view.pages.app_store_page import AppStorePage, ApplicationCard, CatalogWorker
@@ -271,10 +271,6 @@ class AppStorePageTest(TestCase):
         self.page._prepareAds()
         self.qtApp.processEvents()
 
-        self.assertEqual(
-            self.page.adStack.stackingMode(),
-            QStackedLayout.StackingMode.StackAll,
-        )
         self.assertTrue(self.page.adOverlay.isVisible())
         start = QPoint(self.page.adOverlay.width() - 30, 40)
         end = QPoint(30, 40)
@@ -329,6 +325,50 @@ class AppStorePageTest(TestCase):
             self.page.adNext.geometry().center().x(),
             self.page.adOverlay.width() * 2 // 3,
         )
+
+    def testAdvertisementKeepsNativeFlipViewShapeAndControls(self):
+        self.page.ads = [
+            {"id": 1, "title": "First", "image_url": ""},
+            {"id": 2, "title": "Second", "image_url": ""},
+        ]
+        self.page.resize(1000, 800)
+        self.page.show()
+        self.page._switchCatalogTab(1)
+        self.page._prepareAds()
+        QTest.qWait(20)
+
+        self.assertLessEqual(self.page.adFrame.height(), 240)
+        self.assertEqual(self.page.adFlipView.borderRadius, 12)
+        self.assertIn("border-radius: 12px", self.page.adOverlay.styleSheet())
+        self.assertIs(self.page.adPrevious, self.page.adFlipView.preButton)
+        self.assertIs(self.page.adNext, self.page.adFlipView.nextButton)
+
+        self.page.adNext.click()
+        self.assertEqual(self.page.adFlipView.currentIndex(), 1)
+        self.page.adPrevious.click()
+        self.assertEqual(self.page.adFlipView.currentIndex(), 0)
+
+    def testAdvertisementResizeKeepsCurrentSlideAligned(self):
+        self.page.ads = [
+            {"id": 1, "title": "First", "image_url": ""},
+            {"id": 2, "title": "Second", "image_url": ""},
+        ]
+        self.page.resize(1000, 800)
+        self.page.show()
+        self.page._switchCatalogTab(1)
+        self.page._prepareAds()
+        QTest.qWait(20)
+        self.page.adFlipView.setCurrentIndex(1)
+        QTest.qWait(520)
+
+        self.page.resize(700, 800)
+        QTest.qWait(20)
+
+        expected = (
+            self.page.adFlipView.item(0).sizeHint().width()
+            + 3 * self.page.adFlipView.spacing()
+        )
+        self.assertEqual(self.page.adFlipView.scrollBar.value(), expected)
 
     def testDetailStartsAtTopAndBackRestoresCatalogScroll(self):
         apps = _apps(20)

@@ -33,7 +33,7 @@ CACHE_MAX_AGE = 7 * 24 * 60 * 60
 CACHE_SWEEP_INTERVAL = CACHE_MAX_AGE
 ARCHITECTURES = ("x86_64", "arm64")
 MANIFEST_NAME = ".djcat-app.json"
-_SAFE_INSTALL_DIR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_SAFE_INSTALL_DIR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}$")
 _RESERVED_NAMES = {
     "CON",
     "PRN",

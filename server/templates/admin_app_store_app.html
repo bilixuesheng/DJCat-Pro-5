@@ -25,7 +25,7 @@
                 <label>软件名称<input name="name" maxlength="120" value="{{ form.name if app else '' }}" required></label>
                 <label>开发者<input name="developer" maxlength="120" value="{{ form.developer if app else '' }}"></label>
                 <label>版本号<input name="version" maxlength="64" value="{{ form.version if app else '' }}" required></label>
-                <label>安装目录<input name="install_dir" maxlength="64" value="{{ form.install_dir if app else '' }}" placeholder="例如 classisland" required><small>客户端会安装到 Program/该目录，不能填写路径分隔符。</small></label>
+                <label>安装目录<input name="install_dir" maxlength="64" value="{{ form.install_dir if app else '' }}" placeholder="例如 ClassIsland 2" required><small>可以包含空格；客户端会安装到 Program/该目录，不能填写路径分隔符。</small></label>
                 <label class="full">简介<textarea name="description" maxlength="1000" rows="3">{{ form.description if app else '' }}</textarea></label>
                 <label class="full">图标 HTTPS 链接<input type="url" name="icon_url" value="{{ form.icon_url if app else '' }}"></label>
                 <label class="option-row full"><span><strong>设为推荐</strong><small>显示在全部应用的推荐分类。</small></span><input type="checkbox" name="recommended" value="1" {% if app and form.recommended %}checked{% endif %}></label>

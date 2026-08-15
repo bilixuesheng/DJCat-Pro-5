@@ -54,7 +54,7 @@ class AppStoreServerTest(TestCase):
         page = self.client.get("/admin/app-store/apps/", base_url="https://dash.djcatpro.top")
         return re.search(rb'name="csrf_token" value="([^"]+)"', page.data).group(1).decode()
 
-    def _createApp(self):
+    def _createApp(self, installDir="demo"):
         self._login()
         response = self.client.post(
             "/admin/app-store/apps/new",
@@ -65,7 +65,7 @@ class AppStoreServerTest(TestCase):
                 "developer": "DJCat",
                 "description": "A demo app",
                 "version": "1.2.0",
-                "install_dir": "demo",
+                "install_dir": installDir,
                 "icon_url": "https://cdn.example.test/demo.png",
                 "recommended": "1",
                 "announcement": "维护公告",
@@ -77,6 +77,21 @@ class AppStoreServerTest(TestCase):
             },
         )
         self.assertEqual(response.status_code, 302)
+
+    def testAdminAllowsSpaceInInstallDirectory(self):
+        self._createApp("Demo App")
+
+        catalog = self.client.get(
+            "/app-store/catalog",
+            base_url="https://api.djcatpro.top",
+        )
+
+        self.assertEqual(catalog.json["apps"][0]["install_dir"], "Demo App")
+        editPage = self.client.get(
+            "/admin/app-store/apps/1",
+            base_url="https://dash.djcatpro.top",
+        )
+        self.assertIn("可以包含空格", editPage.get_data(as_text=True))
 
     def testCatalogIsApiOnlyAndUsesEtag(self):
         api = self.client.get("/app-store/catalog", base_url="https://api.djcatpro.top")

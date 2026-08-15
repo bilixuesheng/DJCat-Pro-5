@@ -17,7 +17,7 @@ from flask import Blueprint, abort, jsonify, redirect, render_template, request
 
 
 ARCHITECTURES = ("x86_64", "arm64")
-_INSTALL_DIR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_INSTALL_DIR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}$")
 _DOWNLOAD_TOKEN = re.compile(r"^[a-f0-9]{32}$")
 _DANGEROUS_SCHEMES = {
     "cmd",
@@ -479,7 +479,7 @@ def register_app_store(
         if not values["version"]:
             errors.append("软件版本不能为空")
         if not _INSTALL_DIR.fullmatch(values["install_dir"]):
-            errors.append("安装目录只能包含字母、数字、点、下划线和短横线")
+            errors.append("安装目录只能包含字母、数字、空格、点、下划线和短横线")
         if request.form.get("icon_url", "").strip() and not values["icon_url"]:
             errors.append("图标链接必须是 HTTPS 地址")
         actionType = request.form.get("open_action_type", "").strip().lower()

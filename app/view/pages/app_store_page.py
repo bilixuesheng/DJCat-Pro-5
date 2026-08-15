@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QSizePolicy,
-    QStackedLayout,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -193,7 +192,7 @@ class AdvertisementFrame(QWidget):
     resized = Signal()
 
     def sizeHint(self):
-        return QSize(1000, 260)
+        return QSize(1000, 220)
 
     def resizeEvent(self, event):
         self.resized.emit()
@@ -316,79 +315,49 @@ class AppStorePage(ScrollArea):
         allLayout.setSpacing(8)
         allLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.adFrame = AdvertisementFrame(self.allPage)
-        self.adFrame.setMinimumHeight(238)
-        self.adFrame.setMaximumHeight(300)
+        self.adFrame.setMinimumHeight(200)
+        self.adFrame.setMaximumHeight(240)
         self.adFrame.setMaximumWidth(1000)
-        self.adStack = QStackedLayout(self.adFrame)
-        self.adStack.setStackingMode(QStackedLayout.StackingMode.StackAll)
+        adLayout = QVBoxLayout(self.adFrame)
+        adLayout.setContentsMargins(0, 0, 0, 0)
         self.adFlipView = HorizontalFlipView(self.adFrame)
         self.adFlipView.setMouseTracking(True)
         self.adFlipView.setMinimumSize(0, 0)
         self.adFlipView.setAspectRatioMode(
             Qt.AspectRatioMode.KeepAspectRatioByExpanding
         )
-        self.adFlipView.preButton.hide()
-        self.adFlipView.nextButton.hide()
-        self.adStack.addWidget(self.adFlipView)
-        self.adOverlay = AdvertisementOverlay(self.adFrame)
+        self.adFlipView.setBorderRadius(12)
+        adLayout.addWidget(self.adFlipView)
+        self.adOverlay = AdvertisementOverlay(self.adFlipView.viewport())
         self.adOverlay.setObjectName("AdvertisementOverlay")
         self.adOverlay.setStyleSheet(
             "QWidget#AdvertisementOverlay {"
             "background: qlineargradient(y1: 0, y2: 1, stop: 0.3 transparent, "
             "stop: 0.68 rgba(0,0,0,150), stop: 1 rgba(0,0,0,235));"
+            "border-radius: 12px;"
             "}"
         )
-        overlayLayout = QGridLayout(self.adOverlay)
-        overlayLayout.setContentsMargins(12, 12, 12, 16)
-        overlayLayout.setColumnStretch(1, 1)
-        overlayLayout.setRowStretch(0, 1)
-        adContent = QWidget(self.adOverlay)
-        adContent.setObjectName("AdvertisementContent")
-        adContent.setStyleSheet(
-            "QWidget#AdvertisementContent { background: transparent; }"
-        )
-        contentLayout = QVBoxLayout(adContent)
-        contentLayout.setContentsMargins(8, 0, 8, 0)
-        contentLayout.setSpacing(6)
-        self.adTitle = SubtitleLabel(adContent)
+        overlayLayout = QVBoxLayout(self.adOverlay)
+        overlayLayout.setContentsMargins(20, 12, 20, 16)
+        overlayLayout.setSpacing(6)
+        overlayLayout.addStretch(1)
+        self.adTitle = SubtitleLabel(self.adOverlay)
         self.adTitle.setStyleSheet("color: white;")
-        self.adDescription = BodyLabel(adContent)
+        self.adDescription = BodyLabel(self.adOverlay)
         self.adDescription.setStyleSheet("color: rgba(255,255,255,220);")
         self.adDescription.setWordWrap(True)
-        contentLayout.addWidget(self.adTitle)
-        contentLayout.addWidget(self.adDescription)
-        self.adButton = PrimaryPushButton("查看软件", adContent)
+        overlayLayout.addWidget(self.adTitle)
+        overlayLayout.addWidget(self.adDescription)
+        self.adButton = PrimaryPushButton("查看软件", self.adOverlay)
         self.adButton.setMinimumHeight(40)
         self.adButton.clicked.connect(self._openAdApp)
-        contentLayout.addWidget(self.adButton, 0, Qt.AlignmentFlag.AlignLeft)
-        overlayLayout.addWidget(adContent, 1, 1)
-        self.adPrevious = ToolButton(FIF.LEFT_ARROW, self.adOverlay)
-        self.adNext = ToolButton(FIF.RIGHT_ARROW, self.adOverlay)
+        overlayLayout.addWidget(self.adButton, 0, Qt.AlignmentFlag.AlignLeft)
+        self.adPrevious = self.adFlipView.preButton
+        self.adNext = self.adFlipView.nextButton
         for button in (self.adPrevious, self.adNext):
             button.setFixedSize(40, 40)
-            button.setStyleSheet("color: white; background: rgba(0,0,0,100); border-radius: 8px;")
-        self.adPrevious.clicked.connect(self._previousAd)
-        self.adNext.clicked.connect(self._nextAd)
         self.adOverlay.previousRequested.connect(self._previousAd)
         self.adOverlay.nextRequested.connect(self._nextAd)
-        overlayLayout.addWidget(
-            self.adPrevious,
-            0,
-            0,
-            2,
-            1,
-            Qt.AlignmentFlag.AlignVCenter,
-        )
-        overlayLayout.addWidget(
-            self.adNext,
-            0,
-            2,
-            2,
-            1,
-            Qt.AlignmentFlag.AlignVCenter,
-        )
-        self.adStack.addWidget(self.adOverlay)
-        self.adStack.setCurrentWidget(self.adOverlay)
         self.adFrame.entered.connect(self._pauseAds)
         self.adFrame.left.connect(self._resumeAds)
         self.adFrame.resized.connect(
@@ -781,6 +750,12 @@ class AppStorePage(ScrollArea):
         size = self.adFlipView.viewport().size()
         if size.width() > 0 and size.height() > 0:
             self.adFlipView.setItemSize(size)
+            self.adOverlay.setGeometry(self.adFlipView.viewport().rect())
+            if self.adFlipView.currentIndex() >= 0:
+                duration = self.adFlipView.scrollBar.duration
+                self.adFlipView.scrollBar.duration = 0
+                self.adFlipView.scrollToIndex(self.adFlipView.currentIndex())
+                self.adFlipView.scrollBar.duration = duration
 
     def _onAdChanged(self, index):
         if not self.ads:

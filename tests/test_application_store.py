@@ -74,6 +74,25 @@ class ApplicationStoreTest(TestCase):
         self.assertFalse((installed.path / "obsolete.txt").exists())
         self.assertEqual(self.store.installed()[7].version, "2.0.0")
 
+    def testInstallAllowsSpaceInDirectoryName(self):
+        app = self._app()
+        app["install_dir"] = "Demo App"
+
+        installed = self.store.installZip(app, self._zip())
+
+        self.assertEqual(installed.installDir, "Demo App")
+        self.assertEqual(installed.path, self.store.programDir / "Demo App")
+        self.assertTrue((installed.path / "app.exe").exists())
+
+    def testInstallDirectoryStillRejectsPathSeparators(self):
+        archive = self._zip()
+        for installDir in ("../Demo App", "Demo/App", "Demo\\App"):
+            with self.subTest(installDir=installDir):
+                app = self._app()
+                app["install_dir"] = installDir
+                with self.assertRaises(ApplicationStoreError):
+                    self.store.installZip(app, archive)
+
     def testRejectsTraversalAndSymlinkArchives(self):
         traversal = self._zip("../escape.exe")
         with self.assertRaises(UnsafeArchiveError):
