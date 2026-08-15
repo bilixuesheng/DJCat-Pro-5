@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QObject, QPoint, QThread, Qt, Signal
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QStackedLayout
-from qfluentwidgets import DrillInTransitionStackedWidget
+from qfluentwidgets import DrillInTransitionStackedWidget, PrimaryPushButton
 
 from app.view.pages.app_store_page import AppStorePage, ApplicationCard, CatalogWorker
 
@@ -74,6 +74,7 @@ class AppStorePageTest(TestCase):
 
     def testPagerClickDoesNotRebuildItems(self):
         apps = _apps(16)
+        self.page.categoryPivot.setCurrentItem("all")
         self.page._allAppsForPage = lambda: apps
         self.page._renderAll()
         item = self.page.pager.item(1)
@@ -84,11 +85,41 @@ class AppStorePageTest(TestCase):
         self.assertEqual(self.page.pager.count(), 2)
         self.assertIsNotNone(self.page.allGrid.itemAtPosition(0, 0))
 
-    def testSinglePageHidesPager(self):
+    def testAllCategoryAlwaysShowsPager(self):
+        self.page.categoryPivot.setCurrentItem("all")
         self.page._allAppsForPage = lambda: _apps(1)
         self.page._renderAll()
 
+        self.assertFalse(self.page.pager.isHidden())
+        self.assertFalse(self.page.pagerBar.isHidden())
+
+    def testPaginationButtonsAreTouchFriendlyAndNavigate(self):
+        self.page.categoryPivot.setCurrentItem("all")
+        self.page._allAppsForPage = lambda: _apps(16)
+        self.page._renderAll()
+
+        self.assertGreaterEqual(self.page.pagerPrevious.width(), 40)
+        self.assertGreaterEqual(self.page.pagerPrevious.height(), 40)
+        self.assertGreaterEqual(self.page.pagerNext.width(), 40)
+        self.assertFalse(self.page.pagerPrevious.isEnabled())
+        self.assertTrue(self.page.pagerNext.isEnabled())
+
+        self.page.pagerNext.click()
+
+        self.assertEqual(self.page._currentPage, 1)
+        self.assertFalse(self.page.pagerNext.isEnabled())
+
+    def testRecommendedCategoryShowsEveryRecommendedAppWithoutPager(self):
+        apps = _apps(16)
+        for app in apps:
+            app["recommended"] = True
+        self.page.catalog = apps
+        self.page.categoryPivot.setCurrentItem("recommended")
+
+        self.page._renderAll()
+
         self.assertTrue(self.page.pager.isHidden())
+        self.assertEqual(self.page.allGrid.count(), 16)
 
     def testProgressUpdatesExistingCardAndDisablesAction(self):
         apps = _apps(1)
@@ -180,6 +211,17 @@ class AppStorePageTest(TestCase):
     def testDetailStackUsesDrillInTransition(self):
         self.assertIsInstance(self.page.stack, DrillInTransitionStackedWidget)
 
+    def testDetailHidesCatalogRefreshButton(self):
+        self.page.show()
+        self.page._showDetail(_apps(1)[0])
+        self.qtApp.processEvents()
+
+        self.assertTrue(self.page.refreshButton.isHidden())
+
+        self.page._backToOverview()
+        self.qtApp.processEvents()
+        self.assertFalse(self.page.refreshButton.isHidden())
+
     def testCardDragDoesNotOpenDetail(self):
         card = ApplicationCard()
         card.resize(320, 156)
@@ -202,6 +244,8 @@ class AppStorePageTest(TestCase):
         self.assertGreaterEqual(card.actionButton.height(), 40)
         self.assertGreaterEqual(card.removeButton.height(), 40)
         self.assertGreaterEqual(card.removeButton.width(), 40)
+        self.assertGreaterEqual(self.page.adPrevious.width(), 40)
+        self.assertGreaterEqual(self.page.adNext.width(), 40)
         card.deleteLater()
 
     def testAdsOnlyAdvanceOnVisibleAllAppsPage(self):
@@ -239,6 +283,79 @@ class AppStorePageTest(TestCase):
         QTest.mouseRelease(self.page.adOverlay, Qt.MouseButton.LeftButton, pos=end)
 
         self.assertEqual(self.page.adFlipView.currentIndex(), 1)
+
+    def testAdvertisementUsesCenteredCropAndBoundedWidth(self):
+        self.page.ads = [{"id": 1, "title": "Ad", "image_url": ""}]
+        self.page.resize(1400, 800)
+        self.page.show()
+        self.page._switchCatalogTab(1)
+        self.page._prepareAds()
+        QTest.qWait(20)
+
+        self.assertGreaterEqual(self.page.adFrame.width(), 998)
+        self.assertLessEqual(self.page.adFrame.width(), 1000)
+        self.assertLessEqual(
+            abs(
+                self.page.adFrame.geometry().center().x()
+                - self.page.allPage.rect().center().x()
+            ),
+            2,
+        )
+        self.assertEqual(
+            self.page.adFlipView.aspectRatioMode,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+        )
+        self.assertEqual(
+            self.page.adFlipView.itemSize,
+            self.page.adFlipView.viewport().size(),
+        )
+
+    def testAdvertisementControlsUseThemeAndBannerEdges(self):
+        self.page.ads = [{"id": 1, "title": "Ad", "image_url": "", "app_id": 1}]
+        self.page.resize(1000, 800)
+        self.page.show()
+        self.page._switchCatalogTab(1)
+        self.page._prepareAds()
+        QTest.qWait(20)
+
+        self.assertIsInstance(self.page.adButton, PrimaryPushButton)
+        self.assertGreaterEqual(self.page.adButton.height(), 40)
+        self.assertIn("QWidget#AdvertisementOverlay", self.page.adOverlay.styleSheet())
+        self.assertLess(
+            self.page.adPrevious.geometry().center().x(),
+            self.page.adOverlay.width() // 3,
+        )
+        self.assertGreater(
+            self.page.adNext.geometry().center().x(),
+            self.page.adOverlay.width() * 2 // 3,
+        )
+
+    def testDetailStartsAtTopAndBackRestoresCatalogScroll(self):
+        apps = _apps(20)
+        for app in apps:
+            app["recommended"] = True
+        self.page.catalog = apps
+        self.page.resize(700, 420)
+        self.page.show()
+        self.page._switchCatalogTab(1)
+        self.page._renderAll()
+        QTest.qWait(20)
+        self.page.container.setMinimumHeight(self.page.container.sizeHint().height())
+        QTest.qWait(20)
+        scrollBar = self.page.verticalScrollBar()
+        original = min(180, scrollBar.maximum())
+        self.assertGreater(original, 0)
+        scrollBar.setValue(original)
+
+        self.page._showDetail(apps[0])
+        QTest.qWait(20)
+
+        self.assertEqual(scrollBar.value(), 0)
+
+        self.page._backToOverview()
+        QTest.qWait(20)
+
+        self.assertEqual(scrollBar.value(), original)
 
     def testCanceledCatalogWorkerDoesNotEmitLateResult(self):
         store = _BlockingCatalogStore()

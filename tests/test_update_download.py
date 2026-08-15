@@ -19,6 +19,7 @@ from shiboken6 import delete
 import djcat
 from app.common.update_download import (
     DOWNLOAD_RETRY_COUNT,
+    DownloadSegment,
     INITIAL_THREAD_COUNT,
     MIN_REASSIGN_SIZE,
     SMART_THREAD_STEP,
@@ -380,6 +381,35 @@ class UpdateDownloadTest(TestCase):
         self.assertEqual(INITIAL_THREAD_COUNT, 32)
         self.assertGreaterEqual(len(dataRanges), INITIAL_THREAD_COUNT)
         self.assertGreater(state["maxActive"], 1)
+
+    def testRangeChunksDoNotFloodProgressSignalQueue(self):
+        chunks = [b"x" * 64 for _ in range(200)]
+        total = sum(map(len, chunks))
+        response = FakeResponse(
+            chunks,
+            statusCode=206,
+            headers={"Content-Range": f"bytes 0-{total - 1}/{total}"},
+        )
+
+        with tempfile.TemporaryDirectory() as tempDir:
+            worker = UpdateDownloadWorker(
+                DOWNLOAD_URL,
+                Path(tempDir) / "update.exe",
+            )
+            segment = DownloadSegment(0, 0, total - 1)
+            worker._segments = [segment]
+            worker._activeWorkers = 1
+            worker.partialPath.touch()
+            with worker.partialPath.open("r+b") as file:
+                file.truncate(total)
+            progress = []
+            worker.progressChanged.connect(lambda *args: progress.append(args))
+
+            with patch("app.common.update_download.requests.get", return_value=response):
+                worker._downloadSegment(DOWNLOAD_URL, segment)
+
+        self.assertLess(len(progress), len(chunks) // 10)
+        self.assertEqual(progress[-1][:2], (total, total))
 
     def testSmartAccelerationMatchesCloudGhostPolicy(self):
         controller = SmartAccelerationController()

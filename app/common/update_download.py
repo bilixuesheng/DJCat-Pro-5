@@ -23,6 +23,7 @@ CHUNK_SIZE = 64 * 1024
 REQUEST_TIMEOUT = (10, 30)
 MAX_RETRIES = 3
 DOWNLOAD_RETRY_COUNT = 3
+PROGRESS_EMIT_INTERVAL = 0.05
 PERMANENT_STATUS = frozenset({400, 401, 403, 404, 405, 410, 451})
 
 
@@ -154,10 +155,12 @@ class UpdateDownloadWorker(QObject):
         self._responses = set()
         self._segmentsLock = threading.Lock()
         self._progressLock = threading.Lock()
+        self._progressEmitLock = threading.Lock()
         self._segments = []
         self._downloaded = 0
         self._currentSpeed = 0
         self._activeWorkers = 0
+        self._lastProgressEmit = 0.0
 
     def cancel(self) -> None:
         self._cancelEvent.set()
@@ -332,7 +335,7 @@ class UpdateDownloadWorker(QObject):
                         downloaded = self._downloaded
                     elapsed = max(time.monotonic() - startedAt, 0.001)
                     speed = int(downloaded / elapsed)
-                    self.progressChanged.emit(downloaded, total, speed, 1)
+                    self._emitProgress(downloaded, total, speed, 1)
         finally:
             self._activeWorkers = 0
             self._untrackResponse(response)
@@ -404,7 +407,7 @@ class UpdateDownloadWorker(QObject):
                         if newSegment is None:
                             break
                         submit(newSegment)
-                    self.progressChanged.emit(
+                    self._emitProgress(
                         downloaded,
                         total,
                         self._currentSpeed,
@@ -484,7 +487,7 @@ class UpdateDownloadWorker(QObject):
                         with self._progressLock:
                             self._downloaded += len(data)
                             downloaded = self._downloaded
-                        self.progressChanged.emit(
+                        self._emitProgress(
                             downloaded,
                             self._totalSize(),
                             self._currentSpeed,
@@ -565,6 +568,17 @@ class UpdateDownloadWorker(QObject):
         with self._progressLock:
             self._downloaded = 0
             self._currentSpeed = 0
+        with self._progressEmitLock:
+            self._lastProgressEmit = 0.0
+
+    def _emitProgress(self, downloaded, total, speed, workers) -> None:
+        now = time.monotonic()
+        complete = total > 0 and downloaded >= total
+        with self._progressEmitLock:
+            if not complete and now - self._lastProgressEmit < PROGRESS_EMIT_INTERVAL:
+                return
+            self._lastProgressEmit = now
+        self.progressChanged.emit(downloaded, total, speed, workers)
 
     def _totalSize(self) -> int:
         with self._segmentsLock:

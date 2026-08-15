@@ -190,6 +190,14 @@ class ApplicationCard(CardWidget):
 class AdvertisementFrame(QWidget):
     entered = Signal()
     left = Signal()
+    resized = Signal()
+
+    def sizeHint(self):
+        return QSize(1000, 260)
+
+    def resizeEvent(self, event):
+        self.resized.emit()
+        super().resizeEvent(event)
 
     def enterEvent(self, event):
         self.entered.emit()
@@ -252,6 +260,7 @@ class AppStorePage(ScrollArea):
         self._progressTimer.setInterval(100)
         self._progressTimer.timeout.connect(self._flushDownloadProgress)
         self._currentPage = 0
+        self._catalogScrollPosition = 0
         self._renderingAll = False
         self._downloadProgressSignal.connect(self._queueDownloadProgress)
         self._downloadRetrySignal.connect(self._showDownloadRetry)
@@ -309,50 +318,87 @@ class AppStorePage(ScrollArea):
         self.adFrame = AdvertisementFrame(self.allPage)
         self.adFrame.setMinimumHeight(238)
         self.adFrame.setMaximumHeight(300)
+        self.adFrame.setMaximumWidth(1000)
         self.adStack = QStackedLayout(self.adFrame)
         self.adStack.setStackingMode(QStackedLayout.StackingMode.StackAll)
         self.adFlipView = HorizontalFlipView(self.adFrame)
         self.adFlipView.setMouseTracking(True)
+        self.adFlipView.setMinimumSize(0, 0)
+        self.adFlipView.setAspectRatioMode(
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding
+        )
+        self.adFlipView.preButton.hide()
+        self.adFlipView.nextButton.hide()
         self.adStack.addWidget(self.adFlipView)
         self.adOverlay = AdvertisementOverlay(self.adFrame)
+        self.adOverlay.setObjectName("AdvertisementOverlay")
         self.adOverlay.setStyleSheet(
-            "background: qlineargradient(y1: 0, y2: 1, stop: 0 transparent, stop: 1 rgba(0,0,0,220));"
+            "QWidget#AdvertisementOverlay {"
+            "background: qlineargradient(y1: 0, y2: 1, stop: 0.3 transparent, "
+            "stop: 0.68 rgba(0,0,0,150), stop: 1 rgba(0,0,0,235));"
+            "}"
         )
-        overlayLayout = QVBoxLayout(self.adOverlay)
-        overlayLayout.setContentsMargins(20, 20, 20, 16)
-        overlayLayout.addStretch(1)
-        self.adTitle = SubtitleLabel(self.adOverlay)
+        overlayLayout = QGridLayout(self.adOverlay)
+        overlayLayout.setContentsMargins(12, 12, 12, 16)
+        overlayLayout.setColumnStretch(1, 1)
+        overlayLayout.setRowStretch(0, 1)
+        adContent = QWidget(self.adOverlay)
+        adContent.setObjectName("AdvertisementContent")
+        adContent.setStyleSheet(
+            "QWidget#AdvertisementContent { background: transparent; }"
+        )
+        contentLayout = QVBoxLayout(adContent)
+        contentLayout.setContentsMargins(8, 0, 8, 0)
+        contentLayout.setSpacing(6)
+        self.adTitle = SubtitleLabel(adContent)
         self.adTitle.setStyleSheet("color: white;")
-        self.adDescription = BodyLabel(self.adOverlay)
+        self.adDescription = BodyLabel(adContent)
         self.adDescription.setStyleSheet("color: rgba(255,255,255,220);")
         self.adDescription.setWordWrap(True)
-        overlayLayout.addWidget(self.adTitle)
-        overlayLayout.addWidget(self.adDescription)
-        adActions = QHBoxLayout()
-        self.adButton = PushButton("查看软件", self.adOverlay)
+        contentLayout.addWidget(self.adTitle)
+        contentLayout.addWidget(self.adDescription)
+        self.adButton = PrimaryPushButton("查看软件", adContent)
+        self.adButton.setMinimumHeight(40)
         self.adButton.clicked.connect(self._openAdApp)
-        adActions.addWidget(self.adButton, 0, Qt.AlignmentFlag.AlignLeft)
-        adActions.addStretch(1)
+        contentLayout.addWidget(self.adButton, 0, Qt.AlignmentFlag.AlignLeft)
+        overlayLayout.addWidget(adContent, 1, 1)
         self.adPrevious = ToolButton(FIF.LEFT_ARROW, self.adOverlay)
         self.adNext = ToolButton(FIF.RIGHT_ARROW, self.adOverlay)
         for button in (self.adPrevious, self.adNext):
+            button.setFixedSize(40, 40)
             button.setStyleSheet("color: white; background: rgba(0,0,0,100); border-radius: 8px;")
         self.adPrevious.clicked.connect(self._previousAd)
         self.adNext.clicked.connect(self._nextAd)
         self.adOverlay.previousRequested.connect(self._previousAd)
         self.adOverlay.nextRequested.connect(self._nextAd)
-        adActions.addWidget(self.adPrevious)
-        adActions.addWidget(self.adNext)
-        overlayLayout.addLayout(adActions)
+        overlayLayout.addWidget(
+            self.adPrevious,
+            0,
+            0,
+            2,
+            1,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+        overlayLayout.addWidget(
+            self.adNext,
+            0,
+            2,
+            2,
+            1,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
         self.adStack.addWidget(self.adOverlay)
         self.adStack.setCurrentWidget(self.adOverlay)
         self.adFrame.entered.connect(self._pauseAds)
         self.adFrame.left.connect(self._resumeAds)
+        self.adFrame.resized.connect(
+            lambda: QTimer.singleShot(0, self._syncAdImageSize)
+        )
         self.adTimer = QTimer(self)
         self.adTimer.setInterval(6000)
         self.adTimer.timeout.connect(self._nextAd)
         self.adFlipView.currentIndexChanged.connect(self._onAdChanged)
-        allLayout.addWidget(self.adFrame)
+        allLayout.addWidget(self.adFrame, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self.categoryPivot = Pivot(self.allPage)
         self.categoryPivot.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -362,9 +408,24 @@ class AppStorePage(ScrollArea):
         allLayout.addWidget(self.categoryPivot)
         self.allGridWidget, self.allGrid = self._createGrid(self.allPage)
         allLayout.addWidget(self.allGridWidget)
-        self.pager = PipsPager(self.allPage)
+        self.pagerBar = QWidget(self.allPage)
+        pagerLayout = QHBoxLayout(self.pagerBar)
+        pagerLayout.setContentsMargins(0, 0, 0, 0)
+        pagerLayout.setSpacing(8)
+        self.pagerPrevious = ToolButton(FIF.LEFT_ARROW, self.pagerBar)
+        self.pagerPrevious.setFixedSize(40, 40)
+        self.pagerPrevious.setToolTip("上一页")
+        self.pagerPrevious.clicked.connect(lambda: self._changePage(-1))
+        pagerLayout.addWidget(self.pagerPrevious)
+        self.pager = PipsPager(self.pagerBar)
         self.pager.currentIndexChanged.connect(self._onPageChanged)
-        allLayout.addWidget(self.pager, 0, Qt.AlignmentFlag.AlignHCenter)
+        pagerLayout.addWidget(self.pager)
+        self.pagerNext = ToolButton(FIF.RIGHT_ARROW, self.pagerBar)
+        self.pagerNext.setFixedSize(40, 40)
+        self.pagerNext.setToolTip("下一页")
+        self.pagerNext.clicked.connect(lambda: self._changePage(1))
+        pagerLayout.addWidget(self.pagerNext)
+        allLayout.addWidget(self.pagerBar, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self.catalogStack.addWidget(self.overview)
         self.catalogStack.addWidget(self.allPage)
@@ -633,6 +694,7 @@ class AppStorePage(ScrollArea):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         QTimer.singleShot(0, self._reflowGrids)
+        QTimer.singleShot(0, self._syncAdImageSize)
 
     def _updateVisibleCardState(self, appId):
         for card in self.container.findChildren(ApplicationCard):
@@ -658,13 +720,16 @@ class AppStorePage(ScrollArea):
         self.pager.blockSignals(True)
         try:
             apps = self._allAppsForPage()
-            pageCount = max(1, (len(apps) + 14) // 15)
+            paginated = self.categoryPivot.currentRouteKey() == "all"
+            pageCount = max(1, (len(apps) + 14) // 15) if paginated else 1
             if self.pager.count() != pageCount:
                 self.pager.setPageNumber(pageCount)
             self._currentPage = min(self._currentPage, pageCount - 1)
             if self.pager.currentIndex() != self._currentPage:
                 self.pager.setCurrentIndex(self._currentPage)
-            self.pager.setVisible(pageCount > 1)
+            self.pager.setVisible(paginated)
+            self.pagerBar.setVisible(paginated)
+            self._updatePagerButtons()
             self._renderAllPage(apps)
         finally:
             self.pager.blockSignals(False)
@@ -672,13 +737,23 @@ class AppStorePage(ScrollArea):
 
     def _renderAllPage(self, apps=None):
         apps = self._allAppsForPage() if apps is None else apps
-        self._renderGrid(self.allGrid, apps[self._currentPage * 15 : (self._currentPage + 1) * 15])
+        if self.categoryPivot.currentRouteKey() == "all":
+            apps = apps[self._currentPage * 15 : (self._currentPage + 1) * 15]
+        self._renderGrid(self.allGrid, apps)
 
     def _onPageChanged(self, index):
         if self._renderingAll:
             return
         self._currentPage = index
+        self._updatePagerButtons()
         self._renderAllPage()
+
+    def _changePage(self, offset):
+        self.pager.setCurrentIndex(self._currentPage + offset)
+
+    def _updatePagerButtons(self):
+        self.pagerPrevious.setEnabled(self._currentPage > 0)
+        self.pagerNext.setEnabled(self._currentPage + 1 < self.pager.count())
 
     def _prepareAds(self):
         self.adFlipView.clear()
@@ -693,8 +768,19 @@ class AppStorePage(ScrollArea):
             else:
                 self.adFlipView.addImage(QPixmap())
         self.adFrame.show()
+        multipleAds = len(self.ads) > 1
+        self.adPrevious.setVisible(multipleAds)
+        self.adNext.setVisible(multipleAds)
+        QTimer.singleShot(0, self._syncAdImageSize)
         self._onAdChanged(0)
         self._resumeAds()
+
+    def _syncAdImageSize(self):
+        if not hasattr(self, "adFlipView"):
+            return
+        size = self.adFlipView.viewport().size()
+        if size.width() > 0 and size.height() > 0:
+            self.adFlipView.setItemSize(size)
 
     def _onAdChanged(self, index):
         if not self.ads:
@@ -734,10 +820,14 @@ class AppStorePage(ScrollArea):
             self.adTimer.start()
 
     def _showDetail(self, app):
+        if self.stack.currentWidget() is not self.detail:
+            self._catalogScrollPosition = self.verticalScrollBar().value()
         self.currentApp = app
         self._pauseAds()
         self.pivot.hide()
+        self.refreshButton.hide()
         self.stack.setCurrentWidget(self.detail)
+        self.verticalScrollBar().setValue(0)
         self.detailName.setText(str(app.get("name", "")))
         self.detailDeveloper.setText(f"开发者：{app.get('developer') or '未填写'}")
         self.detailVersion.setText(f"版本：{app.get('version') or '未填写'}")
@@ -754,14 +844,18 @@ class AppStorePage(ScrollArea):
     def _backToOverview(self):
         self.currentApp = None
         self.pivot.show()
+        self.refreshButton.show()
         target = 0 if self.pivot.currentRouteKey() == "installed" else 1
         self.catalogStack.setCurrentIndex(target)
         self.stack.setCurrentIndex(0, isBack=True)
-        if target == 0:
-            self._renderInstalled()
-        else:
-            self._renderAll()
+        QTimer.singleShot(0, self._restoreCatalogScroll)
+        if target == 1:
             self._resumeAds()
+
+    def _restoreCatalogScroll(self):
+        if self.currentApp is None:
+            scrollBar = self.verticalScrollBar()
+            scrollBar.setValue(min(self._catalogScrollPosition, scrollBar.maximum()))
 
     def _updateDetailAction(self):
         if not self.currentApp:
