@@ -19,6 +19,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtTextToSpeech import QTextToSpeech
 from PySide6.QtWidgets import QApplication, QGraphicsOpacityEffect, QVBoxLayout, QWidget
+from shiboken6 import isValid
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import (
     DrillInTransitionStackedWidget,
@@ -953,6 +954,8 @@ class MainWindow(MSFluentWindow):
         if toolTip is None:
             return
         self._downloadStateToolTip = None
+        if not isValid(toolTip):
+            return
         toolTip.hide()
         toolTip.deleteLater()
 

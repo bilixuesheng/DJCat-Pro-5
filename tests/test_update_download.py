@@ -14,6 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QEvent, QRect, QSize
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+from shiboken6 import delete
 
 import djcat
 from app.common.update_download import (
@@ -496,6 +497,24 @@ class UpdateWindowLifecycleTest(TestCase):
             self.app.processEvents()
 
         update.assert_called_once_with(20, 100, 2, 4)
+
+    def testDisposingAlreadyDeletedStateToolTipIsSafe(self):
+        from qfluentwidgets import StateToolTip
+
+        toolTip = StateToolTip("", "", self.window)
+        self.window._downloadStateToolTip = toolTip
+        delete(toolTip)
+        tray = Mock()
+        tray.parent.return_value = self.window
+
+        with (
+            patch("app.view.windows.main_window.cfg.set"),
+            patch("app.view.windows.main_window.QApplication.quit") as quitApp,
+        ):
+            SystemTrayIcon._onQuitActionTriggered(tray)
+
+        self.assertIsNone(self.window._downloadStateToolTip)
+        quitApp.assert_called_once_with()
 
     def testDestroyedUpdateInfoBarClearsCapturedReference(self):
         InfoBarStub.instances.clear()
