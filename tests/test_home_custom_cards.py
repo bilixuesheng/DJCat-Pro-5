@@ -7,12 +7,18 @@ from unittest import TestCase, mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent, QPoint, Qt
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtGui import QInputDevice
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QScroller, QWidget
 from qfluentwidgets import FluentIcon as FIF
-from qfluentwidgets import RoundMenu, ToolButton, ToolTipFilter
+from qfluentwidgets import (
+    RoundMenu,
+    ToggleToolButton,
+    ToolButton,
+    ToolTipFilter,
+    qconfig,
+)
 
 from app.common.home_cards import (
     DEFAULT_HOME_CARD_NAMES,
@@ -67,6 +73,19 @@ class HomeCustomCardTest(TestCase):
         self.page._restoreDefaultCard("全屏投送")
         self.assertIn("全屏投送", self.page._card_order)
         self.assertIn("全屏投送", cfg.visibleDefaultHomeCards.value)
+
+    def testRestoringCardImmediatelyRefreshesHomeLayoutHeight(self):
+        name = DEFAULT_HOME_CARD_NAMES[-1]
+        self.page._removeDefaultCard(name)
+        self.app.processEvents()
+
+        self.page._restoreDefaultCard(name)
+        QTest.qWait(100)
+
+        expected_height = self.page.flowLayout.heightForWidth(
+            self.page.cardsWidget.width()
+        )
+        self.assertGreaterEqual(self.page.cardsWidget.height(), expected_height)
 
     def testNewMenuShowsOnlyMissingDefaultsWithIcons(self):
         visible = list(DEFAULT_HOME_CARD_NAMES[:-1])
@@ -135,6 +154,13 @@ class HomeCustomCardTest(TestCase):
                         dialog.buttonGroup.geometry().bottom(),
                         dialog.widget.height(),
                     )
+                    if isinstance(dialog, IconPickerDialog):
+                        self.assertEqual(
+                            dialog.gridWidget.height(),
+                            dialog.grid.heightForWidth(
+                                dialog.scrollArea.viewport().width() - 8
+                            ),
+                        )
         finally:
             for dialog in dialogs:
                 dialog.deleteLater()
@@ -164,6 +190,63 @@ class HomeCustomCardTest(TestCase):
         dialog.deleteLater()
         parent.deleteLater()
 
+    def testDialogReleasesTouchScrollerBeforeClosing(self):
+        parent = QWidget()
+        parent.resize(900, 700)
+        dialog = CustomCardDialog(parent=parent)
+        viewport = dialog.scrollArea.viewport()
+        self.assertGreater(QScroller.grabbedGesture(viewport).value, 0)
+
+        with mock.patch.object(
+            QScroller,
+            "ungrabGesture",
+            wraps=QScroller.ungrabGesture,
+        ) as ungrab:
+            dialog.reject()
+            dialog.reject()
+
+        ungrab.assert_called_once_with(viewport)
+        dialog.deleteLater()
+        parent.deleteLater()
+
+    def testRealDialogAcceptAndRejectCyclesDoNotLeak(self):
+        parent = QWidget()
+        parent.resize(900, 700)
+        parent.show()
+        for index in range(3):
+            for accepted in (False, True):
+                dialog = CustomCardDialog(parent=parent)
+                if accepted:
+                    dialog.titleEdit.setText(f"card-{index}")
+                    dialog.actionList.rows[0].setData(
+                        {
+                            "id": f"action-{index}",
+                            "type": "delay",
+                            "seconds": 1,
+                        }
+                    )
+                    QTimer.singleShot(0, dialog.yesButton.click)
+                else:
+                    QTimer.singleShot(0, dialog.cancelButton.click)
+                self.assertEqual(bool(dialog.exec()), accepted)
+                dialog.deleteLater()
+                self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+                self.app.processEvents()
+
+        self.assertEqual(parent.findChildren(CustomCardDialog), [])
+
+        for dialog_type in (IconPickerDialog, ActionEditorDialog):
+            for _ in range(3):
+                dialog = dialog_type(parent=parent)
+                QTimer.singleShot(0, dialog.cancelButton.click)
+                self.assertFalse(dialog.exec())
+                dialog.deleteLater()
+                self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+                self.app.processEvents()
+            self.assertEqual(parent.findChildren(dialog_type), [])
+
+        parent.deleteLater()
+
     def testIconPickerClearsLayoutAndShowsSelectionImmediately(self):
         parent = QWidget()
         parent.resize(900, 700)
@@ -171,12 +254,65 @@ class HomeCustomCardTest(TestCase):
         try:
             dialog._selectFluent("ADD")
             self.assertEqual(dialog.previewLabel.text(), "ADD")
-            self.assertEqual(
-                sum(button.isChecked() for button in dialog._buttons),
-                1,
+            selected = [button for button in dialog._buttons if button.isChecked()]
+            self.assertEqual(len(selected), 1)
+            self.assertIsInstance(selected[0], ToggleToolButton)
+            self.assertIn(
+                qconfig.themeColor.value.name().lower(),
+                selected[0].styleSheet().lower(),
             )
             dialog._clearGrid()
             self.assertEqual(dialog.grid.count(), 0)
+        finally:
+            dialog.deleteLater()
+            parent.deleteLater()
+
+    def testIconPickerSeparatesImagesFromIconResources(self):
+        parent = QWidget()
+        parent.resize(900, 700)
+        dialog = IconPickerDialog(parent)
+        try:
+            self.assertEqual(
+                [dialog.sourceCombo.itemText(index) for index in range(3)],
+                ["QWF 图标库", "图片文件", "ICO / EXE / DLL"],
+            )
+            with mock.patch(
+                "app.view.components.home_card_dialog.QFileDialog.getOpenFileName",
+                return_value=("", ""),
+            ) as choose_file:
+                dialog.sourceCombo.setCurrentIndex(1)
+                dialog._browse()
+                image_filter = choose_file.call_args.args[3]
+                dialog.sourceCombo.setCurrentIndex(2)
+                dialog._browse()
+                resource_filter = choose_file.call_args.args[3]
+            self.assertIn("*.png", image_filter)
+            self.assertNotIn("*.exe", image_filter)
+            self.assertIn("*.exe", resource_filter)
+            self.assertNotIn("*.png", resource_filter)
+        finally:
+            dialog.deleteLater()
+            parent.deleteLater()
+
+    def testCardEditorUsesConsistentTouchButtonHeights(self):
+        parent = QWidget()
+        parent.resize(900, 700)
+        dialog = CustomCardDialog(parent=parent)
+        try:
+            dialog.show()
+            self.app.processEvents()
+            row = dialog.actionList.rows[0]
+            for button in (
+                dialog.yesButton,
+                dialog.cancelButton,
+                dialog.iconSelectButton,
+                dialog.addActionButton,
+                row.dragHandle,
+                row.editButton,
+                row.deleteButton,
+            ):
+                with self.subTest(button=button):
+                    self.assertEqual(button.height(), 44)
         finally:
             dialog.deleteLater()
             parent.deleteLater()
@@ -189,7 +325,7 @@ class HomeCustomCardTest(TestCase):
         try:
             row = card_dialog.actionList.rows[0]
             for widget in (
-                card_dialog.iconButton,
+                card_dialog.iconPreview,
                 row.dragHandle,
                 row.editButton,
                 row.deleteButton,

@@ -760,6 +760,10 @@ class HomePage(ScrollArea):
             card = self.all_cards[name]
             self.flowLayout.addWidget(card)
             card.show()
+        self.flowLayout.invalidate()
+        self.cardsWidget.updateGeometry()
+        self.vBoxLayout.invalidate()
+        self.vBoxLayout.activate()
 
     def _toggleCardEditing(self):
         self._editing_cards = not self._editing_cards
