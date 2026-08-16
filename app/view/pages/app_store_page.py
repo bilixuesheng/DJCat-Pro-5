@@ -1264,40 +1264,30 @@ class AppStorePage(ScrollArea):
         }
 
     def _togglePin(self, app, preset):
-        cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
-        key = (int(app["id"]), int(preset["id"]))
-        existing = next(
-            (
-                item
-                for item in cards
-                if (item["app_id"], item["preset_id"]) == key
-            ),
-            None,
+        self._togglePinnedCard(
+            app,
+            preset["id"],
+            preset.get("title", ""),
+            preset.get("description", ""),
+            preset.get("action"),
         )
-        if existing:
-            cards.remove(existing)
-        else:
-            cards.append(
-                {
-                    "app_id": key[0],
-                    "preset_id": key[1],
-                    "title": preset.get("title", ""),
-                    "description": preset.get("description", ""),
-                    "action": preset.get("action"),
-                    "install_dir": app.get("install_dir", ""),
-                    "icon_url": app.get("icon_url", ""),
-                    "icon_path": self.imagePaths.get(app.get("icon_url", ""), ""),
-                }
-            )
-        cfg.set(cfg.pinnedHomeCards, cards)
-        self.pinnedCardsChanged.emit(cards)
 
     def _toggleApplicationPin(self, app):
         action = app.get("open_action")
         if not isinstance(action, dict):
             return
+        self._togglePinnedCard(
+            app,
+            DIRECT_APPLICATION_PRESET_ID,
+            app.get("name", ""),
+            app.get("description", ""),
+            action,
+        )
+        self._updateVisibleCardState(int(app["id"]))
+
+    def _togglePinnedCard(self, app, presetId, title, description, action):
         cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
-        key = (int(app["id"]), DIRECT_APPLICATION_PRESET_ID)
+        key = (int(app["id"]), int(presetId))
         existing = next(
             (
                 item
@@ -1313,8 +1303,8 @@ class AppStorePage(ScrollArea):
                 {
                     "app_id": key[0],
                     "preset_id": key[1],
-                    "title": app.get("name", ""),
-                    "description": app.get("description", ""),
+                    "title": title,
+                    "description": description,
                     "action": action,
                     "install_dir": app.get("install_dir", ""),
                     "icon_url": app.get("icon_url", ""),
@@ -1323,7 +1313,6 @@ class AppStorePage(ScrollArea):
             )
         cfg.set(cfg.pinnedHomeCards, cards)
         self.pinnedCardsChanged.emit(cards)
-        self._updateVisibleCardState(key[0])
 
     def executePinnedCard(self, item):
         cards = normalize_pinned_cards([item])

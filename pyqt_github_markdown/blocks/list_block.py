@@ -7,7 +7,6 @@ class ListItem(QWidget):
         super().__init__(parent)
         self._marker = marker
         self._children = children
-        # instant layout
         self._rootLayout = QHBoxLayout(self)
         self._contentLayout = QVBoxLayout()
         self._initWidget()
@@ -31,7 +30,6 @@ class ListBlock(QWidget):
     def __init__(self, items: list[ListItem], parent: QWidget | None = None):
         super().__init__(parent)
         self._items = items
-        # instant layout
         self._rootLayout = QVBoxLayout(self)
         self._initLayout()
 

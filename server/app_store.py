@@ -354,6 +354,41 @@ def _applicationExists(database, appId):
     ).fetchone() is not None
 
 
+def _advertisementForm():
+    title = request.form.get("title", "").strip()
+    description = request.form.get("description", "").strip()
+    imageUrl = _safeUrl(request.form.get("image_url"), httpsOnly=True)
+    try:
+        appId = (
+            int(request.form.get("app_id"))
+            if request.form.get("app_id")
+            else None
+        )
+    except ValueError:
+        appId = None
+    sortOrderValue = request.form.get("sort_order")
+    try:
+        sortOrder = (
+            int(sortOrderValue) if sortOrderValue is not None else None
+        )
+    except ValueError:
+        sortOrder = None
+    if not title or not imageUrl:
+        return None, "广告标题和 HTTPS 图片链接不能为空"
+    if len(title) > 120 or len(description) > 300:
+        return None, "广告标题或简介过长"
+    if sortOrderValue is not None and sortOrder is None:
+        return None, "广告顺序无效"
+    return (
+        title,
+        description,
+        imageUrl,
+        appId,
+        sortOrder,
+        int(bool(request.form.get("enabled"))),
+    ), ""
+
+
 def _moveItem(database, table, itemId, direction, appId=None):
     if direction not in {"up", "down"}:
         raise ValueError("无效的移动方向")
@@ -1016,26 +1051,12 @@ def register_app_store(
     def adminAds():
         if request.method == "POST":
             check_csrf()
-            title = request.form.get("title", "").strip()
-            description = request.form.get("description", "").strip()
-            imageUrl = _safeUrl(request.form.get("image_url"), httpsOnly=True)
-            try:
-                appId = int(request.form.get("app_id")) if request.form.get("app_id") else None
-            except ValueError:
-                appId = None
-            sortOrderValue = request.form.get("sort_order")
-            try:
-                sortOrder = (
-                    int(sortOrderValue) if sortOrderValue is not None else None
+            values, error = _advertisementForm()
+            if error:
+                return admin_response(
+                    error, "error", "app_store.adminAds", 400
                 )
-            except ValueError:
-                sortOrder = None
-            if not title or not imageUrl:
-                return admin_response("广告标题和 HTTPS 图片链接不能为空", "error", "app_store.adminAds", 400)
-            if len(title) > 120 or len(description) > 300:
-                return admin_response("广告标题或简介过长", "error", "app_store.adminAds", 400)
-            if sortOrderValue is not None and sortOrder is None:
-                return admin_response("广告顺序无效", "error", "app_store.adminAds", 400)
+            title, description, imageUrl, appId, sortOrder, enabled = values
             _ensureSchema(connect)
             with closing(connect()) as database:
                 if not _applicationExists(database, appId):
@@ -1052,7 +1073,7 @@ def register_app_store(
                     ).fetchone()[0]
                 database.execute(
                     "INSERT INTO market_advertisements(title, description, image_url, app_id, sort_order, enabled) VALUES (?, ?, ?, ?, ?, ?)",
-                    (title, description, imageUrl, appId, sortOrder, int(bool(request.form.get("enabled")))),
+                    (title, description, imageUrl, appId, sortOrder, enabled),
                 )
                 database.commit()
             return admin_response("广告已新增", "success", "app_store.adminAds")
@@ -1113,26 +1134,10 @@ def register_app_store(
                     )
                 database.commit()
             return admin_response("广告已删除", "success", "app_store.adminAds")
-        title = request.form.get("title", "").strip()
-        description = request.form.get("description", "").strip()
-        imageUrl = _safeUrl(request.form.get("image_url"), httpsOnly=True)
-        try:
-            appId = int(request.form.get("app_id")) if request.form.get("app_id") else None
-        except ValueError:
-            appId = None
-        sortOrderValue = request.form.get("sort_order")
-        try:
-            sortOrder = (
-                int(sortOrderValue) if sortOrderValue is not None else None
-            )
-        except ValueError:
-            sortOrder = None
-        if not title or not imageUrl:
-            return admin_response("广告标题和 HTTPS 图片链接不能为空", "error", "app_store.adminAds", 400)
-        if len(title) > 120 or len(description) > 300:
-            return admin_response("广告标题或简介过长", "error", "app_store.adminAds", 400)
-        if sortOrderValue is not None and sortOrder is None:
-            return admin_response("广告顺序无效", "error", "app_store.adminAds", 400)
+        values, error = _advertisementForm()
+        if error:
+            return admin_response(error, "error", "app_store.adminAds", 400)
+        title, description, imageUrl, appId, sortOrder, enabled = values
         with closing(connect()) as database:
             if not _applicationExists(database, appId):
                 return admin_response(
@@ -1153,7 +1158,7 @@ def register_app_store(
                 sortOrder = current["sort_order"]
             updated = database.execute(
                 "UPDATE market_advertisements SET title=?, description=?, image_url=?, app_id=?, sort_order=?, enabled=? WHERE id=?",
-                (title, description, imageUrl, appId, sortOrder, int(bool(request.form.get("enabled"))), ad_id),
+                (title, description, imageUrl, appId, sortOrder, enabled, ad_id),
             )
             if not updated.rowcount:
                 database.rollback()

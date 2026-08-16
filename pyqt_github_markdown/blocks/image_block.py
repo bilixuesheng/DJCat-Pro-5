@@ -28,9 +28,7 @@ class ImagePlaceholder(QWidget):
         self._manager = None
         self._reply = None
         self._data = bytearray()
-        # instant widget
         self._label = QLabel()
-        # instant layout
         self._rootLayout = QVBoxLayout(self)
         self._initWidget()
         self._initLayout()

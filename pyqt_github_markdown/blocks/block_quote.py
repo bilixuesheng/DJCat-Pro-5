@@ -15,11 +15,9 @@ class BlockQuote(QWidget):
         self._children = children
         self._kind = kind
         self._icon = icon
-        # instant widget — alerts (> [!NOTE]) carry an icon + coloured title row; quotes don't.
         self._isAlert = kind != "quote"
         self._iconLabel = QLabel() if self._isAlert else None
         self._titleLabel = QLabel(kind.capitalize()) if self._isAlert else None
-        # instant layout
         self._titleLayout = QHBoxLayout() if self._isAlert else None
         self._rootLayout = QVBoxLayout(self)
         self._initWidget()

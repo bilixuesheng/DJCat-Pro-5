@@ -20,10 +20,8 @@ class MarkdownWidget(QWidget):
         super().__init__(parent)
         self._theme = theme
         self._tree = None  # cached SyntaxTreeNode so setTheme can rebuild (code colours are baked in)
-        # instant widget
         self._scroll = QScrollArea(self)
         self._content = QWidget()
-        # instant layout
         self._rootLayout = QVBoxLayout(self)
         self._contentLayout = QVBoxLayout(self._content)
         self._initWidget()

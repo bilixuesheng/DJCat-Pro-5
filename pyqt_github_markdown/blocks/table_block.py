@@ -14,7 +14,6 @@ class TableBlock(QWidget):
         self._headers = headers
         self._rows = rows
         self._aligns = aligns
-        # instant layout
         self._grid = QGridLayout(self)
         self._initWidget()
         self._initLayout()

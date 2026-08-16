@@ -36,11 +36,9 @@ class CodeBlock(QWidget):
         self._code = code
         self._lang = lang
         self._codeStyle = codeStyle
-        # instant widget
         self._langLabel = QLabel(lang)
         self._copyButton = QToolButton()
         self._editor = QTextEdit()
-        # instant layout
         self._headerLayout = QHBoxLayout()
         self._rootLayout = QVBoxLayout(self)
         self._initWidget()
