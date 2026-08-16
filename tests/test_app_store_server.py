@@ -54,28 +54,30 @@ class AppStoreServerTest(TestCase):
         page = self.client.get("/admin/app-store/apps/", base_url="https://dash.djcatpro.top")
         return re.search(rb'name="csrf_token" value="([^"]+)"', page.data).group(1).decode()
 
-    def _createApp(self, installDir="demo", expectedStatus=302):
+    def _createApp(self, installDir="demo", expectedStatus=302, **overrides):
         self._login()
+        data = {
+            "csrf_token": self._csrf(),
+            "name": "Demo",
+            "developer": "DJCat",
+            "description": "A demo app",
+            "version": "1.2.0",
+            "install_dir": installDir,
+            "icon_url": "https://cdn.example.test/demo.png",
+            "recommended": "1",
+            "announcement": "维护公告",
+            "open_action_type": "program",
+            "open_action_target": "demo.exe",
+            "open_action_arguments": "--minimized\n--profile default",
+            "x86_64_enabled": "1",
+            "x86_64_url": "https://cdn.example.test/demo-x64.zip",
+        }
+        data.update(overrides)
         response = self.client.post(
             "/admin/app-store/apps/new",
             base_url="https://dash.djcatpro.top",
             headers={"Accept": "application/json"} if expectedStatus != 302 else None,
-            data={
-                "csrf_token": self._csrf(),
-                "name": "Demo",
-                "developer": "DJCat",
-                "description": "A demo app",
-                "version": "1.2.0",
-                "install_dir": installDir,
-                "icon_url": "https://cdn.example.test/demo.png",
-                "recommended": "1",
-                "announcement": "维护公告",
-                "open_action_type": "program",
-                "open_action_target": "demo.exe",
-                "open_action_arguments": "--minimized\n--profile default",
-                "x86_64_enabled": "1",
-                "x86_64_url": "https://cdn.example.test/demo-x64.zip",
-            },
+            data=data,
         )
         self.assertEqual(response.status_code, expectedStatus)
 
@@ -103,6 +105,80 @@ class AppStoreServerTest(TestCase):
             base_url="https://api.djcatpro.top",
         )
         self.assertEqual(len(catalog.json["apps"]), 1)
+
+    def testInstallDirectoryRejectsWindowsReservedNames(self):
+        for installDir in ("CON", "LPT1.tools", "Demo."):
+            with self.subTest(installDir=installDir):
+                self._createApp(installDir, expectedStatus=400)
+
+    def testAdminRejectsOversizedCatalogFields(self):
+        self._createApp(expectedStatus=400, name="x" * 121)
+        self._createApp(
+            expectedStatus=400,
+            icon_url="https://cdn.example.test/" + "x" * 2048,
+        )
+
+    def testEditingMissingMarketItemsReturnsNotFound(self):
+        self._createApp()
+        missingApp = self.client.post(
+            "/admin/app-store/apps/999",
+            base_url="https://dash.djcatpro.top",
+            headers={"Accept": "application/json"},
+            data={
+                "csrf_token": self._csrf(),
+                "name": "Missing",
+                "version": "1.0",
+                "install_dir": "missing",
+            },
+        )
+        missingPreset = self.client.post(
+            "/admin/app-store/presets/999",
+            base_url="https://dash.djcatpro.top",
+            headers={"Accept": "application/json"},
+            data={
+                "csrf_token": self._csrf(),
+                "preset_app_id": "1",
+                "preset_title": "Missing",
+                "preset_action_type": "program",
+                "preset_action_target": "demo.exe",
+            },
+        )
+        missingAd = self.client.post(
+            "/admin/app-store/ads/999",
+            base_url="https://dash.djcatpro.top",
+            headers={"Accept": "application/json"},
+            data={
+                "csrf_token": self._csrf(),
+                "title": "Missing",
+                "image_url": "https://cdn.example.test/missing.png",
+            },
+        )
+
+        self.assertEqual(missingApp.status_code, 404)
+        self.assertEqual(missingPreset.status_code, 404)
+        self.assertEqual(missingAd.status_code, 404)
+
+    def testCatalogLoadsPackagesAndPresetsWithConstantQueryCount(self):
+        self._createApp("demo-one")
+        self._createApp("demo-two")
+        statements = []
+        connect = ai_markdown.sqlite3.connect
+
+        def tracedConnect(*args, **kwargs):
+            database = connect(*args, **kwargs)
+            database.set_trace_callback(statements.append)
+            return database
+
+        with patch.object(ai_markdown.sqlite3, "connect", side_effect=tracedConnect):
+            response = self.client.get(
+                "/app-store/catalog",
+                base_url="https://api.djcatpro.top",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        selects = [statement.lower() for statement in statements if statement.lstrip().lower().startswith("select")]
+        self.assertEqual(sum("from market_packages" in query for query in selects), 1)
+        self.assertEqual(sum("from market_presets" in query for query in selects), 1)
 
     def testCatalogIsApiOnlyAndUsesEtag(self):
         api = self.client.get("/app-store/catalog", base_url="https://api.djcatpro.top")
@@ -368,6 +444,8 @@ class AppStoreServerTest(TestCase):
         listing = self.client.get("/admin/app-store/apps/", base_url="https://dash.djcatpro.top")
         body = listing.get_data(as_text=True)
         self.assertIn(">编辑</a>", body)
+        self.assertIn('data-remove-on-success="tr"', body)
+        self.assertIn("data-item-count", body)
         self.assertNotIn('class="table-action" href="/admin/app-store/apps/1">Demo</a>', body)
 
     def testAdminAndApiHostsDoNotCross(self):

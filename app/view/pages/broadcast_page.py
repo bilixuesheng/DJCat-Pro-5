@@ -498,9 +498,15 @@ class BroadcastWindow(FramelessWindow):
         self.miniWindow.show()
         rect = self.screen().availableGeometry()
         if cfg.broadcastActionButtonPosition.value == "右下角":
-            self.miniWindow.move(rect.width() - 150, rect.height() - 150)
+            self.miniWindow.move(
+                rect.left() + rect.width() - 150,
+                rect.top() + rect.height() - 150,
+            )
         else:
-            self.miniWindow.move(50, rect.height() - 150)
+            self.miniWindow.move(
+                rect.left() + 50,
+                rect.top() + rect.height() - 150,
+            )
 
     def restoreFromMini(self):
         self.miniWindow.hide()

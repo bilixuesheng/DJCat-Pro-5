@@ -186,8 +186,4 @@ if sys.platform == "win32":
             logger.warning("未找到正在运行实例的 IPC 窗口")
             return
 
-        win32gui.SendMessage(hWnd, WM_USER_WAKE, 0, 0)
-        try:
-            win32gui.SetForegroundWindow(hWnd)
-        except Exception:
-            pass
+        win32gui.PostMessage(hWnd, WM_USER_WAKE, 0, 0)

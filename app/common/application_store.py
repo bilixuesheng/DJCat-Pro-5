@@ -1,5 +1,6 @@
 """Client-side application catalog, installation and cache primitives."""
 
+import hashlib
 import json
 import os
 import platform
@@ -28,6 +29,9 @@ MAX_ZIP_COMPRESSED = 2 * 1024 * 1024 * 1024
 MAX_ZIP_EXPANDED = 8 * 1024 * 1024 * 1024
 MAX_ZIP_FILES = 50_000
 MAX_ZIP_RATIO = 200
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+IMAGE_CHUNK_SIZE = 64 * 1024
+ZIP_CHUNK_SIZE = 1024 * 1024
 CACHE_MAX_AGE = 7 * 24 * 60 * 60
 CACHE_SWEEP_INTERVAL = CACHE_MAX_AGE
 ARCHITECTURES = ("x86_64", "arm64")
@@ -84,8 +88,22 @@ def clientArchitecture() -> str:
 
 
 def versionKey(value: str) -> tuple:
-    parts = re.findall(r"\d+|[a-z]+", str(value or "").lower())
-    return tuple((0, int(part)) if part.isdigit() else (1, part) for part in parts)
+    value = str(value or "").strip().lower().removeprefix("v")
+    value = value.partition("+")[0]
+    core, separator, prerelease = value.partition("-")
+    if re.fullmatch(r"\d+(?:\.\d+)*", core):
+        coreParts = [int(part) for part in core.split(".")]
+        while len(coreParts) > 1 and coreParts[-1] == 0:
+            coreParts.pop()
+        coreKey = tuple((0, part) for part in coreParts)
+        prereleaseKey = tuple(
+            (0, int(part)) if part.isdigit() else (1, part)
+            for part in re.findall(r"\d+|[a-z]+", prerelease)
+        )
+        return coreKey, 0 if separator else 1, prereleaseKey
+
+    parts = re.findall(r"\d+|[a-z]+", value)
+    return tuple((0, int(part)) if part.isdigit() else (1, part) for part in parts), 1, ()
 
 
 def isUpdateAvailable(installedVersion: str, catalogVersion: str) -> bool:
@@ -95,15 +113,27 @@ def isUpdateAvailable(installedVersion: str, catalogVersion: str) -> bool:
 
 
 def _httpsUrl(value: str) -> str:
-    parsed = urlparse((value or "").strip())
-    if parsed.scheme != "https" or not parsed.netloc:
+    value = (value or "").strip()
+    parsed = urlparse(value)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or any(char in value for char in "\r\n\x00")
+    ):
         raise ApplicationStoreError("应用链接必须使用 HTTPS")
     return parsed.geturl()
 
 
 def _safeInstallDir(value: str) -> str:
     value = str(value or "").strip()
-    if not _SAFE_INSTALL_DIR.fullmatch(value):
+    baseName = value.rstrip(" .").split(".", 1)[0].upper()
+    if (
+        not _SAFE_INSTALL_DIR.fullmatch(value)
+        or value.endswith((".", " "))
+        or baseName in _RESERVED_NAMES
+    ):
         raise ApplicationStoreError("应用安装目录无效")
     return value
 
@@ -196,10 +226,12 @@ def validateZip(path: Path) -> None:
         raise UnsafeArchiveError("下载文件不是有效的 ZIP 安装包") from error
 
 
-def _extractZip(path: Path, destination: Path) -> None:
+def _extractZip(path: Path, destination: Path, cancelEvent=None) -> None:
     with zipfile.ZipFile(path) as archive:
         entries = _stripTopFolder(_archiveEntries(archive))
         for info, parts in entries:
+            if cancelEvent is not None and cancelEvent.is_set():
+                raise ApplicationStoreError("安装已取消")
             if not parts:
                 continue
             target = _underRoot(destination.joinpath(*parts), destination)
@@ -208,7 +240,13 @@ def _extractZip(path: Path, destination: Path) -> None:
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(info, "r") as source, target.open("wb") as output:
-                shutil.copyfileobj(source, output, length=1024 * 1024)
+                while True:
+                    if cancelEvent is not None and cancelEvent.is_set():
+                        raise ApplicationStoreError("安装已取消")
+                    chunk = source.read(ZIP_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    output.write(chunk)
 
 
 class ImageCache:
@@ -222,8 +260,6 @@ class ImageCache:
         suffix = Path(urlparse(url).path).suffix.lower()
         if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg"}:
             suffix = ".img"
-        import hashlib
-
         return self.directory / f"{hashlib.sha256(url.encode()).hexdigest()}{suffix}"
 
     def get(self, url: str, session=requests) -> Path:
@@ -232,16 +268,33 @@ class ImageCache:
         if path.is_file():
             path.touch()
             return path
-        response = session.get(url, timeout=(10, 30))
-        response.raise_for_status()
-        if urlparse(str(getattr(response, "url", url))).scheme.lower() != "https":
-            raise ApplicationStoreError("图片链接必须保持 HTTPS")
-        if len(response.content) > 20 * 1024 * 1024:
-            raise ApplicationStoreError("图片超过 20MB，未写入缓存")
         temporary = path.with_suffix(path.suffix + ".part")
-        temporary.write_bytes(response.content)
-        temporary.replace(path)
-        return path
+        response = session.get(url, timeout=(10, 30), stream=True)
+        try:
+            response.raise_for_status()
+            if urlparse(str(getattr(response, "url", url))).scheme.lower() != "https":
+                raise ApplicationStoreError("图片链接必须保持 HTTPS")
+            contentLength = str(getattr(response, "headers", {}).get("Content-Length", ""))
+            if contentLength.isdigit() and int(contentLength) > MAX_IMAGE_BYTES:
+                raise ApplicationStoreError("图片超过 20MB，未写入缓存")
+
+            size = 0
+            try:
+                with temporary.open("wb") as output:
+                    for chunk in response.iter_content(chunk_size=IMAGE_CHUNK_SIZE):
+                        if not chunk:
+                            continue
+                        size += len(chunk)
+                        if size > MAX_IMAGE_BYTES:
+                            raise ApplicationStoreError("图片超过 20MB，未写入缓存")
+                        output.write(chunk)
+                temporary.replace(path)
+                return path
+            except Exception:
+                temporary.unlink(missing_ok=True)
+                raise
+        finally:
+            response.close()
 
     def sweepIfDue(self, now: float | None = None) -> None:
         now = now or time.time()
@@ -322,16 +375,24 @@ class ApplicationStore:
             f"?arch={self.architecture}&token={uuid.uuid4().hex}",
         )
 
-    def installZip(self, app: dict, zipPath: Path) -> InstalledApplication:
+    def installZip(self, app: dict, zipPath: Path, cancelEvent=None) -> InstalledApplication:
+        if cancelEvent is not None and cancelEvent.is_set():
+            raise ApplicationStoreError("安装已取消")
         validateZip(zipPath)
+        if cancelEvent is not None and cancelEvent.is_set():
+            raise ApplicationStoreError("安装已取消")
         installDir = _safeInstallDir(app.get("install_dir"))
         target = _underRoot(self.programDir / installDir, self.programDir)
         staging = self.programDir / f".{installDir}.staging-{uuid.uuid4().hex}"
         backup = None
         staging.mkdir(parents=True, exist_ok=False)
         try:
-            _extractZip(Path(zipPath), staging)
+            _extractZip(Path(zipPath), staging, cancelEvent)
+            if cancelEvent is not None and cancelEvent.is_set():
+                raise ApplicationStoreError("安装已取消")
             _assertNoLinks(target)
+            if cancelEvent is not None and cancelEvent.is_set():
+                raise ApplicationStoreError("安装已取消")
             if target.exists() and not target.is_dir():
                 raise ApplicationStoreError("应用安装目录不是文件夹")
             manifest = {
@@ -370,19 +431,21 @@ class ApplicationStore:
         if not self.programDir.exists():
             return result
         for directory in self.programDir.iterdir():
-            if not directory.is_dir() or directory.is_symlink():
+            isJunction = getattr(directory, "is_junction", lambda: False)()
+            if not directory.is_dir() or directory.is_symlink() or isJunction:
                 continue
             manifestPath = directory / MANIFEST_NAME
             try:
+                installDir = _safeInstallDir(directory.name)
                 manifest = json.loads(manifestPath.read_text(encoding="utf-8"))
                 appId = int(manifest["id"])
-            except (OSError, ValueError, TypeError, json.JSONDecodeError, KeyError):
+            except (ApplicationStoreError, OSError, ValueError, TypeError, json.JSONDecodeError, KeyError):
                 continue
             result[appId] = InstalledApplication(
                 appId,
                 str(manifest.get("name", "")),
                 str(manifest.get("version", "")),
-                str(manifest.get("install_dir", directory.name)),
+                installDir,
                 directory,
                 manifest,
             )

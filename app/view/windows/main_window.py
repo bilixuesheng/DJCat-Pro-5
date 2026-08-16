@@ -40,7 +40,9 @@ from qfluentwidgets import (
 )
 
 from app.common.ai_markdown import registerMachine
+from app.common.application_store import isUpdateAvailable
 from app.common.edge_tts import DEFAULT_EDGE_VOICE, EdgeSpeechWorker
+from app.common.home_cards import normalize_pinned_cards
 from app.common.update_download import UpdateDownloadWorker, clearUpdateDirectory
 from app.config.cfg import cfg
 from app.config.constants import (
@@ -87,6 +89,8 @@ class UpdateWorker(QObject):
                 response = requests.get(UPDATE_API, timeout=5)
                 response.raise_for_status()
                 data = response.json()
+                if not isinstance(data, dict):
+                    raise ValueError("更新接口返回格式无效")
                 self.finished.emit(self.requestId, data, "")
                 return
             except (requests.RequestException, ValueError) as error:
@@ -521,17 +525,22 @@ class MainWindow(MSFluentWindow):
         self._updateSearchEdit()
 
     def _setPinnedHomeCards(self, cards):
-        self.homePage.setApplicationCards(cards)
+        normalized = self.homePage.setApplicationCards(cards)
+        if normalized != cards:
+            cfg.set(cfg.pinnedHomeCards, normalized)
 
     def _onPinnedHomeCardClicked(self, item):
         self.appStorePage.executePinnedCard(item)
 
     def _onPinnedHomeCardRemoved(self, item):
-        key = (int(item.get("app_id", -1)), int(item.get("preset_id", -1)))
+        normalized = normalize_pinned_cards([item])
+        if not normalized:
+            return
+        key = (normalized[0]["app_id"], normalized[0]["preset_id"])
         cards = [
-            card for card in cfg.pinnedHomeCards.value
-            if not isinstance(card, dict)
-            or (int(card.get("app_id", -1)), int(card.get("preset_id", -1))) != key
+            card
+            for card in normalize_pinned_cards(cfg.pinnedHomeCards.value)
+            if (card["app_id"], card["preset_id"]) != key
         ]
         cfg.set(cfg.pinnedHomeCards, cards)
 
@@ -773,6 +782,8 @@ class MainWindow(MSFluentWindow):
             infoBar.close()
 
     def _onUpdateChecked(self, data, error, manual):
+        if not error and not isinstance(data, dict):
+            error = "更新接口返回格式无效"
         if error:
             if manual:
                 InfoBar.error(
@@ -784,9 +795,20 @@ class MainWindow(MSFluentWindow):
                 )
             return
 
-        latest_version = data.get("latest_version", "未知")
+        latest_version = data.get("latest_version")
+        if not isinstance(latest_version, str) or not latest_version.strip():
+            if manual:
+                InfoBar.error(
+                    "检查更新失败",
+                    "更新接口返回格式无效",
+                    duration=3000,
+                    position=InfoBarPosition.BOTTOM_RIGHT,
+                    parent=self,
+                )
+            return
+        latest_version = latest_version.strip()
 
-        if latest_version == VERSION:
+        if not isUpdateAvailable(VERSION, latest_version):
             if manual:
                 InfoBar.success(
                     "已是最新版本",

@@ -24,6 +24,7 @@ from app.common.home_cards import (
     execute_action,
     extract_icon_images,
     normalize_custom_cards,
+    normalize_pinned_cards,
     validate_action,
 )
 from app.config.cfg import cfg
@@ -518,6 +519,52 @@ class HomeCustomCardTest(TestCase):
         )
         self.assertEqual(len(cards), 1)
         self.assertNotEqual(cards[0]["actions"][0]["id"], cards[0]["actions"][1]["id"])
+
+    def testDuplicateCustomCardIdsAreRepairedAndPersisted(self):
+        cards = [
+            {
+                "id": "duplicate",
+                "title": title,
+                "actions": [{"type": "delay", "seconds": 1}],
+            }
+            for title in ("第一张", "第二张")
+        ]
+        cfg.set(cfg.customHomeCards, cards)
+
+        page = HomePage()
+        try:
+            repairedIds = [item["id"] for item in cfg.customHomeCards.value]
+            self.assertEqual(len(set(repairedIds)), 2)
+        finally:
+            page.close()
+
+        second = HomePage()
+        try:
+            self.assertEqual(
+                set(second._customCardData),
+                set(repairedIds),
+            )
+        finally:
+            second.close()
+
+    def testMalformedPinnedCardsAreSkippedWithoutDuplicateWidgets(self):
+        valid = {
+            "app_id": "7",
+            "preset_id": "9",
+            "title": "打开应用",
+            "action": {"type": "program", "target": "demo.exe"},
+        }
+        cards = normalize_pinned_cards(
+            [None, {"app_id": "broken"}, valid, dict(valid)]
+        )
+
+        self.assertEqual(len(cards), 1)
+        self.assertEqual((cards[0]["app_id"], cards[0]["preset_id"]), (7, 9))
+        self.assertEqual(self.page.setApplicationCards([None, valid, dict(valid)]), cards)
+        self.assertEqual(
+            [key for key in self.page.all_cards if key.startswith("app:")],
+            ["app:7:9"],
+        )
 
     def testMalformedDefaultAndOrderConfigDoesNotBreakHomePage(self):
         cfg.set(cfg.visibleDefaultHomeCards, [[], DEFAULT_HOME_CARD_NAMES[0]])

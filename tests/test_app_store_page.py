@@ -1,12 +1,13 @@
 import os
 import sys
 import threading
+import time
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, QPoint, Qt, QThread, Signal
+from PySide6.QtCore import QObject, QPoint, Qt, Signal
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import (
@@ -40,6 +41,18 @@ class _CancelableWorker(QObject):
         self.cancelEvent.set()
 
 
+class _IgnoringCancelWorker:
+    def __init__(self):
+        self.canceled = threading.Event()
+        self.release = threading.Event()
+
+    def run(self):
+        self.release.wait()
+
+    def cancel(self):
+        self.canceled.set()
+
+
 class _BlockingCatalogStore:
     def __init__(self):
         self.started = threading.Event()
@@ -49,6 +62,23 @@ class _BlockingCatalogStore:
         self.started.set()
         self.release.wait()
         return {"apps": [], "ads": []}
+
+
+class _SlowImageStore:
+    def __init__(self):
+        self.imageStarted = threading.Event()
+        self.releaseImage = threading.Event()
+
+    def fetchCatalog(self):
+        return {
+            "apps": [{"id": 1, "icon_url": "https://example.test/icon.png"}],
+            "ads": [],
+        }
+
+    def imagePath(self, _url):
+        self.imageStarted.set()
+        self.releaseImage.wait()
+        return "cached.png"
 
 
 def _apps(count):
@@ -507,13 +537,32 @@ class AppStorePageTest(TestCase):
         self.assertFalse(thread.is_alive())
         self.assertEqual(results, [])
 
-    def testShutdownWaitsForActiveDownloadThread(self):
+    def testCatalogIsPublishedBeforeSlowImagesFinish(self):
+        store = _SlowImageStore()
+        worker = CatalogWorker(store)
+        results = []
+        images = []
+        completed = threading.Event()
+        worker.finished.connect(lambda *result: results.append(result))
+        worker.imageLoaded.connect(lambda *result: images.append(result))
+        worker.completed.connect(completed.set)
+        thread = threading.Thread(target=worker.run)
+        thread.start()
+        self.assertTrue(store.imageStarted.wait(1))
+        QTest.qWait(20)
+
+        self.assertEqual(results[0][0]["apps"][0]["id"], 1)
+        self.assertEqual(images, [])
+
+        store.releaseImage.set()
+        thread.join(1)
+        QTest.qWait(20)
+        self.assertTrue(completed.is_set())
+        self.assertEqual(images, [("https://example.test/icon.png", "cached.png")])
+
+    def testShutdownWaitsForCooperativeDownloadThread(self):
         worker = _CancelableWorker()
-        thread = QThread(self.page)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.finished.connect(worker.deleteLater)
-        worker.finished.connect(thread.quit)
+        thread = threading.Thread(target=worker.run)
         thread.start()
         QTest.qWait(20)
 
@@ -522,6 +571,28 @@ class AppStorePageTest(TestCase):
 
         self.page.shutdown()
 
-        self.assertFalse(thread.isRunning())
+        self.assertFalse(thread.is_alive())
         self.assertNotIn(1, self.page._downloadJobs)
         self.page.store.downloadSlots.release.assert_called_once_with()
+
+    def testShutdownHasBoundedWaitForUncooperativeDownload(self):
+        worker = _IgnoringCancelWorker()
+        thread = threading.Thread(target=worker.run, daemon=True)
+        thread.start()
+        self.page.store.downloadSlots = Mock()
+        self.page._downloadJobs[1] = (thread, worker)
+
+        started = time.monotonic()
+        try:
+            with patch(
+                "app.view.pages.app_store_page.SHUTDOWN_WAIT_SECONDS",
+                0.01,
+            ):
+                self.page.shutdown()
+        finally:
+            worker.release.set()
+            thread.join(1)
+
+        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertTrue(worker.canceled.is_set())
+        self.assertNotIn(1, self.page._downloadJobs)

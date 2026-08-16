@@ -18,6 +18,16 @@ from flask import Blueprint, abort, jsonify, redirect, render_template, request
 ARCHITECTURES = ("x86_64", "arm64")
 _INSTALL_DIR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}$")
 _DOWNLOAD_TOKEN = re.compile(r"^[a-f0-9]{32}$")
+_RESERVED_INSTALL_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
+_MAX_URL_LENGTH = 2048
+_MAX_ARGUMENTS_LENGTH = 4096
 _DANGEROUS_SCHEMES = {
     "cmd",
     "data",
@@ -44,11 +54,22 @@ def _hostOnly():
 def _safeUrl(value, *, httpsOnly=True):
     value = (value or "").strip()
     parsed = urlparse(value)
+    if len(value) > _MAX_URL_LENGTH or any(char in value for char in "\r\n\x00"):
+        return ""
     if httpsOnly and parsed.scheme != "https":
         return ""
     if not parsed.netloc or parsed.username or parsed.password:
         return ""
     return value
+
+
+def _safeInstallDir(value):
+    baseName = value.rstrip(" .").split(".", 1)[0].upper()
+    return bool(
+        _INSTALL_DIR.fullmatch(value)
+        and not value.endswith((".", " "))
+        and baseName not in _RESERVED_INSTALL_NAMES
+    )
 
 
 def _safeAction(actionType, target, arguments=""):
@@ -71,7 +92,11 @@ def _safeAction(actionType, target, arguments=""):
             return None
     elif actionType == "uri":
         scheme = urlparse(target).scheme.lower()
-        if len(scheme) < 2 or scheme in _DANGEROUS_SCHEMES:
+        if (
+            len(target) > _MAX_URL_LENGTH
+            or len(scheme) < 2
+            or scheme in _DANGEROUS_SCHEMES
+        ):
             return None
         if any(char in target for char in ("\r", "\n", "\x00")):
             return None
@@ -94,6 +119,8 @@ def _formArguments(actionType, value):
     if actionType != "program":
         return "{}"
     value = (value or "").strip()
+    if len(value) > _MAX_ARGUMENTS_LENGTH:
+        return None
     try:
         parsed = json.loads(value) if value else {}
     except (TypeError, ValueError):
@@ -115,7 +142,8 @@ def _argumentsText(value):
 
 
 def _formAction(actionType, target, arguments):
-    return _safeAction(actionType, target, _formArguments(actionType, arguments))
+    arguments = _formArguments(actionType, arguments)
+    return _safeAction(actionType, target, arguments) if arguments is not None else None
 
 
 def _ensureSchema(connect):
@@ -252,18 +280,7 @@ def _rowAction(row, prefix="open"):
     }
 
 
-def _appPayload(database, row):
-    packages = database.execute(
-        "SELECT architecture, enabled FROM market_packages WHERE app_id = ?",
-        (row["id"],),
-    ).fetchall()
-    presets = database.execute(
-        """
-        SELECT id, title, description, action_type, action_target, action_arguments
-        FROM market_presets WHERE app_id = ? ORDER BY sort_order, id
-        """,
-        (row["id"],),
-    ).fetchall()
+def _appPayload(row, packages, presets):
     packageMap = {
         package["architecture"]: {"enabled": bool(package["enabled"])}
         for package in packages
@@ -353,7 +370,28 @@ def register_app_store(
             rows = database.execute(
                 "SELECT * FROM market_applications ORDER BY recommended DESC, name COLLATE NOCASE"
             ).fetchall()
-            apps = [_appPayload(database, row) for row in rows]
+            packagesByApp = {}
+            for package in database.execute(
+                "SELECT app_id, architecture, enabled FROM market_packages"
+            ):
+                packagesByApp.setdefault(package["app_id"], []).append(package)
+            presetsByApp = {}
+            for preset in database.execute(
+                """
+                SELECT app_id, id, title, description, action_type, action_target,
+                       action_arguments
+                FROM market_presets ORDER BY app_id, sort_order, id
+                """
+            ):
+                presetsByApp.setdefault(preset["app_id"], []).append(preset)
+            apps = [
+                _appPayload(
+                    row,
+                    packagesByApp.get(row["id"], ()),
+                    presetsByApp.get(row["id"], ()),
+                )
+                for row in rows
+            ]
             ads = [
                 {
                     "id": ad["id"],
@@ -487,8 +525,17 @@ def register_app_store(
             errors.append("软件名称不能为空")
         if not values["version"]:
             errors.append("软件版本不能为空")
-        if not _INSTALL_DIR.fullmatch(values["install_dir"]):
-            errors.append("安装目录只能包含字母、数字、空格、点、下划线和短横线")
+        if not _safeInstallDir(values["install_dir"]):
+            errors.append("安装目录包含无效或 Windows 保留名称")
+        for field, label, limit in (
+            ("name", "软件名称", 120),
+            ("developer", "开发者", 120),
+            ("description", "软件简介", 1000),
+            ("version", "软件版本", 64),
+            ("announcement", "软件公告", 1000),
+        ):
+            if len(values[field]) > limit:
+                errors.append(f"{label}不能超过 {limit} 个字符")
         if request.form.get("icon_url", "").strip() and not values["icon_url"]:
             errors.append("图标链接必须是 HTTPS 地址")
         actionType = request.form.get("open_action_type", "").strip().lower()
@@ -501,10 +548,13 @@ def register_app_store(
             errors.append("打开动作配置无效")
         packages = {}
         for architecture in ARCHITECTURES:
-            url = _safeUrl(request.form.get(f"{architecture}_url"), httpsOnly=True)
+            rawUrl = request.form.get(f"{architecture}_url", "").strip()
+            url = _safeUrl(rawUrl, httpsOnly=True)
             enabled = bool(request.form.get(f"{architecture}_enabled"))
             if enabled and not url:
                 errors.append(f"{architecture} 安装包启用时必须填写 HTTPS 链接")
+            elif rawUrl and not url:
+                errors.append(f"{architecture} 安装包链接无效")
             if url:
                 packages[architecture] = (enabled, url)
         if errors:
@@ -517,6 +567,16 @@ def register_app_store(
         with closing(connect()) as database:
             try:
                 database.execute("BEGIN IMMEDIATE")
+                if appId is not None and not database.execute(
+                    "SELECT 1 FROM market_applications WHERE id = ?", (appId,)
+                ).fetchone():
+                    database.rollback()
+                    return admin_response(
+                        "软件不存在",
+                        "error",
+                        "app_store.adminApps",
+                        404,
+                    )
                 duplicate = database.execute(
                     "SELECT id FROM market_applications "
                     "WHERE install_dir = ? COLLATE NOCASE "
@@ -590,7 +650,16 @@ def register_app_store(
         check_csrf()
         _ensureSchema(connect)
         with closing(connect()) as database:
-            database.execute("DELETE FROM market_applications WHERE id = ?", (app_id,))
+            deleted = database.execute(
+                "DELETE FROM market_applications WHERE id = ?", (app_id,)
+            )
+            if not deleted.rowcount:
+                return admin_response(
+                    "软件不存在",
+                    "error",
+                    "app_store.adminApps",
+                    404,
+                )
             database.commit()
         return admin_response("软件已删除", "success", "app_store.adminApps")
 
@@ -651,7 +720,16 @@ def register_app_store(
         if request.form.get("delete"):
             _ensureSchema(connect)
             with closing(connect()) as database:
-                database.execute("DELETE FROM market_presets WHERE id = ?", (presetId,))
+                deleted = database.execute(
+                    "DELETE FROM market_presets WHERE id = ?", (presetId,)
+                )
+                if not deleted.rowcount:
+                    return admin_response(
+                        "预设卡片不存在",
+                        "error",
+                        "app_store.adminPresets",
+                        404,
+                    )
                 database.commit()
             return admin_response("预设卡片已删除", "success", "app_store.adminPresets")
         errors = []
@@ -659,6 +737,10 @@ def register_app_store(
             errors.append("请选择软件")
         if not title:
             errors.append("卡片标题不能为空")
+        if len(title) > 80:
+            errors.append("卡片标题不能超过 80 个字符")
+        if len(description) > 240:
+            errors.append("卡片简介不能超过 240 个字符")
         if not action:
             errors.append("预设卡片动作配置无效")
         if errors:
@@ -669,8 +751,8 @@ def register_app_store(
                 return admin_response("选择的软件不存在", "error", "app_store.adminPresets", 400)
             values = (
                 appId,
-                title[:80],
-                description[:240],
+                title,
+                description,
                 action["type"],
                 action["target"],
                 json.dumps(action["arguments"], ensure_ascii=False),
@@ -687,13 +769,21 @@ def register_app_store(
                 )
                 message = "预设卡片已新增"
             else:
-                database.execute(
+                updated = database.execute(
                     """
                     UPDATE market_presets SET app_id=?, title=?, description=?, action_type=?,
                     action_target=?, action_arguments=?, sort_order=? WHERE id=?
                     """,
                     values + (presetId,),
                 )
+                if not updated.rowcount:
+                    database.rollback()
+                    return admin_response(
+                        "预设卡片不存在",
+                        "error",
+                        "app_store.adminPresets",
+                        404,
+                    )
                 message = "预设卡片已保存"
             database.commit()
         return admin_response(message, "success", "app_store.adminPresets")
@@ -713,6 +803,8 @@ def register_app_store(
                 appId, sortOrder = None, 0
             if not title or not imageUrl:
                 return admin_response("广告标题和 HTTPS 图片链接不能为空", "error", "app_store.adminAds", 400)
+            if len(title) > 120 or len(description) > 300:
+                return admin_response("广告标题或简介过长", "error", "app_store.adminAds", 400)
             _ensureSchema(connect)
             with closing(connect()) as database:
                 if not _applicationExists(database, appId):
@@ -752,7 +844,16 @@ def register_app_store(
         check_csrf()
         if request.form.get("delete"):
             with closing(connect()) as database:
-                database.execute("DELETE FROM market_advertisements WHERE id = ?", (ad_id,))
+                deleted = database.execute(
+                    "DELETE FROM market_advertisements WHERE id = ?", (ad_id,)
+                )
+                if not deleted.rowcount:
+                    return admin_response(
+                        "广告不存在",
+                        "error",
+                        "app_store.adminAds",
+                        404,
+                    )
                 database.commit()
             return admin_response("广告已删除", "success", "app_store.adminAds")
         title = request.form.get("title", "").strip()
@@ -765,6 +866,8 @@ def register_app_store(
             appId, sortOrder = None, 0
         if not title or not imageUrl:
             return admin_response("广告标题和 HTTPS 图片链接不能为空", "error", "app_store.adminAds", 400)
+        if len(title) > 120 or len(description) > 300:
+            return admin_response("广告标题或简介过长", "error", "app_store.adminAds", 400)
         with closing(connect()) as database:
             if not _applicationExists(database, appId):
                 return admin_response(
@@ -773,10 +876,18 @@ def register_app_store(
                     "app_store.adminAds",
                     400,
                 )
-            database.execute(
+            updated = database.execute(
                 "UPDATE market_advertisements SET title=?, description=?, image_url=?, app_id=?, sort_order=?, enabled=? WHERE id=?",
                 (title, description, imageUrl, appId, sortOrder, int(bool(request.form.get("enabled"))), ad_id),
             )
+            if not updated.rowcount:
+                database.rollback()
+                return admin_response(
+                    "广告不存在",
+                    "error",
+                    "app_store.adminAds",
+                    404,
+                )
             database.commit()
         return admin_response("广告已保存", "success", "app_store.adminAds")
 

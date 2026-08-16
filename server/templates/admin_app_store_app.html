@@ -27,7 +27,7 @@
                 <label>版本号<input name="version" maxlength="64" value="{{ form.version if app else '' }}" required></label>
                 <label>安装目录<input name="install_dir" maxlength="64" value="{{ form.install_dir if app else '' }}" placeholder="例如 ClassIsland 2" required><small>可以包含空格；客户端会安装到 Program/该目录，不能填写路径分隔符。</small></label>
                 <label class="full">简介<textarea name="description" maxlength="1000" rows="3">{{ form.description if app else '' }}</textarea></label>
-                <label class="full">图标 HTTPS 链接<input type="url" name="icon_url" value="{{ form.icon_url if app else '' }}"></label>
+                <label class="full">图标 HTTPS 链接<input type="url" name="icon_url" maxlength="2048" value="{{ form.icon_url if app else '' }}"></label>
                 <label class="option-row full"><span><strong>设为推荐</strong><small>显示在全部应用的推荐分类。</small></span><input type="checkbox" name="recommended" value="1" {% if app and form.recommended %}checked{% endif %}></label>
             </div>
         </section>
@@ -39,7 +39,7 @@
                 {% set package = form.packages.get(architecture) if app else none %}
                 <div class="option-list package-option">
                     <div class="option-row"><span><strong>{{ architecture }}</strong><small>按客户端架构提供 ZIP 安装包。</small></span><input type="checkbox" name="{{ architecture }}_enabled" value="1" {% if (not app) or (package and package.enabled) %}checked{% endif %}></div>
-                    <label class="package-url-field">ZIP 下载 HTTPS 链接<input type="url" name="{{ architecture }}_url" value="{{ package.download_url if package else '' }}" placeholder="https://下载域名/软件/{{ architecture }}.zip"><small>示例：<code>https://cdn.example.com/classisland-x86_64.zip</code></small></label>
+                    <label class="package-url-field">ZIP 下载 HTTPS 链接<input type="url" name="{{ architecture }}_url" maxlength="2048" value="{{ package.download_url if package else '' }}" placeholder="https://下载域名/软件/{{ architecture }}.zip"><small>示例：<code>https://cdn.example.com/classisland-x86_64.zip</code></small></label>
                 </div>
             {% endfor %}
             </div>
@@ -49,8 +49,8 @@
             <div class="form-section-title"><span>03</span><div><h2>打开动作</h2><p>安装后卡片和详情页的“打开”按钮使用。</p></div></div>
             <div class="form-fields two-columns" data-action-form>
                 <label>类型<select name="open_action_type" data-action-type><option value="">不设置</option><option value="program" {% if app and form.open_action_type == 'program' %}selected{% endif %}>程序</option><option value="url" {% if app and form.open_action_type == 'url' %}selected{% endif %}>HTTPS 网页</option><option value="uri" {% if app and form.open_action_type == 'uri' %}selected{% endif %}>系统协议</option></select></label>
-                <label>目标<input name="open_action_target" data-action-target value="{{ form.open_action_target if app else '' }}" placeholder="classisland.exe 或 https://example.com"></label>
-                <label class="full" data-action-arguments-wrapper>程序参数<textarea name="open_action_arguments" data-action-arguments rows="3" placeholder="--minimized\n--profile default">{{ form.open_action_arguments if app else '' }}</textarea><small>仅程序动作使用；每行填写一个参数。例如 <code>--minimized</code>。</small></label>
+                <label>目标<input name="open_action_target" data-action-target maxlength="2048" value="{{ form.open_action_target if app else '' }}" placeholder="classisland.exe 或 https://example.com"></label>
+                <label class="full" data-action-arguments-wrapper>程序参数<textarea name="open_action_arguments" data-action-arguments maxlength="4096" rows="3" placeholder="--minimized\n--profile default">{{ form.open_action_arguments if app else '' }}</textarea><small>仅程序动作使用；每行填写一个参数。例如 <code>--minimized</code>。</small></label>
                 <p class="action-help full" data-action-help>程序目标只能是安装目录内的相对 EXE；网页必须使用 HTTPS；系统协议会按客户端安全规则校验。</p>
             </div>
         </section>

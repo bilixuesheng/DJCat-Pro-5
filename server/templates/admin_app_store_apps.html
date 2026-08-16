@@ -11,7 +11,7 @@
             <h1>软件目录</h1>
             <p>管理客户端展示信息、分架构安装包、打开动作和版本号。</p>
         </div>
-        <div class="machine-count"><strong>{{ apps|length }}</strong><span>个软件</span></div>
+        <div class="machine-count"><strong data-item-count>{{ apps|length }}</strong><span>个软件</span></div>
     </header>
 
     <section class="section-block" aria-labelledby="apps-title">
@@ -39,7 +39,7 @@
                         <td>
                             <div class="table-actions">
                                 <a class="table-action" href="{{ url_for('app_store.adminApp', app_id=app.id) }}">编辑</a>
-                                <form method="post" action="{{ url_for('app_store.adminDeleteApp', app_id=app.id) }}" data-async-form data-confirm="确认删除 {{ app.name }} 吗？">
+                                <form method="post" action="{{ url_for('app_store.adminDeleteApp', app_id=app.id) }}" data-async-form data-remove-on-success="tr" data-confirm="确认删除 {{ app.name }} 吗？">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                     <button class="table-action" type="submit">删除</button>
                                 </form>

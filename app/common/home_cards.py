@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from PySide6.QtCore import QObject, QProcess, QSize, Signal
-from PySide6.QtGui import QIcon, QImage, QPixmap
+from PySide6.QtGui import QIcon, QImage
 from qfluentwidgets import FluentIcon as FIF
 
 from app.config.paths import HOME_CARD_ICON_DIR
@@ -110,6 +110,36 @@ def normalize_custom_cards(value) -> list[dict]:
                 "description": _text(raw.get("description"))[:120],
                 "icon": normalized_icon,
                 "actions": actions,
+            }
+        )
+    return result
+
+
+def normalize_pinned_cards(value) -> list[dict]:
+    result = []
+    keys = set()
+    for raw in value if isinstance(value, list) else []:
+        if not isinstance(raw, dict) or not isinstance(raw.get("action"), dict):
+            continue
+        try:
+            app_id = int(raw.get("app_id"))
+            preset_id = int(raw.get("preset_id"))
+        except (TypeError, ValueError):
+            continue
+        key = (app_id, preset_id)
+        if app_id <= 0 or preset_id <= 0 or key in keys:
+            continue
+        keys.add(key)
+        result.append(
+            {
+                "app_id": app_id,
+                "preset_id": preset_id,
+                "title": _text(raw.get("title")),
+                "description": _text(raw.get("description")),
+                "action": copy.deepcopy(raw["action"]),
+                "install_dir": _text(raw.get("install_dir")),
+                "icon_url": _text(raw.get("icon_url")),
+                "icon_path": _text(raw.get("icon_path")),
             }
         )
     return result
@@ -383,6 +413,7 @@ __all__ = [
     "new_id",
     "normalize_action",
     "normalize_custom_cards",
+    "normalize_pinned_cards",
     "remove_cached_icon",
     "save_icon_image",
     "validate_action",

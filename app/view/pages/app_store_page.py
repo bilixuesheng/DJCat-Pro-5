@@ -1,7 +1,8 @@
 import threading
+import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -37,14 +38,19 @@ from app.common.application_store import (
     ApplicationStoreError,
     downloadWorker,
 )
+from app.common.home_cards import normalize_pinned_cards
 from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import LabelElideFilter
 from app.view.components.tool_tip import setFluentToolTip
 
+SHUTDOWN_WAIT_SECONDS = 0.5
+
 
 class CatalogWorker(QObject):
     finished = Signal(object, object, str)
+    imageLoaded = Signal(str, str)
+    completed = Signal()
 
     def __init__(self, store: ApplicationStore):
         super().__init__()
@@ -59,12 +65,18 @@ class CatalogWorker(QObject):
             payload = self.store.fetchCatalog()
             if self._cancelEvent.is_set():
                 return
+            self.finished.emit(payload, {}, "")
             imagePaths = {}
             urls = {
                 item.get("icon_url", "")
                 for item in payload.get("apps", [])
+                if isinstance(item, dict)
             }
-            urls.update(item.get("image_url", "") for item in payload.get("ads", []))
+            urls.update(
+                item.get("image_url", "")
+                for item in payload.get("ads", [])
+                if isinstance(item, dict)
+            )
             for url in urls:
                 if self._cancelEvent.is_set():
                     return
@@ -74,11 +86,13 @@ class CatalogWorker(QObject):
                     imagePaths[url] = str(self.store.imagePath(url))
                 except Exception:
                     continue
-            if not self._cancelEvent.is_set():
-                self.finished.emit(payload, imagePaths, "")
+                if not self._cancelEvent.is_set():
+                    self.imageLoaded.emit(url, imagePaths[url])
         except Exception as error:
             if not self._cancelEvent.is_set():
                 self.finished.emit({}, {}, str(error))
+        finally:
+            self.completed.emit()
 
 
 class ApplicationCard(CardWidget):
@@ -158,6 +172,9 @@ class ApplicationCard(CardWidget):
             self.descriptionLabel,
             str(app.get("description", "")),
         )
+        self.setImage(imagePath)
+
+    def setImage(self, imagePath: str = "") -> None:
         if imagePath and Path(imagePath).exists():
             pixmap = QPixmap(imagePath).scaled(
                 54,
@@ -260,6 +277,7 @@ class AppStorePage(ScrollArea):
         self.currentApp = None
         self.searchText = ""
         self._catalogLoading = False
+        self._catalogLoaded = False
         self._catalogThread = None
         self._catalogWorker = None
         self._shuttingDown = False
@@ -268,6 +286,7 @@ class AppStorePage(ScrollArea):
         self._installing = set()
         self._installationThreads = set()
         self._installationLock = threading.Lock()
+        self._installationCancelEvent = threading.Event()
         self._pendingProgress = {}
         self._progressTimer = QTimer(self)
         self._progressTimer.setInterval(100)
@@ -508,7 +527,8 @@ class AppStorePage(ScrollArea):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self._loadCatalog()
+        if not self._catalogLoaded:
+            self._loadCatalog()
 
     def hideEvent(self, event):
         self._pauseAds()
@@ -522,21 +542,37 @@ class AppStorePage(ScrollArea):
         self._progressTimer.stop()
         self._pendingProgress.clear()
         self._catalogLoading = False
+        catalogThread = self._catalogThread
         if self._catalogWorker is not None:
             self._catalogWorker.cancel()
-        self._catalogWorker = None
-        self._catalogThread = None
 
         jobs = tuple(self._downloadJobs.items())
         for _appId, (thread, worker) in jobs:
             worker.cancel()
-            thread.quit()
+        self._installationCancelEvent.set()
+        with self._installationLock:
+            installationThreads = tuple(self._installationThreads)
+
+        deadline = time.monotonic() + SHUTDOWN_WAIT_SECONDS
+        threads = [thread for _appId, (thread, _worker) in jobs]
+        if catalogThread is not None:
+            threads.insert(0, catalogThread)
+        threads.extend(installationThreads)
+        for thread in threads:
+            if thread is threading.current_thread():
+                continue
+            thread.join(max(0, deadline - time.monotonic()))
+
+        if catalogThread is None or not catalogThread.is_alive():
+            self._catalogWorker = None
+            self._catalogThread = None
+
         for appId, (thread, worker) in jobs:
-            if thread.isRunning():
-                thread.wait()
             if self._downloadJobs.pop(appId, None) is not None:
                 self.store.downloadSlots.release()
             self._downloadStates.pop(appId, None)
+            if thread.is_alive():
+                continue
             for attribute in ("targetPath", "partialPath"):
                 path = getattr(worker, attribute, None)
                 if path:
@@ -545,10 +581,6 @@ class AppStorePage(ScrollArea):
                     except OSError:
                         pass
 
-        with self._installationLock:
-            installationThreads = tuple(self._installationThreads)
-        for thread in installationThreads:
-            thread.join()
         for _appId in tuple(self._installing):
             self.store.downloadSlots.release()
         self._installing.clear()
@@ -567,21 +599,20 @@ class AppStorePage(ScrollArea):
         thread = threading.Thread(target=worker.run, daemon=True)
         self._catalogThread = thread
         worker.finished.connect(self._onCatalogLoaded)
+        worker.imageLoaded.connect(self._onCatalogImageLoaded)
+        worker.completed.connect(self._onCatalogCompleted)
         thread.start()
 
     def _onCatalogLoaded(self, payload, imagePaths, error):
-        self._catalogLoading = False
-        self.refreshButton.setEnabled(True)
-        self._catalogWorker = None
-        self._catalogThread = None
         if self._shuttingDown:
             return
         if error:
             InfoBar.error("应用目录加载失败", error, duration=5000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
             return
+        self._catalogLoaded = True
         self.catalog = list(payload.get("apps", []))
         self.ads = list(payload.get("ads", []))
-        self.imagePaths = dict(imagePaths)
+        self.imagePaths.update(imagePaths)
         self._prepareAds()
         self._renderInstalled()
         self._renderAll()
@@ -589,6 +620,49 @@ class AppStorePage(ScrollArea):
             current = next((app for app in self._mergedApps() if app["id"] == self.currentApp["id"]), None)
             if current:
                 self._showDetail(current)
+
+    def _onCatalogImageLoaded(self, url, path):
+        if self._shuttingDown:
+            return
+        self.imagePaths[url] = path
+        for card in self.container.findChildren(ApplicationCard):
+            if card.appData.get("icon_url") == url:
+                card.setImage(path)
+
+        if self.currentApp and self.currentApp.get("icon_url") == url:
+            self.detailIcon.setPixmap(
+                QPixmap(path).scaled(
+                    112,
+                    112,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+        for index, ad in enumerate(self.ads):
+            if ad.get("image_url") == url:
+                self.adFlipView.setItemImage(index, QPixmap(path))
+
+        pinnedCards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
+        pinnedChanged = pinnedCards != cfg.pinnedHomeCards.value
+        updatedCards = []
+        for item in pinnedCards:
+            card = dict(item)
+            if card.get("icon_url") == url and card.get("icon_path") != path:
+                card["icon_path"] = path
+                pinnedChanged = True
+            updatedCards.append(card)
+        if pinnedChanged:
+            cfg.set(cfg.pinnedHomeCards, updatedCards)
+            self.pinnedCardsChanged.emit(updatedCards)
+
+    def _onCatalogCompleted(self):
+        if self.sender() is not self._catalogWorker:
+            return
+        self._catalogLoading = False
+        self._catalogWorker = None
+        self._catalogThread = None
+        if not self._shuttingDown:
+            self.refreshButton.setEnabled(True)
 
     def _mergedApps(self):
         return self.store.mergeInstalled(self.catalog)
@@ -919,8 +993,7 @@ class AppStorePage(ScrollArea):
             self.store.downloadSlots.release()
             InfoBar.error("无法开始下载", str(error), duration=4000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
             return
-        thread = QThread(self)
-        worker.moveToThread(thread)
+        thread = threading.Thread(target=worker.run, daemon=True)
         self._downloadJobs[appId] = (thread, worker)
         self._downloadStates[appId] = "下载中 0%"
         worker.progressChanged.connect(
@@ -936,10 +1009,7 @@ class AppStorePage(ScrollArea):
                 appData, path, error, canceled
             )
         )
-        thread.started.connect(worker.run)
         worker.finished.connect(worker.deleteLater)
-        worker.finished.connect(thread.quit)
-        thread.finished.connect(thread.deleteLater)
         thread.start()
         self._updateVisibleCardState(appId)
         self._updateDetailAction()
@@ -1004,7 +1074,11 @@ class AppStorePage(ScrollArea):
 
     def _installInBackground(self, app, path):
         try:
-            installed = self.store.installZip(app, path)
+            installed = self.store.installZip(
+                app,
+                path,
+                self._installationCancelEvent,
+            )
             if not self._shuttingDown:
                 self._installFinished.emit(int(app["id"]), installed, "")
         except Exception as error:
@@ -1094,15 +1168,21 @@ class AppStorePage(ScrollArea):
 
     def _pinnedKeys(self):
         return {
-            (int(item.get("app_id")), int(item.get("preset_id")))
-            for item in cfg.pinnedHomeCards.value
-            if isinstance(item, dict) and item.get("app_id") is not None and item.get("preset_id") is not None
+            (item["app_id"], item["preset_id"])
+            for item in normalize_pinned_cards(cfg.pinnedHomeCards.value)
         }
 
     def _togglePin(self, app, preset):
-        cards = [dict(item) for item in cfg.pinnedHomeCards.value if isinstance(item, dict)]
+        cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
         key = (int(app["id"]), int(preset["id"]))
-        existing = next((item for item in cards if (int(item.get("app_id", -1)), int(item.get("preset_id", -1))) == key), None)
+        existing = next(
+            (
+                item
+                for item in cards
+                if (item["app_id"], item["preset_id"]) == key
+            ),
+            None,
+        )
         if existing:
             cards.remove(existing)
         else:
@@ -1123,7 +1203,12 @@ class AppStorePage(ScrollArea):
         self._renderPresets(app)
 
     def executePinnedCard(self, item):
-        appId = int(item.get("app_id", -1))
+        cards = normalize_pinned_cards([item])
+        if not cards:
+            InfoBar.warning("预设卡片无效", "请重新固定这张主页卡片。", duration=3000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
+            return
+        item = cards[0]
+        appId = item["app_id"]
         installed = self.store.installed().get(appId)
         if not installed:
             InfoBar.warning("应用尚未安装", "请先安装对应应用后再使用主页预设卡片。", duration=3000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
@@ -1134,8 +1219,5 @@ class AppStorePage(ScrollArea):
             InfoBar.error("执行预设失败", str(error), duration=4000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
 
     def refreshPinnedCards(self):
-        cards = []
-        for item in cfg.pinnedHomeCards.value:
-            if isinstance(item, dict):
-                cards.append(dict(item))
+        cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
         self.pinnedCardsChanged.emit(cards)

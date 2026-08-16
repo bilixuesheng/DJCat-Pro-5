@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, QSize, Qt
+from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QStackedWidget, QWidget
 from qfluentwidgets import Flyout, PrimaryPushButton, PushButton
@@ -316,6 +316,28 @@ class FullscreenTaskCloseTest(TestCase):
         self.assertTrue(window._isResizeEnabled)
         window.close()
         page.close()
+
+    def testBroadcastMiniWindowUsesSecondaryScreenOrigin(self):
+        page = BroadcastEditPage()
+        window = page.broadcastWin
+        screen = patch.object(window, "screen")
+        self.app.setQuitOnLastWindowClosed(False)
+        cfg.set(cfg.broadcastActionButtonPosition, "右下角")
+
+        with screen as currentScreen:
+            currentScreen.return_value.availableGeometry.return_value = QRect(
+                1920,
+                100,
+                1600,
+                900,
+            )
+            window.minimizeToMini()
+
+        self.assertEqual(window.miniWindow.pos(), QPoint(3370, 850))
+        window.miniWindow.close()
+        window.close()
+        page.close()
+        self.app.processEvents()
 
     def testAIMarkdownDialogDoesNotOverlapQuotaRequestsAndStopsTimers(self):
         parent = QWidget()

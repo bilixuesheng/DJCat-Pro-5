@@ -790,6 +790,39 @@ class UpdateWindowLifecycleTest(TestCase):
             [(18, {"latest_version": "9999.0.0"}, "")],
         )
 
+    def testUpdateWorkerRejectsNonObjectJson(self):
+        response = Mock()
+        response.json.return_value = []
+        results = []
+        worker = UpdateWorker(19)
+        worker.finished.connect(lambda *args: results.append(args))
+
+        with (
+            patch.object(worker, "RETRY_COUNT", 0),
+            patch(
+                "app.view.windows.main_window.requests.get",
+                return_value=response,
+            ),
+        ):
+            worker.run()
+
+        self.assertEqual(results[0][:2], (19, {}))
+        self.assertIn("格式无效", results[0][2])
+
+    def testOlderRemoteVersionDoesNotShowUpdate(self):
+        with (
+            patch("app.view.windows.main_window.VERSION", "5.0.0"),
+            patch.object(self.window, "_showUpdateInfoBar") as showUpdate,
+        ):
+            self.window._onUpdateChecked(
+                {"latest_version": "4.9.0", "update_note": "old"},
+                "",
+                False,
+            )
+
+        showUpdate.assert_not_called()
+        self.assertIsNone(self.window._pendingUpdateNotification)
+
     def testManualCheckClosesPendingBarBeforeShowingResult(self):
         order = []
         checkBar = Mock()

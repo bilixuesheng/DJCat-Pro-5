@@ -21,7 +21,7 @@
             <label>标题<input name="title" maxlength="120" required></label>
             <label>绑定软件<select name="app_id"><option value="">不显示跳转按钮</option>{% for app in apps %}<option value="{{ app.id }}">{{ app.name }}</option>{% endfor %}</select></label>
             <label class="full">简介<textarea name="description" maxlength="300" rows="2"></textarea></label>
-            <label class="full">图片 HTTPS 链接<input type="url" name="image_url" required></label>
+            <label class="full">图片 HTTPS 链接<input type="url" name="image_url" maxlength="2048" required></label>
             <label>排序<input type="number" name="sort_order" value="0"></label>
             <label class="option-row"><span><strong>立即启用</strong></span><input type="checkbox" name="enabled" value="1" checked></label>
         </div>
@@ -36,10 +36,10 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div class="form-section-title"><span>{{ '%02d'|format(loop.index) }}</span><div><h2>{{ ad.title }}</h2><p>{{ ad.app_name or '无跳转软件' }}</p></div></div>
         <div class="form-fields two-columns">
-            <label>标题<input name="title" value="{{ ad.title }}" required></label>
+            <label>标题<input name="title" maxlength="120" value="{{ ad.title }}" required></label>
             <label>绑定软件<select name="app_id"><option value="">不显示跳转按钮</option>{% for app in apps %}<option value="{{ app.id }}" {% if ad.app_id == app.id %}selected{% endif %}>{{ app.name }}</option>{% endfor %}</select></label>
-            <label class="full">简介<textarea name="description" rows="2">{{ ad.description }}</textarea></label>
-            <label class="full">图片 HTTPS 链接<input type="url" name="image_url" value="{{ ad.image_url }}" required></label>
+            <label class="full">简介<textarea name="description" maxlength="300" rows="2">{{ ad.description }}</textarea></label>
+            <label class="full">图片 HTTPS 链接<input type="url" name="image_url" maxlength="2048" value="{{ ad.image_url }}" required></label>
             <label>排序<input type="number" name="sort_order" value="{{ ad.sort_order }}"></label>
             <label class="option-row"><span><strong>启用</strong></span><input type="checkbox" name="enabled" value="1" {% if ad.enabled %}checked{% endif %}></label>
             <div class="form-actions full"><span>编号 {{ ad.id }}</span><span><button class="button button-danger" type="submit" name="delete" value="1" data-confirm="确认删除这条广告吗？">删除</button> <button class="button button-secondary" type="submit">保存</button></span></div>

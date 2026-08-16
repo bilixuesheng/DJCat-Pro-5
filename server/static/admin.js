@@ -68,15 +68,25 @@
     const prepareToast = (toast) => {
         if (toast.dataset.toastReady === "true") return;
         toast.dataset.toastReady = "true";
+        let remaining = 10_000;
+        let startedAt = Date.now();
         let timer = window.setTimeout(() => dismissToast(toast), 10_000);
         const pause = () => {
             if (timer !== null) {
                 window.clearTimeout(timer);
                 timer = null;
+                remaining = Math.max(0, remaining - (Date.now() - startedAt));
             }
             toast.classList.add("is-paused");
         };
+        const resume = () => {
+            if (timer !== null || toast.classList.contains("is-leaving")) return;
+            toast.classList.remove("is-paused");
+            startedAt = Date.now();
+            timer = window.setTimeout(() => dismissToast(toast), remaining);
+        };
         toast.addEventListener("mouseenter", pause);
+        toast.addEventListener("mouseleave", resume);
         toast.querySelector("[data-toast-close]")?.addEventListener("click", () => {
             dismissToast(toast);
         });
@@ -187,6 +197,14 @@
             }
             if (form.dataset.resetKind) updateQuotaLabels(form);
             showToast(payload?.message || "操作已完成", payload?.category || "success");
+            if (form.dataset.removeOnSuccess) {
+                const target = form.closest(form.dataset.removeOnSuccess);
+                target?.remove();
+                const count = document.querySelector("[data-item-count]");
+                if (target && count) {
+                    count.textContent = String(Math.max(0, Number(count.textContent) - 1));
+                }
+            }
         } catch (error) {
             showToast(error.message || "操作失败，请稍后重试", "error");
         } finally {

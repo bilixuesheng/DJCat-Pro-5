@@ -71,6 +71,19 @@ def test_raiseWindow_uses_windows_foreground_api():
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows IPC only")
+def test_second_instance_posts_wake_without_waiting_for_first():
+    with (
+        patch.object(application.win32gui, "FindWindow", return_value=42),
+        patch.object(application.win32gui, "PostMessage") as post_message,
+        patch.object(application.win32gui, "SendMessage") as send_message,
+    ):
+        application._sendToRunningWindows()
+
+    post_message.assert_called_once_with(42, application.WM_USER_WAKE, 0, 0)
+    send_message.assert_not_called()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows IPC only")
 def test_second_instance_wakes_first_and_lock_is_released(tmp_path: Path):
     key = f"DJCatPro5Test_{uuid.uuid4().hex}"
     script = """

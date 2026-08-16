@@ -43,6 +43,7 @@ from app.common.home_cards import (
     ActionSequenceWorker,
     icon_for_data,
     normalize_custom_cards,
+    normalize_pinned_cards,
     remove_cached_icon,
 )
 from app.config.cfg import (
@@ -461,7 +462,10 @@ class HomePage(ScrollArea):
             card.dragMoved.connect(self._moveCard)
             card.dragFinished.connect(self._finishCardDrag)
 
-        for data in normalize_custom_cards(cfg.customHomeCards.value):
+        customCards = normalize_custom_cards(cfg.customHomeCards.value)
+        if customCards != cfg.customHomeCards.value:
+            cfg.set(cfg.customHomeCards, customCards)
+        for data in customCards:
             self._addCustomCard(data, persist=False)
 
         self._renderCards()
@@ -477,7 +481,8 @@ class HomePage(ScrollArea):
         )
         self.dragPreview.hide()
 
-    def setApplicationCards(self, cards) -> None:
+    def setApplicationCards(self, cards) -> list[dict]:
+        cards = normalize_pinned_cards(cards)
         for key in tuple(self._applicationCardKeys):
             card = self.all_cards.pop(key, None)
             if card is not None:
@@ -507,6 +512,7 @@ class HomePage(ScrollArea):
             self._applicationCardKeys.add(key)
             self._applicationCardData[key] = dict(item)
         self._renderCards()
+        return cards
 
     def _addCustomCard(self, data, persist=True):
         normalized = normalize_custom_cards([data])

@@ -24,8 +24,8 @@
                 <label>卡片标题<input name="preset_title" maxlength="80" placeholder="例如：打开 ClassIsland" required></label>
                 <label>卡片简介<input name="preset_description" maxlength="240" placeholder="安装后点击卡片启动主程序"></label>
                 <label>卡片类型（操作）<select name="preset_action_type" data-action-type><option value="program">程序</option><option value="url">HTTPS 网页</option><option value="uri">系统协议</option></select></label>
-                <label>操作目标<input name="preset_action_target" data-action-target placeholder="classisland.exe 或 https://example.com" required></label>
-                <label class="full" data-action-arguments-wrapper>程序参数<textarea name="preset_action_arguments" data-action-arguments rows="3" placeholder="--minimized\n--profile default"></textarea><small>仅程序动作使用，每行一个参数；程序目标必须是安装目录内的相对 EXE。</small></label>
+                <label>操作目标<input name="preset_action_target" data-action-target maxlength="2048" placeholder="classisland.exe 或 https://example.com" required></label>
+                <label class="full" data-action-arguments-wrapper>程序参数<textarea name="preset_action_arguments" data-action-arguments maxlength="4096" rows="3" placeholder="--minimized\n--profile default"></textarea><small>仅程序动作使用，每行一个参数；程序目标必须是安装目录内的相对 EXE。</small></label>
                 <p class="action-help full" data-action-help>网页必须使用 HTTPS；系统协议会按客户端安全规则校验。</p>
             </div>
             <div class="form-actions"><span>保存后客户端下次拉取目录即可看到。</span><button class="button button-primary" type="submit">新增卡片</button></div>
@@ -44,8 +44,8 @@
                 <label>卡片标题<input name="preset_title" maxlength="80" value="{{ preset.title }}" required></label>
                 <label>卡片简介<input name="preset_description" maxlength="240" value="{{ preset.description }}"></label>
                 <label>卡片类型（操作）<select name="preset_action_type" data-action-type><option value="program" {% if preset.action_type == 'program' %}selected{% endif %}>程序</option><option value="url" {% if preset.action_type == 'url' %}selected{% endif %}>HTTPS 网页</option><option value="uri" {% if preset.action_type == 'uri' %}selected{% endif %}>系统协议</option></select></label>
-                <label>操作目标<input name="preset_action_target" data-action-target value="{{ preset.action_target }}" required></label>
-                <label class="full" data-action-arguments-wrapper>程序参数<textarea name="preset_action_arguments" data-action-arguments rows="3">{{ preset.action_arguments }}</textarea><small>每行一个参数。</small></label>
+                <label>操作目标<input name="preset_action_target" data-action-target maxlength="2048" value="{{ preset.action_target }}" required></label>
+                <label class="full" data-action-arguments-wrapper>程序参数<textarea name="preset_action_arguments" data-action-arguments maxlength="4096" rows="3">{{ preset.action_arguments }}</textarea><small>每行一个参数。</small></label>
                 <p class="action-help full" data-action-help>网页必须使用 HTTPS；系统协议会按客户端安全规则校验。</p>
             </div>
             <div class="form-actions full"><span>编号 {{ preset.id }} · {{ preset.action_type }}</span><span><button class="button button-danger" type="submit" name="delete" value="1" data-confirm="确认删除这张预设卡片吗？">删除</button> <button class="button button-secondary" type="submit">保存</button></span></div>
