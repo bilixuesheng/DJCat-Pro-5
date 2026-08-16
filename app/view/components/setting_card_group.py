@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 from PySide6.QtCore import (
+    Property,
     QByteArray,
     QEasingCurve,
     QEvent,
     QObject,
-    Property,
     QPropertyAnimation,
+    QRect,
     QRectF,
     Qt,
 )
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QPainter, QTextLayout, QTextOption
 from PySide6.QtWidgets import (
     QAbstractButton,
     QApplication,
@@ -22,8 +23,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from qfluentwidgets import (
-    CardWidget,
     CaptionLabel,
+    CardWidget,
     FluentIcon,
     FluentStyleSheet,
     IconWidget,
@@ -53,20 +54,75 @@ def _set_reveal_painting(widget: QWidget, enabled: bool) -> None:
 
 
 class LabelElideFilter(QObject):
+    def __init__(self, parent=None, maximumLines=None):
+        super().__init__(parent)
+        self.maximumLines = maximumLines
+
+    def displayLines(self, label: QLabel) -> list[str]:
+        metrics = label.fontMetrics()
+        width = label.contentsRect().width()
+        if self.maximumLines is None:
+            return [
+                metrics.elidedText(line, Qt.TextElideMode.ElideRight, width)
+                for line in label.text().splitlines() or [""]
+            ]
+        if self.maximumLines == 1:
+            return [
+                metrics.elidedText(
+                    " ".join(label.text().split()),
+                    Qt.TextElideMode.ElideRight,
+                    width,
+                )
+            ]
+
+        text = " ".join(label.text().split())
+        layout = QTextLayout(text, label.font())
+        option = QTextOption()
+        option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        layout.setTextOption(option)
+        lines = []
+        layout.beginLayout()
+        for index in range(self.maximumLines):
+            line = layout.createLine()
+            if not line.isValid():
+                break
+            line.setLineWidth(width)
+            start = line.textStart()
+            end = start + line.textLength()
+            value = text[start:end].rstrip()
+            if index == self.maximumLines - 1 and end < len(text):
+                value = metrics.elidedText(
+                    text[start:],
+                    Qt.TextElideMode.ElideRight,
+                    width,
+                )
+            lines.append(value)
+        layout.endLayout()
+        return lines
+
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         if event.type() != QEvent.Type.Paint or not isinstance(obj, QLabel):
             return False
 
-        metrics = obj.fontMetrics()
         rect = obj.contentsRect()
-        text = "\n".join(
-            metrics.elidedText(line, Qt.TextElideMode.ElideRight, rect.width())
-            for line in obj.text().splitlines() or [""]
-        )
+        lines = self.displayLines(obj)
+        lineHeight = obj.fontMetrics().lineSpacing()
+        top = rect.top() + max(0, (rect.height() - len(lines) * lineHeight) // 2)
         with QPainter(obj) as painter:
             painter.setFont(obj.font())
             painter.setPen(obj.palette().color(obj.foregroundRole()))
-            painter.drawText(rect, obj.alignment(), text)
+            for index, line in enumerate(lines):
+                lineRect = QRect(
+                    rect.left(),
+                    top + index * lineHeight,
+                    rect.width(),
+                    lineHeight,
+                )
+                painter.drawText(
+                    lineRect,
+                    obj.alignment(),
+                    line,
+                )
         return True
 
 

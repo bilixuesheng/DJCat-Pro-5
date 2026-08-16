@@ -11,11 +11,9 @@ from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtGui import QInputDevice
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QScroller, QWidget
-from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import (
     RoundMenu,
     ToggleToolButton,
-    ToolButton,
     ToolTipFilter,
     qconfig,
 )
@@ -104,13 +102,12 @@ class HomeCustomCardTest(TestCase):
         self.assertEqual(menu.actions()[0].text(), "自定义")
 
     def testNewButtonUsesOnlyIconAndMatchesEditButton(self):
-        expected_size = ToolButton(FIF.EDIT).sizeHint()
         self.assertEqual(self.page.addBtn.text(), "")
-        self.assertEqual(self.page.addBtn.size(), expected_size)
-        self.assertEqual(self.page.sortBtn.size(), expected_size)
+        self.assertEqual(self.page.addBtn.size().toTuple(), (40, 40))
+        self.assertEqual(self.page.sortBtn.size().toTuple(), (40, 40))
         card = self.page.all_cards[DEFAULT_HOME_CARD_NAMES[0]]
-        self.assertEqual(card.editButton.size().toTuple(), (24, 24))
-        self.assertEqual(card.deleteButton.size().toTuple(), (24, 24))
+        self.assertEqual(card.editButton.size().toTuple(), (40, 40))
+        self.assertEqual(card.deleteButton.size().toTuple(), (40, 40))
 
     def testNewControlsUseFluentTooltips(self):
         card = self.page.all_cards[DEFAULT_HOME_CARD_NAMES[0]]

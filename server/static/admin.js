@@ -240,7 +240,6 @@
         cancelButton.addEventListener("click", close);
         confirmButton.addEventListener("click", () => {
             form.dataset.confirmed = "true";
-            if (submitter) submitter.dataset.confirmed = "true";
             close();
             form.requestSubmit(submitter || undefined);
         });
@@ -263,10 +262,6 @@
         const form = button.form;
         if (!form) return;
         button.addEventListener("click", (event) => {
-            if (button.dataset.confirmed === "true") {
-                delete button.dataset.confirmed;
-                return;
-            }
             event.preventDefault();
             showConfirm(form, button);
         });
@@ -274,6 +269,7 @@
 
     document.querySelectorAll("form[data-async-form]").forEach((form) => {
         form.addEventListener("submit", (event) => {
+            if (form.dataset.confirm && form.dataset.confirmed !== "true") return;
             if (form.dataset.confirmed === "true") delete form.dataset.confirmed;
             event.preventDefault();
             submitAsync(form);

@@ -394,4 +394,10 @@ class AIAdminTest(TestCase):
         self.assertIn("form[data-confirm]", javascript)
         self.assertIn("form.requestSubmit", javascript)
         self.assertIn("form[data-async-form]", javascript)
+        self.assertIn(
+            'if (form.dataset.confirm && form.dataset.confirmed !== "true") return;',
+            javascript,
+        )
+        self.assertNotIn("submitter.dataset.confirmed", javascript)
+        self.assertNotIn("button.dataset.confirmed", javascript)
         self.assertIn("X-Requested-With", javascript)

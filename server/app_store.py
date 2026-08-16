@@ -15,7 +15,6 @@ from urllib.parse import urlparse
 
 from flask import Blueprint, abort, jsonify, redirect, render_template, request
 
-
 ARCHITECTURES = ("x86_64", "arm64")
 _INSTALL_DIR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}$")
 _DOWNLOAD_TOKEN = re.compile(r"^[a-f0-9]{32}$")
@@ -72,7 +71,7 @@ def _safeAction(actionType, target, arguments=""):
             return None
     elif actionType == "uri":
         scheme = urlparse(target).scheme.lower()
-        if not scheme or scheme in _DANGEROUS_SCHEMES:
+        if len(scheme) < 2 or scheme in _DANGEROUS_SCHEMES:
             return None
         if any(char in target for char in ("\r", "\n", "\x00")):
             return None
@@ -190,6 +189,16 @@ def _ensureSchema(connect):
                 ON market_download_requests(created_at);
             """
         )
+        duplicateInstallDir = database.execute(
+            "SELECT 1 FROM market_applications "
+            "GROUP BY install_dir COLLATE NOCASE HAVING COUNT(*) > 1 LIMIT 1"
+        ).fetchone()
+        if duplicateInstallDir is None:
+            database.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "market_applications_install_dir_nocase_idx "
+                "ON market_applications(install_dir COLLATE NOCASE)"
+            )
         database.commit()
 
 
@@ -508,6 +517,20 @@ def register_app_store(
         with closing(connect()) as database:
             try:
                 database.execute("BEGIN IMMEDIATE")
+                duplicate = database.execute(
+                    "SELECT id FROM market_applications "
+                    "WHERE install_dir = ? COLLATE NOCASE "
+                    "AND (? IS NULL OR id <> ?)",
+                    (values["install_dir"], appId, appId),
+                ).fetchone()
+                if duplicate:
+                    database.rollback()
+                    return admin_response(
+                        "安装目录已被其他软件使用",
+                        "error",
+                        "app_store.adminApps",
+                        400,
+                    )
                 if appId is None:
                     cursor = database.execute(
                         """

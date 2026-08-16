@@ -6,12 +6,16 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, QPoint, QThread, Qt, Signal
+from PySide6.QtCore import QObject, QPoint, Qt, QThread, Signal
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-from qfluentwidgets import DrillInTransitionStackedWidget, PrimaryPushButton
+from qfluentwidgets import (
+    DrillInTransitionStackedWidget,
+    PrimaryPushButton,
+    ToolTipFilter,
+)
 
-from app.view.pages.app_store_page import AppStorePage, ApplicationCard, CatalogWorker
+from app.view.pages.app_store_page import ApplicationCard, AppStorePage, CatalogWorker
 
 
 class _Store:
@@ -151,6 +155,47 @@ class AppStorePageTest(TestCase):
         self.page._renderGrid(self.page.allGrid, apps)
 
         self.assertIsInstance(self.page.allGrid.itemAtPosition(0, 2).widget(), ApplicationCard)
+
+    def testLongDescriptionDoesNotExpandItsGridColumn(self):
+        apps = _apps(2)
+        apps[1]["description"] = "Ghost Downloader " * 80
+        self.page.resize(1400, 700)
+        self.page.show()
+        self.page._switchCatalogTab(1)
+        self.qtApp.processEvents()
+
+        self.page._renderGrid(self.page.allGrid, apps)
+        self.qtApp.processEvents()
+
+        widths = [
+            self.page.allGrid.itemAtPosition(0, column).widget().width()
+            for column in range(2)
+        ]
+        self.assertLessEqual(max(widths) - min(widths), 2)
+        expectedWidth = (self.page.allGridWidget.width() - 24) // 3
+        self.assertLessEqual(max(widths), expectedWidth + 6)
+
+    def testDescriptionUsesTwoLinesAndFluentToolTip(self):
+        card = ApplicationCard()
+        lineHeight = card.descriptionLabel.fontMetrics().lineSpacing()
+        card.resize(320, card.height())
+        card.setApplication(
+            {
+                "id": 1,
+                "name": "Ghost Downloader",
+                "description": "Ghost Downloader " * 30,
+            }
+        )
+        self.qtApp.processEvents()
+
+        self.assertTrue(card.descriptionLabel.wordWrap())
+        self.assertGreaterEqual(card.descriptionLabel.minimumHeight(), lineHeight * 2)
+        self.assertTrue(card.descriptionLabel.findChildren(ToolTipFilter))
+        self.assertTrue(card.titleLabel.findChildren(ToolTipFilter))
+        lines = card._descriptionElideFilter.displayLines(card.descriptionLabel)
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(lines[-1].endswith("…"))
+        card.deleteLater()
 
     def testResponsiveGridUsesTwoAndOneColumnsOnNarrowTouchLayouts(self):
         self.page.resize(700, 600)
@@ -348,6 +393,21 @@ class AppStorePageTest(TestCase):
         self.page.adPrevious.click()
         self.assertEqual(self.page.adFlipView.currentIndex(), 0)
 
+    def testAdvertisementGradientDarkensTheWholeLowerArea(self):
+        self.page.resize(1000, 800)
+        self.page.show()
+        self.page.ads = [{"id": 1, "title": "Ad", "image_url": ""}]
+        self.page._switchCatalogTab(1)
+        self.page._prepareAds()
+        QTest.qWait(20)
+
+        image = self.page.adOverlay.grab().toImage()
+        middle = image.pixelColor(image.width() - 10, int(image.height() * 0.72))
+        bottom = image.pixelColor(image.width() - 10, image.height() - 10)
+
+        self.assertGreaterEqual(middle.alpha(), 180)
+        self.assertGreaterEqual(bottom.alpha(), 240)
+
     def testAdvertisementResizeKeepsCurrentSlideAligned(self):
         self.page.ads = [
             {"id": 1, "title": "First", "image_url": ""},
@@ -369,6 +429,21 @@ class AppStorePageTest(TestCase):
             + 3 * self.page.adFlipView.spacing()
         )
         self.assertEqual(self.page.adFlipView.scrollBar.value(), expected)
+
+    def testAdvertisementRefreshResetsRemovedSlideIndex(self):
+        self.page.ads = [
+            {"id": 1, "title": "First", "image_url": ""},
+            {"id": 2, "title": "Second", "image_url": ""},
+            {"id": 3, "title": "Third", "image_url": ""},
+        ]
+        self.page._prepareAds()
+        self.page.adFlipView.setCurrentIndex(2)
+        self.page.ads = [{"id": 4, "title": "Only", "image_url": ""}]
+
+        self.page._prepareAds()
+
+        self.assertEqual(self.page.adFlipView.currentIndex(), 0)
+        self.page._openAdApp()
 
     def testDetailStartsAtTopAndBackRestoresCatalogScroll(self):
         apps = _apps(20)
@@ -396,6 +471,25 @@ class AppStorePageTest(TestCase):
         QTest.qWait(20)
 
         self.assertEqual(scrollBar.value(), original)
+
+    def testSearchEnteredInDetailAppliesWhenReturningToList(self):
+        apps = _apps(2)
+        self.page.catalog = apps
+        self.page.resize(900, 600)
+        self.page.show()
+        self.qtApp.processEvents()
+        self.page.pivot.setCurrentItem("all")
+        self.page.categoryPivot.setCurrentItem("all")
+        self.page._renderAll()
+        self.assertIsNotNone(self.page.allGrid.itemAtPosition(0, 0))
+        self.page._showDetail(apps[0])
+        QTest.qWait(350)
+        self.assertIs(self.page.stack.currentWidget(), self.page.detail)
+
+        self.page.setSearchText("no matching application")
+        self.page._backToOverview()
+
+        self.assertIsNone(self.page.allGrid.itemAtPosition(0, 0))
 
     def testCanceledCatalogWorkerDoesNotEmitLateResult(self):
         store = _BlockingCatalogStore()

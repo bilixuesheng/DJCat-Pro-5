@@ -10,9 +10,9 @@ import time
 import uuid
 import webbrowser
 import zipfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Iterable
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -22,7 +22,6 @@ from app.config.paths import (
     APP_STORE_DOWNLOAD_DIR,
     PROGRAM_DIR,
 )
-
 
 CATALOG_PATH = "/app-store/catalog"
 MAX_ZIP_COMPRESSED = 2 * 1024 * 1024 * 1024
@@ -184,7 +183,6 @@ def _stripTopFolder(entries: Iterable[tuple[zipfile.ZipInfo, tuple[str, ...]]]):
     firstParts = {parts[0] for info, parts in entries if not info.is_dir() and parts}
     if len(firstParts) != 1:
         return entries
-    top = next(iter(firstParts))
     if any(len(parts) == 1 and not info.is_dir() for info, parts in entries):
         return entries
     return [(info, parts[1:]) for info, parts in entries]
@@ -463,7 +461,11 @@ class ApplicationStore:
             return webbrowser.open(_httpsUrl(target))
         if actionType == "uri":
             parsed = urlparse(target)
-            if not parsed.scheme or parsed.scheme.lower() in _DANGEROUS_SCHEMES or any(char in target for char in "\r\n\x00"):
+            if (
+                len(parsed.scheme) < 2
+                or parsed.scheme.lower() in _DANGEROUS_SCHEMES
+                or any(char in target for char in "\r\n\x00")
+            ):
                 raise ApplicationStoreError("系统协议动作被拒绝")
             if hasattr(os, "startfile"):
                 os.startfile(target)

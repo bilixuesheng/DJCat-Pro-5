@@ -1,7 +1,7 @@
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, Qt, QTimer, QSize, Signal
+from PySide6.QtCore import QObject, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -22,8 +22,8 @@ from qfluentwidgets import (
     InfoBar,
     InfoBarPosition,
     MessageBox,
-    Pivot,
     PipsPager,
+    Pivot,
     PrimaryPushButton,
     PushButton,
     SubtitleLabel,
@@ -38,8 +38,9 @@ from app.common.application_store import (
     downloadWorker,
 )
 from app.config.cfg import cfg
-from app.view.components.setting_card_group import LabelElideFilter
 from app.view.components.scroll_area import ScrollArea
+from app.view.components.setting_card_group import LabelElideFilter
+from app.view.components.tool_tip import setFluentToolTip
 
 
 class CatalogWorker(QObject):
@@ -87,7 +88,7 @@ class ApplicationCard(CardWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setClickEnabled(True)
-        self.setFixedHeight(156)
+        self.setFixedHeight(168)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.appId = None
@@ -100,17 +101,27 @@ class ApplicationCard(CardWidget):
         self.iconLabel.setStyleSheet("border-radius: 12px; background: transparent;")
         self.titleLabel = SubtitleLabel(self)
         self.titleLabel.setWordWrap(False)
+        self.titleLabel.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
         self.descriptionLabel = BodyLabel(self)
-        self.descriptionLabel.setWordWrap(False)
-        self.descriptionLabel.setMaximumHeight(22)
-        self._elideFilter = LabelElideFilter()
+        self.descriptionLabel.setWordWrap(True)
+        self.descriptionLabel.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
+        descriptionHeight = self.descriptionLabel.fontMetrics().lineSpacing() * 2
+        self.descriptionLabel.setFixedHeight(descriptionHeight)
+        self._elideFilter = LabelElideFilter(maximumLines=1)
+        self._descriptionElideFilter = LabelElideFilter(maximumLines=2)
         self.titleLabel.installEventFilter(self._elideFilter)
-        self.descriptionLabel.installEventFilter(self._elideFilter)
+        self.descriptionLabel.installEventFilter(self._descriptionElideFilter)
         self.actionButton = PrimaryPushButton(self)
         self.actionButton.setFixedHeight(40)
         self.removeButton = ToolButton(FIF.DELETE, self)
         self.removeButton.setFixedSize(40, 40)
-        self.removeButton.setToolTip("卸载")
+        setFluentToolTip(self.removeButton, "卸载")
         self.removeButton.setStyleSheet(
             "ToolButton { color: #d13438; border: 1px solid #d13438; border-radius: 8px; }"
             "ToolButton:hover { background: #d13438; color: white; }"
@@ -141,9 +152,12 @@ class ApplicationCard(CardWidget):
         self.appId = int(app["id"])
         self.appData = app
         self.titleLabel.setText(str(app.get("name", "")))
-        self.titleLabel.setToolTip(str(app.get("name", "")))
+        setFluentToolTip(self.titleLabel, str(app.get("name", "")))
         self.descriptionLabel.setText(str(app.get("description", "")))
-        self.descriptionLabel.setToolTip(str(app.get("description", "")))
+        setFluentToolTip(
+            self.descriptionLabel,
+            str(app.get("description", "")),
+        )
         if imagePath and Path(imagePath).exists():
             pixmap = QPixmap(imagePath).scaled(
                 54,
@@ -284,7 +298,7 @@ class AppStorePage(ScrollArea):
         header.addWidget(self.pivot)
         header.addStretch(1)
         self.refreshButton = ToolButton(FIF.SYNC, self.container)
-        self.refreshButton.setToolTip("刷新应用目录")
+        setFluentToolTip(self.refreshButton, "刷新应用目录")
         self.refreshButton.clicked.connect(self._loadCatalog)
         header.addWidget(self.refreshButton)
         self.rootLayout.addLayout(header)
@@ -332,8 +346,8 @@ class AppStorePage(ScrollArea):
         self.adOverlay.setObjectName("AdvertisementOverlay")
         self.adOverlay.setStyleSheet(
             "QWidget#AdvertisementOverlay {"
-            "background: qlineargradient(y1: 0, y2: 1, stop: 0.3 transparent, "
-            "stop: 0.68 rgba(0,0,0,150), stop: 1 rgba(0,0,0,235));"
+            "background: qlineargradient(y1: 0, y2: 1, stop: 0.45 transparent, "
+            "stop: 0.62 rgba(0,0,0,190), stop: 1 rgba(0,0,0,250));"
             "border-radius: 12px;"
             "}"
         )
@@ -383,7 +397,7 @@ class AppStorePage(ScrollArea):
         pagerLayout.setSpacing(8)
         self.pagerPrevious = ToolButton(FIF.LEFT_ARROW, self.pagerBar)
         self.pagerPrevious.setFixedSize(40, 40)
-        self.pagerPrevious.setToolTip("上一页")
+        setFluentToolTip(self.pagerPrevious, "上一页")
         self.pagerPrevious.clicked.connect(lambda: self._changePage(-1))
         pagerLayout.addWidget(self.pagerPrevious)
         self.pager = PipsPager(self.pagerBar)
@@ -391,7 +405,7 @@ class AppStorePage(ScrollArea):
         pagerLayout.addWidget(self.pager)
         self.pagerNext = ToolButton(FIF.RIGHT_ARROW, self.pagerBar)
         self.pagerNext.setFixedSize(40, 40)
-        self.pagerNext.setToolTip("下一页")
+        setFluentToolTip(self.pagerNext, "下一页")
         self.pagerNext.clicked.connect(lambda: self._changePage(1))
         pagerLayout.addWidget(self.pagerNext)
         allLayout.addWidget(self.pagerBar, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -607,8 +621,21 @@ class AppStorePage(ScrollArea):
 
     @staticmethod
     def _setGridColumns(layout, columns):
+        margins = layout.contentsMargins()
+        spacing = max(0, layout.horizontalSpacing())
+        available = (
+            layout.parentWidget().width()
+            - margins.left()
+            - margins.right()
+            - spacing * (columns - 1)
+        )
+        columnWidth = max(0, available // columns)
         for column in range(3):
             layout.setColumnStretch(column, 1 if column < columns else 0)
+            layout.setColumnMinimumWidth(
+                column,
+                columnWidth if column < columns else 0,
+            )
 
     def _setCardState(self, card, app, installedPage=False):
         appId = int(app["id"])
@@ -736,6 +763,7 @@ class AppStorePage(ScrollArea):
                 self.adFlipView.addImage(QPixmap(path))
             else:
                 self.adFlipView.addImage(QPixmap())
+        self.adFlipView.setCurrentIndex(0)
         self.adFrame.show()
         multipleAds = len(self.ads) > 1
         self.adPrevious.setVisible(multipleAds)
@@ -777,7 +805,10 @@ class AppStorePage(ScrollArea):
     def _openAdApp(self):
         if not self.ads:
             return
-        appId = self.ads[self.adFlipView.currentIndex()].get("app_id")
+        index = self.adFlipView.currentIndex()
+        if not 0 <= index < len(self.ads):
+            return
+        appId = self.ads[index].get("app_id")
         app = next((item for item in self._mergedApps() if item["id"] == appId), None)
         if app:
             self._showDetail(app)
@@ -822,6 +853,10 @@ class AppStorePage(ScrollArea):
         self.refreshButton.show()
         target = 0 if self.pivot.currentRouteKey() == "installed" else 1
         self.catalogStack.setCurrentIndex(target)
+        if target == 0:
+            self._renderInstalled()
+        else:
+            self._renderAll()
         self.stack.setCurrentIndex(0, isBack=True)
         QTimer.singleShot(0, self._restoreCatalogScroll)
         if target == 1:

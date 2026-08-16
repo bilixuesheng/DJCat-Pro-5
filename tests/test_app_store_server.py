@@ -54,11 +54,12 @@ class AppStoreServerTest(TestCase):
         page = self.client.get("/admin/app-store/apps/", base_url="https://dash.djcatpro.top")
         return re.search(rb'name="csrf_token" value="([^"]+)"', page.data).group(1).decode()
 
-    def _createApp(self, installDir="demo"):
+    def _createApp(self, installDir="demo", expectedStatus=302):
         self._login()
         response = self.client.post(
             "/admin/app-store/apps/new",
             base_url="https://dash.djcatpro.top",
+            headers={"Accept": "application/json"} if expectedStatus != 302 else None,
             data={
                 "csrf_token": self._csrf(),
                 "name": "Demo",
@@ -76,7 +77,7 @@ class AppStoreServerTest(TestCase):
                 "x86_64_url": "https://cdn.example.test/demo-x64.zip",
             },
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, expectedStatus)
 
     def testAdminAllowsSpaceInInstallDirectory(self):
         self._createApp("Demo App")
@@ -92,6 +93,16 @@ class AppStoreServerTest(TestCase):
             base_url="https://dash.djcatpro.top",
         )
         self.assertIn("可以包含空格", editPage.get_data(as_text=True))
+
+    def testInstallDirectoryIsUniqueIgnoringCase(self):
+        self._createApp("Demo")
+        self._createApp("demo", expectedStatus=400)
+
+        catalog = self.client.get(
+            "/app-store/catalog",
+            base_url="https://api.djcatpro.top",
+        )
+        self.assertEqual(len(catalog.json["apps"]), 1)
 
     def testCatalogIsApiOnlyAndUsesEtag(self):
         api = self.client.get("/app-store/catalog", base_url="https://api.djcatpro.top")
@@ -266,6 +277,22 @@ class AppStoreServerTest(TestCase):
                 "preset_title": "危险动作",
                 "preset_action_type": "program",
                 "preset_action_target": "../demo.exe",
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def testPresetRejectsWindowsPathDisguisedAsUri(self):
+        self._createApp()
+        response = self.client.post(
+            "/admin/app-store/presets/",
+            base_url="https://dash.djcatpro.top",
+            headers={"Accept": "application/json"},
+            data={
+                "csrf_token": self._csrf(),
+                "preset_app_id": "1",
+                "preset_title": "危险动作",
+                "preset_action_type": "uri",
+                "preset_action_target": r"C:\Windows\System32\calc.exe",
             },
         )
         self.assertEqual(response.status_code, 400)

@@ -34,8 +34,6 @@ from qfluentwidgets import (
     SubtitleLabel,
     TitleLabel,
     ToolButton,
-    ToolTipFilter,
-    ToolTipPosition,
     qconfig,
 )
 from qfluentwidgets import FluentIcon as FIF
@@ -55,6 +53,7 @@ from app.config.cfg import (
 from app.config.paths import ASSET_DIR
 from app.view.components.home_card_dialog import CustomCardDialog
 from app.view.components.scroll_area import ScrollArea
+from app.view.components.tool_tip import setFluentToolTip
 
 DEFAULT_CARD_INFO = {
     "全屏投送": (FIF.FULL_SCREEN, "将信息以大字全屏展示"),
@@ -62,13 +61,6 @@ DEFAULT_CARD_INFO = {
     "定时播报": (FIF.MEGAPHONE, "设置每日定点语音播报时间或播放音频"),
     "定时关机": (FIF.POWER_BUTTON, "设置指定时间提示或自动关闭计算机"),
 }
-
-
-def _set_tooltip(widget, text):
-    widget.setToolTip(text)
-    widget.installEventFilter(
-        ToolTipFilter(widget, showDelay=300, position=ToolTipPosition.TOP)
-    )
 
 
 class ActionCard(CardWidget):
@@ -96,20 +88,20 @@ class ActionCard(CardWidget):
         icon_widget = IconWidget(icon, self)
         icon_widget.setFixedSize(18, 18)
         title_label = TitleLabel(title, self)
-        _set_tooltip(title_label, title)
+        setFluentToolTip(title_label, title)
         self.iconWidget = icon_widget
         self.titleLabel = title_label
         self.contentLabel = BodyLabel(content, self)
         self.contentLabel.setWordWrap(True)
         self.editButton = ToolButton(FIF.EDIT, self)
-        self.editButton.setFixedSize(24, 24)
-        _set_tooltip(self.editButton, "编辑主页卡片")
+        self.editButton.setFixedSize(40, 40)
+        setFluentToolTip(self.editButton, "编辑主页卡片")
         self.editButton.setAccessibleName("编辑主页卡片")
         self.editButton.hide()
         self.deleteButton = ToolButton(FIF.DELETE, self)
-        self.deleteButton.setFixedSize(24, 24)
+        self.deleteButton.setFixedSize(40, 40)
         self.deleteButton.setEnabled(False)
-        _set_tooltip(self.deleteButton, "删除主页卡片")
+        setFluentToolTip(self.deleteButton, "删除主页卡片")
         self.deleteButton.setAccessibleName(f"删除{title}")
         self.deleteButton.setStyleSheet("""
             ToolButton {
@@ -409,14 +401,15 @@ class HomePage(ScrollArea):
         self.editHint = BodyLabel("拖动卡片调整位置", self.container)
         self.editHint.hide()
         self.addBtn = ToolButton(FIF.ADD, self.container)
-        _set_tooltip(self.addBtn, "新建主页卡片")
+        setFluentToolTip(self.addBtn, "新建主页卡片")
         self.addBtn.setAccessibleName("新建主页卡片")
         self.addBtn.hide()
         self.addBtn.clicked.connect(self._showAddMenu)
         self.sortBtn = ToolButton(FIF.EDIT, self.container)
-        _set_tooltip(self.sortBtn, "调整卡片顺序")
+        setFluentToolTip(self.sortBtn, "调整卡片顺序")
         self.sortBtn.setAccessibleName("调整卡片顺序")
-        self.addBtn.setFixedSize(self.sortBtn.sizeHint())
+        self.addBtn.setFixedSize(40, 40)
+        self.sortBtn.setFixedSize(40, 40)
         self.sortBtn.clicked.connect(self._toggleCardEditing)
         self.headerLayout.addWidget(self.subTitle)
         self.headerLayout.addStretch(1)

@@ -35,8 +35,6 @@ from qfluentwidgets import (
     SubtitleLabel,
     ToggleToolButton,
     ToolButton,
-    ToolTipFilter,
-    ToolTipPosition,
 )
 from qfluentwidgets import FluentIcon as FIF
 
@@ -51,6 +49,7 @@ from app.common.home_cards import (
     validate_action,
 )
 from app.view.components.scroll_area import ScrollArea
+from app.view.components.tool_tip import setFluentToolTip
 
 ACTION_LABELS = {
     "program": "直接启动程序",
@@ -59,13 +58,6 @@ ACTION_LABELS = {
     "path": "打开文件或文件夹",
     "delay": "等待",
 }
-
-
-def _set_tooltip(widget, text):
-    widget.setToolTip(text)
-    widget.installEventFilter(
-        ToolTipFilter(widget, showDelay=300, position=ToolTipPosition.TOP)
-    )
 
 
 def _dialog_host(widget):
@@ -122,7 +114,7 @@ class DragHandleButton(ToolButton):
         super().__init__(parent)
         self.setIcon(FIF.MOVE)
         self.setFixedSize(44, 44)
-        _set_tooltip(self, "拖动调整动作顺序")
+        setFluentToolTip(self, "拖动调整动作顺序")
         self.setAccessibleName("拖动调整动作顺序")
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
         self._press_position = None
@@ -213,7 +205,7 @@ class ActionRow(CardWidget):
             (self.deleteButton, "删除动作"),
         ):
             button.setFixedSize(44, 44)
-            _set_tooltip(button, name)
+            setFluentToolTip(button, name)
             button.setAccessibleName(name)
         self.editButton.clicked.connect(self.editRequested)
         self.deleteButton.clicked.connect(self.deleteRequested)
@@ -247,10 +239,7 @@ class ActionRow(CardWidget):
         else:
             detail = f"{self.action['seconds']} 秒"
         self.detail.setText(detail)
-        if not self.detail.findChildren(ToolTipFilter):
-            _set_tooltip(self.detail, detail)
-        else:
-            self.detail.setToolTip(detail)
+        setFluentToolTip(self.detail, detail)
 
     def mousePressEvent(self, event):
         event.ignore()
@@ -690,7 +679,7 @@ class IconPickerDialog(_ResponsiveMessageBox):
         for name, icon in FIF.__members__.items():
             button = ToggleToolButton(icon, self.gridWidget)
             button.setFixedSize(56, 56)
-            _set_tooltip(button, name)
+            setFluentToolTip(button, name)
             button.setAccessibleName(name)
             button.clicked.connect(lambda _checked=False, name=name: self._selectFluent(name))
             self.grid.addWidget(button)
@@ -778,7 +767,7 @@ class IconPickerDialog(_ResponsiveMessageBox):
                 QIcon(QPixmap.fromImage(image)), self.gridWidget
             )
             button.setFixedSize(56, 56)
-            _set_tooltip(button, f"图标 {index + 1}")
+            setFluentToolTip(button, f"图标 {index + 1}")
             button.clicked.connect(
                 lambda _checked=False, image=image, button=button: self._selectImage(image, button)
             )
@@ -822,7 +811,7 @@ class CustomCardDialog(_ResponsiveMessageBox):
         self.descriptionEdit.setPlaceholderText("简短说明卡片用途")
         self.iconPreview = IconWidget(icon_for_data(self._icon), self)
         self.iconPreview.setFixedSize(40, 40)
-        _set_tooltip(self.iconPreview, "当前图标")
+        setFluentToolTip(self.iconPreview, "当前图标")
         self.iconCard = SimpleCardWidget(self)
         self.iconCard.setMinimumHeight(76)
         icon_title = StrongBodyLabel("卡片图标", self.iconCard)

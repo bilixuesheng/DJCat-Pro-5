@@ -129,6 +129,11 @@ class ApplicationStoreTest(TestCase):
     def testActionsAndDownloadSlotsAreGuarded(self):
         with self.assertRaises(ApplicationStoreError):
             self.store.executeAction(self._app(), {"type": "uri", "target": "file:///bad"})
+        with self.assertRaises(ApplicationStoreError):
+            self.store.executeAction(
+                self._app(),
+                {"type": "uri", "target": r"C:\\Windows\\System32\\calc.exe"},
+            )
         slots = DownloadSlots(3)
         slots.acquire()
         slots.acquire()
