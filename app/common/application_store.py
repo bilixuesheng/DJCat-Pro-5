@@ -148,6 +148,26 @@ def _underRoot(path: Path, root: Path) -> Path:
     return path
 
 
+def _externalProcessEnvironment() -> dict[str, str]:
+    environment = os.environ.copy()
+    compiled = globals().get("__compiled__")
+    if compiled is None:
+        return environment
+    binaryDir = Path(compiled.containing_dir)
+
+    # Nuitka 的 Qt 插件会把 DJCat 的 DLL 目录放到 PATH 首位，外部应用不能继承它。
+    binaryKey = os.path.normcase(os.path.abspath(binaryDir))
+    environment["PATH"] = os.pathsep.join(
+        entry
+        for entry in environment.get("PATH", "").split(os.pathsep)
+        if os.path.normcase(
+            os.path.abspath(os.path.expandvars(entry.strip('"')))
+        )
+        != binaryKey
+    )
+    return environment
+
+
 def _assertNoLinks(root: Path) -> None:
     isJunction = getattr(root, "is_junction", lambda: False)()
     if root.is_symlink() or isJunction:
@@ -352,6 +372,7 @@ class ApplicationStore:
         self.cache = cache or ImageCache()
         self.architecture = clientArchitecture()
         self.downloadSlots = DownloadSlots()
+        self._launchedProcesses = {}
 
     def fetchCatalog(self, session=requests) -> dict:
         response = session.get(urljoin(self.apiBaseUrl, CATALOG_PATH.lstrip("/")), timeout=(10, 30))
@@ -466,7 +487,21 @@ class ApplicationStore:
         installDir = _safeInstallDir(installDir)
         target = _underRoot(self.programDir / installDir, self.programDir)
         if target.exists():
-            shutil.rmtree(target)
+            running = [
+                process
+                for process in self._launchedProcesses.get(target, ())
+                if process.poll() is None
+            ]
+            if running:
+                self._launchedProcesses[target] = running
+                raise ApplicationStoreError("软件仍在运行，请完全退出后再卸载")
+            self._launchedProcesses.pop(target, None)
+            try:
+                shutil.rmtree(target)
+            except PermissionError as error:
+                raise ApplicationStoreError(
+                    "软件仍在运行或文件被占用，请完全退出后重试"
+                ) from error
 
     def mergeInstalled(self, apps: Iterable[dict]) -> list[dict]:
         installed = self.installed()
@@ -519,7 +554,15 @@ class ApplicationStore:
             args = arguments.get("args", []) if isinstance(arguments, dict) else []
             if not isinstance(args, list) or any(not isinstance(value, str) for value in args):
                 raise ApplicationStoreError("程序参数无效")
-            return subprocess.Popen([str(programPath), *args], cwd=installPath)
+            processes = self._launchedProcesses.setdefault(installPath, [])
+            processes[:] = [process for process in processes if process.poll() is None]
+            process = subprocess.Popen(
+                [str(programPath), *args],
+                cwd=installPath,
+                env=_externalProcessEnvironment(),
+            )
+            processes.append(process)
+            return process
         if actionType == "url":
             return webbrowser.open(_httpsUrl(target))
         if actionType == "uri":

@@ -8,17 +8,21 @@ from unittest.mock import Mock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QObject, QPoint, Qt, QTimer, Signal
+from PySide6.QtGui import QInputDevice
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QScroller, QStackedWidget
 from qfluentwidgets import (
+    CardWidget,
     DrillInTransitionStackedWidget,
     InfoBar,
     MessageBox,
     PrimaryPushButton,
+    ToggleToolButton,
     ToolTipFilter,
 )
 
 from app.config.cfg import cfg
+from app.view.components.scroll_area import ScrollArea
 from app.view.pages.app_store_page import ApplicationCard, AppStorePage, CatalogWorker
 
 
@@ -172,13 +176,20 @@ class AppStorePageTest(TestCase):
         self.assertFalse(card.actionButton.isEnabled())
         self.assertFalse(card.removeButton.isEnabled())
 
-    def testRerenderHidesCardsBeforeDeferredDeletion(self):
-        self.page._renderGrid(self.page.allGrid, _apps(1))
-        oldCard = self.page.allGrid.itemAtPosition(0, 0).widget()
+    def testRerenderReusesVisibleCardsWithoutABlankFrame(self):
+        first = _apps(1)
+        second = _apps(1)
+        second[0]["id"] = 9
+        second[0]["name"] = "Updated"
+        self.page._renderGrid(self.page.allGrid, first)
+        card = self.page.allGrid.itemAtPosition(0, 0).widget()
 
-        self.page._renderGrid(self.page.allGrid, _apps(1))
+        self.page._renderGrid(self.page.allGrid, second)
 
-        self.assertTrue(oldCard.isHidden())
+        self.assertIs(self.page.allGrid.itemAtPosition(0, 0).widget(), card)
+        self.assertFalse(card.isHidden())
+        self.assertEqual(card.appId, 9)
+        self.assertEqual(card.titleLabel.text(), "Updated")
 
     def testResponsiveGridUsesThreeColumnsAtDesktopWidth(self):
         apps = _apps(3)
@@ -286,8 +297,80 @@ class AppStorePageTest(TestCase):
         self.assertLessEqual(margins.top(), 12)
         self.assertLessEqual(cardTop - titleBottom, 24)
 
-    def testDetailStackUsesDrillInTransition(self):
-        self.assertIsInstance(self.page.stack, DrillInTransitionStackedWidget)
+    def testDetailStackDoesNotAnimateStaleContent(self):
+        self.assertIs(type(self.page.stack), QStackedWidget)
+        self.assertNotIsInstance(self.page.stack, DrillInTransitionStackedWidget)
+
+    def testDetailContentIsReadyBeforeThePageSwitch(self):
+        app = _apps(1)[0]
+        app["name"] = "Fresh application"
+        observed = []
+
+        with patch.object(
+            self.page.stack,
+            "setCurrentWidget",
+            side_effect=lambda _widget: observed.append(self.page.detailName.text()),
+        ):
+            self.page._showDetail(app)
+
+        self.assertEqual(observed, ["Fresh application"])
+
+    def testDetailColumnsScrollIndependentlyAndUseOnePresetGroup(self):
+        app = _apps(1)[0] | {
+            "installed": True,
+            "description": "很长的软件简介。" * 120,
+            "presets": [
+                {
+                    "id": index,
+                    "title": f"预设 {index}",
+                    "description": "固定到主页后执行这个动作",
+                    "action": {"type": "program", "target": "app.exe"},
+                }
+                for index in range(12)
+            ],
+        }
+        self.page.resize(900, 420)
+        self.page.show()
+        self.page._showDetail(app)
+        QTest.qWait(20)
+
+        self.assertIsInstance(self.page.detailLeftScroll, ScrollArea)
+        self.assertIsInstance(self.page.presetScroll, ScrollArea)
+        self.assertIsNot(
+            self.page.detailLeftScroll.verticalScrollBar(),
+            self.page.presetScroll.verticalScrollBar(),
+        )
+        for scrollArea in (self.page.detailLeftScroll, self.page.presetScroll):
+            self.assertGreater(
+                QScroller.grabbedGesture(scrollArea.viewport()).value,
+                0,
+            )
+            self.assertGreater(scrollArea.verticalScrollBar().maximum(), 0)
+        outerScroll = self.page.verticalScrollBar()
+        leftScroll = self.page.detailLeftScroll.verticalScrollBar()
+        rightScroll = self.page.presetScroll.verticalScrollBar()
+        device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
+        viewport = self.page.presetScroll.viewport()
+        start = viewport.rect().center()
+        end = start + QPoint(0, -80)
+
+        QTest.touchEvent(viewport, device).press(0, start, viewport).commit()
+        self.qtApp.processEvents()
+        QTest.touchEvent(viewport, device).move(0, end, viewport).commit()
+        QTest.qWait(100)
+        QTest.touchEvent(viewport, device).release(0, end, viewport).commit()
+        QTest.qWait(200)
+
+        self.assertGreater(rightScroll.value(), 0)
+        self.assertEqual(leftScroll.value(), 0)
+        self.assertEqual(outerScroll.value(), 0)
+        self.assertIsInstance(self.page.presetGroup, CardWidget)
+        self.assertEqual(
+            len(self.page.presetGroup.findChildren(ToggleToolButton)),
+            len(app["presets"]),
+        )
+
+        self.page._backToOverview()
 
     def testDetailHidesCatalogRefreshButton(self):
         self.page.show()
@@ -315,6 +398,38 @@ class AppStorePageTest(TestCase):
 
         self.assertEqual(clicks, [])
         card.deleteLater()
+
+    def testTouchScrollStartingOnCardDoesNotOpenDetail(self):
+        apps = _apps(12)
+        for app in apps:
+            app["recommended"] = True
+        self.page.catalog = apps
+        self.page.resize(500, 300)
+        self.page.show()
+        self.page._switchCatalogTab(1)
+        self.page._renderAll()
+        QTest.qWait(20)
+        self.page._showDetail(apps[0])
+        self.page._backToOverview()
+        QTest.qWait(20)
+        scrollBar = self.page.verticalScrollBar()
+        self.assertGreater(scrollBar.maximum(), 0)
+        card = self.page.allGrid.itemAtPosition(0, 0).widget()
+        clicks = []
+        card.clicked.connect(lambda: clicks.append(True))
+        device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
+        start = card.rect().center()
+        end = start + QPoint(0, -80)
+
+        QTest.touchEvent(card, device).press(0, start, card).commit()
+        self.qtApp.processEvents()
+        QTest.touchEvent(card, device).move(0, end, card).commit()
+        QTest.qWait(100)
+        QTest.touchEvent(card, device).release(0, end, card).commit()
+        QTest.qWait(200)
+
+        self.assertGreater(scrollBar.value(), 0)
+        self.assertEqual(clicks, [])
 
     def testCardButtonsKeepTouchFriendlyTargets(self):
         card = ApplicationCard()

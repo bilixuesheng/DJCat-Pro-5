@@ -9,6 +9,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 from contextlib import closing
 from functools import wraps
 from urllib.parse import urlparse
@@ -41,6 +42,8 @@ _DANGEROUS_SCHEMES = {
     "shell",
     "vbscript",
 }
+_schemaInitLock = threading.Lock()
+_initializedSchemas = set()
 
 
 def _apiHost():
@@ -51,12 +54,12 @@ def _hostOnly():
     return request.host.partition(":")[0].lower()
 
 
-def _safeUrl(value, *, httpsOnly=True):
+def _safeUrl(value):
     value = (value or "").strip()
     parsed = urlparse(value)
     if len(value) > _MAX_URL_LENGTH or any(char in value for char in "\r\n\x00"):
         return ""
-    if httpsOnly and parsed.scheme != "https":
+    if parsed.scheme != "https":
         return ""
     if not parsed.netloc or parsed.username or parsed.password:
         return ""
@@ -147,7 +150,11 @@ def _formAction(actionType, target, arguments):
 
 
 def _ensureSchema(connect):
-    with closing(connect()) as database:
+    with closing(connect()) as database, _schemaInitLock:
+        databaseRow = database.execute("PRAGMA database_list").fetchone()
+        databaseKey = databaseRow[2] if databaseRow else ""
+        if databaseKey and databaseKey in _initializedSchemas:
+            return
         database.execute("PRAGMA foreign_keys = ON")
         database.executescript(
             """
@@ -243,6 +250,8 @@ def _ensureSchema(connect):
                 "ON market_applications(install_dir COLLATE NOCASE)"
             )
         database.commit()
+        if databaseKey:
+            _initializedSchemas.add(databaseKey)
 
 
 def marketplaceStats(connect, day):
@@ -252,8 +261,9 @@ def marketplaceStats(connect, day):
     with closing(connect()) as database:
         todayDownloads = database.execute(
             "SELECT COUNT(*) FROM market_download_events "
-            "WHERE date(downloaded_at, '+8 hours') = ?",
-            (day,),
+            "WHERE downloaded_at >= datetime(?, '-8 hours') "
+            "AND downloaded_at < datetime(?, '+1 day', '-8 hours')",
+            (day, day),
         ).fetchone()[0]
         totalDownloads = database.execute(
             "SELECT COALESCE(SUM(download_count), 0) FROM market_applications"
@@ -357,7 +367,7 @@ def _applicationExists(database, appId):
 def _advertisementForm():
     title = request.form.get("title", "").strip()
     description = request.form.get("description", "").strip()
-    imageUrl = _safeUrl(request.form.get("image_url"), httpsOnly=True)
+    imageUrl = _safeUrl(request.form.get("image_url"))
     try:
         appId = (
             int(request.form.get("app_id"))
@@ -598,7 +608,7 @@ def register_app_store(
             "developer": request.form.get("developer", "").strip(),
             "description": request.form.get("description", "").strip(),
             "version": request.form.get("version", "").strip(),
-            "icon_url": _safeUrl(request.form.get("icon_url"), httpsOnly=True),
+            "icon_url": _safeUrl(request.form.get("icon_url")),
             "install_dir": request.form.get("install_dir", "").strip(),
             "recommended": 1 if request.form.get("recommended") else 0,
             "announcement": request.form.get("announcement", "").strip(),
@@ -632,7 +642,7 @@ def register_app_store(
         packages = {}
         for architecture in ARCHITECTURES:
             rawUrl = request.form.get(f"{architecture}_url", "").strip()
-            url = _safeUrl(rawUrl, httpsOnly=True)
+            url = _safeUrl(rawUrl)
             enabled = bool(request.form.get(f"{architecture}_enabled"))
             if enabled and not url:
                 errors.append(f"{architecture} 安装包启用时必须填写 HTTPS 链接")

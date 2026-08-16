@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QScroller,
     QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
@@ -18,7 +19,6 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     BodyLabel,
     CardWidget,
-    DrillInTransitionStackedWidget,
     HorizontalFlipView,
     InfoBar,
     InfoBarPosition,
@@ -27,6 +27,7 @@ from qfluentwidgets import (
     Pivot,
     PrimaryPushButton,
     PushButton,
+    StrongBodyLabel,
     SubtitleLabel,
     TitleLabel,
     ToggleToolButton,
@@ -49,6 +50,7 @@ from app.view.components.setting_card_group import LabelElideFilter
 from app.view.components.tool_tip import setFluentToolTip
 
 SHUTDOWN_WAIT_SECONDS = 0.5
+QWIDGETSIZE_MAX = (1 << 24) - 1
 
 
 class CatalogWorker(QObject):
@@ -353,7 +355,7 @@ class AppStorePage(ScrollArea):
         header.addWidget(self.refreshButton)
         self.rootLayout.addLayout(header)
 
-        self.stack = DrillInTransitionStackedWidget(self.container)
+        self.stack = QStackedWidget(self.container)
         self.catalogPage = QWidget(self.stack)
         catalogLayout = QVBoxLayout(self.catalogPage)
         catalogLayout.setContentsMargins(0, 0, 0, 0)
@@ -488,19 +490,30 @@ class AppStorePage(ScrollArea):
     def _buildDetail(self):
         layout = QVBoxLayout(self.detail)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
         back = PushButton(FIF.LEFT_ARROW, "返回应用列表", self.detail)
+        back.setMinimumHeight(40)
         back.clicked.connect(self._backToOverview)
         layout.addWidget(back, 0, Qt.AlignmentFlag.AlignLeft)
         columns = QHBoxLayout()
-        columns.setSpacing(28)
-        self.detailLeft = QFrame(self.detail)
-        self.detailLeft.setMinimumWidth(300)
+        columns.setSpacing(16)
+
+        self.detailLeftScroll = ScrollArea(self.detail)
+        self.detailLeftScroll.setWidgetResizable(True)
+        self.detailLeftScroll.setMinimumWidth(220)
+        self.detailLeftScroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.detailLeftScroll.enableTransparentBackground()
+        self.detailLeft = QFrame()
         leftLayout = QVBoxLayout(self.detailLeft)
-        leftLayout.setContentsMargins(8, 8, 8, 8)
+        leftLayout.setContentsMargins(8, 8, 16, 8)
+        leftLayout.setSpacing(8)
         self.detailIcon = QLabel(self.detailLeft)
         self.detailIcon.setFixedSize(112, 112)
         self.detailIcon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.detailName = TitleLabel(self.detailLeft)
+        self.detailName.setWordWrap(True)
         self.detailDeveloper = BodyLabel(self.detailLeft)
         self.detailVersion = BodyLabel(self.detailLeft)
         self.detailAction = PrimaryPushButton(self.detailLeft)
@@ -517,24 +530,48 @@ class AppStorePage(ScrollArea):
         leftLayout.addSpacing(12)
         leftLayout.addWidget(self.detailDescription)
         leftLayout.addStretch(1)
-        columns.addWidget(self.detailLeft, 1)
+        self.detailLeftScroll.setWidget(self.detailLeft)
+        columns.addWidget(self.detailLeftScroll, 1)
 
-        self.presetPanel = QFrame(self.detail)
+        self.presetScroll = ScrollArea(self.detail)
+        self.presetScroll.setWidgetResizable(True)
+        self.presetScroll.setMinimumWidth(300)
+        self.presetScroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.presetScroll.enableTransparentBackground()
+        self.presetPanel = QFrame()
         presetLayout = QVBoxLayout(self.presetPanel)
-        presetLayout.setContentsMargins(0, 8, 0, 8)
-        presetLayout.addWidget(SubtitleLabel("预设卡片", self.presetPanel))
+        presetLayout.setContentsMargins(8, 8, 8, 8)
+        presetLayout.setSpacing(10)
+        presetLayout.addWidget(SubtitleLabel("主页预设卡片", self.presetPanel))
         self.announcementLabel = QLabel(self.presetPanel)
         self.announcementLabel.setWordWrap(True)
         self.announcementLabel.setStyleSheet(
             "padding: 10px 12px; border-radius: 8px; background: #fff4e6; color: #8a4b08;"
         )
         presetLayout.addWidget(self.announcementLabel)
+
+        self.presetGroup = CardWidget(self.presetPanel)
+        groupLayout = QVBoxLayout(self.presetGroup)
+        groupLayout.setContentsMargins(16, 14, 16, 14)
+        groupLayout.setSpacing(0)
+        groupLayout.addWidget(SubtitleLabel("可用卡片", self.presetGroup))
+        divider = QFrame(self.presetGroup)
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setStyleSheet(
+            "border: none; border-top: 1px solid rgba(128, 128, 128, 0.28);"
+        )
+        groupLayout.addWidget(divider)
         self.presetCards = QVBoxLayout()
-        self.presetCards.setSpacing(10)
-        presetLayout.addLayout(self.presetCards)
+        self.presetCards.setContentsMargins(0, 4, 0, 0)
+        self.presetCards.setSpacing(0)
+        groupLayout.addLayout(self.presetCards)
+        presetLayout.addWidget(self.presetGroup)
         presetLayout.addStretch(1)
-        columns.addWidget(self.presetPanel, 2)
-        layout.addLayout(columns)
+        self.presetScroll.setWidget(self.presetPanel)
+        columns.addWidget(self.presetScroll, 2)
+        layout.addLayout(columns, 1)
 
     def _switchCatalogTab(self, index: int):
         self.catalogStack.setCurrentIndex(index)
@@ -713,13 +750,6 @@ class AppStorePage(ScrollArea):
             or self.searchText in str(app.get("developer", "")).lower()
         ]
 
-    def _clearGrid(self, layout):
-        while layout.count():
-            item = layout.takeAt(0)
-            if item.widget():
-                item.widget().hide()
-                item.widget().deleteLater()
-
     def _columnCount(self):
         margins = self.rootLayout.contentsMargins()
         width = self.viewport().width() - margins.left() - margins.right()
@@ -760,24 +790,48 @@ class AppStorePage(ScrollArea):
         )
 
     def _renderGrid(self, layout, apps, installedPage=False):
-        self._clearGrid(layout)
+        cards = []
+        gridWidget = layout.parentWidget()
+        gridWidget.setUpdatesEnabled(False)
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                cards.append(item.widget())
         columns = self._columnCount()
-        for index, app in enumerate(apps):
-            card = ApplicationCard(self)
-            card.setApplication(app, self.imagePaths.get(app.get("icon_url", ""), ""))
-            card.installedPage = installedPage
-            self._setCardState(card, app, installedPage)
-            card.clicked.connect(lambda appData=app: self._showDetail(appData))
-            card.actionClicked.connect(lambda _checked=False, appData=app: self._onAppAction(appData))
-            card.pinClicked.connect(
-                lambda _checked=False, appData=app: self._toggleApplicationPin(
-                    appData
+        try:
+            for index, app in enumerate(apps):
+                if index < len(cards):
+                    card = cards[index]
+                else:
+                    card = ApplicationCard(self)
+                    card.clicked.connect(
+                        lambda card=card: self._showDetail(card.appData)
+                    )
+                    card.actionClicked.connect(
+                        lambda card=card: self._onAppAction(card.appData)
+                    )
+                    card.pinClicked.connect(
+                        lambda card=card: self._toggleApplicationPin(card.appData)
+                    )
+                    card.uninstallClicked.connect(
+                        lambda card=card: self._confirmUninstall(card.appData)
+                    )
+                card.setApplication(
+                    app,
+                    self.imagePaths.get(app.get("icon_url", ""), ""),
                 )
-            )
-            card.uninstallClicked.connect(lambda _checked=False, appData=app: self._confirmUninstall(appData))
-            row, column = divmod(index, columns)
-            layout.addWidget(card, row, column)
-        self._setGridColumns(layout, columns)
+                card.installedPage = installedPage
+                self._setCardState(card, app, installedPage)
+                row, column = divmod(index, columns)
+                layout.addWidget(card, row, column)
+                card.show()
+            for card in cards[len(apps) :]:
+                card.hide()
+                card.deleteLater()
+            self._setGridColumns(layout, columns)
+        finally:
+            gridWidget.setUpdatesEnabled(True)
+            gridWidget.update()
 
     def _reflowGrid(self, layout):
         widgets = []
@@ -799,8 +853,15 @@ class AppStorePage(ScrollArea):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        if hasattr(self, "detail") and self.stack.currentWidget() is self.detail:
+            self._resizeDetailStack()
         QTimer.singleShot(0, self._reflowGrids)
         QTimer.singleShot(0, self._syncAdImageSize)
+
+    def _resizeDetailStack(self):
+        margins = self.rootLayout.contentsMargins()
+        available = self.viewport().height() - margins.top() - margins.bottom()
+        self.stack.setFixedHeight(max(280, available))
 
     def _updateVisibleCardState(self, appId):
         for card in self.container.findChildren(ApplicationCard):
@@ -957,8 +1018,6 @@ class AppStorePage(ScrollArea):
         self._pauseAds()
         self.pivot.hide()
         self.refreshButton.hide()
-        self.stack.setCurrentWidget(self.detail)
-        self.verticalScrollBar().setValue(0)
         self.detailName.setText(str(app.get("name", "")))
         self.detailDeveloper.setText(f"开发者：{app.get('developer') or '未填写'}")
         self.detailVersion.setText(f"版本：{app.get('version') or '未填写'}")
@@ -971,18 +1030,32 @@ class AppStorePage(ScrollArea):
         )
         self._updateDetailAction()
         self._renderPresets(app)
+        self.detailLeftScroll.verticalScrollBar().setValue(0)
+        self.presetScroll.verticalScrollBar().setValue(0)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._resizeDetailStack()
+        self.stack.setCurrentWidget(self.detail)
+        self.verticalScrollBar().setValue(0)
+        QScroller.ungrabGesture(self.viewport())
 
     def _backToOverview(self):
         self.currentApp = None
         self.pivot.show()
         self.refreshButton.show()
+        self.stack.setMinimumHeight(0)
+        self.stack.setMaximumHeight(QWIDGETSIZE_MAX)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        QScroller.grabGesture(
+            self.viewport(),
+            QScroller.ScrollerGestureType.TouchGesture,
+        )
         target = 0 if self.pivot.currentRouteKey() == "installed" else 1
         self.catalogStack.setCurrentIndex(target)
         if target == 0:
             self._renderInstalled()
         else:
             self._renderAll()
-        self.stack.setCurrentIndex(0, isBack=True)
+        self.stack.setCurrentIndex(0)
         QTimer.singleShot(0, self._restoreCatalogScroll)
         if target == 1:
             self._resumeAds()
@@ -1239,23 +1312,43 @@ class AppStorePage(ScrollArea):
         self.announcementLabel.setVisible(bool(announcement))
         presets = app.get("presets") or []
         if not presets:
-            self.presetCards.addWidget(BodyLabel("该应用暂不支持预设卡片", self.presetPanel))
+            self.presetCards.addWidget(
+                BodyLabel("该应用暂不支持预设卡片", self.presetGroup)
+            )
             return
         pinned = self._pinnedKeys()
-        for preset in presets:
-            card = CardWidget(self.presetPanel)
-            row = QHBoxLayout(card)
-            row.setContentsMargins(14, 12, 14, 12)
+        for index, preset in enumerate(presets):
+            if index:
+                divider = QFrame(self.presetGroup)
+                divider.setFrameShape(QFrame.Shape.HLine)
+                divider.setStyleSheet(
+                    "border: none; border-top: 1px solid rgba(128, 128, 128, 0.2);"
+                )
+                self.presetCards.addWidget(divider)
+            item = QWidget(self.presetGroup)
+            row = QHBoxLayout(item)
+            row.setContentsMargins(0, 10, 0, 10)
+            row.setSpacing(12)
             copy = QVBoxLayout()
-            copy.addWidget(SubtitleLabel(str(preset.get("title", "")), card))
-            copy.addWidget(BodyLabel(str(preset.get("description", "")), card))
+            copy.setSpacing(4)
+            copy.addWidget(
+                StrongBodyLabel(str(preset.get("title", "")), item)
+            )
+            description = BodyLabel(str(preset.get("description", "")), item)
+            description.setWordWrap(True)
+            copy.addWidget(description)
             row.addLayout(copy, 1)
             key = (int(app["id"]), int(preset["id"]))
-            pin = PushButton(FIF.PIN, "取消固定" if key in pinned else "固定到主页", card)
+            pin = ToggleToolButton(FIF.PIN, item)
+            pin.setFixedSize(40, 40)
+            pin.setChecked(key in pinned)
             pin.setEnabled(bool(app.get("installed")))
+            tooltip = "取消固定" if key in pinned else "固定到主页"
+            pin.setAccessibleName(tooltip)
+            setFluentToolTip(pin, tooltip)
             pin.clicked.connect(lambda _checked=False, appData=app, presetData=preset: self._togglePin(appData, presetData))
             row.addWidget(pin)
-            self.presetCards.addWidget(card)
+            self.presetCards.addWidget(item)
 
     def _pinnedKeys(self):
         return {

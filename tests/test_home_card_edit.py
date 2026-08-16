@@ -176,6 +176,38 @@ class HomeCardEditTest(TestCase):
 
         self.assertEqual(clicks, [True])
 
+    def testCardIgnoresRightClick(self):
+        card = self.page.all_cards["全屏投送"]
+        clicks = []
+        card.clicked.connect(lambda: clicks.append(True))
+
+        QTest.mouseClick(
+            card,
+            Qt.MouseButton.RightButton,
+            pos=card.rect().center(),
+        )
+
+        self.assertEqual(clicks, [])
+
+    def testCardTitleAndDescriptionEndWithEllipsis(self):
+        card = self.page.all_cards["全屏投送"]
+        card.setCardData(
+            card.iconWidget.icon,
+            "Ghost Downloader 的标题非常非常长",
+            "这是一段超过主页卡片两行可用空间的简介，必须在结尾显示省略号而不是把文字硬裁掉。" * 3,
+        )
+        self.app.processEvents()
+
+        titleLines = card._titleElideFilter.displayLines(card.titleLabel)
+        descriptionLines = card._descriptionElideFilter.displayLines(
+            card.contentLabel
+        )
+
+        self.assertEqual(len(titleLines), 1)
+        self.assertTrue(titleLines[0].endswith("…"))
+        self.assertEqual(len(descriptionLines), 2)
+        self.assertTrue(descriptionLines[-1].endswith("…"))
+
     def testTouchScrollStartingOnCardDoesNotClick(self):
         self.page.resize(500, 300)
         QTest.qWait(300)

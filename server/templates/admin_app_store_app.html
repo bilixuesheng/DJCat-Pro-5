@@ -38,7 +38,7 @@
             {% for architecture in architectures %}
                 {% set package = form.packages.get(architecture) if app else none %}
                 <div class="option-list package-option">
-                    <div class="option-row"><span><strong>{{ architecture }}</strong><small>按客户端架构提供 ZIP 安装包。</small></span><input type="checkbox" name="{{ architecture }}_enabled" value="1" {% if (not app) or (package and package.enabled) %}checked{% endif %}></div>
+                    <label class="option-row"><span><strong>{{ architecture }}</strong><small>按客户端架构提供 ZIP 安装包。</small></span><input type="checkbox" name="{{ architecture }}_enabled" value="1" {% if (not app) or (package and package.enabled) %}checked{% endif %}></label>
                     <label class="package-url-field">ZIP 下载 HTTPS 链接<input type="url" name="{{ architecture }}_url" maxlength="2048" value="{{ package.download_url if package else '' }}" placeholder="https://下载域名/软件/{{ architecture }}.zip"><small>示例：<code>https://cdn.example.com/classisland-x86_64.zip</code></small></label>
                 </div>
             {% endfor %}

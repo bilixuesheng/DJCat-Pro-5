@@ -136,6 +136,50 @@ class AIAdminTest(TestCase):
         self.assertIn("<table", content)
         self.assertNotIn('name="system_prompt"', content)
 
+    def testDashboardStatsRefreshWhileThePageIsVisible(self):
+        dashboard = self._login().get_data(as_text=True)
+
+        self.assertNotIn("每天 00:00 刷新", dashboard)
+        self.assertNotIn("refresh-note", dashboard)
+        self.assertIn(
+            'data-dashboard-stats-url="/admin/dashboard/stats"',
+            dashboard,
+        )
+        self.assertIn('data-stat="today.ai_requests"', dashboard)
+        self.assertIn('data-stat="processing"', dashboard)
+        self.assertIn('data-stat="consumed"', dashboard)
+        self.assertIn('data-stat="market.downloads"', dashboard)
+
+        response = self.client.get(
+            "/admin/dashboard/stats",
+            base_url="https://dash.djcatpro.top",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("today", response.json)
+        self.assertIn("all", response.json)
+        self.assertIn("market", response.json)
+
+    def testDashboardStatsScanRequestHistoryOnlyTwice(self):
+        statements = []
+        originalConnect = ai_markdown._connect
+
+        def connect():
+            database = originalConnect()
+            database.set_trace_callback(statements.append)
+            return database
+
+        with patch.object(ai_markdown, "_connect", connect):
+            ai_markdown._dashboardStats()
+
+        requestQueries = [
+            statement
+            for statement in statements
+            if statement.lstrip().upper().startswith("SELECT")
+            and "FROM request_log" in statement
+        ]
+        self.assertEqual(len(requestQueries), 2)
+
     def testMachineRegistrationReturnsStableShortCode(self):
         first = self.client.post(
             "/ai/markdown/register", json={"machine_id": "a" * 64}
@@ -372,7 +416,11 @@ class AIAdminTest(TestCase):
         cssResponse.close()
         self.assertIn("@view-transition", css)
         self.assertIn("::view-transition-new(admin-workspace)", css)
+        self.assertIn("::view-transition-group(sidebar-active)", css)
+        self.assertIn("view-transition-name: sidebar-active", css)
         self.assertIn("admin-topbar", css)
+        self.assertIn(".service-card + .service-card { margin-top: 16px; }", css)
+        self.assertNotIn(".market-page { animation:", css)
         self.assertIn("toast-progress", css)
         self.assertIn("toast-progress 10s", css)
         self.assertIn("prefers-reduced-motion", css)
@@ -394,6 +442,14 @@ class AIAdminTest(TestCase):
         self.assertIn("form[data-confirm]", javascript)
         self.assertIn("form.requestSubmit", javascript)
         self.assertIn("form[data-async-form]", javascript)
+        self.assertIn("[data-dashboard-stats-url]", javascript)
+        self.assertIn("visibilitychange", javascript)
+        self.assertIn("10_000", javascript)
+        self.assertIn("if (refreshStarted) refreshStats();", javascript)
+        self.assertIn(".table-action { min-height: 40px;", css)
+        self.assertIn(".order-controls button { width: 40px; height: 40px;", css)
+        self.assertIn(".sidebar-toggle { width: 40px; height: 40px;", css)
+        self.assertIn("@media (hover: none), (pointer: coarse)", css)
         self.assertIn(
             'if (form.dataset.confirm && form.dataset.confirmed !== "true") return;',
             javascript,

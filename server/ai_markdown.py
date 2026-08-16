@@ -639,55 +639,53 @@ def _dashboardStats():
     day = _today()
     with closing(_connect()) as database:
         machines = database.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
-        requestsByStatus = {
-            row["status"]: row["count"]
-            for row in database.execute(
-                """
-                SELECT status, COUNT(*) AS count
-                FROM request_log WHERE day = ? GROUP BY status
-                """,
-                (day,),
-            )
-        }
+        todayStats = database.execute(
+            """
+            SELECT
+                COUNT(*) AS requests,
+                COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS success,
+                COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
+                COALESCE(SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END), 0) AS processing
+            FROM request_log WHERE day = ?
+            """,
+            (day,),
+        ).fetchone()
         consumed = database.execute(
             "SELECT COALESCE(SUM(count), 0) FROM usage WHERE day = ?", (day,)
         ).fetchone()[0]
-        allRequests = database.execute(
-            "SELECT COUNT(*) FROM request_log"
-        ).fetchone()[0]
-        allByStatus = {
-            row["status"]: row["count"]
-            for row in database.execute(
-                "SELECT status, COUNT(*) AS count FROM request_log GROUP BY status"
-            )
-        }
-        allConsumed = database.execute(
-            "SELECT COALESCE(SUM(CASE WHEN status IN ('success', 'processing') "
-            "THEN cost ELSE 0 END), 0) FROM request_log"
-        ).fetchone()[0]
+        allStats = database.execute(
+            """
+            SELECT
+                COUNT(*) AS requests,
+                COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS success,
+                COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
+                COALESCE(SUM(CASE WHEN status IN ('success', 'processing') THEN cost ELSE 0 END), 0) AS consumed
+            FROM request_log
+            """
+        ).fetchone()
     market = marketplaceStats(_connect, day)
     today = {
-        "ai_requests": sum(requestsByStatus.values()),
-        "ai_success": requestsByStatus.get("success", 0),
-        "ai_failed": requestsByStatus.get("failed", 0),
+        "ai_requests": todayStats["requests"],
+        "ai_success": todayStats["success"],
+        "ai_failed": todayStats["failed"],
         "market_downloads": market["today_downloads"],
     }
     allData = {
-        "ai_requests": allRequests,
-        "ai_success": allByStatus.get("success", 0),
-        "ai_failed": allByStatus.get("failed", 0),
+        "ai_requests": allStats["requests"],
+        "ai_success": allStats["success"],
+        "ai_failed": allStats["failed"],
         "market_downloads": market["downloads"],
     }
     return {
         "machines": machines,
-        "requests": sum(requestsByStatus.values()),
-        "success": requestsByStatus.get("success", 0),
-        "failed": requestsByStatus.get("failed", 0),
-        "processing": requestsByStatus.get("processing", 0),
+        "requests": todayStats["requests"],
+        "success": todayStats["success"],
+        "failed": todayStats["failed"],
+        "processing": todayStats["processing"],
         "consumed": consumed,
         "today": today,
         "all": allData,
-        "all_consumed": allConsumed,
+        "all_consumed": allStats["consumed"],
         "market": market,
     }
 
@@ -820,6 +818,12 @@ def adminDashboard():
             _setting("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY")
         ),
     )
+
+
+@app.get("/admin/dashboard/stats")
+@_loginRequired
+def adminDashboardStats():
+    return jsonify(_dashboardStats())
 
 
 @app.get("/admin/ai/markdown/")

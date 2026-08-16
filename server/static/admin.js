@@ -30,6 +30,49 @@
         });
     }
 
+    const dashboard = document.querySelector("[data-dashboard-stats-url]");
+    if (dashboard) {
+        let refreshing = false;
+        let refreshStarted = false;
+        let refreshTimer = null;
+        const refreshStats = async () => {
+            if (document.hidden || refreshing) return;
+            refreshing = true;
+            try {
+                const response = await fetch(dashboard.dataset.dashboardStatsUrl, {
+                    cache: "no-store",
+                    credentials: "same-origin",
+                    headers: { Accept: "application/json" },
+                });
+                if (!response.ok) return;
+                const stats = await response.json();
+                document.querySelectorAll("[data-stat]").forEach((element) => {
+                    const value = element.dataset.stat
+                        .split(".")
+                        .reduce((current, key) => current?.[key], stats);
+                    if (value !== undefined && value !== null) element.textContent = value;
+                });
+            } catch (_) {
+                // 后台统计失败不应打断正在进行的管理操作。
+            } finally {
+                refreshing = false;
+            }
+        };
+        const syncStatsRefresh = () => {
+            if (refreshTimer !== null) window.clearInterval(refreshTimer);
+            refreshTimer = null;
+            if (document.hidden) {
+                refreshStarted = true;
+                return;
+            }
+            if (refreshStarted) refreshStats();
+            refreshStarted = true;
+            refreshTimer = window.setInterval(refreshStats, 10_000);
+        };
+        document.addEventListener("visibilitychange", syncStatsRefresh);
+        syncStatsRefresh();
+    }
+
     const syncActionFields = (form) => {
         const type = form.querySelector("[data-action-type]");
         const argumentsWrapper = form.querySelector("[data-action-arguments-wrapper]");

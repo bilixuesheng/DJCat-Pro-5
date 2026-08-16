@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QScroller,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -54,6 +55,7 @@ from app.config.cfg import (
 from app.config.paths import ASSET_DIR
 from app.view.components.home_card_dialog import CustomCardDialog
 from app.view.components.scroll_area import ScrollArea
+from app.view.components.setting_card_group import LabelElideFilter
 from app.view.components.tool_tip import setFluentToolTip
 
 DEFAULT_CARD_INFO = {
@@ -89,11 +91,27 @@ class ActionCard(CardWidget):
         icon_widget = IconWidget(icon, self)
         icon_widget.setFixedSize(18, 18)
         title_label = TitleLabel(title, self)
+        title_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
         setFluentToolTip(title_label, title)
         self.iconWidget = icon_widget
         self.titleLabel = title_label
         self.contentLabel = BodyLabel(content, self)
         self.contentLabel.setWordWrap(True)
+        self.contentLabel.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.contentLabel.setFixedHeight(
+            self.contentLabel.fontMetrics().lineSpacing() * 2
+        )
+        setFluentToolTip(self.contentLabel, content)
+        self._titleElideFilter = LabelElideFilter(self, maximumLines=1)
+        self._descriptionElideFilter = LabelElideFilter(self, maximumLines=2)
+        self.titleLabel.installEventFilter(self._titleElideFilter)
+        self.contentLabel.installEventFilter(self._descriptionElideFilter)
         self.editButton = ToolButton(FIF.EDIT, self)
         self.editButton.setFixedSize(24, 24)
         setFluentToolTip(self.editButton, "编辑主页卡片")
@@ -116,8 +134,7 @@ class ActionCard(CardWidget):
         """)
         self.deleteButton.hide()
         top_layout.addWidget(icon_widget)
-        top_layout.addWidget(title_label)
-        top_layout.addStretch(1)
+        top_layout.addWidget(title_label, 1)
         top_layout.addWidget(self.editButton)
         top_layout.addWidget(self.deleteButton)
         layout.addLayout(top_layout)
@@ -137,6 +154,7 @@ class ActionCard(CardWidget):
         self.titleLabel.setText(title)
         self.titleLabel.setToolTip(title)
         self.contentLabel.setText(content)
+        self.contentLabel.setToolTip(content)
 
     def setEditing(self, editing):
         self._editing = editing
@@ -193,6 +211,10 @@ class ActionCard(CardWidget):
         return super().event(event)
 
     def mousePressEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            self._press_position = None
+            event.accept()
+            return
         if self._editing and event.button() == Qt.MouseButton.LeftButton:
             self._start_dragging(event.globalPosition().toPoint())
             event.accept()
@@ -211,6 +233,12 @@ class ActionCard(CardWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            self._press_position = None
+            self.isPressed = False
+            self._updateBackgroundColor()
+            event.accept()
+            return
         if self._editing:
             self._finish_dragging()
             event.accept()

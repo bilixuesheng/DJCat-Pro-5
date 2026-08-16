@@ -9,7 +9,7 @@ from unittest.mock import patch
 from cryptography.fernet import Fernet
 from werkzeug.security import generate_password_hash
 
-from server import ai_markdown
+from server import ai_markdown, app_store
 
 
 class AppStoreServerTest(TestCase):
@@ -361,6 +361,27 @@ class AppStoreServerTest(TestCase):
         self.assertEqual(stats["today"]["market_downloads"], 1)
         self.assertEqual(stats["all"]["market_downloads"], 1)
 
+    def testMarketplaceSchemaMigrationRunsOncePerDatabase(self):
+        statements = []
+
+        def connect():
+            database = ai_markdown._connect()
+            database.set_trace_callback(statements.append)
+            return database
+
+        app_store._ensureSchema(connect)
+        self.assertTrue(
+            any(
+                "CREATE TABLE IF NOT EXISTS market_applications" in statement
+                for statement in statements
+            )
+        )
+        statements.clear()
+
+        app_store._ensureSchema(connect)
+
+        self.assertFalse(any("CREATE TABLE" in statement for statement in statements))
+
     def testDownloadRetriesWithSameTokenCountOnce(self):
         self._createApp()
         path = "/app-store/apps/1/download?arch=x86_64&token=" + "a" * 32
@@ -478,6 +499,7 @@ class AppStoreServerTest(TestCase):
         self._login()
         page = self.client.get("/admin/app-store/apps/new", base_url="https://dash.djcatpro.top")
         body = page.get_data(as_text=True)
+        self.assertIn('<label class="option-row"><span><strong>x86_64</strong>', body)
         self.assertIn('name="x86_64_enabled" value="1" checked', body)
         self.assertIn('name="arm64_enabled" value="1" checked', body)
         self.assertIn("程序参数", body)
@@ -621,6 +643,9 @@ class AppStoreServerTest(TestCase):
                 "ALTER TABLE market_applications DROP COLUMN sort_order"
             )
             database.commit()
+        app_store._initializedSchemas.discard(
+            str(ai_markdown.DATABASE_PATH.resolve())
+        )
 
         page = self.client.get(
             "/admin/app-store/apps/",

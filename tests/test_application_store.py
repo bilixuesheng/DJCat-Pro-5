@@ -5,6 +5,7 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlparse
@@ -210,6 +211,72 @@ class ApplicationStoreTest(TestCase):
             slots.acquire()
         slots.release()
         slots.acquire()
+
+    @patch("app.common.application_store.subprocess.Popen")
+    def testProgramLaunchDoesNotInheritNuitkaBundlePath(self, popen):
+        app = self._app()
+        app["open_action"] = {"type": "program", "target": "app.exe"}
+        installed = self.store.installZip(app, self._zip())
+        bundleDir = self.root / "djcat.dist"
+        systemPath = str(self.root / "system")
+
+        with (
+            patch.dict(
+                os.environ,
+                {"PATH": f"{bundleDir}{os.pathsep}{systemPath}"},
+            ),
+            patch(
+                "app.common.application_store.__compiled__",
+                SimpleNamespace(containing_dir=str(bundleDir)),
+                create=True,
+            ),
+        ):
+            self.store.executeAction(installed)
+
+        self.assertEqual(popen.call_args.kwargs["env"]["PATH"], systemPath)
+
+    @patch("app.common.application_store.subprocess.Popen")
+    def testRunningApplicationMustExitBeforeUninstall(self, popen):
+        app = self._app()
+        app["open_action"] = {"type": "program", "target": "app.exe"}
+        installed = self.store.installZip(app, self._zip())
+        popen.return_value.poll.return_value = None
+        self.store.executeAction(installed)
+
+        with (
+            patch("app.common.application_store.shutil.rmtree") as rmtree,
+            self.assertRaisesRegex(ApplicationStoreError, "仍在运行"),
+        ):
+            self.store.uninstall(installed)
+
+        rmtree.assert_not_called()
+
+    @patch("app.common.application_store.subprocess.Popen")
+    def testExitedApplicationProcessIsReleasedBeforeNextLaunch(self, popen):
+        app = self._app()
+        app["open_action"] = {"type": "program", "target": "app.exe"}
+        installed = self.store.installZip(app, self._zip())
+        first = Mock()
+        first.poll.return_value = 0
+        second = Mock()
+        popen.side_effect = [first, second]
+
+        self.store.executeAction(installed)
+        self.store.executeAction(installed)
+
+        self.assertEqual(self.store._launchedProcesses[installed.path], [second])
+
+    def testLockedUninstallUsesUserFacingError(self):
+        installed = self.store.installZip(self._app(), self._zip())
+
+        with (
+            patch(
+                "app.common.application_store.shutil.rmtree",
+                side_effect=PermissionError(5, "Access denied"),
+            ),
+            self.assertRaisesRegex(ApplicationStoreError, "完全退出"),
+        ):
+            self.store.uninstall(installed)
 
     def testDownloadUrlUsesOneUniqueTokenPerTask(self):
         first = parse_qs(urlparse(self.store.downloadUrl(self._app())).query)
