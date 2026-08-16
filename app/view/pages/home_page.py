@@ -2,7 +2,7 @@ import os
 from copy import deepcopy
 from threading import RLock
 
-from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QRectF, Qt, Signal
+from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QIcon,
@@ -95,12 +95,12 @@ class ActionCard(CardWidget):
         self.contentLabel = BodyLabel(content, self)
         self.contentLabel.setWordWrap(True)
         self.editButton = ToolButton(FIF.EDIT, self)
-        self.editButton.setFixedSize(40, 40)
+        self.editButton.setFixedSize(24, 24)
         setFluentToolTip(self.editButton, "编辑主页卡片")
         self.editButton.setAccessibleName("编辑主页卡片")
         self.editButton.hide()
         self.deleteButton = ToolButton(FIF.DELETE, self)
-        self.deleteButton.setFixedSize(40, 40)
+        self.deleteButton.setFixedSize(24, 24)
         self.deleteButton.setEnabled(False)
         setFluentToolTip(self.deleteButton, "删除主页卡片")
         self.deleteButton.setAccessibleName(f"删除{title}")
@@ -409,8 +409,7 @@ class HomePage(ScrollArea):
         self.sortBtn = ToolButton(FIF.EDIT, self.container)
         setFluentToolTip(self.sortBtn, "调整卡片顺序")
         self.sortBtn.setAccessibleName("调整卡片顺序")
-        self.addBtn.setFixedSize(40, 40)
-        self.sortBtn.setFixedSize(40, 40)
+        self.addBtn.setFixedSize(self.sortBtn.sizeHint())
         self.sortBtn.clicked.connect(self._toggleCardEditing)
         self.headerLayout.addWidget(self.subTitle)
         self.headerLayout.addStretch(1)
@@ -605,7 +604,15 @@ class HomePage(ScrollArea):
             unavailable.setEnabled(False)
             defaults.addAction(unavailable)
         menu.addMenu(defaults)
-        menu.addAction(Action(FIF.EDIT, "自定义", triggered=self._createCustomCard))
+        menu.addAction(
+            Action(
+                FIF.EDIT,
+                "自定义",
+                triggered=lambda _checked=False: QTimer.singleShot(
+                    0, self._createCustomCard
+                ),
+            )
+        )
         menu.exec(self.addBtn.mapToGlobal(QPoint(0, self.addBtn.height())))
 
     def _restoreDefaultCard(self, name):

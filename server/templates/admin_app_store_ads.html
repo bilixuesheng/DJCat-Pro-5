@@ -5,49 +5,81 @@
 
 {% block content %}
 <div class="market-page">
-<header class="page-header">
-    <div>
-        <div class="eyebrow">应用市场 / 广告</div>
-        <h1>广告横幅</h1>
-        <p>全部应用页使用 FlipView 轮播启用的广告，按钮会跳转到绑定的软件详情页。</p>
-    </div>
-</header>
-
-<form class="config-form" method="post" action="{{ url_for('app_store.adminAds') }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <section class="form-section">
-        <div class="form-section-title"><span>01</span><div><h2>新增广告</h2><p>图片和按钮目标由服务端目录统一下发。</p></div></div>
-        <div class="form-fields two-columns">
-            <label>标题<input name="title" maxlength="120" required></label>
-            <label>绑定软件<select name="app_id"><option value="">不显示跳转按钮</option>{% for app in apps %}<option value="{{ app.id }}">{{ app.name }}</option>{% endfor %}</select></label>
-            <label class="full">简介<textarea name="description" maxlength="300" rows="2"></textarea></label>
-            <label class="full">图片 HTTPS 链接<input type="url" name="image_url" maxlength="2048" required></label>
-            <label>排序<input type="number" name="sort_order" value="0"></label>
-            <label class="option-row"><span><strong>立即启用</strong></span><input type="checkbox" name="enabled" value="1" checked></label>
+    <header class="page-header">
+        <div>
+            <div class="eyebrow">应用市场 / 广告管理</div>
+            <h1>广告横幅</h1>
+            <p>集中管理轮播内容、投放状态、绑定软件和客户端展示顺序。</p>
         </div>
-        <div class="form-actions"><span>可以同时启用多个广告。</span><button class="button button-primary" type="submit">新增广告</button></div>
-    </section>
-</form>
+        <div class="machine-count"><strong>{{ ads|selectattr('enabled')|list|length }}</strong><span>条投放中</span></div>
+    </header>
 
-<section class="section-block">
-    <div class="section-heading"><div><span class="section-index">02</span><h2>广告列表</h2></div></div>
-    {% for ad in ads %}
-    <form class="form-section" method="post" action="{{ url_for('app_store.adminAd', ad_id=ad.id) }}">
+    <form class="config-form" method="post" action="{{ url_for('app_store.adminAd', ad_id=edit_ad.id) if edit_ad else url_for('app_store.adminAds') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <div class="form-section-title"><span>{{ '%02d'|format(loop.index) }}</span><div><h2>{{ ad.title }}</h2><p>{{ ad.app_name or '无跳转软件' }}</p></div></div>
-        <div class="form-fields two-columns">
-            <label>标题<input name="title" maxlength="120" value="{{ ad.title }}" required></label>
-            <label>绑定软件<select name="app_id"><option value="">不显示跳转按钮</option>{% for app in apps %}<option value="{{ app.id }}" {% if ad.app_id == app.id %}selected{% endif %}>{{ app.name }}</option>{% endfor %}</select></label>
-            <label class="full">简介<textarea name="description" maxlength="300" rows="2">{{ ad.description }}</textarea></label>
-            <label class="full">图片 HTTPS 链接<input type="url" name="image_url" maxlength="2048" value="{{ ad.image_url }}" required></label>
-            <label>排序<input type="number" name="sort_order" value="{{ ad.sort_order }}"></label>
-            <label class="option-row"><span><strong>启用</strong></span><input type="checkbox" name="enabled" value="1" {% if ad.enabled %}checked{% endif %}></label>
-            <div class="form-actions full"><span>编号 {{ ad.id }}</span><span><button class="button button-danger" type="submit" name="delete" value="1" data-confirm="确认删除这条广告吗？">删除</button> <button class="button button-secondary" type="submit">保存</button></span></div>
-        </div>
+        <section class="form-section">
+            <div class="form-section-title">
+                <span>01</span>
+                <div>
+                    <h2>{{ '编辑广告' if edit_ad else '新建广告' }}</h2>
+                    <p>广告顺序在下方投放列表中单独调整。</p>
+                </div>
+            </div>
+            <div class="form-fields two-columns">
+                <label>标题<input name="title" maxlength="120" value="{{ edit_ad.title if edit_ad else '' }}" required></label>
+                <label>绑定软件
+                    <select name="app_id">
+                        <option value="">不显示跳转按钮</option>
+                        {% for app in apps %}<option value="{{ app.id }}" {% if edit_ad and edit_ad.app_id == app.id %}selected{% endif %}>{{ app.name }}</option>{% endfor %}
+                    </select>
+                </label>
+                <label class="full">简介<textarea name="description" maxlength="300" rows="2">{{ edit_ad.description if edit_ad else '' }}</textarea></label>
+                <label class="full">图片 HTTPS 链接<input type="url" name="image_url" maxlength="2048" value="{{ edit_ad.image_url if edit_ad else '' }}" required></label>
+                <label class="option-row full">
+                    <span><strong>{{ '启用投放' if edit_ad else '立即投放' }}</strong><small>关闭后仍保留配置，但客户端不会收到这条广告。</small></span>
+                    <input type="checkbox" name="enabled" value="1" {% if not edit_ad or edit_ad.enabled %}checked{% endif %}>
+                </label>
+            </div>
+            <div class="form-actions full">
+                <span>{{ '编号 ' ~ edit_ad.id if edit_ad else '新广告会追加到轮播末尾' }}</span>
+                <span class="form-action-buttons">
+                    {% if edit_ad %}<button class="button button-danger" type="submit" name="delete" value="1" data-confirm="确认删除这条广告吗？">删除</button>{% endif %}
+                    <button class="button button-primary" type="submit">{{ '保存广告' if edit_ad else '新建广告' }}</button>
+                </span>
+            </div>
+        </section>
     </form>
-    {% else %}
-    <div class="notice">还没有广告。</div>
-    {% endfor %}
-</section>
+
+    <section class="section-block" aria-labelledby="published-ads-title">
+        <div class="section-heading">
+            <div><span class="section-index">02</span><h2 id="published-ads-title">已投放广告</h2></div>
+            <span>使用上移、下移调整广告顺序</span>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>顺序</th><th>广告</th><th>状态</th><th>绑定软件</th><th>图片</th><th>操作</th></tr></thead>
+                <tbody>
+                {% for ad in ads %}
+                    <tr>
+                        <td>
+                            <form class="order-controls" method="post" action="{{ url_for('app_store.adminMoveAd', ad_id=ad.id) }}" aria-label="调整 {{ ad.title }} 的顺序">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <span>{{ '%02d'|format(loop.index) }}</span>
+                                <button type="submit" name="direction" value="up" aria-label="上移 {{ ad.title }}" {% if loop.first %}disabled{% endif %}>↑</button>
+                                <button type="submit" name="direction" value="down" aria-label="下移 {{ ad.title }}" {% if loop.last %}disabled{% endif %}>↓</button>
+                            </form>
+                        </td>
+                        <td><strong>{{ ad.title }}</strong><br><small>{{ ad.description or '无简介' }}</small></td>
+                        <td><span class="status-chip {{ '' if ad.enabled else 'waiting' }}"><i></i>{{ '投放中' if ad.enabled else '已暂停' }}</span></td>
+                        <td>{{ ad.app_name or '无跳转软件' }}</td>
+                        <td><a class="table-action" href="{{ ad.image_url }}" target="_blank" rel="noopener noreferrer">查看图片</a></td>
+                        <td><a class="table-action" href="{{ url_for('app_store.adminAds', edit=ad.id) }}">编辑</a></td>
+                    </tr>
+                {% else %}
+                    <tr><td class="empty" colspan="6">还没有广告，请在上方新建。</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
 </div>
 {% endblock %}

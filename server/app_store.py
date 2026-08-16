@@ -160,6 +160,7 @@ def _ensureSchema(connect):
                 icon_url TEXT NOT NULL DEFAULT '',
                 install_dir TEXT NOT NULL,
                 recommended INTEGER NOT NULL DEFAULT 0,
+                sort_order INTEGER NOT NULL DEFAULT 0,
                 announcement TEXT NOT NULL DEFAULT '',
                 open_action_type TEXT,
                 open_action_target TEXT,
@@ -188,6 +189,8 @@ def _ensureSchema(connect):
                 action_arguments TEXT NOT NULL DEFAULT '{}',
                 sort_order INTEGER NOT NULL DEFAULT 0
             );
+            CREATE INDEX IF NOT EXISTS market_presets_order_idx
+                ON market_presets(app_id, sort_order, id);
             CREATE TABLE IF NOT EXISTS market_advertisements (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
@@ -216,6 +219,18 @@ def _ensureSchema(connect):
             CREATE INDEX IF NOT EXISTS market_download_requests_time_idx
                 ON market_download_requests(created_at);
             """
+        )
+        applicationColumns = {
+            row[1] for row in database.execute("PRAGMA table_info(market_applications)")
+        }
+        if "sort_order" not in applicationColumns:
+            database.execute(
+                "ALTER TABLE market_applications "
+                "ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"
+            )
+        database.execute(
+            "CREATE INDEX IF NOT EXISTS market_apps_order_idx "
+            "ON market_applications(sort_order, id)"
         )
         duplicateInstallDir = database.execute(
             "SELECT 1 FROM market_applications "
@@ -339,6 +354,39 @@ def _applicationExists(database, appId):
     ).fetchone() is not None
 
 
+def _moveItem(database, table, itemId, direction, appId=None):
+    if direction not in {"up", "down"}:
+        raise ValueError("无效的移动方向")
+    if table not in {
+        "market_applications",
+        "market_presets",
+        "market_advertisements",
+    }:
+        raise ValueError("无效的排序表")
+    if table == "market_presets":
+        rows = database.execute(
+            "SELECT id FROM market_presets WHERE app_id = ? "
+            "ORDER BY sort_order, id",
+            (appId,),
+        ).fetchall()
+    else:
+        rows = database.execute(
+            f"SELECT id FROM {table} ORDER BY sort_order, id"
+        ).fetchall()
+    ids = [row["id"] for row in rows]
+    if itemId not in ids:
+        return False
+    index = ids.index(itemId)
+    target = index + (-1 if direction == "up" else 1)
+    if 0 <= target < len(ids):
+        ids[index], ids[target] = ids[target], ids[index]
+    database.executemany(
+        f"UPDATE {table} SET sort_order = ? WHERE id = ?",
+        [(sortOrder, rowId) for sortOrder, rowId in enumerate(ids)],
+    )
+    return True
+
+
 def register_app_store(
     app,
     *,
@@ -368,7 +416,7 @@ def register_app_store(
         _ensureSchema(connect)
         with closing(connect()) as database:
             rows = database.execute(
-                "SELECT * FROM market_applications ORDER BY recommended DESC, name COLLATE NOCASE"
+                "SELECT * FROM market_applications ORDER BY sort_order, id"
             ).fetchall()
             packagesByApp = {}
             for package in database.execute(
@@ -474,7 +522,7 @@ def register_app_store(
         _ensureSchema(connect)
         with closing(connect()) as database:
             rows = database.execute(
-                "SELECT * FROM market_applications ORDER BY updated_at DESC, id DESC"
+                "SELECT * FROM market_applications ORDER BY sort_order, id"
             ).fetchall()
         return render_template(
             "admin_app_store_apps.html",
@@ -592,18 +640,22 @@ def register_app_store(
                         400,
                     )
                 if appId is None:
+                    sortOrder = database.execute(
+                        "SELECT COALESCE(MAX(sort_order), -1) + 1 "
+                        "FROM market_applications"
+                    ).fetchone()[0]
                     cursor = database.execute(
                         """
                         INSERT INTO market_applications
                         (name, developer, description, version, icon_url, install_dir,
-                         recommended, announcement, open_action_type, open_action_target,
+                         recommended, sort_order, announcement, open_action_type, open_action_target,
                          open_action_arguments)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             values["name"], values["developer"], values["description"],
                             values["version"], values["icon_url"], values["install_dir"],
-                            values["recommended"], values["announcement"],
+                            values["recommended"], sortOrder, values["announcement"],
                             action["type"] if action else None,
                             action["target"] if action else None,
                             json.dumps(action["arguments"] if action else {}, ensure_ascii=False),
@@ -663,31 +715,104 @@ def register_app_store(
             database.commit()
         return admin_response("软件已删除", "success", "app_store.adminApps")
 
-    def _renderPresets():
+    @blueprint.post("/admin/app-store/apps/<int:app_id>/move")
+    @login_required
+    def adminMoveApp(app_id):
+        check_csrf()
+        direction = request.form.get("direction", "")
+        if direction not in {"up", "down"}:
+            return admin_response(
+                "无效的移动方向", "error", "app_store.adminApps", 400
+            )
         _ensureSchema(connect)
         with closing(connect()) as database:
-            rows = database.execute(
-                """
-                SELECT p.*, a.name AS app_name
-                FROM market_presets p
-                JOIN market_applications a ON a.id = p.app_id
-                ORDER BY a.name COLLATE NOCASE, p.sort_order, p.id
-                """
-            ).fetchall()
+            database.execute("BEGIN IMMEDIATE")
+            if not _moveItem(
+                database,
+                "market_applications",
+                app_id,
+                direction,
+            ):
+                return admin_response(
+                    "软件不存在", "error", "app_store.adminApps", 404
+                )
+            database.commit()
+        return admin_response("软件顺序已更新", "success", "app_store.adminApps")
+
+    def _renderPresets():
+        appIdValue = request.args.get("app_id")
+        editValue = request.args.get("edit")
+        try:
+            appId = int(appIdValue) if appIdValue is not None else None
+            editId = int(editValue) if editValue is not None else None
+            if appId is not None and appId <= 0:
+                raise ValueError
+            if editId is not None and editId <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            abort(404)
+        if editId is not None and appId is None:
+            abort(404)
+
+        _ensureSchema(connect)
+        with closing(connect()) as database:
             apps = database.execute(
-                "SELECT id, name FROM market_applications ORDER BY name COLLATE NOCASE"
+                """
+                SELECT a.id, a.name, a.version, a.sort_order,
+                       COUNT(p.id) AS preset_count
+                FROM market_applications a
+                LEFT JOIN market_presets p ON p.app_id = a.id
+                GROUP BY a.id
+                ORDER BY a.sort_order, a.id
+                """
             ).fetchall()
+            selectedApp = next(
+                (item for item in apps if item["id"] == appId),
+                None,
+            )
+            if appId is not None and selectedApp is None:
+                abort(404)
+            rows = (
+                database.execute(
+                    "SELECT * FROM market_presets WHERE app_id = ? "
+                    "ORDER BY sort_order, id",
+                    (appId,),
+                ).fetchall()
+                if selectedApp is not None
+                else []
+            )
+            editRow = (
+                database.execute(
+                    "SELECT * FROM market_presets "
+                    "WHERE id = ? AND app_id = ?",
+                    (editId, appId),
+                ).fetchone()
+                if editId is not None
+                else None
+            )
+            if editId is not None and editRow is None:
+                abort(404)
+
         presets = []
         for row in rows:
             preset = dict(row)
-            preset["action_arguments"] = _argumentsText(preset["action_arguments"])
+            preset["action_arguments"] = _argumentsText(
+                preset["action_arguments"]
+            )
             presets.append(preset)
+        editPreset = dict(editRow) if editRow is not None else None
+        if editPreset is not None:
+            editPreset["action_arguments"] = _argumentsText(
+                editPreset["action_arguments"]
+            )
         return render_template(
             "admin_app_store_presets.html",
             csrf_token=csrf_token(),
             current_page="app_store_presets",
             presets=presets,
             apps=apps,
+            selected_app=selectedApp,
+            edit_preset=editPreset,
         )
 
     @blueprint.route("/admin/app-store/presets/", methods=["GET", "POST"])
@@ -704,6 +829,31 @@ def register_app_store(
 
     def _savePreset(presetId):
         check_csrf()
+        if request.form.get("delete"):
+            _ensureSchema(connect)
+            with closing(connect()) as database:
+                row = database.execute(
+                    "SELECT app_id FROM market_presets WHERE id = ?",
+                    (presetId,),
+                ).fetchone()
+                if row is None:
+                    return admin_response(
+                        "预设卡片不存在",
+                        "error",
+                        "app_store.adminPresets",
+                        404,
+                    )
+                database.execute(
+                    "DELETE FROM market_presets WHERE id = ?", (presetId,)
+                )
+                database.commit()
+            return admin_response(
+                "预设卡片已删除",
+                "success",
+                "app_store.adminPresets",
+                url_values={"app_id": row["app_id"]},
+            )
+
         title = request.form.get("preset_title", "").strip()
         description = request.form.get("preset_description", "").strip()
         actionType = request.form.get("preset_action_type", "").strip().lower()
@@ -714,24 +864,15 @@ def register_app_store(
         )
         try:
             appId = int(request.form.get("preset_app_id"))
-            sortOrder = int(request.form.get("preset_sort_order", "0"))
         except (TypeError, ValueError):
-            appId, sortOrder = None, 0
-        if request.form.get("delete"):
-            _ensureSchema(connect)
-            with closing(connect()) as database:
-                deleted = database.execute(
-                    "DELETE FROM market_presets WHERE id = ?", (presetId,)
-                )
-                if not deleted.rowcount:
-                    return admin_response(
-                        "预设卡片不存在",
-                        "error",
-                        "app_store.adminPresets",
-                        404,
-                    )
-                database.commit()
-            return admin_response("预设卡片已删除", "success", "app_store.adminPresets")
+            appId = None
+        sortOrderValue = request.form.get("preset_sort_order")
+        try:
+            sortOrder = (
+                int(sortOrderValue) if sortOrderValue is not None else None
+            )
+        except ValueError:
+            sortOrder = None
         errors = []
         if appId is None:
             errors.append("请选择软件")
@@ -743,12 +884,51 @@ def register_app_store(
             errors.append("卡片简介不能超过 240 个字符")
         if not action:
             errors.append("预设卡片动作配置无效")
+        if sortOrderValue is not None and sortOrder is None:
+            errors.append("预设卡片顺序无效")
+        redirectValues = {"app_id": appId} if appId else None
         if errors:
-            return admin_response("；".join(errors), "error", "app_store.adminPresets", 400)
+            return admin_response(
+                "；".join(errors),
+                "error",
+                "app_store.adminPresets",
+                400,
+                url_values=redirectValues,
+            )
         _ensureSchema(connect)
         with closing(connect()) as database:
             if not database.execute("SELECT 1 FROM market_applications WHERE id = ?", (appId,)).fetchone():
-                return admin_response("选择的软件不存在", "error", "app_store.adminPresets", 400)
+                return admin_response(
+                    "选择的软件不存在",
+                    "error",
+                    "app_store.adminPresets",
+                    400,
+                )
+            current = (
+                database.execute(
+                    "SELECT app_id, sort_order FROM market_presets WHERE id = ?",
+                    (presetId,),
+                ).fetchone()
+                if presetId is not None
+                else None
+            )
+            if presetId is not None and current is None:
+                return admin_response(
+                    "预设卡片不存在",
+                    "error",
+                    "app_store.adminPresets",
+                    404,
+                    url_values=redirectValues,
+                )
+            if sortOrder is None:
+                if current is not None and current["app_id"] == appId:
+                    sortOrder = current["sort_order"]
+                else:
+                    sortOrder = database.execute(
+                        "SELECT COALESCE(MAX(sort_order), -1) + 1 "
+                        "FROM market_presets WHERE app_id = ?",
+                        (appId,),
+                    ).fetchone()[0]
             values = (
                 appId,
                 title,
@@ -783,10 +963,53 @@ def register_app_store(
                         "error",
                         "app_store.adminPresets",
                         404,
+                        url_values=redirectValues,
                     )
                 message = "预设卡片已保存"
             database.commit()
-        return admin_response(message, "success", "app_store.adminPresets")
+        return admin_response(
+            message,
+            "success",
+            "app_store.adminPresets",
+            url_values={"app_id": appId},
+        )
+
+    @blueprint.post("/admin/app-store/presets/<int:preset_id>/move")
+    @login_required
+    def adminMovePreset(preset_id):
+        check_csrf()
+        direction = request.form.get("direction", "")
+        if direction not in {"up", "down"}:
+            return admin_response(
+                "无效的移动方向", "error", "app_store.adminPresets", 400
+            )
+        _ensureSchema(connect)
+        with closing(connect()) as database:
+            database.execute("BEGIN IMMEDIATE")
+            row = database.execute(
+                "SELECT app_id FROM market_presets WHERE id = ?",
+                (preset_id,),
+            ).fetchone()
+            if row is None or not _moveItem(
+                database,
+                "market_presets",
+                preset_id,
+                direction,
+                row["app_id"] if row else None,
+            ):
+                return admin_response(
+                    "预设卡片不存在",
+                    "error",
+                    "app_store.adminPresets",
+                    404,
+                )
+            database.commit()
+        return admin_response(
+            "预设卡片顺序已更新",
+            "success",
+            "app_store.adminPresets",
+            url_values={"app_id": row["app_id"]},
+        )
 
     @blueprint.route("/admin/app-store/ads/", methods=["GET", "POST"])
     @login_required
@@ -798,13 +1021,21 @@ def register_app_store(
             imageUrl = _safeUrl(request.form.get("image_url"), httpsOnly=True)
             try:
                 appId = int(request.form.get("app_id")) if request.form.get("app_id") else None
-                sortOrder = int(request.form.get("sort_order", "0"))
             except ValueError:
-                appId, sortOrder = None, 0
+                appId = None
+            sortOrderValue = request.form.get("sort_order")
+            try:
+                sortOrder = (
+                    int(sortOrderValue) if sortOrderValue is not None else None
+                )
+            except ValueError:
+                sortOrder = None
             if not title or not imageUrl:
                 return admin_response("广告标题和 HTTPS 图片链接不能为空", "error", "app_store.adminAds", 400)
             if len(title) > 120 or len(description) > 300:
                 return admin_response("广告标题或简介过长", "error", "app_store.adminAds", 400)
+            if sortOrderValue is not None and sortOrder is None:
+                return admin_response("广告顺序无效", "error", "app_store.adminAds", 400)
             _ensureSchema(connect)
             with closing(connect()) as database:
                 if not _applicationExists(database, appId):
@@ -814,12 +1045,24 @@ def register_app_store(
                         "app_store.adminAds",
                         400,
                     )
+                if sortOrder is None:
+                    sortOrder = database.execute(
+                        "SELECT COALESCE(MAX(sort_order), -1) + 1 "
+                        "FROM market_advertisements"
+                    ).fetchone()[0]
                 database.execute(
                     "INSERT INTO market_advertisements(title, description, image_url, app_id, sort_order, enabled) VALUES (?, ?, ?, ?, ?, ?)",
                     (title, description, imageUrl, appId, sortOrder, int(bool(request.form.get("enabled")))),
                 )
                 database.commit()
             return admin_response("广告已新增", "success", "app_store.adminAds")
+        editValue = request.args.get("edit")
+        try:
+            editId = int(editValue) if editValue is not None else None
+            if editId is not None and editId <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            abort(404)
         _ensureSchema(connect)
         with closing(connect()) as database:
             ads = database.execute(
@@ -829,19 +1072,33 @@ def register_app_store(
                 ORDER BY ad.sort_order, ad.id
                 """
             ).fetchall()
-            apps = database.execute("SELECT id, name FROM market_applications ORDER BY name COLLATE NOCASE").fetchall()
+            editAd = (
+                database.execute(
+                    "SELECT * FROM market_advertisements WHERE id = ?",
+                    (editId,),
+                ).fetchone()
+                if editId is not None
+                else None
+            )
+            if editId is not None and editAd is None:
+                abort(404)
+            apps = database.execute(
+                "SELECT id, name FROM market_applications ORDER BY sort_order, id"
+            ).fetchall()
         return render_template(
             "admin_app_store_ads.html",
             csrf_token=csrf_token(),
             current_page="app_store_ads",
             ads=ads,
             apps=apps,
+            edit_ad=editAd,
         )
 
     @blueprint.post("/admin/app-store/ads/<int:ad_id>")
     @login_required
     def adminAd(ad_id):
         check_csrf()
+        _ensureSchema(connect)
         if request.form.get("delete"):
             with closing(connect()) as database:
                 deleted = database.execute(
@@ -861,13 +1118,21 @@ def register_app_store(
         imageUrl = _safeUrl(request.form.get("image_url"), httpsOnly=True)
         try:
             appId = int(request.form.get("app_id")) if request.form.get("app_id") else None
-            sortOrder = int(request.form.get("sort_order", "0"))
         except ValueError:
-            appId, sortOrder = None, 0
+            appId = None
+        sortOrderValue = request.form.get("sort_order")
+        try:
+            sortOrder = (
+                int(sortOrderValue) if sortOrderValue is not None else None
+            )
+        except ValueError:
+            sortOrder = None
         if not title or not imageUrl:
             return admin_response("广告标题和 HTTPS 图片链接不能为空", "error", "app_store.adminAds", 400)
         if len(title) > 120 or len(description) > 300:
             return admin_response("广告标题或简介过长", "error", "app_store.adminAds", 400)
+        if sortOrderValue is not None and sortOrder is None:
+            return admin_response("广告顺序无效", "error", "app_store.adminAds", 400)
         with closing(connect()) as database:
             if not _applicationExists(database, appId):
                 return admin_response(
@@ -876,6 +1141,16 @@ def register_app_store(
                     "app_store.adminAds",
                     400,
                 )
+            current = database.execute(
+                "SELECT sort_order FROM market_advertisements WHERE id = ?",
+                (ad_id,),
+            ).fetchone()
+            if current is None:
+                return admin_response(
+                    "广告不存在", "error", "app_store.adminAds", 404
+                )
+            if sortOrder is None:
+                sortOrder = current["sort_order"]
             updated = database.execute(
                 "UPDATE market_advertisements SET title=?, description=?, image_url=?, app_id=?, sort_order=?, enabled=? WHERE id=?",
                 (title, description, imageUrl, appId, sortOrder, int(bool(request.form.get("enabled"))), ad_id),
@@ -890,5 +1165,29 @@ def register_app_store(
                 )
             database.commit()
         return admin_response("广告已保存", "success", "app_store.adminAds")
+
+    @blueprint.post("/admin/app-store/ads/<int:ad_id>/move")
+    @login_required
+    def adminMoveAd(ad_id):
+        check_csrf()
+        direction = request.form.get("direction", "")
+        if direction not in {"up", "down"}:
+            return admin_response(
+                "无效的移动方向", "error", "app_store.adminAds", 400
+            )
+        _ensureSchema(connect)
+        with closing(connect()) as database:
+            database.execute("BEGIN IMMEDIATE")
+            if not _moveItem(
+                database,
+                "market_advertisements",
+                ad_id,
+                direction,
+            ):
+                return admin_response(
+                    "广告不存在", "error", "app_store.adminAds", 404
+                )
+            database.commit()
+        return admin_response("广告顺序已更新", "success", "app_store.adminAds")
 
     app.register_blueprint(blueprint)

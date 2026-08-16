@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtCore import QAbstractAnimation, QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QImage, QPixmap, QWheelEvent
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import (
@@ -313,6 +313,31 @@ class ScheduleShutdownUiTest(TestCase):
             shutdownCard.formWidgets["timePicker"], TouchTimePicker
         )
 
+    def testTimePickerTouchDragStopsRunningSnapAnimation(self):
+        picker = TouchTimePicker(showSeconds=True)
+        self.addCleanup(picker.deleteLater)
+
+        picker.show()
+        QApplication.processEvents()
+        picker._showPanel()
+        QApplication.processEvents()
+        column = picker.findChildren(QAbstractItemView)[0]
+        smoothScroll = column.vScrollBar
+        smoothScroll.scrollTo(smoothScroll.value() + 74)
+
+        self.assertEqual(
+            smoothScroll.ani.state(),
+            QAbstractAnimation.State.Running,
+        )
+        TouchTimePicker._settleColumn(column, QScroller.State.Dragging)
+        self.assertEqual(
+            smoothScroll.ani.state(),
+            QAbstractAnimation.State.Stopped,
+        )
+
+        column.window().close()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
     def testTimePickerPopupColumnsEnableTouchScrolling(self):
         picker = TouchTimePicker(showSeconds=True)
         self.addCleanup(picker.deleteLater)
@@ -422,19 +447,25 @@ class ScheduleShutdownUiTest(TestCase):
 
         QTest.qWait(300)
         clickedItem = column.itemAt(center + QPoint(0, 37))
+        clickedText = clickedItem.text()
         QTest.mouseClick(
             viewport,
             Qt.MouseButton.LeftButton,
             pos=center + QPoint(0, 37),
         )
-        self.assertIs(column.currentItem(), clickedItem)
+        QTest.qWait(300)
+        self.assertEqual(column.currentItem().text(), clickedText)
+        self.assertIs(column.currentItem(), column.itemAt(center))
 
         column.verticalScrollBar().setValue(
             column.verticalScrollBar().value() + 74
         )
-        centeredItem = column.itemAt(column.viewport().rect().center())
         TouchTimePicker._settleColumn(column, QScroller.State.Inactive)
-        self.assertIs(column.currentItem(), centeredItem)
+        QTest.qWait(300)
+        self.assertIs(
+            column.currentItem(),
+            column.itemAt(column.viewport().rect().center()),
+        )
 
         panel.close()
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

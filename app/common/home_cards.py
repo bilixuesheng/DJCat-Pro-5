@@ -19,6 +19,7 @@ from app.config.paths import HOME_CARD_ICON_DIR
 
 
 DEFAULT_HOME_CARD_NAMES = ("全屏投送", "考试倒计时", "定时关机", "定时播报")
+DIRECT_APPLICATION_PRESET_ID = 0
 ACTION_TYPES = ("program", "shell", "url", "path", "delay")
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 
@@ -127,7 +128,7 @@ def normalize_pinned_cards(value) -> list[dict]:
         except (TypeError, ValueError):
             continue
         key = (app_id, preset_id)
-        if app_id <= 0 or preset_id <= 0 or key in keys:
+        if app_id <= 0 or preset_id < DIRECT_APPLICATION_PRESET_ID or key in keys:
             continue
         keys.add(key)
         result.append(
@@ -406,6 +407,7 @@ __all__ = [
     "ACTION_TYPES",
     "ActionSequenceWorker",
     "DEFAULT_HOME_CARD_NAMES",
+    "DIRECT_APPLICATION_PRESET_ID",
     "HomeCardError",
     "execute_action",
     "extract_icon_images",

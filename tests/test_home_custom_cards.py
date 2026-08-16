@@ -104,11 +104,22 @@ class HomeCustomCardTest(TestCase):
 
     def testNewButtonUsesOnlyIconAndMatchesEditButton(self):
         self.assertEqual(self.page.addBtn.text(), "")
-        self.assertEqual(self.page.addBtn.size().toTuple(), (40, 40))
-        self.assertEqual(self.page.sortBtn.size().toTuple(), (40, 40))
+        self.assertEqual(self.page.addBtn.size(), self.page.sortBtn.sizeHint())
+        self.assertEqual(self.page.sortBtn.size(), self.page.sortBtn.sizeHint())
         card = self.page.all_cards[DEFAULT_HOME_CARD_NAMES[0]]
-        self.assertEqual(card.editButton.size().toTuple(), (40, 40))
-        self.assertEqual(card.deleteButton.size().toTuple(), (40, 40))
+        self.assertEqual(card.editButton.size().toTuple(), (24, 24))
+        self.assertEqual(card.deleteButton.size().toTuple(), (24, 24))
+
+    def testCustomCardDialogOpensAfterAddMenuCallbackReturns(self):
+        with mock.patch.object(RoundMenu, "exec", autospec=True) as execute:
+            with mock.patch.object(self.page, "_createCustomCard") as create:
+                self.page._showAddMenu()
+                menu = execute.call_args.args[0]
+                menu.actions()[0].trigger()
+
+                create.assert_not_called()
+                self.app.processEvents()
+                create.assert_called_once_with()
 
     def testNewControlsUseFluentTooltips(self):
         card = self.page.all_cards[DEFAULT_HOME_CARD_NAMES[0]]
@@ -565,6 +576,23 @@ class HomeCustomCardTest(TestCase):
             [key for key in self.page.all_cards if key.startswith("app:")],
             ["app:7:9"],
         )
+
+    def testDirectApplicationPinnedCardUsesReservedZeroPresetId(self):
+        cards = normalize_pinned_cards(
+            [
+                {
+                    "app_id": 7,
+                    "preset_id": 0,
+                    "title": "打开应用",
+                    "action": {"type": "program", "target": "demo.exe"},
+                }
+            ]
+        )
+
+        self.assertEqual(len(cards), 1)
+        self.assertEqual((cards[0]["app_id"], cards[0]["preset_id"]), (7, 0))
+        self.page.setApplicationCards(cards)
+        self.assertIn("app:7:0", self.page.all_cards)
 
     def testMalformedDefaultAndOrderConfigDoesNotBreakHomePage(self):
         cfg.set(cfg.visibleDefaultHomeCards, [[], DEFAULT_HOME_CARD_NAMES[0]])

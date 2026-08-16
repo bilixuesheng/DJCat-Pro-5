@@ -172,6 +172,18 @@
         });
     };
 
+    const refreshTableOrder = (table) => {
+        const controls = [...(table?.querySelectorAll("tbody .order-controls") || [])];
+        controls.forEach((control, index) => {
+            const position = control.querySelector(":scope > span");
+            const up = control.querySelector('button[value="up"]');
+            const down = control.querySelector('button[value="down"]');
+            if (position) position.textContent = String(index + 1).padStart(2, "0");
+            if (up) up.disabled = index === 0;
+            if (down) down.disabled = index === controls.length - 1;
+        });
+    };
+
     const submitAsync = async (form) => {
         if (form.dataset.submitting === "true") return;
         form.dataset.submitting = "true";
@@ -199,7 +211,16 @@
             showToast(payload?.message || "操作已完成", payload?.category || "success");
             if (form.dataset.removeOnSuccess) {
                 const target = form.closest(form.dataset.removeOnSuccess);
+                const table = target?.closest("table");
                 target?.remove();
+                refreshTableOrder(table);
+                if (table?.dataset.emptyMessage && !table.tBodies[0]?.rows.length) {
+                    const row = table.tBodies[0].insertRow();
+                    const cell = row.insertCell();
+                    cell.className = "empty";
+                    cell.colSpan = table.tHead?.rows[0]?.cells.length || 1;
+                    cell.textContent = table.dataset.emptyMessage;
+                }
                 const count = document.querySelector("[data-item-count]");
                 if (target && count) {
                     count.textContent = String(Math.max(0, Number(count.textContent) - 1));

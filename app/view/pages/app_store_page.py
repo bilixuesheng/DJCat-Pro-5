@@ -29,6 +29,7 @@ from qfluentwidgets import (
     PushButton,
     SubtitleLabel,
     TitleLabel,
+    ToggleToolButton,
     ToolButton,
 )
 from qfluentwidgets import FluentIcon as FIF
@@ -38,7 +39,10 @@ from app.common.application_store import (
     ApplicationStoreError,
     downloadWorker,
 )
-from app.common.home_cards import normalize_pinned_cards
+from app.common.home_cards import (
+    DIRECT_APPLICATION_PRESET_ID,
+    normalize_pinned_cards,
+)
 from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import LabelElideFilter
@@ -97,6 +101,7 @@ class CatalogWorker(QObject):
 
 class ApplicationCard(CardWidget):
     actionClicked = Signal()
+    pinClicked = Signal()
     uninstallClicked = Signal()
 
     def __init__(self, parent=None):
@@ -131,6 +136,11 @@ class ApplicationCard(CardWidget):
         self._descriptionElideFilter = LabelElideFilter(maximumLines=2)
         self.titleLabel.installEventFilter(self._elideFilter)
         self.descriptionLabel.installEventFilter(self._descriptionElideFilter)
+        self.pinButton = ToggleToolButton(FIF.PIN, self)
+        self.pinButton.setFixedSize(40, 40)
+        self.pinButton.setAccessibleName("固定到主页")
+        setFluentToolTip(self.pinButton, "固定到主页")
+        self.pinButton.hide()
         self.actionButton = PrimaryPushButton(self)
         self.actionButton.setFixedHeight(40)
         self.removeButton = ToolButton(FIF.DELETE, self)
@@ -146,6 +156,7 @@ class ApplicationCard(CardWidget):
         top.setSpacing(12)
         top.addWidget(self.iconLabel)
         top.addWidget(self.titleLabel, 1)
+        top.addWidget(self.pinButton)
         body = QVBoxLayout()
         body.setContentsMargins(14, 14, 14, 12)
         body.setSpacing(7)
@@ -160,6 +171,7 @@ class ApplicationCard(CardWidget):
         self.setLayout(body)
 
         self.actionButton.clicked.connect(self.actionClicked)
+        self.pinButton.clicked.connect(self.pinClicked)
         self.removeButton.clicked.connect(self.uninstallClicked)
 
     def setApplication(self, app: dict, imagePath: str = "") -> None:
@@ -188,11 +200,26 @@ class ApplicationCard(CardWidget):
                 FIF.APPLICATION.icon().pixmap(QSize(32, 32))
             )
 
-    def setState(self, text: str, removable: bool = False, enabled: bool = True) -> None:
+    def setState(
+        self,
+        text: str,
+        removable: bool = False,
+        enabled: bool = True,
+        pinnable: bool = False,
+        pinned: bool = False,
+    ) -> None:
         self.actionButton.setText(text)
         self.actionButton.setEnabled(enabled)
         self.removeButton.setVisible(removable)
         self.removeButton.setEnabled(enabled)
+        self.pinButton.setVisible(removable)
+        self.pinButton.setEnabled(enabled and pinnable)
+        self.pinButton.setChecked(pinned)
+        tooltip = "取消固定" if pinned else (
+            "固定到主页" if pinnable else "该软件未配置打开动作"
+        )
+        self.pinButton.setAccessibleName(tooltip)
+        setFluentToolTip(self.pinButton, tooltip)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -267,6 +294,7 @@ class AppStorePage(ScrollArea):
     _downloadProgressSignal = Signal(int, int, int)
     _downloadRetrySignal = Signal(str)
     _downloadFinishedSignal = Signal(object, str, str, bool)
+    _uninstallFinished = Signal(int, object, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -284,8 +312,9 @@ class AppStorePage(ScrollArea):
         self._downloadJobs = {}
         self._downloadStates = {}
         self._installing = set()
-        self._installationThreads = set()
-        self._installationLock = threading.Lock()
+        self._uninstalling = set()
+        self._fileOperationThreads = set()
+        self._fileOperationLock = threading.Lock()
         self._installationCancelEvent = threading.Event()
         self._pendingProgress = {}
         self._progressTimer = QTimer(self)
@@ -298,8 +327,10 @@ class AppStorePage(ScrollArea):
         self._downloadRetrySignal.connect(self._showDownloadRetry)
         self._downloadFinishedSignal.connect(self._onDownloadFinished)
         self._installFinished.connect(self._onInstallFinished)
+        self._uninstallFinished.connect(self._onUninstallFinished)
         self.setObjectName("AppStorePage")
         self._buildUi()
+        cfg.pinnedHomeCards.valueChanged.connect(self._refreshPinStates)
 
     def _buildUi(self):
         self.container = QWidget()
@@ -361,12 +392,14 @@ class AppStorePage(ScrollArea):
         )
         self.adFlipView.setBorderRadius(12)
         adLayout.addWidget(self.adFlipView)
-        self.adOverlay = AdvertisementOverlay(self.adFlipView.viewport())
+        self.adOverlay = AdvertisementOverlay(self.adFlipView)
         self.adOverlay.setObjectName("AdvertisementOverlay")
+        self.adOverlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.adOverlay.setStyleSheet(
             "QWidget#AdvertisementOverlay {"
-            "background: qlineargradient(y1: 0, y2: 1, stop: 0.45 transparent, "
-            "stop: 0.62 rgba(0,0,0,190), stop: 1 rgba(0,0,0,250));"
+            "background: qlineargradient(y1: 0, y2: 1, stop: 0.38 transparent, "
+            "stop: 0.48 rgba(0,0,0,45), stop: 0.58 rgba(0,0,0,95), "
+            "stop: 0.74 rgba(0,0,0,175), stop: 1 rgba(0,0,0,245));"
             "border-radius: 12px;"
             "}"
         )
@@ -550,14 +583,14 @@ class AppStorePage(ScrollArea):
         for _appId, (thread, worker) in jobs:
             worker.cancel()
         self._installationCancelEvent.set()
-        with self._installationLock:
-            installationThreads = tuple(self._installationThreads)
+        with self._fileOperationLock:
+            fileOperationThreads = tuple(self._fileOperationThreads)
 
         deadline = time.monotonic() + SHUTDOWN_WAIT_SECONDS
         threads = [thread for _appId, (thread, _worker) in jobs]
         if catalogThread is not None:
             threads.insert(0, catalogThread)
-        threads.extend(installationThreads)
+        threads.extend(fileOperationThreads)
         for thread in threads:
             if thread is threading.current_thread():
                 continue
@@ -584,6 +617,9 @@ class AppStorePage(ScrollArea):
         for _appId in tuple(self._installing):
             self.store.downloadSlots.release()
         self._installing.clear()
+        for appId in self._uninstalling:
+            self._downloadStates.pop(appId, None)
+        self._uninstalling.clear()
 
     def closeEvent(self, event):
         self.shutdown()
@@ -695,21 +731,9 @@ class AppStorePage(ScrollArea):
 
     @staticmethod
     def _setGridColumns(layout, columns):
-        margins = layout.contentsMargins()
-        spacing = max(0, layout.horizontalSpacing())
-        available = (
-            layout.parentWidget().width()
-            - margins.left()
-            - margins.right()
-            - spacing * (columns - 1)
-        )
-        columnWidth = max(0, available // columns)
         for column in range(3):
             layout.setColumnStretch(column, 1 if column < columns else 0)
-            layout.setColumnMinimumWidth(
-                column,
-                columnWidth if column < columns else 0,
-            )
+            layout.setColumnMinimumWidth(column, 0)
 
     def _setCardState(self, card, app, installedPage=False):
         appId = int(app["id"])
@@ -726,7 +750,14 @@ class AppStorePage(ScrollArea):
                 "打开" if app.get("installed") else ("下载" if supported else "不支持")
             )
             enabled = supported or bool(app.get("installed") and not app.get("update_available"))
-        card.setState(actionText, installedPage, enabled)
+        directKey = (appId, DIRECT_APPLICATION_PRESET_ID)
+        card.setState(
+            actionText,
+            installedPage,
+            enabled,
+            isinstance(app.get("open_action"), dict),
+            directKey in self._pinnedKeys(),
+        )
 
     def _renderGrid(self, layout, apps, installedPage=False):
         self._clearGrid(layout)
@@ -738,6 +769,11 @@ class AppStorePage(ScrollArea):
             self._setCardState(card, app, installedPage)
             card.clicked.connect(lambda appData=app: self._showDetail(appData))
             card.actionClicked.connect(lambda _checked=False, appData=app: self._onAppAction(appData))
+            card.pinClicked.connect(
+                lambda _checked=False, appData=app: self._toggleApplicationPin(
+                    appData
+                )
+            )
             card.uninstallClicked.connect(lambda _checked=False, appData=app: self._confirmUninstall(appData))
             row, column = divmod(index, columns)
             layout.addWidget(card, row, column)
@@ -770,6 +806,14 @@ class AppStorePage(ScrollArea):
         for card in self.container.findChildren(ApplicationCard):
             if card.appId == appId:
                 self._setCardState(card, card.appData, card.installedPage)
+
+    def _refreshPinStates(self, _cards=None):
+        if self._shuttingDown:
+            return
+        for card in self.container.findChildren(ApplicationCard):
+            self._setCardState(card, card.appData, card.installedPage)
+        if self.currentApp:
+            self._renderPresets(self.currentApp)
 
     def _renderInstalled(self):
         apps = [app for app in self._filtered(self._mergedApps()) if app.get("installed")]
@@ -852,12 +896,18 @@ class AppStorePage(ScrollArea):
         size = self.adFlipView.viewport().size()
         if size.width() > 0 and size.height() > 0:
             self.adFlipView.setItemSize(size)
-            self.adOverlay.setGeometry(self.adFlipView.viewport().rect())
+            self._positionAdOverlay()
             if self.adFlipView.currentIndex() >= 0:
                 duration = self.adFlipView.scrollBar.duration
                 self.adFlipView.scrollBar.duration = 0
                 self.adFlipView.scrollToIndex(self.adFlipView.currentIndex())
                 self.adFlipView.scrollBar.duration = duration
+
+    def _positionAdOverlay(self):
+        self.adOverlay.setGeometry(self.adFlipView.viewport().geometry())
+        self.adOverlay.raise_()
+        self.adPrevious.raise_()
+        self.adNext.raise_()
 
     def _onAdChanged(self, index):
         if not self.ads:
@@ -867,6 +917,7 @@ class AppStorePage(ScrollArea):
         self.adTitle.setText(str(ad.get("title", "")))
         self.adDescription.setText(str(ad.get("description", "")))
         self.adButton.setVisible(bool(ad.get("app_id")))
+        self._positionAdOverlay()
 
     def _nextAd(self):
         if self.ads:
@@ -961,6 +1012,7 @@ class AppStorePage(ScrollArea):
         self.detailAction.setEnabled(
             appId not in self._downloadJobs
             and appId not in self._installing
+            and appId not in self._uninstalling
             and (
                 supported
                 or bool(self.currentApp.get("installed") and not self.currentApp.get("update_available"))
@@ -973,7 +1025,11 @@ class AppStorePage(ScrollArea):
 
     def _onAppAction(self, app):
         appId = int(app["id"])
-        if appId in self._downloadJobs or appId in self._installing:
+        if (
+            appId in self._downloadJobs
+            or appId in self._installing
+            or appId in self._uninstalling
+        ):
             return
         if app.get("installed") and not app.get("update_available"):
             try:
@@ -1068,8 +1124,8 @@ class AppStorePage(ScrollArea):
             args=(app, Path(path)),
             daemon=True,
         )
-        with self._installationLock:
-            self._installationThreads.add(thread)
+        with self._fileOperationLock:
+            self._fileOperationThreads.add(thread)
         thread.start()
 
     def _installInBackground(self, app, path):
@@ -1089,8 +1145,8 @@ class AppStorePage(ScrollArea):
                 path.unlink(missing_ok=True)
             except OSError:
                 pass
-            with self._installationLock:
-                self._installationThreads.discard(threading.current_thread())
+            with self._fileOperationLock:
+                self._fileOperationThreads.discard(threading.current_thread())
 
     _installFinished = Signal(int, object, str)
 
@@ -1112,16 +1168,51 @@ class AppStorePage(ScrollArea):
 
     def _confirmUninstall(self, app):
         appId = int(app["id"])
-        if appId in self._downloadJobs or appId in self._installing:
+        if (
+            appId in self._downloadJobs
+            or appId in self._installing
+            or appId in self._uninstalling
+        ):
             return
         box = MessageBox("确认卸载", f"将删除 {app.get('name', '')} 的安装目录，是否继续？", self)
         if not box.exec():
             return
+        self._uninstalling.add(appId)
+        self._downloadStates[appId] = "卸载中"
+        self._updateVisibleCardState(appId)
+        self._updateDetailAction()
+        thread = threading.Thread(
+            target=self._uninstallInBackground,
+            args=(app,),
+            daemon=True,
+        )
+        with self._fileOperationLock:
+            self._fileOperationThreads.add(thread)
+        thread.start()
+
+    def _uninstallInBackground(self, app):
+        appId = int(app["id"])
         try:
-            local = self.store.installed().get(int(app["id"]))
+            local = self.store.installed().get(appId)
             self.store.uninstall(local or app)
-        except (ApplicationStoreError, OSError) as error:
-            InfoBar.error("卸载失败", str(error), duration=4000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
+            if not self._shuttingDown:
+                self._uninstallFinished.emit(appId, app, "")
+        except Exception as error:
+            if not self._shuttingDown:
+                self._uninstallFinished.emit(appId, app, str(error))
+        finally:
+            with self._fileOperationLock:
+                self._fileOperationThreads.discard(threading.current_thread())
+
+    def _onUninstallFinished(self, appId, app, error):
+        if self._shuttingDown or appId not in self._uninstalling:
+            return
+        self._uninstalling.discard(appId)
+        self._downloadStates.pop(appId, None)
+        if error:
+            InfoBar.error("卸载失败", error, duration=4000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
+            self._updateVisibleCardState(appId)
+            self._updateDetailAction()
             return
         self._reloadState()
         InfoBar.success("已卸载", f"{app.get('name', '')} 已从本机删除。", duration=3000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
@@ -1200,7 +1291,39 @@ class AppStorePage(ScrollArea):
             )
         cfg.set(cfg.pinnedHomeCards, cards)
         self.pinnedCardsChanged.emit(cards)
-        self._renderPresets(app)
+
+    def _toggleApplicationPin(self, app):
+        action = app.get("open_action")
+        if not isinstance(action, dict):
+            return
+        cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
+        key = (int(app["id"]), DIRECT_APPLICATION_PRESET_ID)
+        existing = next(
+            (
+                item
+                for item in cards
+                if (item["app_id"], item["preset_id"]) == key
+            ),
+            None,
+        )
+        if existing:
+            cards.remove(existing)
+        else:
+            cards.append(
+                {
+                    "app_id": key[0],
+                    "preset_id": key[1],
+                    "title": app.get("name", ""),
+                    "description": app.get("description", ""),
+                    "action": action,
+                    "install_dir": app.get("install_dir", ""),
+                    "icon_url": app.get("icon_url", ""),
+                    "icon_path": self.imagePaths.get(app.get("icon_url", ""), ""),
+                }
+            )
+        cfg.set(cfg.pinnedHomeCards, cards)
+        self.pinnedCardsChanged.emit(cards)
+        self._updateVisibleCardState(key[0])
 
     def executePinnedCard(self, item):
         cards = normalize_pinned_cards([item])
@@ -1220,4 +1343,5 @@ class AppStorePage(ScrollArea):
 
     def refreshPinnedCards(self):
         cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
+        self._refreshPinStates(cards)
         self.pinnedCardsChanged.emit(cards)

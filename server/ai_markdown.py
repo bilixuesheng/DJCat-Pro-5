@@ -605,11 +605,11 @@ def _isAjaxRequest():
     )
 
 
-def _adminResponse(message, category, endpoint, status=200):
+def _adminResponse(message, category, endpoint, status=200, url_values=None):
     if _isAjaxRequest():
         return jsonify(message=message, category=category), status
     flash(message, category)
-    return redirect(url_for(endpoint))
+    return redirect(url_for(endpoint, **(url_values or {})))
 
 
 def _adminRoute(view):

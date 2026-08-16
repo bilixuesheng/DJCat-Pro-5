@@ -7,15 +7,18 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, QPoint, Qt, Signal
+from PySide6.QtCore import QObject, QPoint, Qt, QTimer, Signal
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import (
     DrillInTransitionStackedWidget,
+    InfoBar,
+    MessageBox,
     PrimaryPushButton,
     ToolTipFilter,
 )
 
+from app.config.cfg import cfg
 from app.view.pages.app_store_page import ApplicationCard, AppStorePage, CatalogWorker
 
 
@@ -319,9 +322,65 @@ class AppStorePageTest(TestCase):
         self.assertGreaterEqual(card.actionButton.height(), 40)
         self.assertGreaterEqual(card.removeButton.height(), 40)
         self.assertGreaterEqual(card.removeButton.width(), 40)
+        self.assertGreaterEqual(card.pinButton.height(), 40)
+        self.assertGreaterEqual(card.pinButton.width(), 40)
         self.assertGreaterEqual(self.page.adPrevious.width(), 40)
         self.assertGreaterEqual(self.page.adNext.width(), 40)
         card.deleteLater()
+
+    def testInstalledApplicationCanBePinnedDirectlyFromItsCard(self):
+        app = _apps(1)[0] | {
+            "id": 1,
+            "name": "Ghost Downloader",
+            "description": "下载工具",
+            "installed": True,
+            "install_dir": "ghost-downloader",
+            "icon_url": "https://example.test/icon.png",
+            "open_action": {"type": "program", "target": "ghost.exe"},
+        }
+        item = cfg.pinnedHomeCards
+        oldValue = item.value
+
+        def setConfig(configItem, value):
+            setattr(configItem, "_ConfigItem__value", value)
+
+        setattr(item, "_ConfigItem__value", [])
+        try:
+            with patch.object(cfg, "set", side_effect=setConfig):
+                self.page._renderGrid(self.page.installedGrid, [app], True)
+                card = self.page.installedGrid.itemAtPosition(0, 0).widget()
+
+                self.assertFalse(card.pinButton.isHidden())
+                self.assertTrue(card.pinButton.isEnabled())
+                card.pinButton.click()
+
+                pinned = cfg.pinnedHomeCards.value
+                self.assertEqual(len(pinned), 1)
+                self.assertEqual(pinned[0]["preset_id"], 0)
+                self.assertEqual(pinned[0]["title"], app["name"])
+                self.assertEqual(pinned[0]["description"], app["description"])
+                self.assertEqual(pinned[0]["action"], app["open_action"])
+                self.assertTrue(card.pinButton.isChecked())
+
+                setattr(item, "_ConfigItem__value", [])
+                item.valueChanged.emit([])
+                self.assertFalse(card.pinButton.isChecked())
+
+                card.pinButton.click()
+                self.assertEqual(len(cfg.pinnedHomeCards.value), 1)
+                card.pinButton.click()
+                self.assertEqual(cfg.pinnedHomeCards.value, [])
+        finally:
+            setattr(item, "_ConfigItem__value", oldValue)
+
+    def testInstalledApplicationWithoutOpenActionCannotBePinned(self):
+        app = _apps(1)[0] | {"id": 1, "installed": True, "open_action": None}
+
+        self.page._renderGrid(self.page.installedGrid, [app], True)
+        card = self.page.installedGrid.itemAtPosition(0, 0).widget()
+
+        self.assertFalse(card.pinButton.isHidden())
+        self.assertFalse(card.pinButton.isEnabled())
 
     def testAdsOnlyAdvanceOnVisibleAllAppsPage(self):
         self.page.ads = [{"id": 1, "title": "Ad", "image_url": ""}]
@@ -432,11 +491,68 @@ class AppStorePageTest(TestCase):
         QTest.qWait(20)
 
         image = self.page.adOverlay.grab().toImage()
+        upper = image.pixelColor(image.width() - 10, int(image.height() * 0.48))
         middle = image.pixelColor(image.width() - 10, int(image.height() * 0.72))
         bottom = image.pixelColor(image.width() - 10, image.height() - 10)
 
-        self.assertGreaterEqual(middle.alpha(), 180)
-        self.assertGreaterEqual(bottom.alpha(), 240)
+        self.assertTrue(
+            self.page.adOverlay.testAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        )
+        self.assertGreater(upper.alpha(), 0)
+        self.assertLess(upper.alpha(), middle.alpha())
+        self.assertLess(middle.alpha(), bottom.alpha())
+
+    def testAdvertisementCopyStaysFixedAboveEverySlide(self):
+        self.page.ads = [
+            {"id": 1, "title": "First", "description": "one", "image_url": ""},
+            {"id": 2, "title": "Second", "description": "two", "image_url": ""},
+        ]
+        self.page.resize(1000, 800)
+        self.page.show()
+        self.page._switchCatalogTab(1)
+        self.page._prepareAds()
+        QTest.qWait(20)
+
+        self.page._nextAd()
+        QTest.qWait(520)
+
+        self.assertIs(self.page.adOverlay.parentWidget(), self.page.adFlipView)
+        self.assertEqual(
+            self.page.adOverlay.geometry(),
+            self.page.adFlipView.viewport().geometry(),
+        )
+        self.assertEqual(self.page.adTitle.text(), "Second")
+        self.assertEqual(self.page.adDescription.text(), "two")
+        self.assertTrue(self.page.adTitle.isVisible())
+
+    def testRestoringFromWideWindowShrinksCatalogContent(self):
+        apps = _apps(3)
+        for app in apps:
+            app["recommended"] = True
+        self.page.catalog = apps
+        self.page.ads = [{"id": 1, "title": "Ad", "image_url": ""}]
+        self.page.resize(1400, 850)
+        self.page.show()
+        self.page._switchCatalogTab(1)
+        self.page._prepareAds()
+        self.page._renderAll()
+        QTest.qWait(30)
+
+        self.page.resize(760, 700)
+        QTest.qWait(80)
+
+        self.assertLessEqual(
+            self.page.container.width(),
+            self.page.viewport().width() + 2,
+        )
+        self.assertTrue(self.page.allPage.rect().contains(self.page.adFrame.geometry()))
+        self.assertLessEqual(
+            abs(
+                self.page.adFrame.geometry().center().x()
+                - self.page.allPage.rect().center().x()
+            ),
+            2,
+        )
 
     def testAdvertisementResizeKeepsCurrentSlideAligned(self):
         self.page.ads = [
@@ -513,7 +629,12 @@ class AppStorePageTest(TestCase):
         self.page._renderAll()
         self.assertIsNotNone(self.page.allGrid.itemAtPosition(0, 0))
         self.page._showDetail(apps[0])
-        QTest.qWait(350)
+        deadline = time.monotonic() + 1
+        while (
+            self.page.stack.currentWidget() is not self.page.detail
+            and time.monotonic() < deadline
+        ):
+            QTest.qWait(20)
         self.assertIs(self.page.stack.currentWidget(), self.page.detail)
 
         self.page.setSearchText("no matching application")
@@ -596,3 +717,50 @@ class AppStorePageTest(TestCase):
         self.assertLess(time.monotonic() - started, 0.5)
         self.assertTrue(worker.canceled.is_set())
         self.assertNotIn(1, self.page._downloadJobs)
+
+    def testUninstallRunsOutsideTheGuiThreadAndReportsCompletion(self):
+        app = _apps(1)[0] | {"name": "Demo", "installed": True}
+        started = threading.Event()
+        release = threading.Event()
+        local = object()
+        self.page.store.installed = Mock(return_value={0: local})
+
+        def uninstall(value):
+            self.assertIs(value, local)
+            started.set()
+            release.wait(1)
+
+        self.page.store.uninstall = uninstall
+        self.page.store.executeAction = Mock()
+        self.page._renderGrid(self.page.installedGrid, [app], True)
+        self.page.currentApp = app
+        card = self.page.installedGrid.itemAtPosition(0, 0).widget()
+        guiCallback = []
+        try:
+            with patch.object(MessageBox, "exec", return_value=1), patch.object(
+                self.page, "_reloadState"
+            ) as reloadState, patch.object(InfoBar, "success"):
+                QTimer.singleShot(0, lambda: guiCallback.append(True))
+                before = time.monotonic()
+                self.page._confirmUninstall(app)
+
+                self.assertLess(time.monotonic() - before, 0.2)
+                self.assertTrue(started.wait(1))
+                QTest.qWait(20)
+                self.assertEqual(guiCallback, [True])
+                self.assertEqual(card.actionButton.text(), "卸载中")
+                self.assertFalse(card.removeButton.isEnabled())
+                self.assertEqual(self.page.detailAction.text(), "卸载中")
+                self.assertFalse(self.page.detailAction.isEnabled())
+                self.page._onAppAction(app)
+                self.page.store.executeAction.assert_not_called()
+
+                release.set()
+                deadline = time.monotonic() + 1
+                while self.page._uninstalling and time.monotonic() < deadline:
+                    QTest.qWait(10)
+
+                self.assertEqual(self.page._uninstalling, set())
+                reloadState.assert_called_once_with()
+        finally:
+            release.set()

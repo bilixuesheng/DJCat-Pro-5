@@ -50,7 +50,7 @@
             <div class="form-fields two-columns" data-action-form>
                 <label>类型<select name="open_action_type" data-action-type><option value="">不设置</option><option value="program" {% if app and form.open_action_type == 'program' %}selected{% endif %}>程序</option><option value="url" {% if app and form.open_action_type == 'url' %}selected{% endif %}>HTTPS 网页</option><option value="uri" {% if app and form.open_action_type == 'uri' %}selected{% endif %}>系统协议</option></select></label>
                 <label>目标<input name="open_action_target" data-action-target maxlength="2048" value="{{ form.open_action_target if app else '' }}" placeholder="classisland.exe 或 https://example.com"></label>
-                <label class="full" data-action-arguments-wrapper>程序参数<textarea name="open_action_arguments" data-action-arguments maxlength="4096" rows="3" placeholder="--minimized\n--profile default">{{ form.open_action_arguments if app else '' }}</textarea><small>仅程序动作使用；每行填写一个参数。例如 <code>--minimized</code>。</small></label>
+                <label class="full" data-action-arguments-wrapper>程序参数<textarea name="open_action_arguments" data-action-arguments maxlength="4096" rows="3" placeholder="--minimized&#10;--profile default">{{ form.open_action_arguments if app else '' }}</textarea><small>仅程序动作使用；每行填写一个参数。例如 <code>--minimized</code>。</small></label>
                 <p class="action-help full" data-action-help>程序目标只能是安装目录内的相对 EXE；网页必须使用 HTTPS；系统协议会按客户端安全规则校验。</p>
             </div>
         </section>
@@ -64,7 +64,11 @@
             <div class="form-section-title"><span>05</span><div><h2>预设卡片</h2><p>预设卡片在独立页面图形化维护，不再填写 JSON。</p></div></div>
             <div class="market-callout">
                 <p>为这个软件添加启动程序、网页或系统协议卡片，安装后可以固定到客户端主页。</p>
-                <a class="button button-secondary" href="{{ url_for('app_store.adminPresets') }}">打开预设卡片管理</a>
+                {% if app %}
+                <a class="button button-secondary" href="{{ url_for('app_store.adminPresets', app_id=app.id) }}">打开预设卡片管理</a>
+                {% else %}
+                <span>先保存软件，再添加预设卡片。</span>
+                {% endif %}
             </div>
         </section>
 

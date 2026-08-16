@@ -81,6 +81,41 @@ class AppStoreServerTest(TestCase):
         )
         self.assertEqual(response.status_code, expectedStatus)
 
+    def _createPreset(self, appId=1, title="打开应用", **overrides):
+        data = {
+            "csrf_token": self._csrf(),
+            "preset_app_id": str(appId),
+            "preset_title": title,
+            "preset_description": "启动软件",
+            "preset_action_type": "program",
+            "preset_action_target": "demo.exe",
+            "preset_action_arguments": "",
+        }
+        data.update(overrides)
+        response = self.client.post(
+            "/admin/app-store/presets/",
+            base_url="https://dash.djcatpro.top",
+            data=data,
+        )
+        self.assertEqual(response.status_code, 302)
+
+    def _createAd(self, title="广告", enabled=True, **overrides):
+        data = {
+            "csrf_token": self._csrf(),
+            "title": title,
+            "description": "广告简介",
+            "image_url": "https://cdn.example.test/ad.png",
+        }
+        if enabled:
+            data["enabled"] = "1"
+        data.update(overrides)
+        response = self.client.post(
+            "/admin/app-store/ads/",
+            base_url="https://dash.djcatpro.top",
+            data=data,
+        )
+        self.assertEqual(response.status_code, 302)
+
     def testAdminAllowsSpaceInInstallDirectory(self):
         self._createApp("Demo App")
 
@@ -244,8 +279,16 @@ class AppStoreServerTest(TestCase):
         self.assertNotIn("presets_json", page.get_data(as_text=True))
         self.assertIn("打开预设卡片管理", page.get_data(as_text=True))
         presets = self.client.get("/admin/app-store/presets/", base_url="https://dash.djcatpro.top")
-        self.assertIn("预设卡片管理", presets.get_data(as_text=True))
-        self.assertIn("--minimized", presets.get_data(as_text=True))
+        presetsBody = presets.get_data(as_text=True)
+        self.assertIn("选择软件", presetsBody)
+        self.assertNotIn('name="preset_title"', presetsBody)
+        selectedPresets = self.client.get(
+            "/admin/app-store/presets/?app_id=1",
+            base_url="https://dash.djcatpro.top",
+        )
+        selectedBody = selectedPresets.get_data(as_text=True)
+        self.assertIn("新增预设卡片", selectedBody)
+        self.assertIn("--minimized", selectedBody)
 
         edited = self.client.post(
             "/admin/app-store/presets/1",
@@ -447,6 +490,152 @@ class AppStoreServerTest(TestCase):
         self.assertIn('data-remove-on-success="tr"', body)
         self.assertIn("data-item-count", body)
         self.assertNotIn('class="table-action" href="/admin/app-store/apps/1">Demo</a>', body)
+
+    def testPresetManagementSelectsAnApplicationBeforeEditingCards(self):
+        self._createApp("demo-one", name="Demo One")
+        self._createApp("demo-two", name="Demo Two")
+        self._createPreset(1, "第一张卡片")
+
+        overview = self.client.get(
+            "/admin/app-store/presets/",
+            base_url="https://dash.djcatpro.top",
+        )
+        body = overview.get_data(as_text=True)
+        self.assertIn("选择软件", body)
+        self.assertIn("Demo One", body)
+        self.assertIn("Demo Two", body)
+        self.assertIn("1 张卡片", body)
+        self.assertNotIn('name="preset_title"', body)
+
+        selected = self.client.get(
+            "/admin/app-store/presets/?app_id=1",
+            base_url="https://dash.djcatpro.top",
+        )
+        selectedBody = selected.get_data(as_text=True)
+        self.assertIn("Demo One", selectedBody)
+        self.assertIn("的预设卡片", selectedBody)
+        self.assertIn("第一张卡片", selectedBody)
+        self.assertIn('name="preset_app_id" value="1"', selectedBody)
+        self.assertIn("返回软件列表", selectedBody)
+
+        editing = self.client.get(
+            "/admin/app-store/presets/?app_id=1&edit=1",
+            base_url="https://dash.djcatpro.top",
+        )
+        self.assertIn("编辑预设卡片", editing.get_data(as_text=True))
+        self.assertEqual(
+            self.client.get(
+                "/admin/app-store/presets/?app_id=999",
+                base_url="https://dash.djcatpro.top",
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get(
+                "/admin/app-store/presets/?app_id=2&edit=1",
+                base_url="https://dash.djcatpro.top",
+            ).status_code,
+            404,
+        )
+
+    def testMarketContentOrderCanBeManagedWithMoveButtons(self):
+        self._createApp("demo-one", name="One")
+        self._createApp("demo-two", name="Two")
+        self._createApp("demo-three", name="Three")
+
+        movedApp = self.client.post(
+            "/admin/app-store/apps/3/move",
+            base_url="https://dash.djcatpro.top",
+            data={"csrf_token": self._csrf(), "direction": "up"},
+        )
+        self.assertEqual(movedApp.status_code, 302)
+        self.assertEqual(
+            [app["id"] for app in self.client.get(
+                "/app-store/catalog", base_url="https://api.djcatpro.top"
+            ).json["apps"]],
+            [1, 3, 2],
+        )
+
+        self._createPreset(1, "第一张")
+        self._createPreset(1, "第二张")
+        movedPreset = self.client.post(
+            "/admin/app-store/presets/2/move",
+            base_url="https://dash.djcatpro.top",
+            data={"csrf_token": self._csrf(), "direction": "up"},
+        )
+        self.assertEqual(movedPreset.status_code, 302)
+        catalog = self.client.get(
+            "/app-store/catalog", base_url="https://api.djcatpro.top"
+        ).json
+        self.assertEqual(
+            [preset["title"] for preset in catalog["apps"][0]["presets"]],
+            ["第二张", "第一张"],
+        )
+
+        self._createAd("第一条广告")
+        self._createAd("第二条广告")
+        movedAd = self.client.post(
+            "/admin/app-store/ads/2/move",
+            base_url="https://dash.djcatpro.top",
+            data={"csrf_token": self._csrf(), "direction": "up"},
+        )
+        self.assertEqual(movedAd.status_code, 302)
+        catalog = self.client.get(
+            "/app-store/catalog", base_url="https://api.djcatpro.top"
+        ).json
+        self.assertEqual(
+            [ad["title"] for ad in catalog["ads"]],
+            ["第二条广告", "第一条广告"],
+        )
+
+        invalidMove = self.client.post(
+            "/admin/app-store/apps/1/move",
+            base_url="https://dash.djcatpro.top",
+            headers={"Accept": "application/json"},
+            data={"csrf_token": self._csrf(), "direction": "sideways"},
+        )
+        self.assertEqual(invalidMove.status_code, 400)
+
+    def testAdvertisementPageSeparatesCreationAndPublishedList(self):
+        self._createApp()
+        self._createAd("投放中的广告", app_id="1")
+        self._createAd("暂停的广告", enabled=False)
+
+        page = self.client.get(
+            "/admin/app-store/ads/",
+            base_url="https://dash.djcatpro.top",
+        )
+        body = page.get_data(as_text=True)
+        self.assertIn("新建广告", body)
+        self.assertIn("已投放广告", body)
+        self.assertIn("投放中", body)
+        self.assertIn("已暂停", body)
+        self.assertIn("调整广告顺序", body)
+        self.assertIn("?edit=1", body)
+
+    def testExistingApplicationTableIsMigratedForManualOrdering(self):
+        self._createApp()
+        with closing(ai_markdown._connect()) as database:
+            database.execute("DROP INDEX market_apps_order_idx")
+            database.execute(
+                "ALTER TABLE market_applications DROP COLUMN sort_order"
+            )
+            database.commit()
+
+        page = self.client.get(
+            "/admin/app-store/apps/",
+            base_url="https://dash.djcatpro.top",
+        )
+
+        self.assertEqual(page.status_code, 200)
+        with closing(ai_markdown._connect()) as database:
+            columns = {
+                row[1]
+                for row in database.execute(
+                    "PRAGMA table_info(market_applications)"
+                )
+            }
+        self.assertIn("sort_order", columns)
 
     def testAdminAndApiHostsDoNotCross(self):
         self.assertEqual(

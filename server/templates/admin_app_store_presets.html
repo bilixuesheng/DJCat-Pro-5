@@ -7,52 +7,113 @@
 <div class="market-page">
     <header class="page-header">
         <div>
-            <div class="eyebrow">应用市场 / 预设卡片管理</div>
-            <h1>主页预设</h1>
-            <p>用图形化表单配置安装后可执行的程序、网页和系统协议操作。</p>
+            <div class="eyebrow">应用市场 / 预设卡片管理{% if selected_app %} / {{ selected_app.name }}{% endif %}</div>
+            {% if selected_app %}
+            <h1>{{ selected_app.name }}<br class="mobile-title-break"> 的预设卡片</h1>
+            <p>新建、编辑并调整该软件在客户端详情页中的卡片顺序。</p>
+            {% else %}
+            <h1>选择软件</h1>
+            <p>先选择软件，再新建和管理它的主页预设卡片，避免不同软件的配置混在一起。</p>
+            {% endif %}
         </div>
-        <div class="machine-count"><strong>{{ presets|length }}</strong><span>张卡片</span></div>
+        <div class="machine-count">
+            <strong>{{ presets|length if selected_app else apps|length }}</strong>
+            <span>{{ '张卡片' if selected_app else '个软件' }}</span>
+        </div>
     </header>
 
-    <form class="config-form" method="post" action="{{ url_for('app_store.adminPresets') }}" data-action-form>
+    {% if not selected_app %}
+    <section class="section-block" aria-labelledby="preset-apps-title">
+        <div class="section-heading">
+            <div><span class="section-index">01</span><h2 id="preset-apps-title">全部软件</h2></div>
+            <a href="{{ url_for('app_store.adminApps') }}">前往软件排序 →</a>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>顺序</th><th>软件</th><th>版本</th><th>预设卡片</th><th>操作</th></tr></thead>
+                <tbody>
+                {% for app in apps %}
+                    <tr>
+                        <td><code>{{ '%02d'|format(loop.index) }}</code></td>
+                        <td><strong>{{ app.name }}</strong></td>
+                        <td>{{ app.version or '未填写' }}</td>
+                        <td><span>{{ app.preset_count }} 张卡片</span></td>
+                        <td><a class="table-action" href="{{ url_for('app_store.adminPresets', app_id=app.id) }}">管理卡片 →</a></td>
+                    </tr>
+                {% else %}
+                    <tr><td class="empty" colspan="5">还没有软件，请先在软件管理中新增。</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% else %}
+    <form class="config-form" method="post" action="{{ url_for('app_store.adminPreset', preset_id=edit_preset.id) if edit_preset else url_for('app_store.adminPresets') }}" data-action-form>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="preset_app_id" value="{{ selected_app.id }}">
         <section class="form-section">
-            <div class="form-section-title"><span>01</span><div><h2>新增预设卡片</h2><p>安装后用户可以把卡片固定到主页。</p></div></div>
+            <div class="form-section-title">
+                <span>01</span>
+                <div>
+                    <h2>{{ '编辑预设卡片' if edit_preset else '新增预设卡片' }}</h2>
+                    <p>卡片顺序在下方列表中单独调整。</p>
+                </div>
+            </div>
             <div class="form-fields two-columns">
-                <label>所属软件<select name="preset_app_id" required><option value="">请选择软件</option>{% for app in apps %}<option value="{{ app.id }}">{{ app.name }}</option>{% endfor %}</select></label>
-                <label>排序<input type="number" name="preset_sort_order" value="0"></label>
-                <label>卡片标题<input name="preset_title" maxlength="80" placeholder="例如：打开 ClassIsland" required></label>
-                <label>卡片简介<input name="preset_description" maxlength="240" placeholder="安装后点击卡片启动主程序"></label>
-                <label>卡片类型（操作）<select name="preset_action_type" data-action-type><option value="program">程序</option><option value="url">HTTPS 网页</option><option value="uri">系统协议</option></select></label>
-                <label>操作目标<input name="preset_action_target" data-action-target maxlength="2048" placeholder="classisland.exe 或 https://example.com" required></label>
-                <label class="full" data-action-arguments-wrapper>程序参数<textarea name="preset_action_arguments" data-action-arguments maxlength="4096" rows="3" placeholder="--minimized\n--profile default"></textarea><small>仅程序动作使用，每行一个参数；程序目标必须是安装目录内的相对 EXE。</small></label>
+                <label>卡片标题<input name="preset_title" maxlength="80" value="{{ edit_preset.title if edit_preset else '' }}" placeholder="例如：打开 {{ selected_app.name }}" required></label>
+                <label>卡片简介<input name="preset_description" maxlength="240" value="{{ edit_preset.description if edit_preset else '' }}" placeholder="安装后点击卡片启动主程序"></label>
+                <label>卡片类型（操作）
+                    <select name="preset_action_type" data-action-type>
+                        <option value="program" {% if not edit_preset or edit_preset.action_type == 'program' %}selected{% endif %}>程序</option>
+                        <option value="url" {% if edit_preset and edit_preset.action_type == 'url' %}selected{% endif %}>HTTPS 网页</option>
+                        <option value="uri" {% if edit_preset and edit_preset.action_type == 'uri' %}selected{% endif %}>系统协议</option>
+                    </select>
+                </label>
+                <label>操作目标<input name="preset_action_target" data-action-target maxlength="2048" value="{{ edit_preset.action_target if edit_preset else '' }}" placeholder="classisland.exe 或 https://example.com" required></label>
+                <label class="full" data-action-arguments-wrapper>程序参数<textarea name="preset_action_arguments" data-action-arguments maxlength="4096" rows="3" placeholder="--minimized&#10;--profile default">{{ edit_preset.action_arguments if edit_preset else '' }}</textarea><small>仅程序动作使用，每行一个参数；程序目标必须是安装目录内的相对 EXE。</small></label>
                 <p class="action-help full" data-action-help>网页必须使用 HTTPS；系统协议会按客户端安全规则校验。</p>
             </div>
-            <div class="form-actions"><span>保存后客户端下次拉取目录即可看到。</span><button class="button button-primary" type="submit">新增卡片</button></div>
+            <div class="form-actions full">
+                <a href="{{ url_for('app_store.adminPresets') }}">← 返回软件列表</a>
+                <span class="form-action-buttons">
+                    {% if edit_preset %}<button class="button button-danger" type="submit" name="delete" value="1" data-confirm="确认删除这张预设卡片吗？">删除</button>{% endif %}
+                    <button class="button button-primary" type="submit">{{ '保存卡片' if edit_preset else '新增卡片' }}</button>
+                </span>
+            </div>
         </section>
     </form>
 
-    <section class="section-block">
-        <div class="section-heading"><div><span class="section-index">02</span><h2>已配置卡片</h2></div></div>
-        {% for preset in presets %}
-        <form class="form-section" method="post" action="{{ url_for('app_store.adminPreset', preset_id=preset.id) }}" data-action-form>
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <div class="form-section-title"><span>{{ '%02d'|format(loop.index) }}</span><div><h2>{{ preset.title }}</h2><p>{{ preset.app_name }}</p></div></div>
-            <div class="form-fields two-columns">
-                <label>所属软件<select name="preset_app_id" required>{% for app in apps %}<option value="{{ app.id }}" {% if app.id == preset.app_id %}selected{% endif %}>{{ app.name }}</option>{% endfor %}</select></label>
-                <label>排序<input type="number" name="preset_sort_order" value="{{ preset.sort_order }}"></label>
-                <label>卡片标题<input name="preset_title" maxlength="80" value="{{ preset.title }}" required></label>
-                <label>卡片简介<input name="preset_description" maxlength="240" value="{{ preset.description }}"></label>
-                <label>卡片类型（操作）<select name="preset_action_type" data-action-type><option value="program" {% if preset.action_type == 'program' %}selected{% endif %}>程序</option><option value="url" {% if preset.action_type == 'url' %}selected{% endif %}>HTTPS 网页</option><option value="uri" {% if preset.action_type == 'uri' %}selected{% endif %}>系统协议</option></select></label>
-                <label>操作目标<input name="preset_action_target" data-action-target maxlength="2048" value="{{ preset.action_target }}" required></label>
-                <label class="full" data-action-arguments-wrapper>程序参数<textarea name="preset_action_arguments" data-action-arguments maxlength="4096" rows="3">{{ preset.action_arguments }}</textarea><small>每行一个参数。</small></label>
-                <p class="action-help full" data-action-help>网页必须使用 HTTPS；系统协议会按客户端安全规则校验。</p>
-            </div>
-            <div class="form-actions full"><span>编号 {{ preset.id }} · {{ preset.action_type }}</span><span><button class="button button-danger" type="submit" name="delete" value="1" data-confirm="确认删除这张预设卡片吗？">删除</button> <button class="button button-secondary" type="submit">保存</button></span></div>
-        </form>
-        {% else %}
-        <div class="notice">还没有预设卡片，请先新增一张。</div>
-        {% endfor %}
+    <section class="section-block" aria-labelledby="preset-list-title">
+        <div class="section-heading">
+            <div><span class="section-index">02</span><h2 id="preset-list-title">已配置卡片</h2></div>
+            {% if edit_preset %}<a href="{{ url_for('app_store.adminPresets', app_id=selected_app.id) }}">取消编辑</a>{% endif %}
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>顺序</th><th>标题</th><th>类型</th><th>操作目标</th><th>操作</th></tr></thead>
+                <tbody>
+                {% for preset in presets %}
+                    <tr>
+                        <td>
+                            <form class="order-controls" method="post" action="{{ url_for('app_store.adminMovePreset', preset_id=preset.id) }}" aria-label="调整 {{ preset.title }} 的顺序">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <span>{{ '%02d'|format(loop.index) }}</span>
+                                <button type="submit" name="direction" value="up" aria-label="上移 {{ preset.title }}" {% if loop.first %}disabled{% endif %}>↑</button>
+                                <button type="submit" name="direction" value="down" aria-label="下移 {{ preset.title }}" {% if loop.last %}disabled{% endif %}>↓</button>
+                            </form>
+                        </td>
+                        <td><strong>{{ preset.title }}</strong><br><small>{{ preset.description or '无简介' }}</small></td>
+                        <td>{{ preset.action_type }}</td>
+                        <td><code>{{ preset.action_target }}</code></td>
+                        <td><a class="table-action" href="{{ url_for('app_store.adminPresets', app_id=selected_app.id, edit=preset.id) }}">编辑</a></td>
+                    </tr>
+                {% else %}
+                    <tr><td class="empty" colspan="5">该软件还没有预设卡片，请在上方新增。</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </section>
+    {% endif %}
 </div>
 {% endblock %}

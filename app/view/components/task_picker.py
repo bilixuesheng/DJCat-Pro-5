@@ -69,13 +69,17 @@ class TouchTimePicker(TimePicker):
 
     @staticmethod
     def _settleColumn(column, state):
+        if state == QScroller.State.Dragging:
+            column.vScrollBar.ani.stop()
+            column.vScrollBar.resetValue(column.verticalScrollBar().value())
+            return
         if state != QScroller.State.Inactive:
             return
         item = column.itemAt(column.viewport().rect().center())
         if item is None or not item.flags() & Qt.ItemFlag.ItemIsEnabled:
             return
         column.setCurrentIndex(column.row(item))
-        column.scrollToItem(item)
+        column.scrollToItem(column.currentItem())
 
 
 class TaskFormSettingCard(SettingCard):

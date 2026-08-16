@@ -24,11 +24,19 @@
             </div>
         </div>
         <div class="table-wrap">
-            <table>
-                <thead><tr><th>编号</th><th>名称</th><th>版本</th><th>安装目录</th><th>推荐</th><th>下载次数</th><th>更新时间</th><th>操作</th></tr></thead>
+            <table data-empty-message="还没有软件，先新增一个。">
+                <thead><tr><th>顺序</th><th>编号</th><th>名称</th><th>版本</th><th>安装目录</th><th>推荐</th><th>下载次数</th><th>更新时间</th><th>操作</th></tr></thead>
                 <tbody>
                 {% for app in apps %}
                     <tr>
+                        <td>
+                            <form class="order-controls" method="post" action="{{ url_for('app_store.adminMoveApp', app_id=app.id) }}" aria-label="调整 {{ app.name }} 的顺序">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <span>{{ '%02d'|format(loop.index) }}</span>
+                                <button type="submit" name="direction" value="up" aria-label="上移 {{ app.name }}" {% if loop.first %}disabled{% endif %}>↑</button>
+                                <button type="submit" name="direction" value="down" aria-label="下移 {{ app.name }}" {% if loop.last %}disabled{% endif %}>↓</button>
+                            </form>
+                        </td>
                         <td><code>{{ app.id }}</code></td>
                         <td><span>{{ app.name }}</span><br><small>{{ app.developer or '未填写开发者' }}</small></td>
                         <td>{{ app.version }}</td>
@@ -47,7 +55,7 @@
                         </td>
                     </tr>
                 {% else %}
-                    <tr><td class="empty" colspan="8">还没有软件，先新增一个。</td></tr>
+                    <tr><td class="empty" colspan="9">还没有软件，先新增一个。</td></tr>
                 {% endfor %}
                 </tbody>
             </table>
