@@ -14,13 +14,13 @@
         <div class="machine-count"><strong>{{ ads|selectattr('enabled')|list|length }}</strong><span>条投放中</span></div>
     </header>
 
-    <form class="config-form" method="post" action="{{ url_for('app_store.adminAd', ad_id=edit_ad.id) if edit_ad else url_for('app_store.adminAds') }}">
+    <form class="config-form" method="post" action="{{ url_for('app_store.adminAd', ad_id=edit_ad.id) if editing else url_for('app_store.adminAds') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <section class="form-section">
             <div class="form-section-title">
                 <span>01</span>
                 <div>
-                    <h2>{{ '编辑广告' if edit_ad else '新建广告' }}</h2>
+                    <h2>{{ '编辑广告' if editing else '新建广告' }}</h2>
                     <p>广告顺序在下方投放列表中单独调整。</p>
                 </div>
             </div>
@@ -35,15 +35,15 @@
                 <label class="full">简介<textarea name="description" maxlength="300" rows="2">{{ edit_ad.description if edit_ad else '' }}</textarea></label>
                 <label class="full">图片 HTTPS 链接<input type="url" name="image_url" maxlength="2048" value="{{ edit_ad.image_url if edit_ad else '' }}" required></label>
                 <label class="option-row full">
-                    <span><strong>{{ '启用投放' if edit_ad else '立即投放' }}</strong><small>关闭后仍保留配置，但客户端不会收到这条广告。</small></span>
+                    <span><strong>{{ '启用投放' if editing else '立即投放' }}</strong><small>关闭后仍保留配置，但客户端不会收到这条广告。</small></span>
                     <input type="checkbox" name="enabled" value="1" {% if not edit_ad or edit_ad.enabled %}checked{% endif %}>
                 </label>
             </div>
             <div class="form-actions full">
-                <span>{{ '编号 ' ~ edit_ad.id if edit_ad else '新广告会追加到轮播末尾' }}</span>
+                <span>{{ '编号 ' ~ edit_ad.id if editing else '新广告会追加到轮播末尾' }}</span>
                 <span class="form-action-buttons">
-                    {% if edit_ad %}<button class="button button-danger" type="submit" name="delete" value="1" data-confirm="确认删除这条广告吗？">删除</button>{% endif %}
-                    <button class="button button-primary" type="submit">{{ '保存广告' if edit_ad else '新建广告' }}</button>
+                    {% if editing %}<button class="button button-danger" type="submit" name="delete" value="1" data-confirm="确认删除这条广告吗？">删除</button>{% endif %}
+                    <button class="button button-primary" type="submit">{{ '保存广告' if editing else '新建广告' }}</button>
                 </span>
             </div>
         </section>

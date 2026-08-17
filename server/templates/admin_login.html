@@ -30,7 +30,7 @@
                 <form method="post" action="{{ url_for('adminLogin') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <label>用户名
-                        <input name="username" autocomplete="username" required autofocus>
+                        <input name="username" value="{{ username }}" autocomplete="username" required autofocus>
                     </label>
                     <label>密码
                         <input type="password" name="password" autocomplete="current-password" required>

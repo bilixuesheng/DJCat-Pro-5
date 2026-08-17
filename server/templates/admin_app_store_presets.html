@@ -48,14 +48,14 @@
         </div>
     </section>
     {% else %}
-    <form class="config-form" method="post" action="{{ url_for('app_store.adminPreset', preset_id=edit_preset.id) if edit_preset else url_for('app_store.adminPresets') }}" data-action-form>
+    <form class="config-form" method="post" action="{{ url_for('app_store.adminPreset', preset_id=edit_preset.id) if editing else url_for('app_store.adminPresets') }}" data-action-form>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="preset_app_id" value="{{ selected_app.id }}">
         <section class="form-section">
             <div class="form-section-title">
                 <span>01</span>
                 <div>
-                    <h2>{{ '编辑预设卡片' if edit_preset else '新增预设卡片' }}</h2>
+                    <h2>{{ '编辑预设卡片' if editing else '新增预设卡片' }}</h2>
                     <p>卡片顺序在下方列表中单独调整。</p>
                 </div>
             </div>
@@ -76,8 +76,8 @@
             <div class="form-actions full">
                 <a href="{{ url_for('app_store.adminPresets') }}">← 返回软件列表</a>
                 <span class="form-action-buttons">
-                    {% if edit_preset %}<button class="button button-danger" type="submit" name="delete" value="1" data-confirm="确认删除这张预设卡片吗？">删除</button>{% endif %}
-                    <button class="button button-primary" type="submit">{{ '保存卡片' if edit_preset else '新增卡片' }}</button>
+                    {% if editing %}<button class="button button-danger" type="submit" name="delete" value="1" data-confirm="确认删除这张预设卡片吗？">删除</button>{% endif %}
+                    <button class="button button-primary" type="submit">{{ '保存卡片' if editing else '新增卡片' }}</button>
                 </span>
             </div>
         </section>
@@ -86,7 +86,7 @@
     <section class="section-block" aria-labelledby="preset-list-title">
         <div class="section-heading">
             <div><span class="section-index">02</span><h2 id="preset-list-title">已配置卡片</h2></div>
-            {% if edit_preset %}<a href="{{ url_for('app_store.adminPresets', app_id=selected_app.id) }}">取消编辑</a>{% endif %}
+            {% if editing %}<a href="{{ url_for('app_store.adminPresets', app_id=selected_app.id) }}">取消编辑</a>{% endif %}
         </div>
         <div class="table-wrap">
             <table>

@@ -340,7 +340,13 @@ def _appPayload(row, packages, presets):
 
 def _adminFormData(database, appId=None):
     if appId is None:
-        return None, {"packages": {}, "open_action_arguments": ""}
+        return None, {
+            "packages": {
+                architecture: {"enabled": True, "download_url": ""}
+                for architecture in ARCHITECTURES
+            },
+            "open_action_arguments": "",
+        }
     row = database.execute(
         "SELECT * FROM market_applications WHERE id = ?", (appId,)
     ).fetchone()
@@ -586,12 +592,14 @@ def register_app_store(
     def adminApp(app_id):
         return _saveApp(app_id) if request.method == "POST" else _renderApp(app_id)
 
-    def _renderApp(appId):
+    def _renderApp(appId, submitted=None):
         _ensureSchema(connect)
         with closing(connect()) as database:
             row, form = _adminFormData(database, appId)
         if appId is not None and row is None:
             abort(404)
+        if submitted is not None:
+            form = submitted
         return render_template(
             "admin_app_store_app.html",
             csrf_token=csrf_token(),
@@ -603,6 +611,7 @@ def register_app_store(
 
     def _saveApp(appId):
         check_csrf()
+        formAppId = appId
         values = {
             "name": request.form.get("name", "").strip(),
             "developer": request.form.get("developer", "").strip(),
@@ -638,7 +647,12 @@ def register_app_store(
             request.form.get("open_action_arguments", ""),
         )
         if actionType and not action:
-            errors.append("打开动作配置无效")
+            errors.append(
+                "HTTPS 网页目标必须以 https:// 开头；"
+                "classisland:// 等自定义协议请选择“系统协议”"
+                if actionType == "url"
+                else "打开动作配置无效"
+            )
         packages = {}
         for architecture in ARCHITECTURES:
             rawUrl = request.form.get(f"{architecture}_url", "").strip()
@@ -650,12 +664,32 @@ def register_app_store(
                 errors.append(f"{architecture} 安装包链接无效")
             if url:
                 packages[architecture] = (enabled, url)
+        submitted = {
+            **values,
+            "icon_url": request.form.get("icon_url", "").strip(),
+            "open_action_type": actionType,
+            "open_action_target": request.form.get("open_action_target", ""),
+            "open_action_arguments": request.form.get(
+                "open_action_arguments", ""
+            ),
+            "packages": {
+                architecture: {
+                    "enabled": bool(
+                        request.form.get(f"{architecture}_enabled")
+                    ),
+                    "download_url": request.form.get(
+                        f"{architecture}_url", ""
+                    ).strip(),
+                }
+                for architecture in ARCHITECTURES
+            },
+        }
         if errors:
             for error in errors:
                 from flask import flash
 
                 flash(error, "error")
-            return _renderApp(appId), 400
+            return _renderApp(formAppId, submitted), 400
         _ensureSchema(connect)
         with closing(connect()) as database:
             try:
@@ -683,6 +717,7 @@ def register_app_store(
                         "error",
                         "app_store.adminApps",
                         400,
+                        renderer=lambda: _renderApp(formAppId, submitted),
                     )
                 if appId is None:
                     sortOrder = database.execute(
@@ -738,6 +773,7 @@ def register_app_store(
                     "error",
                     "app_store.adminApps",
                     400,
+                    renderer=lambda: _renderApp(formAppId, submitted),
                 )
         return admin_response("软件信息已保存", "success", "app_store.adminApps")
 
@@ -784,9 +820,11 @@ def register_app_store(
             database.commit()
         return admin_response("软件顺序已更新", "success", "app_store.adminApps")
 
-    def _renderPresets():
-        appIdValue = request.args.get("app_id")
-        editValue = request.args.get("edit")
+    def _renderPresets(appIdValue=None, editValue=None, submitted=None):
+        if appIdValue is None:
+            appIdValue = request.args.get("app_id")
+        if editValue is None:
+            editValue = request.args.get("edit")
         try:
             appId = int(appIdValue) if appIdValue is not None else None
             editId = int(editValue) if editValue is not None else None
@@ -845,8 +883,10 @@ def register_app_store(
                 preset["action_arguments"]
             )
             presets.append(preset)
-        editPreset = dict(editRow) if editRow is not None else None
-        if editPreset is not None:
+        editPreset = submitted if submitted is not None else (
+            dict(editRow) if editRow is not None else None
+        )
+        if editPreset is not None and submitted is None:
             editPreset["action_arguments"] = _argumentsText(
                 editPreset["action_arguments"]
             )
@@ -858,6 +898,7 @@ def register_app_store(
             apps=apps,
             selected_app=selectedApp,
             edit_preset=editPreset,
+            editing=editId is not None,
         )
 
     @blueprint.route("/admin/app-store/presets/", methods=["GET", "POST"])
@@ -928,17 +969,35 @@ def register_app_store(
         if len(description) > 240:
             errors.append("卡片简介不能超过 240 个字符")
         if not action:
-            errors.append("预设卡片动作配置无效")
+            errors.append(
+                "HTTPS 网页目标必须以 https:// 开头；"
+                "classisland:// 等自定义协议请选择“系统协议”"
+                if actionType == "url"
+                else "预设卡片动作配置无效"
+            )
         if sortOrderValue is not None and sortOrder is None:
             errors.append("预设卡片顺序无效")
         redirectValues = {"app_id": appId} if appId else None
         if errors:
+            submitted = {
+                "id": presetId,
+                "title": title,
+                "description": description,
+                "action_type": actionType,
+                "action_target": request.form.get(
+                    "preset_action_target", ""
+                ),
+                "action_arguments": request.form.get(
+                    "preset_action_arguments", ""
+                ),
+            }
             return admin_response(
                 "；".join(errors),
                 "error",
                 "app_store.adminPresets",
                 400,
                 url_values=redirectValues,
+                renderer=lambda: _renderPresets(appId, presetId, submitted),
             )
         _ensureSchema(connect)
         with closing(connect()) as database:
@@ -1056,38 +1115,19 @@ def register_app_store(
             url_values={"app_id": row["app_id"]},
         )
 
-    @blueprint.route("/admin/app-store/ads/", methods=["GET", "POST"])
-    @login_required
-    def adminAds():
-        if request.method == "POST":
-            check_csrf()
-            values, error = _advertisementForm()
-            if error:
-                return admin_response(
-                    error, "error", "app_store.adminAds", 400
-                )
-            title, description, imageUrl, appId, sortOrder, enabled = values
-            _ensureSchema(connect)
-            with closing(connect()) as database:
-                if not _applicationExists(database, appId):
-                    return admin_response(
-                        "绑定的软件不存在",
-                        "error",
-                        "app_store.adminAds",
-                        400,
-                    )
-                if sortOrder is None:
-                    sortOrder = database.execute(
-                        "SELECT COALESCE(MAX(sort_order), -1) + 1 "
-                        "FROM market_advertisements"
-                    ).fetchone()[0]
-                database.execute(
-                    "INSERT INTO market_advertisements(title, description, image_url, app_id, sort_order, enabled) VALUES (?, ?, ?, ?, ?, ?)",
-                    (title, description, imageUrl, appId, sortOrder, enabled),
-                )
-                database.commit()
-            return admin_response("广告已新增", "success", "app_store.adminAds")
-        editValue = request.args.get("edit")
+    def _submittedAd(adId=None):
+        return {
+            "id": adId,
+            "title": request.form.get("title", ""),
+            "description": request.form.get("description", ""),
+            "image_url": request.form.get("image_url", ""),
+            "app_id": request.form.get("app_id", type=int),
+            "enabled": bool(request.form.get("enabled")),
+        }
+
+    def _renderAds(editValue=None, submitted=None):
+        if editValue is None:
+            editValue = request.args.get("edit")
         try:
             editId = int(editValue) if editValue is not None else None
             if editId is not None and editId <= 0:
@@ -1116,6 +1156,8 @@ def register_app_store(
             apps = database.execute(
                 "SELECT id, name FROM market_applications ORDER BY sort_order, id"
             ).fetchall()
+        if submitted is not None:
+            editAd = submitted
         return render_template(
             "admin_app_store_ads.html",
             csrf_token=csrf_token(),
@@ -1123,7 +1165,48 @@ def register_app_store(
             ads=ads,
             apps=apps,
             edit_ad=editAd,
+            editing=editId is not None,
         )
+
+    @blueprint.route("/admin/app-store/ads/", methods=["GET", "POST"])
+    @login_required
+    def adminAds():
+        if request.method == "POST":
+            check_csrf()
+            values, error = _advertisementForm()
+            if error:
+                submitted = _submittedAd()
+                return admin_response(
+                    error,
+                    "error",
+                    "app_store.adminAds",
+                    400,
+                    renderer=lambda: _renderAds(submitted=submitted),
+                )
+            title, description, imageUrl, appId, sortOrder, enabled = values
+            submitted = _submittedAd()
+            _ensureSchema(connect)
+            with closing(connect()) as database:
+                if not _applicationExists(database, appId):
+                    return admin_response(
+                        "绑定的软件不存在",
+                        "error",
+                        "app_store.adminAds",
+                        400,
+                        renderer=lambda: _renderAds(submitted=submitted),
+                    )
+                if sortOrder is None:
+                    sortOrder = database.execute(
+                        "SELECT COALESCE(MAX(sort_order), -1) + 1 "
+                        "FROM market_advertisements"
+                    ).fetchone()[0]
+                database.execute(
+                    "INSERT INTO market_advertisements(title, description, image_url, app_id, sort_order, enabled) VALUES (?, ?, ?, ?, ?, ?)",
+                    (title, description, imageUrl, appId, sortOrder, enabled),
+                )
+                database.commit()
+            return admin_response("广告已新增", "success", "app_store.adminAds")
+        return _renderAds()
 
     @blueprint.post("/admin/app-store/ads/<int:ad_id>")
     @login_required
@@ -1146,8 +1229,16 @@ def register_app_store(
             return admin_response("广告已删除", "success", "app_store.adminAds")
         values, error = _advertisementForm()
         if error:
-            return admin_response(error, "error", "app_store.adminAds", 400)
+            submitted = _submittedAd(ad_id)
+            return admin_response(
+                error,
+                "error",
+                "app_store.adminAds",
+                400,
+                renderer=lambda: _renderAds(ad_id, submitted),
+            )
         title, description, imageUrl, appId, sortOrder, enabled = values
+        submitted = _submittedAd(ad_id)
         with closing(connect()) as database:
             if not _applicationExists(database, appId):
                 return admin_response(
@@ -1155,6 +1246,7 @@ def register_app_store(
                     "error",
                     "app_store.adminAds",
                     400,
+                    renderer=lambda: _renderAds(ad_id, submitted),
                 )
             current = database.execute(
                 "SELECT sort_order FROM market_advertisements WHERE id = ?",

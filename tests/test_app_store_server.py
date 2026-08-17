@@ -153,6 +153,253 @@ class AppStoreServerTest(TestCase):
             icon_url="https://cdn.example.test/" + "x" * 2048,
         )
 
+    def testPresetCustomSchemeRequiresSystemProtocolWithoutDiscardingForm(self):
+        self._createApp()
+        target = "classisland://app/settings/general/"
+        data = {
+            "csrf_token": self._csrf(),
+            "preset_app_id": "1",
+            "preset_title": "基本设置",
+            "preset_description": "进入 ClassIsland 软件的设置",
+            "preset_action_type": "url",
+            "preset_action_target": target,
+            "preset_action_arguments": "--minimized\n--profile default",
+        }
+
+        invalid = self.client.post(
+            "/admin/app-store/presets/",
+            base_url="https://dash.djcatpro.top",
+            data=data,
+        )
+
+        body = invalid.get_data(as_text=True)
+        self.assertEqual(invalid.status_code, 400)
+        self.assertIn(
+            "HTTPS 网页目标必须以 https:// 开头；classisland:// 等自定义协议请选择“系统协议”",
+            body,
+        )
+        self.assertIn('value="基本设置"', body)
+        self.assertIn('value="进入 ClassIsland 软件的设置"', body)
+        self.assertIn('<option value="url" selected>HTTPS 网页</option>', body)
+        self.assertIn(f'value="{target}"', body)
+        self.assertIn("--minimized\n--profile default", body)
+
+        data["preset_action_type"] = "uri"
+        created = self.client.post(
+            "/admin/app-store/presets/",
+            base_url="https://dash.djcatpro.top",
+            data=data,
+        )
+
+        self.assertEqual(created.status_code, 302)
+        preset = self.client.get(
+            "/app-store/catalog",
+            base_url="https://api.djcatpro.top",
+        ).json["apps"][0]["presets"][0]
+        self.assertEqual(preset["title"], "基本设置")
+        self.assertEqual(preset["action"]["type"], "uri")
+        self.assertEqual(preset["action"]["target"], target)
+
+    def testInvalidMarketFormsKeepSubmittedValues(self):
+        self._login()
+        appResponse = self.client.post(
+            "/admin/app-store/apps/new",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(),
+                "name": "Keep App",
+                "developer": "Keep Developer",
+                "description": "Keep App Description",
+                "version": "1.0",
+                "install_dir": "CON",
+                "icon_url": "http://invalid.test/icon.png",
+                "recommended": "1",
+                "announcement": "Keep Announcement",
+                "open_action_type": "program",
+                "open_action_target": "bin/keep.exe",
+                "open_action_arguments": "--minimized\n--profile default",
+                "x86_64_enabled": "1",
+                "x86_64_url": "http://invalid.test/keep.zip",
+            },
+        )
+
+        appBody = appResponse.get_data(as_text=True)
+        self.assertEqual(appResponse.status_code, 400)
+        for value in (
+            "Keep App",
+            "Keep Developer",
+            "Keep App Description",
+            "CON",
+            "http://invalid.test/icon.png",
+            "Keep Announcement",
+            "bin/keep.exe",
+            "--minimized\n--profile default",
+            "http://invalid.test/keep.zip",
+        ):
+            self.assertIn(value, appBody)
+        self.assertIn('<option value="program" selected>程序</option>', appBody)
+        self.assertIn('name="recommended" value="1" checked', appBody)
+        self.assertIn('name="x86_64_enabled" value="1" checked', appBody)
+
+        self._createApp()
+        presetResponse = self.client.post(
+            "/admin/app-store/presets/",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(),
+                "preset_app_id": "1",
+                "preset_title": "Keep Preset",
+                "preset_description": "Keep Preset Description",
+                "preset_action_type": "program",
+                "preset_action_target": "../invalid.exe",
+                "preset_action_arguments": "--minimized\n--profile default",
+            },
+        )
+
+        presetBody = presetResponse.get_data(as_text=True)
+        self.assertEqual(presetResponse.status_code, 400)
+        for value in (
+            "Keep Preset",
+            "Keep Preset Description",
+            "../invalid.exe",
+            "--minimized\n--profile default",
+        ):
+            self.assertIn(value, presetBody)
+        self.assertIn('<option value="program" selected>程序</option>', presetBody)
+
+        adResponse = self.client.post(
+            "/admin/app-store/ads/",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(),
+                "title": "Keep Advertisement",
+                "description": "Keep Advertisement Description",
+                "image_url": "http://invalid.test/ad.png",
+                "app_id": "1",
+                "enabled": "1",
+            },
+        )
+
+        adBody = adResponse.get_data(as_text=True)
+        self.assertEqual(adResponse.status_code, 400)
+        for value in (
+            "Keep Advertisement",
+            "Keep Advertisement Description",
+            "http://invalid.test/ad.png",
+        ):
+            self.assertIn(value, adBody)
+        self.assertIn('<option value="1" selected>Demo</option>', adBody)
+        self.assertIn('name="enabled" value="1" checked', adBody)
+
+    def testDuplicateInstallDirectoryKeepsSubmittedApplication(self):
+        self._createApp()
+        response = self.client.post(
+            "/admin/app-store/apps/new",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(),
+                "name": "Keep Duplicate",
+                "developer": "Keep Developer",
+                "description": "Keep Duplicate Description",
+                "version": "2.0",
+                "install_dir": "Demo",
+                "icon_url": "https://cdn.example.test/duplicate.png",
+                "open_action_type": "program",
+                "open_action_target": "bin/keep.exe",
+                "open_action_arguments": "--profile duplicate",
+                "x86_64_enabled": "1",
+                "x86_64_url": "https://cdn.example.test/duplicate.zip",
+            },
+        )
+
+        body = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("安装目录已被其他软件使用", body)
+        for value in (
+            "Keep Duplicate",
+            "Keep Developer",
+            "Keep Duplicate Description",
+            "Demo",
+            "bin/keep.exe",
+            "--profile duplicate",
+            "https://cdn.example.test/duplicate.zip",
+        ):
+            self.assertIn(value, body)
+
+    def testApplicationCustomSchemeRequiresSystemProtocolWithoutDiscardingForm(self):
+        self._login()
+        target = "classisland://app/settings/general/"
+        data = {
+            "csrf_token": self._csrf(),
+            "name": "ClassIsland",
+            "version": "2.0",
+            "install_dir": "ClassIsland",
+            "open_action_type": "url",
+            "open_action_target": target,
+            "open_action_arguments": "--minimized",
+            "x86_64_enabled": "1",
+            "x86_64_url": "https://cdn.example.test/classisland.zip",
+        }
+
+        invalid = self.client.post(
+            "/admin/app-store/apps/new",
+            base_url="https://dash.djcatpro.top",
+            data=data,
+        )
+
+        body = invalid.get_data(as_text=True)
+        self.assertEqual(invalid.status_code, 400)
+        self.assertIn(
+            "HTTPS 网页目标必须以 https:// 开头；classisland:// 等自定义协议请选择“系统协议”",
+            body,
+        )
+        self.assertIn('<option value="url" selected>HTTPS 网页</option>', body)
+        self.assertIn(f'value="{target}"', body)
+        self.assertIn("--minimized", body)
+
+        data["open_action_type"] = "uri"
+        created = self.client.post(
+            "/admin/app-store/apps/new",
+            base_url="https://dash.djcatpro.top",
+            data=data,
+        )
+        self.assertEqual(created.status_code, 302)
+        action = self.client.get(
+            "/app-store/catalog",
+            base_url="https://api.djcatpro.top",
+        ).json["apps"][0]["open_action"]
+        self.assertEqual(action["type"], "uri")
+        self.assertEqual(action["target"], target)
+
+    def testAdvertisementMissingApplicationKeepsSubmittedValues(self):
+        self._createApp()
+        self._createAd()
+        for path, title in (
+            ("/admin/app-store/ads/", "Keep New Advertisement"),
+            ("/admin/app-store/ads/1", "Keep Edited Advertisement"),
+        ):
+            with self.subTest(path=path):
+                response = self.client.post(
+                    path,
+                    base_url="https://dash.djcatpro.top",
+                    data={
+                        "csrf_token": self._csrf(),
+                        "title": title,
+                        "description": "Keep Missing App Description",
+                        "image_url": "https://cdn.example.test/missing-app.png",
+                        "app_id": "999",
+                        "enabled": "1",
+                    },
+                )
+
+                body = response.get_data(as_text=True)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("绑定的软件不存在", body)
+                self.assertIn(title, body)
+                self.assertIn("Keep Missing App Description", body)
+                self.assertIn("https://cdn.example.test/missing-app.png", body)
+                self.assertIn('name="enabled" value="1" checked', body)
+
     def testEditingMissingMarketItemsReturnsNotFound(self):
         self._createApp()
         missingApp = self.client.post(

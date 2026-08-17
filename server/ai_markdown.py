@@ -605,10 +605,14 @@ def _isAjaxRequest():
     )
 
 
-def _adminResponse(message, category, endpoint, status=200, url_values=None):
+def _adminResponse(
+    message, category, endpoint, status=200, url_values=None, renderer=None
+):
     if _isAjaxRequest():
         return jsonify(message=message, category=category), status
     flash(message, category)
+    if renderer is not None:
+        return renderer(), status
     return redirect(url_for(endpoint, **(url_values or {})))
 
 
@@ -784,6 +788,7 @@ def adminRoot():
 @app.route("/admin/login", methods=["GET", "POST"])
 @_adminRoute
 def adminLogin():
+    username = ""
     if request.method == "POST":
         _checkCsrf()
         username = request.form.get("username", "")
@@ -800,7 +805,9 @@ def adminLogin():
             _csrfToken()
             return redirect(url_for("adminDashboard"))
         flash("用户名或密码错误", "error")
-    return render_template("admin_login.html", csrf_token=_csrfToken())
+    return render_template(
+        "admin_login.html", csrf_token=_csrfToken(), username=username
+    )
 
 
 @app.get("/admin/")
@@ -845,88 +852,147 @@ def adminAIMarkdown():
     )
 
 
+def _renderAdminSettings(submitted=None):
+    values = submitted or {
+        "daily_limit": _dailyLimit(),
+        "peak_enabled": _setting("peak_enabled", "1") == "1",
+        "model": _deepseekModel(),
+        "clear_api_key": False,
+    }
+    return render_template(
+        "admin_ai_settings.html",
+        csrf_token=_csrfToken(),
+        current_page="ai_settings",
+        api_key_configured=bool(
+            _setting("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY")
+        ),
+        **values,
+    )
+
+
 @app.route("/admin/ai/markdown/settings", methods=["GET", "POST"])
 @_loginRequired
 def adminSettings():
     if request.method == "GET":
-        return render_template(
-            "admin_ai_settings.html",
-            csrf_token=_csrfToken(),
-            current_page="ai_settings",
-            daily_limit=_dailyLimit(),
-            peak_enabled=_setting("peak_enabled", "1") == "1",
-            model=_deepseekModel(),
-            api_key_configured=bool(
-                _setting("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY")
-            ),
-        )
+        return _renderAdminSettings()
 
     _checkCsrf()
+    submitted = {
+        "daily_limit": request.form.get("daily_limit", ""),
+        "peak_enabled": bool(request.form.get("peak_enabled")),
+        "model": request.form.get("model", ""),
+        "clear_api_key": bool(request.form.get("clear_api_key")),
+    }
     try:
-        dailyLimit = int(request.form.get("daily_limit", ""))
+        dailyLimit = int(submitted["daily_limit"])
     except ValueError:
         dailyLimit = 0
-    model = request.form.get("model", "").strip()
+    model = submitted["model"].strip()
     systemPrompt = _setting("system_prompt", SYSTEM_PROMPT)
     if not 1 <= dailyLimit <= 10_000:
         return _adminResponse(
-            "每日额度必须在 1 到 10000 之间", "error", "adminSettings", 400
+            "每日额度必须在 1 到 10000 之间",
+            "error",
+            "adminSettings",
+            400,
+            renderer=lambda: _renderAdminSettings(submitted),
         )
     elif not re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", model):
-        return _adminResponse("模型名称格式无效", "error", "adminSettings", 400)
+        return _adminResponse(
+            "模型名称格式无效",
+            "error",
+            "adminSettings",
+            400,
+            renderer=lambda: _renderAdminSettings(submitted),
+        )
     elif not systemPrompt:
-        return _adminResponse("系统提示词不能为空", "error", "adminSettings", 400)
+        return _adminResponse(
+            "系统提示词不能为空",
+            "error",
+            "adminSettings",
+            400,
+            renderer=lambda: _renderAdminSettings(submitted),
+        )
     elif len(systemPrompt) > MAX_SYSTEM_PROMPT_LENGTH:
         return _adminResponse(
             f"系统提示词不能超过 {MAX_SYSTEM_PROMPT_LENGTH} 个字符",
             "error",
             "adminSettings",
             400,
+            renderer=lambda: _renderAdminSettings(submitted),
         )
     else:
         apiKey = request.form.get("api_key", "").strip()
         try:
             _saveAISettings(
                 dailyLimit,
-                bool(request.form.get("peak_enabled")),
+                submitted["peak_enabled"],
                 model,
                 systemPrompt,
                 apiKey,
-                bool(request.form.get("clear_api_key")),
+                submitted["clear_api_key"],
             )
         except (RuntimeError, sqlite3.Error) as error:
-            return _adminResponse(str(error), "error", "adminSettings", 400)
+            return _adminResponse(
+                str(error),
+                "error",
+                "adminSettings",
+                400,
+                renderer=lambda: _renderAdminSettings(submitted),
+            )
         return _adminResponse("AI 配置已保存", "success", "adminSettings")
+
+
+def _renderAdminPrompt(systemPrompt=None):
+    return render_template(
+        "admin_ai_prompt.html",
+        csrf_token=_csrfToken(),
+        current_page="ai_prompt",
+        system_prompt=(
+            _setting("system_prompt", SYSTEM_PROMPT)
+            if systemPrompt is None
+            else systemPrompt
+        ),
+        max_system_prompt_length=MAX_SYSTEM_PROMPT_LENGTH,
+    )
 
 
 @app.route("/admin/ai/markdown/prompt", methods=["GET", "POST"])
 @_loginRequired
 def adminPrompt():
     if request.method == "GET":
-        return render_template(
-            "admin_ai_prompt.html",
-            csrf_token=_csrfToken(),
-            current_page="ai_prompt",
-            system_prompt=_setting("system_prompt", SYSTEM_PROMPT),
-            max_system_prompt_length=MAX_SYSTEM_PROMPT_LENGTH,
-        )
+        return _renderAdminPrompt()
 
     _checkCsrf()
-    systemPrompt = request.form.get("system_prompt", "").strip()
+    submittedPrompt = request.form.get("system_prompt", "")
+    systemPrompt = submittedPrompt.strip()
     if not systemPrompt:
-        return _adminResponse("系统提示词不能为空", "error", "adminPrompt", 400)
+        return _adminResponse(
+            "系统提示词不能为空",
+            "error",
+            "adminPrompt",
+            400,
+            renderer=lambda: _renderAdminPrompt(submittedPrompt),
+        )
     elif len(systemPrompt) > MAX_SYSTEM_PROMPT_LENGTH:
         return _adminResponse(
             f"系统提示词不能超过 {MAX_SYSTEM_PROMPT_LENGTH} 个字符",
             "error",
             "adminPrompt",
             400,
+            renderer=lambda: _renderAdminPrompt(submittedPrompt),
         )
     else:
         try:
             _saveSystemPrompt(systemPrompt)
         except sqlite3.Error as error:
-            return _adminResponse(str(error), "error", "adminPrompt", 400)
+            return _adminResponse(
+                str(error),
+                "error",
+                "adminPrompt",
+                400,
+                renderer=lambda: _renderAdminPrompt(submittedPrompt),
+            )
         else:
             return _adminResponse("系统提示词已保存", "success", "adminPrompt")
 

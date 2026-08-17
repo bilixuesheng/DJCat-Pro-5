@@ -85,14 +85,14 @@
             target.placeholder = type.value === "url"
                 ? "https://example.com"
                 : type.value === "uri"
-                    ? "例如：mailto:hello@example.com"
+                    ? "例如：classisland://app/settings/general/"
                     : "例如：classisland.exe 或 bin/classisland.exe";
         }
         if (help) {
             help.textContent = type.value === "url"
                 ? "网页目标必须使用 HTTPS。"
                 : type.value === "uri"
-                    ? "系统协议会按客户端安全规则校验，危险协议会被拒绝。"
+                    ? "系统协议例如 classisland://app/settings/general/；危险协议会被拒绝。"
                     : "程序目标只能是安装目录内的相对 EXE；每行填写一个启动参数。";
         }
     };

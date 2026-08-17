@@ -286,6 +286,20 @@ class AIAdminTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["category"], "success")
 
+        response = self.client.post(
+            "/admin/ai/markdown/settings",
+            base_url="https://dash.djcatpro.top",
+            headers=headers,
+            data={
+                "csrf_token": self._csrf(settings),
+                "daily_limit": "0",
+                "model": "submitted-model",
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["category"], "error")
+        self.assertNotIn("Location", response.headers)
+
         registered = self.client.post(
             "/ai/markdown/register", json={"machine_id": "a" * 64}
         ).get_json()
@@ -308,6 +322,67 @@ class AIAdminTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["category"], "success")
 
+    def testNonAjaxAdminFormFailuresPreserveSafeInput(self):
+        self._login()
+        settings = self._settingsPage()
+        response = self.client.post(
+            "/admin/ai/markdown/settings",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(settings),
+                "daily_limit": "0",
+                "model": "submitted-model",
+                "api_key": "settings-secret-must-not-echo",
+                "clear_api_key": "1",
+            },
+        )
+        content = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertRegex(content, r'name="daily_limit"[^>]*value="0"')
+        self.assertRegex(content, r'name="model"[^>]*value="submitted-model"')
+        self.assertNotRegex(content, r'name="peak_enabled"[^>]*checked')
+        self.assertRegex(content, r'name="clear_api_key"[^>]*checked')
+        self.assertNotIn("settings-secret-must-not-echo", content)
+
+        prompt = self._promptPage()
+        submittedPrompt = "x" * ai_markdown.MAX_SYSTEM_PROMPT_LENGTH + "保留标记"
+        response = self.client.post(
+            "/admin/ai/markdown/prompt",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(prompt),
+                "system_prompt": submittedPrompt,
+            },
+        )
+        content = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(submittedPrompt, content)
+
+        self.client.post(
+            "/admin/logout",
+            base_url="https://dash.djcatpro.top",
+            data={"csrf_token": self._csrf(prompt)},
+        )
+        login = self.client.get(
+            "/admin/login", base_url="https://dash.djcatpro.top"
+        )
+        response = self.client.post(
+            "/admin/login",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(login),
+                "username": "submitted-admin",
+                "password": "login-secret-must-not-echo",
+            },
+        )
+        content = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('name="username" value="submitted-admin"', content)
+        self.assertNotIn("login-secret-must-not-echo", content)
+
     def testInvalidEncryptionKeyDoesNotPartiallySaveSettings(self):
         self._login()
         settings = self._settingsPage()
@@ -320,11 +395,17 @@ class AIAdminTest(TestCase):
                     "daily_limit": "20",
                     "model": "changed-model",
                     "api_key": "sk-will-not-save",
+                    "peak_enabled": "1",
                 },
-                follow_redirects=True,
             )
 
-        self.assertIn("格式无效", response.get_data(as_text=True))
+        content = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("格式无效", content)
+        self.assertRegex(content, r'name="daily_limit"[^>]*value="20"')
+        self.assertRegex(content, r'name="model"[^>]*value="changed-model"')
+        self.assertRegex(content, r'name="peak_enabled"[^>]*checked')
+        self.assertNotIn("sk-will-not-save", content)
         self.assertEqual(ai_markdown._dailyLimit(), 15)
         self.assertEqual(ai_markdown._deepseekModel(), "deepseek-v4-flash")
 
