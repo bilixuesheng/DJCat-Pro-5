@@ -7,7 +7,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QMenu,
     QProxyStyle,
-    QScroller,
     QStyle,
     QStyleFactory,
     QSystemTrayIcon,
@@ -36,6 +35,16 @@ class CustomMenuStyle(QProxyStyle):
     def unpolish(self, app, /):
         QStyleFactory.create("fusion").polish(app)
 
+
+class _TrayMenuActionListWidget(MenuActionListWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.viewport().removeEventFilter(self.scrollDelegate)
+
+    def wheelEvent(self, event):
+        event.accept()
+
+
 class AcrylicMenu(RoundMenu):
     def __init__(self, title="", parent=None):
         QMenu.__init__(self, parent)
@@ -52,7 +61,7 @@ class AcrylicMenu(RoundMenu):
         self.itemHeight = 28
 
         self.hBoxLayout = QHBoxLayout(self)
-        self.view = MenuActionListWidget(self)
+        self.view = _TrayMenuActionListWidget(self)
         self.windowEffect = WindowEffect(self)
         self.timer = QTimer(self)
         self.__initWidgets()
@@ -73,21 +82,20 @@ class AcrylicMenu(RoundMenu):
         self.timer.setSingleShot(True)
         self.timer.setInterval(400)
         self.timer.timeout.connect(self._onShowMenuTimeOut)
-        self.setItemHeight(32)
-        QScroller.grabGesture(
-            self.view.viewport(),
-            QScroller.ScrollerGestureType.TouchGesture,
-        )
-
         self.view.itemClicked.connect(self._onItemClicked)
         self.view.itemEntered.connect(self._onItemEntered)
 
     def adjustPosition(self):
+        if self.isSubMenu:
+            return super().adjustPosition()
         m = self.hBoxLayout.contentsMargins()
         rect = getCurrentScreenGeometry()
         w = self.hBoxLayout.sizeHint().width() + 5
-        x = min(self.x() - m.left(), rect.right() - w)
-        y = self.y() - 45
+        x = max(rect.left(), min(self.x() - m.left(), rect.right() - w))
+        y = max(
+            rect.top(),
+            min(self.y() - 45, rect.bottom() - self.height() + 1),
+        )
         self.move(x, y)
 
     def showEvent(self, event):
@@ -200,13 +208,8 @@ class SystemTrayIcon(QSystemTrayIcon):
         if cards:
             menu.addSeparator()
             if cfg.trayHomeCardsInSubmenu.value:
-                submenu = RoundMenu("主页卡片", menu)
+                submenu = AcrylicMenu("主页卡片", menu)
                 submenu.setIcon(FIF.HOME)
-                submenu.setItemHeight(menu.itemHeight)
-                QScroller.grabGesture(
-                    submenu.view.viewport(),
-                    QScroller.ScrollerGestureType.TouchGesture,
-                )
                 for entry in cards:
                     submenu.addAction(self._cardAction(entry, submenu))
                 menu.addMenu(submenu)

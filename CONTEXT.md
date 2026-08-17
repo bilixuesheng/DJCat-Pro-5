@@ -29,7 +29,7 @@ _Avoid_: workflow、macro
 ### 系统托盘
 
 **Tray Menu**:
-DJCat 系统托盘图标提供的快捷操作集合。右键始终打开它；左键可配置为打开 Tray Menu 或显示主窗口。打开主窗口和退出程序始终可用，Broadcast Task 与 Shutdown Task 的总开关可分别隐藏；选中的 Tray Card Shortcut 位于任务总开关之后，按主页顺序显示或统一放入“主页卡片”二级菜单。根菜单和二级菜单都支持鼠标悬停、触控点击展开以及触控滚动。
+DJCat 系统托盘图标提供的快捷操作集合。右键始终打开它；左键可配置为打开 Tray Menu 或显示主窗口。打开主窗口和退出程序始终可用，Broadcast Task 与 Shutdown Task 的总开关可分别隐藏；选中的 Tray Card Shortcut 位于任务总开关之后，按主页顺序显示或统一放入“主页卡片”二级菜单。菜单使用原生行高，不提供滚动；“主页卡片”二级菜单既可由鼠标悬停，也可由触控点击展开。
 _Avoid_: context menu、右键菜单（它不只可由右键打开）
 
 **Tray Click Action**:

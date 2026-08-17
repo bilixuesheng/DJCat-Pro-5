@@ -183,7 +183,7 @@ class HomeCardTrayInterfaceTest(TestCase):
         finally:
             trayPage.deleteLater()
 
-    def testTrayControlPageKeepsTouchScrollingAndSizedControls(self):
+    def testTrayControlPageKeepsTouchScrollingAndNativeControlSizes(self):
         from app.view.pages.tray_control_page import TrayControlPage
 
         trayPage = TrayControlPage()
@@ -192,11 +192,16 @@ class HomeCardTrayInterfaceTest(TestCase):
         self.app.processEvents()
         try:
             self.assertTrue(QScroller.hasScroller(trayPage.viewport()))
-            self.assertEqual(trayPage.leftClickCard.comboBox.height(), 32)
+            self.assertEqual(
+                trayPage.leftClickCard.comboBox.height(),
+                trayPage.leftClickCard.comboBox.sizeHint().height(),
+            )
             cards = [*trayPage.menuCards, *trayPage.homeCardSwitches.values()]
             for card in cards:
-                self.assertEqual(card.switchButton.height(), 32)
-                self.assertEqual(card.switchButton.indicator.height(), 22)
+                self.assertEqual(
+                    card.switchButton.height(),
+                    card.switchButton.sizeHint().height(),
+                )
                 self.assertLessEqual(
                     abs(
                         card.switchButton.geometry().center().y()
@@ -515,16 +520,52 @@ class TrayMenuTest(TestCase):
         finally:
             tray.deleteLater()
 
-    def testTrayMenusUseTouchSizedRows(self):
+    def testTrayMenusUseOriginalRowsWithoutScrolling(self):
         cfg.set(cfg.trayHomeCardsInSubmenu, True)
         tray = self._createTray()
         try:
-            self.assertEqual(tray.menu.itemHeight, 32)
-            self.assertTrue(QScroller.hasScroller(tray.menu.view.viewport()))
+            self.assertEqual(tray.menu.itemHeight, 28)
+            self.assertFalse(QScroller.hasScroller(tray.menu.view.viewport()))
             submenu = tray.menu.findChildren(RoundMenu)[0]
-            self.assertEqual(submenu.itemHeight, 32)
-            self.assertTrue(QScroller.hasScroller(submenu.view.viewport()))
+            self.assertEqual(submenu.itemHeight, 28)
+            self.assertFalse(QScroller.hasScroller(submenu.view.viewport()))
         finally:
+            tray.deleteLater()
+
+    def testLongTrayMenuStaysInsideAvailableScreen(self):
+        from app.view.shell.tray import getCurrentScreenGeometry
+
+        keys = [f"custom:{index}" for index in range(12)]
+        cfg.set(cfg.trayHomeCardKeys, keys)
+        tray = self._createTray()
+        tray.setHomeCards(
+            [
+                {
+                    "key": key,
+                    "source": "custom",
+                    "title": f"主页卡片 {index}",
+                    "description": "",
+                    "icon": FIF.APPLICATION,
+                }
+                for index, key in enumerate(keys)
+            ]
+        )
+        screen = getCurrentScreenGeometry()
+        tray.menu.move(screen.bottomRight())
+        tray.menu.show()
+        self.app.processEvents()
+        try:
+            bounds = tray.menu.geometry()
+            self.assertGreaterEqual(bounds.left(), screen.left())
+            self.assertGreaterEqual(bounds.top(), screen.top())
+            self.assertLessEqual(bounds.right(), screen.right())
+            self.assertLessEqual(bounds.bottom(), screen.bottom())
+            self.assertEqual(
+                tray.menu.view.verticalScrollBar().maximum(),
+                0,
+            )
+        finally:
+            tray.menu.hide()
             tray.deleteLater()
 
     def testClickingSubmenuEntryOpensItForTouchUsers(self):

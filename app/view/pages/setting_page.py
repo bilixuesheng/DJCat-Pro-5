@@ -107,7 +107,6 @@ class CacheSettingCard(SettingCard):
             parent,
         )
         self.clearButton = ToolButton(FluentIcon.DELETE, self)
-        self.clearButton.setFixedSize(40, 40)
         self.clearButton.setAccessibleName("清除缓存")
         self.clearButton.clicked.connect(self.clicked)
         self.hBoxLayout.addWidget(self.clearButton)

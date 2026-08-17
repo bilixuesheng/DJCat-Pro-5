@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QInputDevice
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QLabel, QScroller, QWidget
@@ -159,9 +159,10 @@ class AppStorePageTest(TestCase):
         self.page._allAppsForPage = lambda: _apps(16)
         self.page._renderAll()
 
-        self.assertGreaterEqual(self.page.pagerPrevious.width(), 40)
-        self.assertGreaterEqual(self.page.pagerPrevious.height(), 40)
-        self.assertGreaterEqual(self.page.pagerNext.width(), 40)
+        for button in (self.page.pagerPrevious, self.page.pagerNext):
+            self.assertLess(button.width(), 40)
+            self.assertLess(button.height(), 40)
+            self.assertLess(button.minimumHeight(), button.maximumHeight())
         self.assertFalse(self.page.pagerPrevious.isEnabled())
         self.assertTrue(self.page.pagerNext.isEnabled())
 
@@ -494,7 +495,11 @@ class AppStorePageTest(TestCase):
 
         self.assertEqual(margins.left(), 20)
         self.assertEqual(margins.right(), 20)
-        self.assertEqual(self.page.detailBackButton.height(), 36)
+        self.assertLess(self.page.detailBackButton.height(), 36)
+        self.assertLess(
+            self.page.detailBackButton.minimumHeight(),
+            self.page.detailBackButton.maximumHeight(),
+        )
 
     def testDetailPresetCanBeOpenedWithInstalledAction(self):
         catalogAction = {"type": "program", "target": "new.exe"}
@@ -531,7 +536,8 @@ class AppStorePageTest(TestCase):
             if button.text() == "打开"
         )
 
-        self.assertGreaterEqual(openButton.height(), 40)
+        self.assertLess(openButton.height(), 40)
+        self.assertLess(openButton.minimumHeight(), openButton.maximumHeight())
         self.assertTrue(openButton.isEnabled())
         openButton.click()
         self.page.store.executeAction.assert_called_once_with(
@@ -681,13 +687,14 @@ class AppStorePageTest(TestCase):
     def testCardButtonsKeepTouchFriendlyTargets(self):
         card = ApplicationCard()
 
-        self.assertGreaterEqual(card.actionButton.height(), 40)
+        self.assertLess(card.actionButton.height(), 40)
         self.assertGreaterEqual(card.removeButton.height(), 40)
         self.assertGreaterEqual(card.removeButton.width(), 40)
-        self.assertGreaterEqual(card.pinButton.height(), 40)
-        self.assertGreaterEqual(card.pinButton.width(), 40)
-        self.assertEqual(self.page.adPrevious.size(), QSize(32, 32))
-        self.assertEqual(self.page.adNext.size(), QSize(32, 32))
+        self.assertLess(card.pinButton.sizeHint().width(), 40)
+        self.assertLess(card.pinButton.sizeHint().height(), 40)
+        self.assertLess(card.pinButton.minimumHeight(), card.pinButton.maximumHeight())
+        for button in (self.page.adPrevious, self.page.adNext):
+            self.assertLess(button.sizeHint().height(), 40)
         card.deleteLater()
 
     def testInstalledApplicationCanBePinnedDirectlyFromItsCard(self):
@@ -1146,7 +1153,10 @@ class AppStorePageTest(TestCase):
         QTest.qWait(20)
 
         self.assertIsInstance(self.page.adButton, PrimaryPushButton)
-        self.assertEqual(self.page.adButton.height(), 32)
+        self.assertLess(self.page.adButton.height(), 32)
+        self.assertLess(
+            self.page.adButton.minimumHeight(), self.page.adButton.maximumHeight()
+        )
         self.assertEqual(self.page.adTimer.interval(), 5000)
         self.assertEqual(self.page.adTitle.toolTip(), "")
         self.assertEqual(self.page.adDescription.toolTip(), "")
@@ -1188,8 +1198,8 @@ class AppStorePageTest(TestCase):
         self.assertIn("border-radius: 12px", self.page.adOverlay.styleSheet())
         self.assertIs(self.page.adPrevious, self.page.adFlipView.preButton)
         self.assertIs(self.page.adNext, self.page.adFlipView.nextButton)
-        self.assertEqual(self.page.adPrevious.size(), QSize(32, 32))
-        self.assertEqual(self.page.adNext.size(), QSize(32, 32))
+        for button in (self.page.adPrevious, self.page.adNext):
+            self.assertLess(button.sizeHint().height(), 40)
         self.assertLessEqual(
             abs(
                 self.page.adPrevious.geometry().center().y()
@@ -1229,7 +1239,10 @@ class AppStorePageTest(TestCase):
 
         self.assertFalse(self.page.installedEmpty.isHidden())
         self.assertFalse(self.page.installedEmptyIcon.pixmap().isNull())
-        self.assertGreaterEqual(self.page.installedEmptyButton.height(), 40)
+        self.assertEqual(
+            self.page.installedEmptyButton.height(),
+            self.page.installedEmptyButton.sizeHint().height(),
+        )
 
         self.page.installedEmptyButton.click()
         deadline = time.monotonic() + 1

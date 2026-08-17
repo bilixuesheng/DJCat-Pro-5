@@ -79,10 +79,7 @@ class _ResponsiveMessageBox(MessageBoxBase):
         self._preferred_height = 0
         self._closing = False
         super().__init__(parent)
-        self.buttonGroup.setFixedHeight(76)
         self.buttonLayout.setContentsMargins(24, 16, 24, 16)
-        self.yesButton.setFixedHeight(44)
-        self.cancelButton.setFixedHeight(44)
 
     def setPreferredSize(self, width, height):
         self._preferred_width = width
@@ -433,7 +430,6 @@ class ActionEditorDialog(_ResponsiveMessageBox):
         self.titleLabel = SubtitleLabel("配置动作", self)
         self.descriptionLabel = CaptionLabel("选择动作类型，并填写执行所需的信息。", self)
         self.typeCombo = ComboBox(self)
-        self.typeCombo.setFixedHeight(44)
         for action_type in ACTION_TYPES:
             self.typeCombo.addItem(ACTION_LABELS[action_type])
         self.stack = QStackedWidget(self)
@@ -471,8 +467,6 @@ class ActionEditorDialog(_ResponsiveMessageBox):
     def _line_with_browse(self, title, filter_text):
         line = LineEdit(self)
         button = PushButton(FIF.FOLDER, "选择", self)
-        line.setFixedHeight(44)
-        button.setFixedHeight(44)
         button.clicked.connect(
             lambda: self._choose_file(line, title, filter_text)
         )
@@ -487,7 +481,6 @@ class ActionEditorDialog(_ResponsiveMessageBox):
         page, form = self._form_page()
         target_wrapper, target = self._line_with_browse("选择程序", "Programs (*.exe *.com *.bat *.cmd);;All files (*.*)")
         arguments = LineEdit(self)
-        arguments.setFixedHeight(44)
         arguments.setPlaceholderText("可选，例如 --profile default")
         working_wrapper, working_dir = self._line_with_browse("选择工作目录", "All files (*.*)")
         wait = CheckBox("等待程序结束后继续", self)
@@ -519,7 +512,6 @@ class ActionEditorDialog(_ResponsiveMessageBox):
 
         page, form = self._form_page()
         url = LineEdit(self)
-        url.setFixedHeight(44)
         url.setPlaceholderText("例如 https://example.com")
         form.addRow("网页地址", url)
         self._pages["url"] = page
@@ -530,9 +522,6 @@ class ActionEditorDialog(_ResponsiveMessageBox):
         path = LineEdit(self)
         file_button = PushButton(FIF.FOLDER, "文件", self)
         folder_button = PushButton(FIF.FOLDER, "文件夹", self)
-        path.setFixedHeight(44)
-        file_button.setFixedHeight(44)
-        folder_button.setFixedHeight(44)
         file_button.clicked.connect(lambda: self._choose_file(path, "选择文件", "All files (*.*)"))
         folder_button.clicked.connect(lambda: self._choose_folder(path))
         buttons = QWidget(self)
@@ -548,7 +537,6 @@ class ActionEditorDialog(_ResponsiveMessageBox):
 
         page, form = self._form_page()
         seconds = SpinBox(self)
-        seconds.setFixedHeight(44)
         seconds.setRange(1, 86400)
         seconds.setSuffix(" 秒")
         form.addRow("等待时间", seconds)
@@ -624,12 +612,9 @@ class IconPickerDialog(_ResponsiveMessageBox):
         self.sourceCombo.addItem("QWF 图标库")
         self.sourceCombo.addItem("图片文件")
         self.sourceCombo.addItem("ICO / EXE / DLL")
-        self.sourceCombo.setFixedHeight(44)
         self.searchEdit = SearchLineEdit(self)
         self.searchEdit.setPlaceholderText("搜索图标名称")
-        self.searchEdit.setFixedHeight(44)
         self.browseButton = PushButton(FIF.FOLDER, "选择文件", self)
-        self.browseButton.setFixedHeight(44)
         self.browseButton.setMinimumWidth(180)
         self.previewIcon = IconWidget(FIF.APPLICATION, self)
         self.previewIcon.setFixedSize(40, 40)
@@ -686,7 +671,6 @@ class IconPickerDialog(_ResponsiveMessageBox):
         self._clearGrid()
         for name, icon in FIF.__members__.items():
             button = ToggleToolButton(icon, self.gridWidget)
-            button.setFixedSize(56, 56)
             setFluentToolTip(button, name)
             button.setAccessibleName(name)
             button.clicked.connect(lambda _checked=False, name=name: self._selectFluent(name))
@@ -774,7 +758,6 @@ class IconPickerDialog(_ResponsiveMessageBox):
             button = ToggleToolButton(
                 QIcon(QPixmap.fromImage(image)), self.gridWidget
             )
-            button.setFixedSize(56, 56)
             setFluentToolTip(button, f"图标 {index + 1}")
             button.clicked.connect(
                 lambda _checked=False, image=image, button=button: self._selectImage(image, button)
@@ -810,11 +793,9 @@ class CustomCardDialog(_ResponsiveMessageBox):
             "设置卡片的显示信息，以及点击后依次执行的动作。", self
         )
         self.titleEdit = LineEdit(self)
-        self.titleEdit.setFixedHeight(44)
         self.titleEdit.setMaxLength(40)
         self.titleEdit.setPlaceholderText("例如：打开课程表")
         self.descriptionEdit = LineEdit(self)
-        self.descriptionEdit.setFixedHeight(44)
         self.descriptionEdit.setMaxLength(120)
         self.descriptionEdit.setPlaceholderText("简短说明卡片用途")
         self.iconPreview = IconWidget(icon_for_data(self._icon), self)
@@ -825,7 +806,6 @@ class CustomCardDialog(_ResponsiveMessageBox):
         icon_title = StrongBodyLabel("卡片图标", self.iconCard)
         icon_description = CaptionLabel("选择一个容易识别的图标", self.iconCard)
         self.iconSelectButton = PushButton(FIF.PALETTE, "选择图标", self)
-        self.iconSelectButton.setFixedHeight(44)
         self.iconSelectButton.clicked.connect(self._chooseIcon)
         icon_card_layout = QHBoxLayout(self.iconCard)
         icon_card_layout.setContentsMargins(16, 12, 16, 12)
@@ -843,7 +823,6 @@ class CustomCardDialog(_ResponsiveMessageBox):
             initial_actions = [{"id": new_id(), "type": "program", "target": "", "arguments": "", "working_dir": "", "wait": False}]
         self.actionList = ActionListWidget(initial_actions, self)
         self.addActionButton = PushButton(FIF.ADD, "添加动作", self)
-        self.addActionButton.setFixedHeight(44)
         self.addActionButton.clicked.connect(self._addAction)
         self.scrollArea = ScrollArea(self.widget)
         self.scrollArea.setWidgetResizable(True)

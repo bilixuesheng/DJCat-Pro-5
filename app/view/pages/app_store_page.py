@@ -335,12 +335,10 @@ class ApplicationCard(CardWidget):
         self.titleLabel.installEventFilter(self._elideFilter)
         self.descriptionLabel.installEventFilter(self._descriptionElideFilter)
         self.pinButton = ToggleToolButton(FIF.PIN, self)
-        self.pinButton.setFixedSize(40, 40)
         self.pinButton.setAccessibleName("固定到主页")
         setFluentToolTip(self.pinButton, "固定到主页")
         self.pinButton.hide()
         self.actionButton = PrimaryPushButton(self)
-        self.actionButton.setFixedHeight(40)
         self.removeButton = ToolButton(FIF.DELETE, self)
         self.removeButton.setFixedSize(40, 40)
         setFluentToolTip(self.removeButton, "卸载")
@@ -737,7 +735,6 @@ class AppStorePage(ScrollArea):
         self.installedEmptyButton = PrimaryPushButton(
             "浏览全部应用", self.installedEmpty
         )
-        self.installedEmptyButton.setMinimumHeight(40)
         self.installedEmptyButton.clicked.connect(self._handleInstalledEmptyAction)
         emptyLayout.addWidget(
             self.installedEmptyIcon, 0, Qt.AlignmentFlag.AlignHCenter
@@ -811,14 +808,11 @@ class AppStorePage(ScrollArea):
         overlayLayout.addWidget(self.adTitle)
         overlayLayout.addWidget(self.adDescription)
         self.adButton = PrimaryPushButton("查看软件", self.adOverlay)
-        self.adButton.setFixedHeight(32)
         self.adButton.clicked.connect(self._openAdApp)
         overlayLayout.addWidget(self.adButton, 0, Qt.AlignmentFlag.AlignLeft)
         self.adPrevious = self.adFlipView.preButton
         self.adNext = self.adFlipView.nextButton
         self.adOverlay.setTouchButtons((self.adPrevious, self.adNext))
-        for button in (self.adPrevious, self.adNext):
-            button.setFixedSize(32, 32)
         self.adOverlay.previousRequested.connect(self._previousAd)
         self.adOverlay.nextRequested.connect(self._nextAd)
         self.adFrame.entered.connect(self._pauseAds)
@@ -843,14 +837,12 @@ class AppStorePage(ScrollArea):
         pagerLayout.setContentsMargins(0, 0, 0, 0)
         pagerLayout.setSpacing(8)
         self.pagerPrevious = ToolButton(FIF.LEFT_ARROW, self.pagerBar)
-        self.pagerPrevious.setFixedSize(40, 40)
         self.pagerPrevious.clicked.connect(lambda: self._changePage(-1))
         pagerLayout.addWidget(self.pagerPrevious)
         self.pager = PipsPager(self.pagerBar)
         self.pager.currentIndexChanged.connect(self._onPageChanged)
         pagerLayout.addWidget(self.pager)
         self.pagerNext = ToolButton(FIF.RIGHT_ARROW, self.pagerBar)
-        self.pagerNext.setFixedSize(40, 40)
         self.pagerNext.clicked.connect(lambda: self._changePage(1))
         pagerLayout.addWidget(self.pagerNext)
         allLayout.addWidget(self.pagerBar, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -888,7 +880,6 @@ class AppStorePage(ScrollArea):
         self.detailBackButton = PushButton(
             FIF.LEFT_ARROW, "返回应用列表", self.detail
         )
-        self.detailBackButton.setFixedHeight(36)
         self.detailBackButton.clicked.connect(self._backToOverview)
         layout.addWidget(
             self.detailBackButton, 0, Qt.AlignmentFlag.AlignLeft
@@ -2091,7 +2082,6 @@ class AppStorePage(ScrollArea):
                 or key[0] in self._uninstalling
             )
             openButton = PushButton(FIF.PLAY, "打开", item)
-            openButton.setFixedHeight(40)
             openButton.setAccessibleName("打开预设")
             openButton.setEnabled(available and not busy)
             openButton.clicked.connect(
@@ -2101,7 +2091,6 @@ class AppStorePage(ScrollArea):
             )
             row.addWidget(openButton)
             pin = ToggleToolButton(FIF.PIN, item)
-            pin.setFixedSize(40, 40)
             isPinned = key in pinned
             pin.setChecked(isPinned)
             pin.setEnabled((available or isPinned) and not busy)

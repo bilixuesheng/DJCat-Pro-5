@@ -303,7 +303,7 @@ class HomeCustomCardTest(TestCase):
             dialog.deleteLater()
             parent.deleteLater()
 
-    def testCardEditorUsesConsistentTouchButtonHeights(self):
+    def testCardEditorUsesNativeControlHeights(self):
         parent = QWidget()
         parent.resize(900, 700)
         dialog = CustomCardDialog(parent=parent)
@@ -316,12 +316,14 @@ class HomeCustomCardTest(TestCase):
                 dialog.cancelButton,
                 dialog.iconSelectButton,
                 dialog.addActionButton,
-                row.dragHandle,
-                row.editButton,
-                row.deleteButton,
             ):
                 with self.subTest(button=button):
-                    self.assertEqual(button.height(), 44)
+                    self.assertLess(button.height(), 44)
+                    self.assertLess(button.minimumHeight(), button.maximumHeight())
+            for button in (row.dragHandle, row.editButton, row.deleteButton):
+                with self.subTest(button=button):
+                    self.assertEqual(button.minimumHeight(), 44)
+                    self.assertEqual(button.maximumHeight(), 44)
         finally:
             dialog.deleteLater()
             parent.deleteLater()
