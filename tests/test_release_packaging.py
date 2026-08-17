@@ -75,6 +75,8 @@ def test_release_workflow_uses_native_windows_runners_and_four_packages():
     assert "Windows-x86_64-Setup.exe" in workflow
     assert "Windows-arm64-Setup.exe" in workflow
     assert "gh release create" in workflow
+    assert 'release_args=()' in workflow
+    assert 'if [[ "$TAG" == *-* ]]; then' in workflow
     assert "--prerelease" in workflow
     assert "cancel-in-progress: false" in workflow
     assert '-OutFile "scripts\\ChineseSimplified.isl"' in workflow
