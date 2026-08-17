@@ -477,6 +477,7 @@ class BannerWidget(QWidget):
 class HomePage(ScrollArea):
     applicationCardRemoved = Signal(object)
     applicationCardClicked = Signal(object)
+    homeCardsChanged = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
@@ -596,6 +597,38 @@ class HomePage(ScrollArea):
         self._dragScrollTimer = QTimer(self)
         self._dragScrollTimer.setInterval(16)
         self._dragScrollTimer.timeout.connect(self._autoScrollCardDrag)
+
+    def homeCardEntries(self) -> list[dict]:
+        entries = []
+        for key in self._card_order:
+            card = self.all_cards.get(key)
+            if card is None:
+                continue
+            if key in DEFAULT_CARD_INFO:
+                source = "default"
+            elif key in self._customCardKeys:
+                source = "custom"
+            else:
+                source = "application"
+            entries.append(
+                {
+                    "key": key,
+                    "source": source,
+                    "title": card.titleLabel.text(),
+                    "description": card.contentLabel.text(),
+                    "icon": card.iconWidget.getIcon(),
+                }
+            )
+        return entries
+
+    def activateHomeCard(self, key: str) -> bool:
+        if key not in self._card_order:
+            return False
+        card = self.all_cards.get(key)
+        if card is None:
+            return False
+        card.clicked.emit()
+        return True
 
     def setApplicationCards(self, cards) -> list[dict]:
         cards = normalize_pinned_cards(cards)
@@ -856,6 +889,9 @@ class HomePage(ScrollArea):
         if not workers:
             self._customWorkers.pop(card_id, None)
         if errors:
+            showMainWindow = getattr(self.window(), "_showMainWindow", None)
+            if callable(showMainWindow):
+                showMainWindow()
             InfoBar.error(
                 "卡片执行完成但有失败动作",
                 "；".join(errors),
@@ -893,6 +929,7 @@ class HomePage(ScrollArea):
                 current_order.append(name)
         self._card_order = current_order
         self._layoutCards()
+        self.homeCardsChanged.emit(self.homeCardEntries())
 
     def _layoutCards(self):
         self.flowLayout.removeAllWidgets()
@@ -1017,6 +1054,7 @@ class HomePage(ScrollArea):
         self.dragPreview.hide()
         card.setGraphicsEffect(None)
         self._saveCardOrder()
+        self.homeCardsChanged.emit(self.homeCardEntries())
 
     def _saveCardOrder(self):
         if cfg.homeCardOrder.value != self._card_order:

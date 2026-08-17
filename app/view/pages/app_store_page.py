@@ -2296,7 +2296,7 @@ class AppStorePage(ScrollArea):
             return False
         try:
             if item["preset_id"] == DIRECT_APPLICATION_PRESET_ID:
-                self.store.executeAction(installed)
+                result = self.store.executeAction(installed)
             else:
                 localPreset = next(
                     (
@@ -2336,8 +2336,8 @@ class AppStorePage(ScrollArea):
                         parent=noticeParent,
                     )
                     return False
-                self.store.executeAction(installed, action)
-            return True
+                result = self.store.executeAction(installed, action)
+            return bool(result)
         except (ApplicationStoreError, OSError, ValueError) as error:
             InfoBar.error("执行预设失败", str(error), duration=4000, position=InfoBarPosition.BOTTOM_RIGHT, parent=noticeParent)
             return False

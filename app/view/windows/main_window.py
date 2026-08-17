@@ -69,6 +69,7 @@ from app.view.components.markdown_view import MarkdownView
 from app.view.pages.credits_page import CreditsPage
 from app.view.pages.home_page import HomePage
 from app.view.pages.setting_page import SettingPage
+from app.view.pages.tray_control_page import TrayControlPage
 from app.view.shell.tray import SystemTrayIcon
 
 
@@ -165,7 +166,7 @@ class LazyAppStorePage(QWidget):
             self.page.setSearchText(text)
 
     def executePinnedCard(self, item):
-        self.ensureLoaded().executePinnedCard(item)
+        return self.ensureLoaded().executePinnedCard(item)
 
     def shutdown(self):
         if self.page is not None:
@@ -236,6 +237,7 @@ class MainWindow(MSFluentWindow):
         self.initNavigation()
         self._startMachineRegistration()
         self.tray = SystemTrayIcon(self)
+        self.tray.setHomeCards(self.homePage.homeCardEntries())
         self.tray.show()
 
         signalBus.catchException.connect(self._onExceptionCaught)
@@ -668,6 +670,7 @@ class MainWindow(MSFluentWindow):
         self.homePage = HomePage(self)
         self.appStorePage = LazyAppStorePage(self)
         self.creditsPage = CreditsPage(self)
+        self.trayControlPage = TrayControlPage(self)
         self.settingPage = SettingPage(self)
         self.broadcastEditPage = None
         self.countdownPage = None
@@ -690,6 +693,12 @@ class MainWindow(MSFluentWindow):
             position=NavigationItemPosition.BOTTOM,
         )
         self.addSubInterface(
+            self.trayControlPage,
+            FIF.MENU,
+            "托盘控件",
+            position=NavigationItemPosition.BOTTOM,
+        )
+        self.addSubInterface(
             self.settingPage,
             FIF.SETTING,
             "设置",
@@ -709,10 +718,34 @@ class MainWindow(MSFluentWindow):
         self.settingPage.appStoreCacheCleared.connect(
             self._onAppStoreCacheCleared
         )
+        self.homePage.homeCardsChanged.connect(self._onHomeCardsChanged)
+        self._onHomeCardsChanged(self.homePage.homeCardEntries())
         self.homePage.applicationCardClicked.connect(self._onPinnedHomeCardClicked)
         self.homePage.applicationCardRemoved.connect(self._onPinnedHomeCardRemoved)
         self._setPinnedHomeCards(cfg.pinnedHomeCards.value)
         self._updateSearchEdit()
+
+    def _onHomeCardsChanged(self, entries):
+        self.trayControlPage.setHomeCards(entries)
+        tray = getattr(self, "tray", None)
+        if tray is not None:
+            tray.setHomeCards(entries)
+
+    def _onTrayHomeCardTriggered(self, key: str) -> None:
+        entry = next(
+            (item for item in self.homePage.homeCardEntries() if item["key"] == key),
+            None,
+        )
+        if entry is None:
+            return
+        if entry["source"] == "default":
+            self._showMainWindow()
+        self.homePage.activateHomeCard(key)
+
+    def _showMainWindow(self):
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
     def _setPinnedHomeCards(self, cards):
         normalized = self.homePage.setApplicationCards(cards)
@@ -732,7 +765,8 @@ class MainWindow(MSFluentWindow):
         self._setPinnedHomeCards(cards)
 
     def _onPinnedHomeCardClicked(self, item):
-        self.appStorePage.executePinnedCard(item)
+        if self.appStorePage.executePinnedCard(item) is False:
+            self._showMainWindow()
 
     def _onPinnedHomeCardRemoved(self, item):
         normalized = normalize_pinned_cards([item])

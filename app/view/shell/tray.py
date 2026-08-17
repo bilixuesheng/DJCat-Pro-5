@@ -1,12 +1,13 @@
 from copy import deepcopy
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QIcon, QPainter
+from PySide6.QtGui import QColor, QCursor, QIcon, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
     QMenu,
     QProxyStyle,
+    QScroller,
     QStyle,
     QStyleFactory,
     QSystemTrayIcon,
@@ -68,6 +69,14 @@ class AcrylicMenu(RoundMenu):
         self.hBoxLayout.setContentsMargins(0, 0, 0, 0)
         FluentStyleSheet.MENU.apply(self)
         self.view.setProperty("transparent", True)
+        self.timer.setSingleShot(True)
+        self.timer.setInterval(400)
+        self.timer.timeout.connect(self._onShowMenuTimeOut)
+        self.setItemHeight(44)
+        QScroller.grabGesture(
+            self.view.viewport(),
+            QScroller.ScrollerGestureType.TouchGesture,
+        )
 
         self.view.itemClicked.connect(self._onItemClicked)
         self.view.itemEntered.connect(self._onItemEntered)
@@ -98,6 +107,15 @@ class AcrylicMenu(RoundMenu):
         painter.setBrush(QColor(0, 0, 0, 1))
         painter.drawRect(self.rect())
 
+    def _onItemClicked(self, item):
+        submenu = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(submenu, RoundMenu):
+            self.lastHoverItem = item
+            self.lastHoverSubMenuItem = item
+            self._onShowMenuTimeOut()
+            return
+        super()._onItemClicked(item)
+
 class SystemTrayIcon(QSystemTrayIcon):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
@@ -107,54 +125,125 @@ class SystemTrayIcon(QSystemTrayIcon):
 
         cfg.trayTooltip.valueChanged.connect(self.setToolTip)
 
-        self.menu = AcrylicMenu(parent=parent)
+        self._homeCards = []
+        cfg.broadcastTasks.valueChanged.connect(self._refreshBroadcastAction)
+        cfg.shutdownTasks.valueChanged.connect(self._refreshShutdownAction)
+        cfg.showBroadcastTrayAction.valueChanged.connect(self._rebuildMenu)
+        cfg.showShutdownTrayAction.valueChanged.connect(self._rebuildMenu)
+        cfg.trayHomeCardKeys.valueChanged.connect(self._rebuildMenu)
+        cfg.trayHomeCardsInSubmenu.valueChanged.connect(self._rebuildMenu)
+        self._rebuildMenu()
+        self.activated.connect(self.onTrayIconClick)
+
+    def setHomeCards(self, entries) -> None:
+        self._homeCards = []
+        keys = set()
+        for entry in entries or []:
+            key = entry.get("key") if isinstance(entry, dict) else None
+            if not isinstance(key, str) or not key or key in keys:
+                continue
+            keys.add(key)
+            self._homeCards.append(dict(entry))
+        if hasattr(self, "menu"):
+            self._rebuildMenu()
+
+    def _rebuildMenu(self, _value=None) -> None:
+        oldMenu = getattr(self, "menu", None)
+        menu = AcrylicMenu(parent=self.parent())
 
         self.showAction = Action(
             QIcon(str(ASSET_DIR / "logo_cat.png")),
             "主页",
-            self.menu,
+            menu,
         )
         self.showAction.triggered.connect(self._onShowActionTriggered)
-        self.menu.addAction(self.showAction)
+        menu.addAction(self.showAction)
 
-        self.broadcastAction = Action(FIF.PLAY, "", self.menu)
-        self.broadcastAction.triggered.connect(self._toggleBroadcastTasks)
-        self.menu.addAction(self.broadcastAction)
-        cfg.broadcastTasks.valueChanged.connect(self._refreshBroadcastAction)
-        self._refreshTaskAction(
-            self.broadcastAction,
-            cfg.broadcastTasks.value,
-            "关闭所有播报",
-            "开启所有播报",
-            FIF.PLAY,
-        )
+        if cfg.showBroadcastTrayAction.value:
+            self.broadcastAction = Action(FIF.PLAY, "", menu)
+            self.broadcastAction.triggered.connect(self._toggleBroadcastTasks)
+            menu.addAction(self.broadcastAction)
+            self._refreshTaskAction(
+                self.broadcastAction,
+                cfg.broadcastTasks.value,
+                "关闭所有播报",
+                "开启所有播报",
+                FIF.PLAY,
+            )
+        else:
+            self.broadcastAction = None
 
-        self.shutdownAction = Action(FIF.POWER_BUTTON, "", self.menu)
-        self.shutdownAction.triggered.connect(self._toggleShutdownTasks)
-        self.menu.addAction(self.shutdownAction)
-        cfg.shutdownTasks.valueChanged.connect(self._refreshShutdownAction)
-        self._refreshTaskAction(
-            self.shutdownAction,
-            cfg.shutdownTasks.value,
-            "关闭所有关机",
-            "开启所有关机",
-            FIF.POWER_BUTTON,
-        )
+        if cfg.showShutdownTrayAction.value:
+            self.shutdownAction = Action(FIF.POWER_BUTTON, "", menu)
+            self.shutdownAction.triggered.connect(self._toggleShutdownTasks)
+            menu.addAction(self.shutdownAction)
+            self._refreshTaskAction(
+                self.shutdownAction,
+                cfg.shutdownTasks.value,
+                "关闭所有关机",
+                "开启所有关机",
+                FIF.POWER_BUTTON,
+            )
+        else:
+            self.shutdownAction = None
 
-        self.menu.addSeparator()
+        selected = {
+            key
+            for key in cfg.trayHomeCardKeys.value
+            if isinstance(key, str)
+        } if isinstance(cfg.trayHomeCardKeys.value, list) else set()
+        cards = [entry for entry in self._homeCards if entry["key"] in selected]
+        if cards:
+            menu.addSeparator()
+            if cfg.trayHomeCardsInSubmenu.value:
+                submenu = RoundMenu("主页卡片", menu)
+                submenu.setIcon(FIF.HOME)
+                submenu.setItemHeight(menu.itemHeight)
+                QScroller.grabGesture(
+                    submenu.view.viewport(),
+                    QScroller.ScrollerGestureType.TouchGesture,
+                )
+                for entry in cards:
+                    submenu.addAction(self._cardAction(entry, submenu))
+                menu.addMenu(submenu)
+            else:
+                for entry in cards:
+                    menu.addAction(self._cardAction(entry, menu))
 
-        self.quitAction = Action(FIF.CLOSE, "退出程序", self.menu)
+        menu.addSeparator()
+        self.quitAction = Action(FIF.CLOSE, "退出程序", menu)
         self.quitAction.triggered.connect(self._onQuitActionTriggered)
-        self.menu.addAction(self.quitAction)
+        menu.addAction(self.quitAction)
 
-        self.setContextMenu(self.menu)
-        self.activated.connect(self.onTrayIconClick)
+        self.menu = menu
+        self.setContextMenu(menu)
+        if oldMenu is not None:
+            oldMenu.close()
+            oldMenu.deleteLater()
+
+    def _cardAction(self, entry, parent):
+        action = Action(entry["icon"], entry["title"], parent)
+        action.triggered.connect(
+            lambda _checked=False, key=entry["key"]: self._onHomeCardTriggered(key)
+        )
+        return action
+
+    def _onHomeCardTriggered(self, key: str) -> None:
+        parent = self.parent()
+        handler = getattr(parent, "_onTrayHomeCardTriggered", None)
+        if handler is not None:
+            handler(key)
 
     def _onShowActionTriggered(self):
-        if self.parent():
-            self.parent().show()
-            self.parent().raise_()
-            self.parent().activateWindow()
+        parent = self.parent()
+        if parent:
+            showMainWindow = getattr(parent, "_showMainWindow", None)
+            if callable(showMainWindow):
+                showMainWindow()
+                return
+            parent.show()
+            parent.raise_()
+            parent.activateWindow()
 
     def _toggleBroadcastTasks(self):
         self._toggleTasks(cfg.broadcastTasks)
@@ -163,22 +252,24 @@ class SystemTrayIcon(QSystemTrayIcon):
         self._toggleTasks(cfg.shutdownTasks)
 
     def _refreshBroadcastAction(self, tasks):
-        self._refreshTaskAction(
-            self.broadcastAction,
-            tasks,
-            "关闭所有播报",
-            "开启所有播报",
-            FIF.PLAY,
-        )
+        if self.broadcastAction is not None:
+            self._refreshTaskAction(
+                self.broadcastAction,
+                tasks,
+                "关闭所有播报",
+                "开启所有播报",
+                FIF.PLAY,
+            )
 
     def _refreshShutdownAction(self, tasks):
-        self._refreshTaskAction(
-            self.shutdownAction,
-            tasks,
-            "关闭所有关机",
-            "开启所有关机",
-            FIF.POWER_BUTTON,
-        )
+        if self.shutdownAction is not None:
+            self._refreshTaskAction(
+                self.shutdownAction,
+                tasks,
+                "关闭所有关机",
+                "开启所有关机",
+                FIF.POWER_BUTTON,
+            )
 
     @staticmethod
     def _refreshTaskAction(
@@ -211,4 +302,7 @@ class SystemTrayIcon(QSystemTrayIcon):
 
     def onTrayIconClick(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            self._onShowActionTriggered()
+            if cfg.trayLeftClickAction.value == "ShowMenu":
+                self.menu.exec(QCursor.pos())
+            else:
+                self._onShowActionTriggered()

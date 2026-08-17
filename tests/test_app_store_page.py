@@ -809,6 +809,24 @@ class AppStorePageTest(TestCase):
 
         self.page.store.executeAction.assert_called_once_with(installed)
 
+    def testPinnedCardPropagatesActionFailure(self):
+        installed = object()
+        self.page.store = Mock()
+        self.page.store.installed.return_value = {1: installed}
+        self.page.store.executeAction.return_value = False
+
+        self.assertFalse(
+            self.page.executePinnedCard(
+                {
+                    "app_id": 1,
+                    "preset_id": 0,
+                    "title": "Ghost Downloader",
+                    "description": "下载工具",
+                    "action": {"type": "url", "target": "https://example.test"},
+                }
+            )
+        )
+
     def testPresetPinnedCardUsesMatchingInstalledPresetAction(self):
         installed = SimpleNamespace(
             metadata={

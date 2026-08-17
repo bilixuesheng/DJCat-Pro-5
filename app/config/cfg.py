@@ -77,6 +77,23 @@ class Config(QConfig):
     windowTitle = ConfigItem("Personalization", "WindowTitle", "")
     trayTooltip = ConfigItem("Personalization", "TrayTooltip", "电教猫 Pro 5")
 
+    trayLeftClickAction = OptionsConfigItem(
+        "Tray",
+        "LeftClickAction",
+        "ShowWindow",
+        OptionsValidator(["ShowWindow", "ShowMenu"]),
+    )
+    showBroadcastTrayAction = ConfigItem(
+        "Tray", "ShowBroadcastAction", True, BoolValidator()
+    )
+    showShutdownTrayAction = ConfigItem(
+        "Tray", "ShowShutdownAction", True, BoolValidator()
+    )
+    trayHomeCardKeys = ConfigItem("Tray", "HomeCardKeys", [])
+    trayHomeCardsInSubmenu = ConfigItem(
+        "Tray", "HomeCardsInSubmenu", False, BoolValidator()
+    )
+
     showBanner = ConfigItem("Banner", "ShowBanner", True, BoolValidator())
     bannerImageSource = OptionsConfigItem(
         "Banner",

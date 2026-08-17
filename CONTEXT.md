@@ -26,6 +26,20 @@ _Avoid_: Application Action、step、command（仅 Shell 类型是命令）
 一次点击 Custom Home Card 后按当前顺序处理的 Home Action 集合。运行期间会读取最新动作列表，但同一动作 ID 至多执行一次；等待型动作和延时会阻塞后续动作，取消则停止尚未执行的动作。
 _Avoid_: workflow、macro
 
+### 系统托盘
+
+**Tray Menu**:
+DJCat 系统托盘图标提供的快捷操作集合。右键始终打开它；左键可配置为打开 Tray Menu 或显示主窗口。打开主窗口和退出程序始终可用，Broadcast Task 与 Shutdown Task 的总开关可分别隐藏；选中的 Tray Card Shortcut 位于任务总开关之后，按主页顺序显示或统一放入“主页卡片”二级菜单。根菜单和二级菜单都支持鼠标悬停、触控点击展开以及触控滚动。
+_Avoid_: context menu、右键菜单（它不只可由右键打开）
+
+**Tray Click Action**:
+用户左键单击系统托盘图标时的行为，取值为显示主窗口或打开 Tray Menu；右键不受它影响。
+_Avoid_: left-click preference、mouse mode
+
+**Tray Card Shortcut**:
+Tray Menu 中对现存 Home Card 的引用，可指向 Default Home Card、Custom Home Card 或 Application Home Card，并复用源卡片的标题、图标和点击行为。触发 Default Home Card 时先显示主窗口并导航；Custom/Application Home Card 成功执行时保持当前窗口状态，失败时显示主窗口并保留现有错误提示。源 Home Card 被移除、删除或取消固定后，对应 Tray Card Shortcut 同步消失。
+_Avoid_: Tray Home Card、复制卡片、独立托盘动作
+
 ### 课堂展示
 
 **Projection**:
@@ -143,6 +157,15 @@ _Avoid_: Client Update；不加限定地称 update
 
 > **Dev:** “应用预设卡片和用户自定义卡片都可以执行动作，是同一种卡片吗？”
 > **Domain expert:** “不是。Application Home Card 执行 Application Catalog 提供的受限 Application Action；Custom Home Card 执行用户在本机编排的 Action Sequence。”
+
+> **Dev:** “托盘里的卡片是不是主页卡片的另一份副本？”
+> **Domain expert:** “不是。Tray Card Shortcut 只引用现存 Home Card，沿用主页的顺序、标题、图标和点击行为。”
+
+> **Dev:** “左键点托盘图标是不是总会打开主页？”
+> **Domain expert:** “不一定。Tray Click Action 可将左键配置为打开 Tray Menu；右键始终打开 Tray Menu。”
+
+> **Dev:** “把卡片放进托盘二级菜单后，它的排序是不是独立的？”
+> **Domain expert:** “不是。Tray Menu 始终沿用主页排序；二级菜单只改变显示层级。”
 
 > **Dev:** “机器码能不能当授权码，阻止别人调用 AI 接口？”
 > **Domain expert:** “不能。Machine Code 只是匿名设备的可见别名，用于查找 Daily Quota，不承担认证。”
