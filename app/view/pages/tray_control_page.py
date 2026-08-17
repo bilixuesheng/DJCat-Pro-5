@@ -35,7 +35,7 @@ class TrayControlPage(ScrollArea):
             "选择打开主窗口或显示托盘菜单",
             texts=["打开主窗口", "显示托盘菜单"],
         )
-        self.leftClickCard.comboBox.setMinimumHeight(40)
+        self.leftClickCard.comboBox.setFixedHeight(32)
         clickGroup.addSettingCard(self.leftClickCard)
         self.vBoxLayout.addWidget(clickGroup)
 
@@ -61,7 +61,7 @@ class TrayControlPage(ScrollArea):
             ),
         ]
         for card in self.menuCards:
-            card.switchButton.setMinimumHeight(40)
+            card.switchButton.setFixedHeight(32)
         menuGroup.addSettingCards(self.menuCards)
         self.vBoxLayout.addWidget(menuGroup)
 
@@ -127,7 +127,7 @@ class TrayControlPage(ScrollArea):
                 entry["title"],
                 entry.get("description", ""),
             )
-            card.switchButton.setMinimumHeight(40)
+            card.switchButton.setFixedHeight(32)
             card.setChecked(key in selected)
             card.checkedChanged.connect(
                 lambda checked, cardKey=key: self._setHomeCardEnabled(

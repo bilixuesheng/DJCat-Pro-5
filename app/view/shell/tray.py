@@ -73,7 +73,7 @@ class AcrylicMenu(RoundMenu):
         self.timer.setSingleShot(True)
         self.timer.setInterval(400)
         self.timer.timeout.connect(self._onShowMenuTimeOut)
-        self.setItemHeight(44)
+        self.setItemHeight(32)
         QScroller.grabGesture(
             self.view.viewport(),
             QScroller.ScrollerGestureType.TouchGesture,

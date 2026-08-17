@@ -192,13 +192,18 @@ class HomeCardTrayInterfaceTest(TestCase):
         self.app.processEvents()
         try:
             self.assertTrue(QScroller.hasScroller(trayPage.viewport()))
-            self.assertGreaterEqual(trayPage.leftClickCard.comboBox.height(), 40)
-            self.assertTrue(
-                all(
-                    card.switchButton.height() >= 40
-                    for card in trayPage.homeCardSwitches.values()
+            self.assertEqual(trayPage.leftClickCard.comboBox.height(), 32)
+            cards = [*trayPage.menuCards, *trayPage.homeCardSwitches.values()]
+            for card in cards:
+                self.assertEqual(card.switchButton.height(), 32)
+                self.assertEqual(card.switchButton.indicator.height(), 22)
+                self.assertLessEqual(
+                    abs(
+                        card.switchButton.geometry().center().y()
+                        - card.rect().center().y()
+                    ),
+                    1,
                 )
-            )
         finally:
             trayPage.deleteLater()
 
@@ -514,10 +519,10 @@ class TrayMenuTest(TestCase):
         cfg.set(cfg.trayHomeCardsInSubmenu, True)
         tray = self._createTray()
         try:
-            self.assertEqual(tray.menu.itemHeight, 44)
+            self.assertEqual(tray.menu.itemHeight, 32)
             self.assertTrue(QScroller.hasScroller(tray.menu.view.viewport()))
             submenu = tray.menu.findChildren(RoundMenu)[0]
-            self.assertEqual(submenu.itemHeight, 44)
+            self.assertEqual(submenu.itemHeight, 32)
             self.assertTrue(QScroller.hasScroller(submenu.view.viewport()))
         finally:
             tray.deleteLater()
@@ -548,7 +553,7 @@ class TrayMenuTest(TestCase):
             tray.menu.hide()
             tray.deleteLater()
 
-    def testHoveringSubmenuEntryOpensItAfterMenuDelay(self):
+    def testHoveringSubmenuEntrySchedulesItAfterMenuDelay(self):
         cfg.set(cfg.trayHomeCardsInSubmenu, True)
         tray = self._createTray()
         tray.menu.show()
@@ -560,9 +565,14 @@ class TrayMenuTest(TestCase):
                 for index in range(tray.menu.view.count())
                 if tray.menu.view.item(index).data(Qt.ItemDataRole.UserRole) is submenu
             )
-            with patch.object(submenu, "exec") as showSubmenu:
+            with (
+                patch.object(tray.menu, "isHidden", return_value=False),
+                patch.object(submenu, "exec") as showSubmenu,
+            ):
                 tray.menu._showSubMenu(item)
-                QTest.qWait(tray.menu.timer.interval() + 50)
+                self.assertTrue(tray.menu.timer.isActive())
+                tray.menu.timer.stop()
+                tray.menu.timer.timeout.emit()
                 showSubmenu.assert_called_once()
         finally:
             tray.menu.hide()
