@@ -163,6 +163,7 @@ class AIAdminTest(TestCase):
     def testDashboardStatsScanRequestHistoryOnlyTwice(self):
         statements = []
         originalConnect = ai_markdown._connect
+        ai_markdown._rollupOldRequests()
 
         def connect():
             database = originalConnect()
@@ -238,6 +239,9 @@ class AIAdminTest(TestCase):
             ),
             1,
         )
+        self.client.post(
+            "/ai/markdown/register", json={"machine_id": "a" * 64}
+        )
         quota = self.client.get(
             "/ai/markdown/quota", query_string={"machine_id": "a" * 64}
         ).get_json()
@@ -251,6 +255,35 @@ class AIAdminTest(TestCase):
                 "SELECT value FROM settings WHERE key = 'deepseek_api_key'"
             ).fetchone()[0]
         self.assertNotIn("sk-panel-test", encrypted)
+
+    def testSavingAISettingsDoesNotOverwritePromptPageChanges(self):
+        self._login()
+        prompt = self._promptPage()
+        self.client.post(
+            "/admin/ai/markdown/prompt",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(prompt),
+                "system_prompt": "独立页面保存的新提示词",
+            },
+        )
+        settings = self._settingsPage()
+
+        response = self.client.post(
+            "/admin/ai/markdown/settings",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(settings),
+                "daily_limit": "20",
+                "model": "deepseek-v4-flash-test",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            ai_markdown._setting("system_prompt"),
+            "独立页面保存的新提示词",
+        )
 
     def testAdminWriteRoutesSupportAjaxResponses(self):
         self._login()
@@ -455,6 +488,52 @@ class AIAdminTest(TestCase):
         )
         self.assertEqual(ai_markdown._remaining(machineId), 15)
 
+    def testMachineResetAcceptsAliasesBeyondSixDigits(self):
+        machineId = "f" * 64
+        with closing(ai_markdown._connect()) as database:
+            database.execute(
+                "INSERT INTO machines(id, machine_id, registered_at, last_seen_at) "
+                "VALUES (1000000, ?, ?, ?)",
+                (machineId, ai_markdown._nowIso(), ai_markdown._nowIso()),
+            )
+            database.execute(
+                "INSERT INTO usage(day, machine_id, count) VALUES (?, ?, 3)",
+                (ai_markdown._today(), machineId),
+            )
+            database.commit()
+
+        self.assertTrue(ai_markdown._resetMachine("DJ-1000000"))
+        self.assertEqual(ai_markdown._remaining(machineId), 15)
+
+    def testQuotaResetSeparatesOldProcessingRequestsFromNewUsage(self):
+        registered = self.client.post(
+            "/ai/markdown/register", json={"machine_id": "a" * 64}
+        ).get_json()
+        machineId = ai_markdown._machineId("a" * 64)
+        day = ai_markdown._today()
+        _, oldRequest = ai_markdown._claimRequest(machineId, 1, day, 15)
+        machines = self._login()
+
+        response = self.client.post(
+            f"/admin/ai/markdown/machines/{registered['machine_code']}/reset",
+            base_url="https://dash.djcatpro.top",
+            data={"csrf_token": self._csrf(machines)},
+        )
+        _, newRequest = ai_markdown._claimRequest(machineId, 1, day, 15)
+        ai_markdown._requestFinished(newRequest, True)
+        settled = ai_markdown._requestFinished(
+            oldRequest, False, machineId, 1, day
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(settled)
+        self.assertEqual(ai_markdown._remaining(machineId, day, 15), 14)
+        with closing(ai_markdown._connect()) as database:
+            status = database.execute(
+                "SELECT status FROM request_log WHERE id = ?", (oldRequest,)
+            ).fetchone()[0]
+        self.assertEqual(status, "reset")
+
     def testAdminRequiresLoginAndCsrf(self):
         response = self.client.get(
             "/admin/login", base_url="https://api.djcatpro.top"
@@ -506,6 +585,7 @@ class AIAdminTest(TestCase):
         self.assertIn("toast-progress 10s", css)
         self.assertIn("prefers-reduced-motion", css)
         self.assertIn("button:active:not(:disabled)", css)
+        self.assertIn("[hidden] { display: none !important; }", css)
         self.assertIn(".button-danger:hover", css)
         self.assertIn("background: var(--danger); color: #fff", css)
 
@@ -528,7 +608,7 @@ class AIAdminTest(TestCase):
         self.assertIn("10_000", javascript)
         self.assertIn("if (refreshStarted) refreshStats();", javascript)
         self.assertIn(".table-action { min-height: 40px;", css)
-        self.assertIn(".order-controls button { width: 40px; height: 40px;", css)
+        self.assertIn(".drag-handle { width: 40px; height: 40px;", css)
         self.assertIn(".sidebar-toggle { width: 40px; height: 40px;", css)
         self.assertIn("@media (hover: none), (pointer: coarse)", css)
         self.assertIn(

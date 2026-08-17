@@ -14,32 +14,36 @@
         <div class="machine-count"><strong data-item-count>{{ apps|length }}</strong><span>个软件</span></div>
     </header>
 
+    {% if integrity_issues %}
+    <div class="notice error" role="alert">
+        <strong>{{ integrity_issues|length }} 个已启用安装包缺少有效的 SHA-256，相关架构已暂停下载。</strong>
+        请编辑软件并补齐校验值：
+        {% for issue in integrity_issues %}{{ issue.name }}（{{ issue.architecture }}）{% if not loop.last %}、{% endif %}{% endfor %}。
+    </div>
+    {% endif %}
+
     <section class="section-block" aria-labelledby="apps-title">
         <div class="section-heading">
             <div><span class="section-index">01</span><h2 id="apps-title">已发布软件</h2></div>
             <div class="section-heading-actions">
                 <a class="button button-primary" href="{{ url_for('app_store.adminNewApp') }}">新增软件</a>
+                <a href="{{ url_for('app_store.adminRecommendations') }}">管理推荐软件 →</a>
                 <a href="{{ url_for('app_store.adminPresets') }}">管理预设卡片 →</a>
                 <a href="{{ url_for('app_store.adminAds') }}">管理广告 →</a>
             </div>
         </div>
         <div class="table-wrap">
-            <table data-empty-message="还没有软件，先新增一个。">
+            <table data-empty-message="还没有软件，先新增一个。" data-sortable-table data-order-url="{{ url_for('app_store.adminOrderApps') }}" data-csrf-token="{{ csrf_token }}">
                 <thead><tr><th>顺序</th><th>编号</th><th>名称</th><th>版本</th><th>安装目录</th><th>推荐</th><th>下载次数</th><th>更新时间</th><th>操作</th></tr></thead>
                 <tbody>
                 {% for app in apps %}
-                    <tr>
+                    <tr data-sort-id="{{ app.id }}">
                         <td>
-                            <form class="order-controls" method="post" action="{{ url_for('app_store.adminMoveApp', app_id=app.id) }}" aria-label="调整 {{ app.name }} 的顺序">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                <span>{{ '%02d'|format(loop.index) }}</span>
-                                <button type="submit" name="direction" value="up" aria-label="上移 {{ app.name }}" {% if loop.first %}disabled{% endif %}>↑</button>
-                                <button type="submit" name="direction" value="down" aria-label="下移 {{ app.name }}" {% if loop.last %}disabled{% endif %}>↓</button>
-                            </form>
+                            <span class="drag-order"><button class="drag-handle" type="button" aria-label="拖动调整 {{ app.name }} 的顺序，方向键也可调整">⠿</button><code data-order-position>{{ '%02d'|format(loop.index) }}</code></span>
                         </td>
                         <td><code>{{ app.id }}</code></td>
                         <td><span>{{ app.name }}</span><br><small>{{ app.developer or '未填写开发者' }}</small></td>
-                        <td>{{ app.version }}</td>
+                        <td>{{ app.version }}{% if app.id in integrity_app_ids %}<br><small>校验值待补齐</small>{% endif %}</td>
                         <td><code>{{ app.install_dir }}</code></td>
                         <td>{{ '是' if app.recommended else '否' }}</td>
                         <td>{{ app.download_count }}</td>

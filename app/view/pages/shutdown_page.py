@@ -372,6 +372,11 @@ class ShutdownPage(ScrollArea):
         self.setWidget(self.view)
         self.setWidgetResizable(True)
         self.enableTransparentBackground()
+        self.saveTimer = QTimer(self)
+        self.saveTimer.setSingleShot(True)
+        self.saveTimer.setInterval(300)
+        self.saveTimer.timeout.connect(self.flushPendingSave)
+        self._savePending = False
         self._loadTasks()
         cfg.shutdownTasks.valueChanged.connect(self._onTasksChanged)
 
@@ -399,6 +404,7 @@ class ShutdownPage(ScrollArea):
             self.cardLayout.addWidget(card)
 
     def _addTask(self):
+        self.flushPendingSave()
         dialog = AddShutdownTaskDialog(self.window())
         try:
             if dialog.exec():
@@ -410,12 +416,26 @@ class ShutdownPage(ScrollArea):
 
     def _updateTask(self, index, data):
         self.current_tasks[index] = data
+        self._savePending = True
+        self.saveTimer.start()
+
+    def flushPendingSave(self):
+        if not self._savePending:
+            return
+        self._savePending = False
+        self.saveTimer.stop()
         cfg.set(cfg.shutdownTasks, self.current_tasks)
 
     def _removeTask(self, data):
+        self.saveTimer.stop()
+        self._savePending = False
         self.current_tasks.remove(data)
         cfg.set(cfg.shutdownTasks, self.current_tasks)
         self._loadTasks()
+
+    def hideEvent(self, event):
+        self.flushPendingSave()
+        super().hideEvent(event)
 
 
 class ShutdownPromptDialog(MessageBoxBase):

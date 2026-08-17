@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QFont, QIcon, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
+    QScroller,
     QStyle,
     QStyleOptionButton,
     QStylePainter,
@@ -41,6 +42,7 @@ from qfluentwidgets import FluentIcon as FIF
 from qframelesswindow import FramelessWindow
 
 from app.common.ai_markdown import PEAK_HOURS_TEXT, fetchQuota, machineId
+from app.common.update_download import isHttpsResponseChain
 from app.config.cfg import cfg
 from app.config.constants import AI_MARKDOWN_API
 from app.config.paths import ASSET_DIR
@@ -326,7 +328,10 @@ class BroadcastWindow(FramelessWindow):
         self.contentEdit.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         self.contentEdit.setStyleSheet("border: none; background: transparent;")
         self.contentScrollDelegate = SmoothScrollDelegate(self.contentEdit, True)
-        self.contentEdit.viewport().installEventFilter(self)
+        QScroller.grabGesture(
+            self.contentEdit.viewport(),
+            QScroller.ScrollerGestureType.TouchGesture,
+        )
 
         self.markdownView = MarkdownView(
             self,
@@ -334,7 +339,6 @@ class BroadcastWindow(FramelessWindow):
             transparentBackground=True,
         )
         self.markdownView.hide()
-        self.markdownView.viewport().installEventFilter(self)
 
         self.vBoxLayout.addWidget(self.titleLabel, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.vBoxLayout.addWidget(self.contentEdit, 1)
@@ -358,24 +362,6 @@ class BroadcastWindow(FramelessWindow):
         self.btn_min.clicked.connect(self.minimizeToMini)
         self.btn_win.clicked.connect(self.toggleWindowMode)
         self.btn_close.clicked.connect(self._onClose)
-
-    def eventFilter(self, obj, event):
-        if (
-            hasattr(self, "contentEdit")
-            and obj in (self.contentEdit.viewport(), self.markdownView.viewport())
-        ):
-            if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
-                if self.is_windowed:
-                    self._isTracking = True
-                    self._dragPos = event.globalPosition().toPoint() - self.pos()
-                    return True
-            elif event.type() == QEvent.Type.MouseMove and getattr(self, '_isTracking', False):
-                if self.is_windowed:
-                    self.move(event.globalPosition().toPoint() - self._dragPos)
-                    return True
-            elif event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
-                self._isTracking = False
-        return super().eventFilter(obj, event)
 
     def _themeBackgroundColor(self):
         is_dark = (
@@ -543,8 +529,19 @@ class BroadcastWindow(FramelessWindow):
 
     def mousePressEvent(self, e):
         if self.is_windowed and e.button() == Qt.MouseButton.LeftButton:
-            self._isTracking = True
-            self._dragPos = e.globalPosition().toPoint() - self.pos()
+            source = self.childAt(e.position().toPoint())
+            blocked = any(
+                source is widget or widget.isAncestorOf(source)
+                for widget in (
+                    self.contentEdit,
+                    self.markdownView,
+                    self.btnContainer,
+                )
+                if source is not None
+            )
+            self._isTracking = not blocked
+            if self._isTracking:
+                self._dragPos = e.globalPosition().toPoint() - self.pos()
         super().mousePressEvent(e)
 
     def mouseMoveEvent(self, e):
@@ -604,6 +601,11 @@ class AIMarkdownDialog(MessageBoxBase):
         self._peakEnabled = None
         self._borderIndex = 0
         self._quotaRequestRunning = False
+        self._cancelEvent = threading.Event()
+        self._responseLock = threading.Lock()
+        self._activeResponse = None
+        self._resultChunks = []
+        self._pendingChunks = []
 
         self.titleLabel = SubtitleLabel("AI帮改Markdown", self)
         self.descriptionLabel = BodyLabel(
@@ -615,6 +617,10 @@ class AIMarkdownDialog(MessageBoxBase):
         self.inputEdit.setPlainText(text)
         self.inputEdit.setPlaceholderText("在此输入要转换的内容")
         self.inputEdit.setMinimumHeight(120)
+        QScroller.grabGesture(
+            self.inputEdit.viewport(),
+            QScroller.ScrollerGestureType.TouchGesture,
+        )
         self._inputStyle = self.inputEdit.styleSheet()
         self.quotaLabel = CaptionLabel(self)
         self.quotaLabel.setWordWrap(True)
@@ -640,6 +646,10 @@ class AIMarkdownDialog(MessageBoxBase):
         self._quotaTimer.setInterval(30_000)
         self._quotaTimer.timeout.connect(self._refreshQuota)
         self._quotaTimer.start()
+        self._flushTimer = QTimer(self)
+        self._flushTimer.setSingleShot(True)
+        self._flushTimer.setInterval(50)
+        self._flushTimer.timeout.connect(self._flushChunks)
         self._updateQuotaLabel()
         self._refreshStartButton()
         self._refreshQuota()
@@ -650,7 +660,7 @@ class AIMarkdownDialog(MessageBoxBase):
             self.widget.setFixedWidth(min(680, max(0, event.size().width() - 80)))
 
     def resultText(self):
-        return self._result
+        return "".join(self._resultChunks)
 
     def validate(self):
         if self._finished:
@@ -666,8 +676,9 @@ class AIMarkdownDialog(MessageBoxBase):
         return False
 
     def reject(self):
-        if not self._running:
-            super().reject()
+        if self._running:
+            self._cancelConversion()
+        super().reject()
 
     def _fetchQuota(self):
         try:
@@ -692,10 +703,14 @@ class AIMarkdownDialog(MessageBoxBase):
     def _startConversion(self):
         self._running = True
         self._result = ""
+        self._resultChunks.clear()
+        self._pendingChunks.clear()
+        self._cancelEvent.clear()
         self.inputEdit.clear()
         self.inputEdit.setReadOnly(True)
         self.yesButton.setEnabled(False)
-        self.cancelButton.setEnabled(False)
+        self.cancelButton.setEnabled(True)
+        self.cancelButton.setText("取消转换")
         self._busyTimer.start()
         self._updateBusyStyle()
         threading.Thread(target=self._streamConversion, daemon=True).start()
@@ -709,13 +724,22 @@ class AIMarkdownDialog(MessageBoxBase):
             customStyle = cfg.aiMarkdownCustomStyle.value.strip()
             if customStyle:
                 payload["custom_style"] = customStyle
+        response = None
         try:
-            with requests.post(
+            response = requests.post(
                 AI_MARKDOWN_API,
                 json=payload,
                 stream=True,
                 timeout=(10, 120),
-            ) as response:
+            )
+            if not isHttpsResponseChain(response, AI_MARKDOWN_API):
+                raise RuntimeError("AI 服务连接未保持 HTTPS")
+            with self._responseLock:
+                if self._cancelEvent.is_set():
+                    response.close()
+                    return
+                self._activeResponse = response
+            with response:
                 remaining = int(
                     response.headers.get("X-RateLimit-Remaining", remaining)
                 )
@@ -734,15 +758,21 @@ class AIMarkdownDialog(MessageBoxBase):
                 for chunk in _iterSseContent(
                     response.iter_lines(chunk_size=1, decode_unicode=True)
                 ):
+                    if self._cancelEvent.is_set():
+                        return
                     try:
                         self.chunkReceived.emit(chunk)
                     except RuntimeError:
                         return
+            if self._cancelEvent.is_set():
+                return
             try:
                 self.conversionFinished.emit(remaining, limit, cost)
             except RuntimeError:
                 pass
         except requests.RequestException:
+            if self._cancelEvent.is_set():
+                return
             try:
                 self.conversionFailed.emit(
                     "无法连接 AI 服务，请检查网络后重试。",
@@ -753,16 +783,43 @@ class AIMarkdownDialog(MessageBoxBase):
             except RuntimeError:
                 pass
         except (RuntimeError, TypeError, ValueError) as error:
+            if self._cancelEvent.is_set():
+                return
             try:
                 self.conversionFailed.emit(str(error), remaining, limit, cost)
             except RuntimeError:
                 pass
+        finally:
+            with self._responseLock:
+                if self._activeResponse is response:
+                    self._activeResponse = None
+            if response is not None:
+                response.close()
 
     def _appendChunk(self, chunk):
+        self._resultChunks.append(chunk)
+        self._pendingChunks.append(chunk)
+        if not self._flushTimer.isActive():
+            self._flushTimer.start()
+
+    def _flushChunks(self):
+        if not self._pendingChunks:
+            return
+        chunk = "".join(self._pendingChunks)
+        self._pendingChunks.clear()
         self._result += chunk
         self.inputEdit.moveCursor(QTextCursor.MoveOperation.End)
         self.inputEdit.insertPlainText(chunk)
         self.inputEdit.ensureCursorVisible()
+
+    def _cancelConversion(self):
+        self._cancelEvent.set()
+        with self._responseLock:
+            response = self._activeResponse
+        if response is not None:
+            response.close()
+        self._running = False
+        self._stopBusyStyle()
 
     def _onQuotaReceived(
         self, remaining, limit, cost, peakEnabled, machineCode
@@ -779,6 +836,8 @@ class AIMarkdownDialog(MessageBoxBase):
         self._refreshStartButton()
 
     def _onConversionFinished(self, remaining, limit, cost):
+        self._flushTimer.stop()
+        self._flushChunks()
         if not self._result.strip():
             self._onConversionFailed(
                 "AI 没有返回内容，请重试。", remaining, limit, cost
@@ -796,8 +855,13 @@ class AIMarkdownDialog(MessageBoxBase):
         self.yesButton.setText("使用结果")
         self.yesButton.setEnabled(True)
         self.cancelButton.setEnabled(True)
+        self.cancelButton.setText("取消")
 
     def _onConversionFailed(self, message, remaining, limit, cost):
+        self._flushTimer.stop()
+        self._pendingChunks.clear()
+        self._resultChunks.clear()
+        self._result = ""
         self._running = False
         if remaining >= 0:
             self._remaining = remaining
@@ -808,6 +872,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self.inputEdit.setPlainText(self._source)
         self.inputEdit.setReadOnly(False)
         self.cancelButton.setEnabled(True)
+        self.cancelButton.setText("取消")
         self._updateQuotaLabel()
         self._refreshStartButton()
         self._refreshQuota()
@@ -826,7 +891,7 @@ class AIMarkdownDialog(MessageBoxBase):
             remaining = self._remaining
         quotaParts = [
             f"剩余 {remaining}/{self._limit}",
-            f"当前每次扣 {self._cost} 次",
+            f"当前每次扣 {self._cost} 点",
         ]
         if self._peakEnabled:
             quotaParts.append(f"双倍时段：{PEAK_HOURS_TEXT}")
@@ -853,7 +918,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self._borderIndex = (hue + 6) % 360
         background = "#343434" if isDarkTheme() else "#E8E8E8"
         self.inputEdit.setStyleSheet(
-            f"QTextEdit {{ background: {background}; border: 2px solid; "
+            f"QTextEdit {{ background: {background}; border: 5px solid; "
             f"border-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, {stops}); "
             "border-radius: 8px; }"
         )
@@ -865,12 +930,17 @@ class AIMarkdownDialog(MessageBoxBase):
     def _stopTimers(self):
         self._busyTimer.stop()
         self._quotaTimer.stop()
+        self._flushTimer.stop()
 
     def done(self, result):
+        if self._running:
+            self._cancelConversion()
         self._stopTimers()
         super().done(result)
 
     def closeEvent(self, event):
+        if self._running:
+            self._cancelConversion()
         self._stopTimers()
         super().closeEvent(event)
 
@@ -908,6 +978,10 @@ class BroadcastEditPage(QWidget):
 
         self.contentInput = TextEdit(self)
         self.contentInput.setPlaceholderText("在此输入要投送的正文")
+        QScroller.grabGesture(
+            self.contentInput.viewport(),
+            QScroller.ScrollerGestureType.TouchGesture,
+        )
         self.vBoxLayout.addWidget(self.contentInput)
 
         btnLayout = QHBoxLayout()

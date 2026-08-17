@@ -28,11 +28,16 @@ from qfluentwidgets import (
     SwitchSettingCard,
     TextEdit,
     TitleLabel,
+    ToolButton,
     setThemeColor,
 )
 
 from app.common.ai_markdown import PEAK_HOURS_TEXT, fetchQuota
-from app.common.application_store import ImageCache
+from app.common.application_store import (
+    ApplicationStoreError,
+    appStoreImageCache,
+    clearAppStoreCache,
+)
 from app.config.cfg import (
     BANNER_IMAGE_PRESETS,
     BANNER_PRESET_SCALE_MODES,
@@ -54,6 +59,7 @@ CUSTOM_STYLE_PLACEHOLDER = (
     "所有关于值日的消息全部使用---与前面的任务分割开，然后使用"
     "**⚠️请值日人员到卫生区打扫⚠️**来写入之日内容。"
 )
+CUSTOM_STYLE_MAX_LENGTH = 4000
 
 
 class LineEditSettingCard(SettingCard):
@@ -88,6 +94,38 @@ class LineEditSettingCard(SettingCard):
         self.lineEdit.editingFinished.connect(
             lambda: cfg.set(self.configItem, self.lineEdit.text())
         )
+
+
+class CacheSettingCard(SettingCard):
+    clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(
+            FluentIcon.FOLDER,
+            "缓存",
+            "当前可清理：0 B",
+            parent,
+        )
+        self.clearButton = ToolButton(FluentIcon.DELETE, self)
+        self.clearButton.setFixedSize(40, 40)
+        self.clearButton.setAccessibleName("清除缓存")
+        self.clearButton.clicked.connect(self.clicked)
+        self.hBoxLayout.addWidget(self.clearButton)
+        self.hBoxLayout.addSpacing(16)
+        self.setCacheSize(0)
+
+    def setCacheSize(self, size: int) -> None:
+        size = max(0, int(size))
+        units = ("B", "KB", "MB", "GB")
+        value = float(size)
+        unit = units[0]
+        for unit in units:
+            if value < 1024 or unit == units[-1]:
+                break
+            value /= 1024
+        text = f"{value:.1f} {unit}" if unit != "B" else f"{size} B"
+        self.contentLabel.setText(f"当前可清理：{text}")
+        self.clearButton.setEnabled(size > 0)
 
 
 class LocalizedColorSettingCard(FluentColorSettingCard):
@@ -202,16 +240,27 @@ class AIMarkdownStyleSettingCard(CollapsibleSettingCard):
         self.editorWidget = QWidget(self.view)
         self.editorLayout = QVBoxLayout(self.editorWidget)
         self.textEdit = TextEdit(self.editorWidget)
+        self.limitLabel = BodyLabel(self.editorWidget)
         self.saveTimer = QTimer(self)
 
         self.card.expandButton.hide()
         self.addWidget(self.switchButton)
         self.textEdit.setMinimumHeight(150)
         self.textEdit.setPlaceholderText(CUSTOM_STYLE_PLACEHOLDER)
-        self.textEdit.setPlainText(cfg.aiMarkdownCustomStyle.value)
+        initialText = cfg.aiMarkdownCustomStyle.value
+        initialTrimmed = len(initialText) > CUSTOM_STYLE_MAX_LENGTH
+        if initialTrimmed:
+            initialText = initialText[:CUSTOM_STYLE_MAX_LENGTH]
+            cfg.set(cfg.aiMarkdownCustomStyle, initialText)
+        self.textEdit.setPlainText(initialText)
         self.editorLayout.setContentsMargins(48, 16, 24, 20)
         self.editorLayout.addWidget(self.textEdit)
+        self.editorLayout.addWidget(
+            self.limitLabel,
+            alignment=Qt.AlignmentFlag.AlignRight,
+        )
         self.addGroupWidget(self.editorWidget)
+        self._updateLimitLabel(initialTrimmed)
 
         enabled = cfg.aiMarkdownCustomStyleEnabled.value
         self.switchButton.setChecked(enabled)
@@ -222,7 +271,7 @@ class AIMarkdownStyleSettingCard(CollapsibleSettingCard):
         self.saveTimer.setInterval(400)
         self.saveTimer.timeout.connect(self.flushPendingSave)
         self.switchButton.checkedChanged.connect(self._onCheckedChanged)
-        self.textEdit.textChanged.connect(self.saveTimer.start)
+        self.textEdit.textChanged.connect(self._onTextChanged)
 
     def _onCheckedChanged(self, enabled: bool) -> None:
         cfg.set(cfg.aiMarkdownCustomStyleEnabled, enabled)
@@ -231,11 +280,40 @@ class AIMarkdownStyleSettingCard(CollapsibleSettingCard):
 
     def flushPendingSave(self) -> None:
         self.saveTimer.stop()
-        cfg.set(cfg.aiMarkdownCustomStyle, self.textEdit.toPlainText())
+        cfg.set(
+            cfg.aiMarkdownCustomStyle,
+            self.textEdit.toPlainText()[:CUSTOM_STYLE_MAX_LENGTH],
+        )
+
+    def _onTextChanged(self) -> None:
+        text = self.textEdit.toPlainText()
+        trimmed = len(text) > CUSTOM_STYLE_MAX_LENGTH
+        if trimmed:
+            cursor = self.textEdit.textCursor()
+            position = min(cursor.position(), CUSTOM_STYLE_MAX_LENGTH)
+            self.textEdit.blockSignals(True)
+            self.textEdit.setPlainText(text[:CUSTOM_STYLE_MAX_LENGTH])
+            cursor = self.textEdit.textCursor()
+            cursor.setPosition(position)
+            self.textEdit.setTextCursor(cursor)
+            self.textEdit.blockSignals(False)
+        self._updateLimitLabel(trimmed)
+        self.saveTimer.start()
+
+    def _updateLimitLabel(self, trimmed=False) -> None:
+        length = len(self.textEdit.toPlainText())
+        suffix = " · 已截去超出内容" if trimmed else ""
+        self.limitLabel.setText(
+            f"{length} / {CUSTOM_STYLE_MAX_LENGTH}{suffix}"
+        )
+        self.limitLabel.setStyleSheet(
+            "color: #d13438;" if trimmed else "color: rgba(128, 128, 128, 0.9);"
+        )
 
 
 class SettingPage(ScrollArea):
     aiQuotaReceived = Signal(int, int, int, object, str)
+    appStoreCacheCleared = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -571,12 +649,8 @@ class SettingPage(ScrollArea):
             "在系统启动时静默运行电教猫 Pro",
             cfg.autoRun,
         )
-        self.clearAppStoreCacheCard = PushSettingCard(
-            "清理应用市场缓存",
-            FluentIcon.DELETE,
-            "图标与广告缓存",
-            "删除超过 7 天未使用的图片缓存，也可以随时手动清理。",
-        )
+        self.clearAppStoreCacheCard = CacheSettingCard()
+        self._refreshAppStoreCacheSize()
         self.softwareGroup.addSettingCards(
             [
                 SwitchSettingCard(
@@ -611,8 +685,8 @@ class SettingPage(ScrollArea):
                     "了解作者",
                     f"发现更多 {AUTHOR} 的作品",
                 ),
-                self.aboutCard,
                 self.errorLogCard,
+                self.aboutCard,
             ]
         )
 
@@ -719,8 +793,8 @@ class SettingPage(ScrollArea):
 
     def _onClearAppStoreCache(self) -> None:
         try:
-            ImageCache().clear()
-        except OSError as error:
+            clearAppStoreCache()
+        except (ApplicationStoreError, OSError) as error:
             InfoBar.error(
                 "清理失败",
                 str(error),
@@ -729,9 +803,11 @@ class SettingPage(ScrollArea):
                 parent=self.window(),
             )
             return
+        self.clearAppStoreCacheCard.setCacheSize(0)
+        self.appStoreCacheCleared.emit()
         InfoBar.success(
             "缓存已清理",
-            "应用市场的图标和广告图片缓存已删除。",
+            "应用市场缓存已删除。",
             duration=3000,
             position=InfoBarPosition.BOTTOM_RIGHT,
             parent=self.window(),
@@ -764,8 +840,16 @@ class SettingPage(ScrollArea):
             group.setSearchExpanded(bool(self._searchText))
 
     def showEvent(self, event) -> None:
+        self._refreshAppStoreCacheSize()
         self._refreshAIQuota()
         super().showEvent(event)
+
+    def _refreshAppStoreCacheSize(self) -> None:
+        try:
+            size = appStoreImageCache.size()
+        except OSError:
+            size = 0
+        self.clearAppStoreCacheCard.setCacheSize(size)
 
     def hideEvent(self, event) -> None:
         self.aiStyleCard.flushPendingSave()

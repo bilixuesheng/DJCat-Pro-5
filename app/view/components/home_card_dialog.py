@@ -65,6 +65,14 @@ def _dialog_host(widget):
     return window.parentWidget() or window
 
 
+def _dispose_dialog(dialog):
+    # Nested editors can be reopened before the next event-loop turn.
+    dialog.deleteLater()
+    app = QApplication.instance()
+    if app is not None:
+        app.sendPostedEvents(dialog, QEvent.Type.DeferredDelete)
+
+
 class _ResponsiveMessageBox(MessageBoxBase):
     def __init__(self, parent=None):
         self._preferred_width = 0
@@ -320,7 +328,7 @@ class ActionListWidget(QWidget):
                 return
             action = dialog.getData()
         finally:
-            dialog.deleteLater()
+            _dispose_dialog(dialog)
         row.setData(action)
         self.orderChanged.emit()
 
@@ -881,7 +889,7 @@ class CustomCardDialog(_ResponsiveMessageBox):
                 return
             selected, image = dialog.selected()
         finally:
-            dialog.deleteLater()
+            _dispose_dialog(dialog)
         if selected["type"] == "fluent":
             self._icon = selected
             self._staged_image = None
@@ -898,7 +906,7 @@ class CustomCardDialog(_ResponsiveMessageBox):
                 return
             action = dialog.getData()
         finally:
-            dialog.deleteLater()
+            _dispose_dialog(dialog)
         self.actionList.addAction(action)
 
     def validate(self) -> bool:

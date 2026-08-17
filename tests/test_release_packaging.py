@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+import deploy
+
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -56,6 +58,8 @@ def test_installer_is_single_language_and_architecture_aware():
     assert 'Name: "chinesetraditional"' not in script
     assert "ArchitecturesAllowed={#MyAppArch}" in script
     assert "Windows-{#MyAppArchName}-Setup" in script
+    assert "DefaultDirName={autopf}\\DJCat Pro" in script
+    assert "DefaultDirName={autopf}\\DJCat Pro 5" not in script
 
 
 def test_release_workflow_uses_native_windows_runners_and_four_packages():
@@ -72,7 +76,7 @@ def test_release_workflow_uses_native_windows_runners_and_four_packages():
     assert "Windows-arm64-Setup.exe" in workflow
     assert "gh release create" in workflow
     assert "--prerelease" in workflow
-    assert "cancel-in-progress: true" in workflow
+    assert "cancel-in-progress: false" in workflow
     assert '-OutFile "scripts\\ChineseSimplified.isl"' in workflow
     assert 'find release-assets -type f -name "$file"' in workflow
     assert 'cp "${matches[0]}" "release-files/$file"' in workflow
@@ -86,3 +90,34 @@ def test_python_requirement_accepts_native_arm_runner_patch_version():
     assert "PYTHON_VERSION: 3.12.10" in (
         REPO / ".github" / "workflows" / "main.yml"
     ).read_text(encoding="utf-8")
+
+
+def test_pre_release_number_is_preserved_in_windows_file_version(monkeypatch):
+    monkeypatch.setattr(deploy, "VERSION", "5.0.0-pre.22")
+
+    args = deploy.build_args()
+
+    assert "--file-version=5.0.0.22" in args
+    assert "--product-version=5.0.0.22" in args
+
+
+def test_release_uses_the_committed_lock_for_tests_and_builds():
+    workflow = (REPO / ".github" / "workflows" / "main.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert (REPO / "uv.lock").is_file()
+    assert "uv.lock" not in (REPO / ".gitignore").read_text(encoding="utf-8")
+    assert workflow.count("uv sync --frozen") == 2
+    assert "uv run --frozen python -m pytest -q" in workflow
+    assert '"Flask>=3.0"' in (REPO / "pyproject.toml").read_text(encoding="utf-8")
+
+
+def test_release_assets_are_not_overwritten_for_an_existing_tag():
+    workflow = (REPO / ".github" / "workflows" / "main.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "release assets are immutable" in workflow
+    assert "--clobber" not in workflow
+    assert "gh release upload" not in workflow

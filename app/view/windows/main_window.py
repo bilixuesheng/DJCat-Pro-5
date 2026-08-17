@@ -1,16 +1,17 @@
+import json
 import re
 import threading
 import time
+from collections import deque
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
 from PySide6.QtCore import (
-    QDate,
     QObject,
     QPropertyAnimation,
     QProcess,
     Qt,
-    QTime,
     QTimer,
     QUrl,
     Signal,
@@ -40,25 +41,39 @@ from qfluentwidgets import (
 )
 
 from app.common.ai_markdown import registerMachine
-from app.common.application_store import isUpdateAvailable
-from app.common.edge_tts import DEFAULT_EDGE_VOICE, EdgeSpeechWorker
+from app.common.application_store import clientArchitecture, isUpdateAvailable
+from app.common.edge_tts import (
+    DEFAULT_EDGE_VOICE,
+    EdgeSpeechWorker,
+    cleanup_edge_speech_files,
+)
 from app.common.home_cards import normalize_pinned_cards
-from app.common.update_download import UpdateDownloadWorker, clearUpdateDirectory
+from app.common.update_download import (
+    MAX_UPDATE_BYTES,
+    UpdateDownloadWorker,
+    clearUpdateDirectory,
+    isHttpsResponseChain,
+)
 from app.config.cfg import cfg
 from app.config.constants import (
     APP_NAME,
-    DOWNLOAD_URL,
     UPDATE_API,
     VERSION,
+    normalizeReleaseVersion,
+    updateChecksumUrl,
+    updateDownloadUrl,
 )
 from app.config.paths import ASSET_DIR, UPDATE_INSTALLER_PATH
-from app.platform.memory import emptyWorkingSet
 from app.signal_bus import signalBus
 from app.view.components.markdown_view import MarkdownView
 from app.view.pages.credits_page import CreditsPage
 from app.view.pages.home_page import HomePage
 from app.view.pages.setting_page import SettingPage
 from app.view.shell.tray import SystemTrayIcon
+
+
+SCHEDULE_CATCH_UP_LIMIT = timedelta(seconds=60)
+SHUTDOWN_CATCH_UP_LIMIT = timedelta(seconds=5)
 
 
 class CustomSplashScreen(SplashScreen):
@@ -85,9 +100,12 @@ class UpdateWorker(QObject):
 
     def run(self):
         for retry in range(self.RETRY_COUNT + 1):
+            response = None
             try:
                 response = requests.get(UPDATE_API, timeout=5)
                 response.raise_for_status()
+                if not isHttpsResponseChain(response, UPDATE_API):
+                    raise ValueError("更新接口必须保持 HTTPS")
                 data = response.json()
                 if not isinstance(data, dict):
                     raise ValueError("更新接口返回格式无效")
@@ -98,6 +116,9 @@ class UpdateWorker(QObject):
                     self.finished.emit(self.requestId, {}, str(error))
                     return
                 time.sleep(1)
+            finally:
+                if response is not None:
+                    response.close()
 
 
 class MachineRegistrationWorker(QObject):
@@ -134,6 +155,10 @@ class LazyAppStorePage(QWidget):
         self.ensureLoaded()
         super().showEvent(event)
 
+    def clearCachedImages(self):
+        if self.page is not None:
+            self.page.clearCachedImages()
+
     def setSearchText(self, text):
         self._searchText = text
         if self.page is not None:
@@ -151,15 +176,20 @@ class UpdateDialog(MessageBoxBase):
     def __init__(self, version, note, parent=None):
         super().__init__(parent)
         self.titleLabel = SubtitleLabel(f"发现新版本: v{version}", self)
-        self.markdownView = MarkdownView(self)
+        self.markdownView = MarkdownView(self, transparentBackground=True)
         self.markdownView.setMarkdown(note)
-        self.markdownView.setFixedSize(460, 260)
+        host = parent.window() if parent is not None else None
+        hostWidth = host.width() if host is not None else 800
+        hostHeight = host.height() if host is not None else 600
+        contentWidth = max(460, min(900, int(hostWidth * 0.54)))
+        contentHeight = max(260, min(620, int(hostHeight * 0.58)))
+        self.markdownView.setFixedSize(contentWidth, contentHeight)
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addSpacing(12)
         self.viewLayout.addWidget(self.markdownView)
         self.yesButton.setText("下载更新")
         self.cancelButton.setText("暂不更新")
-        self.widget.setMinimumWidth(500)
+        self.widget.setMinimumWidth(contentWidth + 40)
 
 
 class MainWindow(MSFluentWindow):
@@ -238,6 +268,7 @@ class MainWindow(MSFluentWindow):
             cfg.set(cfg.aiMarkdownMachineCode, machineCode)
 
     def initWindow(self):
+        cleanup_edge_speech_files()
         self._updateWindowTitle(cfg.windowTitle.value)
         self.setWindowIcon(QIcon(str(ASSET_DIR / "logo.png")))
         self.setMinimumSize(700, 400)
@@ -247,11 +278,16 @@ class MainWindow(MSFluentWindow):
         self.player.setAudioOutput(self.audioOutput)
         self.current_play_repeats = 0
         self.player.mediaStatusChanged.connect(self._onMediaStatusChanged)
+        self.player.errorOccurred.connect(self._onMediaError)
         self._edge_tts_request_id = 0
         self._edge_tts_jobs = {}
         self._edge_tts_temp_path = ""
+        self._audioTaskQueue = deque()
+        self._audioTaskActive = False
+        self._activeAudioKind = ""
 
         self.tts = QTextToSpeech(self)
+        self.tts.stateChanged.connect(self._onTtsStateChanged)
         self._setBroadcastVolume(100)
 
         signalBus.testAudio.connect(self._playAudioTask)
@@ -262,8 +298,9 @@ class MainWindow(MSFluentWindow):
         self._downloadProgressTimer = QTimer(self)
         self._downloadProgressTimer.setInterval(100)
         self._downloadProgressTimer.timeout.connect(self._flushDownloadProgress)
-        self.last_triggered_time = ""
-        self.last_shutdown_triggered_time = ""
+        self._triggeredScheduleDate = ""
+        self._triggeredScheduleKeys = set()
+        self._lastScheduleCheck = None
 
     def _updateWindowTitle(self, title):
         self.setWindowTitle(title.strip() or APP_NAME)
@@ -283,8 +320,36 @@ class MainWindow(MSFluentWindow):
         self.tts.setVolume(volume)
 
     def _playAudioTask(self, task_data):
-        if self._resourcesShutdown:
+        if (
+            self._resourcesShutdown
+            or not isinstance(task_data, dict)
+            or not isinstance(task_data.get("type"), str)
+        ):
             return
+        self._audioTaskQueue.append(dict(task_data))
+        self._playNextAudioTask()
+
+    def _playNextAudioTask(self):
+        if self._resourcesShutdown or self._audioTaskActive:
+            return
+        if not self._audioTaskQueue:
+            return
+        task = self._audioTaskQueue.popleft()
+        self._audioTaskActive = True
+        if not self._startAudioTask(task):
+            self._finishAudioTask()
+
+    def _finishAudioTask(self):
+        if not self._audioTaskActive:
+            return
+        self._audioTaskActive = False
+        self._activeAudioKind = ""
+        if not self._resourcesShutdown:
+            QTimer.singleShot(0, self, self._playNextAudioTask)
+
+    def _startAudioTask(self, task_data):
+        if self._resourcesShutdown:
+            return False
 
         volume = task_data.get("volume", 100)
         self._setBroadcastVolume(volume)
@@ -300,9 +365,9 @@ class MainWindow(MSFluentWindow):
                     repeat_count,
                     volume,
                 )
-            else:
-                self._invalidatePendingEdgeTts()
-            return
+                self._activeAudioKind = "edge"
+                return True
+            return False
 
         self._invalidatePendingEdgeTts()
         self._cleanupEdgeTtsFile()
@@ -311,8 +376,10 @@ class MainWindow(MSFluentWindow):
             content = task_data.get("content", "")
             if content:
                 full_text = "。".join([content] * repeat_count)
+                self._activeAudioKind = "tts"
                 self.tts.say(full_text)
-            return
+                return True
+            return False
 
         presetFiles = {
             "预设: 12:30报时": "1230.mp3",
@@ -326,9 +393,12 @@ class MainWindow(MSFluentWindow):
         )
 
         if path and Path(path).exists():
+            self._activeAudioKind = "media"
             self.current_play_repeats = repeat_count - 1
             self.player.setSource(QUrl.fromLocalFile(path))
             self.player.play()
+            return True
+        return False
 
     def _startEdgeTts(self, content, voice, repeat_count, volume):
         self._edge_tts_request_id += 1
@@ -363,12 +433,14 @@ class MainWindow(MSFluentWindow):
                 position=InfoBarPosition.BOTTOM_RIGHT,
                 parent=self,
             )
+            self._finishAudioTask()
             return
 
         _, _, repeat_count, volume = job
         self._setBroadcastVolume(volume)
         self._cleanupEdgeTtsFile()
         self._edge_tts_temp_path = path
+        self._activeAudioKind = "media"
         self.current_play_repeats = repeat_count - 1
         self.player.setSource(QUrl.fromLocalFile(path))
         self.player.play()
@@ -411,43 +483,158 @@ class MainWindow(MSFluentWindow):
             self.player.play()
         elif status == QMediaPlayer.MediaStatus.EndOfMedia:
             QTimer.singleShot(0, self, self._cleanupEdgeTtsFile)
+            self._finishAudioTask()
+        elif (
+            status == QMediaPlayer.MediaStatus.InvalidMedia
+            and self._activeAudioKind == "media"
+        ):
+            self._finishAudioTask()
+
+    def _onMediaError(self, _error, _message=""):
+        if self._activeAudioKind != "media":
+            return
+        self._cleanupEdgeTtsFile()
+        self._finishAudioTask()
+
+    def _onTtsStateChanged(self, state):
+        if (
+            self._activeAudioKind == "tts"
+            and state
+            in (QTextToSpeech.State.Ready, QTextToSpeech.State.Error)
+        ):
+            self._finishAudioTask()
 
     def _checkSchedule(self):
-        now_time = QTime.currentTime().toString("HH:mm:ss")
-        today_week = QDate.currentDate().dayOfWeek() - 1
+        self._checkScheduleAt(datetime.now().astimezone())
 
-        if now_time != self.last_triggered_time:
-            task = self._scheduledTask(
-                cfg.broadcastTasks.value,
-                now_time,
-                today_week,
-            )
-            if task:
-                self.last_triggered_time = now_time
-                self._playAudioTask(task)
+    def _checkScheduleAt(
+        self,
+        now,
+        broadcastTasks=None,
+        shutdownTasks=None,
+    ):
+        previous = self._lastScheduleCheck
+        self._lastScheduleCheck = now
+        if previous is None or now <= previous:
+            previous = now - timedelta(seconds=1)
+        else:
+            # A modal dialog or a slow disk operation can block the GUI for
+            # longer than one timer tick. Catch up that bounded interval, but
+            # do not replay an entire multi-day sleep after resume.
+            if now - previous > SCHEDULE_CATCH_UP_LIMIT:
+                previous = now - timedelta(seconds=1)
 
-        if now_time != self.last_shutdown_triggered_time:
-            task = self._scheduledTask(
-                cfg.shutdownTasks.value,
-                now_time,
-                today_week,
-            )
-            if task:
-                self.last_shutdown_triggered_time = now_time
-                self._handleShutdownTask(task)
+        self._runDueScheduledTasks(
+            "broadcast",
+            cfg.broadcastTasks.value if broadcastTasks is None else broadcastTasks,
+            previous,
+            now,
+            self._playAudioTask,
+        )
+        self._runDueScheduledTasks(
+            "shutdown",
+            cfg.shutdownTasks.value if shutdownTasks is None else shutdownTasks,
+            max(previous, now - SHUTDOWN_CATCH_UP_LIMIT),
+            now,
+            self._handleShutdownTask,
+        )
+
+    def _runDueScheduledTasks(
+        self,
+        kind,
+        tasks,
+        previous,
+        now,
+        callback,
+    ):
+        if not isinstance(tasks, (list, tuple)):
+            return
+        self._prepareScheduleDate(now.date().isoformat())
+        taskIdentities = {}
+        day = previous.date()
+        while day <= now.date():
+            for task in tasks:
+                if not isinstance(task, dict):
+                    continue
+                weeks = task.get("weeks", [])
+                if not isinstance(weeks, (list, tuple, set)):
+                    continue
+                if not task.get("enabled", False) or day.weekday() not in weeks:
+                    continue
+                try:
+                    scheduledTime = datetime.strptime(
+                        str(task.get("time", "")), "%H:%M:%S"
+                    ).time()
+                except ValueError:
+                    continue
+                scheduled = datetime.combine(day, scheduledTime, now.tzinfo)
+                if not previous < scheduled <= now:
+                    continue
+                identity = self._scheduleTaskIdentity(task, taskIdentities)
+                key = (kind, scheduled.isoformat(), identity)
+                if key in self._triggeredScheduleKeys:
+                    continue
+                self._triggeredScheduleKeys.add(key)
+                callback(task)
+            day += timedelta(days=1)
+
+    def _prepareScheduleDate(self, date_key):
+        if date_key == self._triggeredScheduleDate:
+            return
+        self._triggeredScheduleDate = date_key
+        self._triggeredScheduleKeys.clear()
+
+    def _runScheduledTasks(
+        self,
+        kind,
+        tasks,
+        date_key,
+        now_time,
+        today_week,
+        callback,
+    ):
+        if not isinstance(tasks, (list, tuple)):
+            return
+        self._prepareScheduleDate(date_key)
+        taskIdentities = {}
+
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            weeks = task.get("weeks", [])
+            if not isinstance(weeks, (list, tuple, set)):
+                continue
+            if not (
+                task.get("enabled", False)
+                and today_week in weeks
+                and task.get("time") == now_time
+            ):
+                continue
+
+            identity = self._scheduleTaskIdentity(task, taskIdentities)
+            key = (kind, f"{date_key}T{now_time}", identity)
+            if key in self._triggeredScheduleKeys:
+                continue
+            self._triggeredScheduleKeys.add(key)
+            callback(task)
 
     @staticmethod
-    def _scheduledTask(tasks, now_time, today_week):
-        return next(
-            (
-                task
-                for task in tasks
-                if task.get("enabled", False)
-                and today_week in task.get("weeks", [])
-                and task.get("time") == now_time
-            ),
-            None,
-        )
+    def _scheduleTaskIdentity(task, identities):
+        configuredId = task.get("id")
+        if isinstance(configuredId, str) and configuredId:
+            return configuredId
+        try:
+            identity = json.dumps(
+                task,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        except (TypeError, ValueError):
+            identity = repr(task)
+        occurrence = identities.get(identity, 0)
+        identities[identity] = occurrence + 1
+        return (identity, occurrence)
 
     def _handleShutdownTask(self, task):
         if self._resourcesShutdown:
@@ -519,6 +706,9 @@ class MainWindow(MSFluentWindow):
             self.homePage.all_cards["定时关机"].clicked.connect(self._navToShutdown)
 
         self.appStorePage.pinnedCardsChanged.connect(self._setPinnedHomeCards)
+        self.settingPage.appStoreCacheCleared.connect(
+            self._onAppStoreCacheCleared
+        )
         self.homePage.applicationCardClicked.connect(self._onPinnedHomeCardClicked)
         self.homePage.applicationCardRemoved.connect(self._onPinnedHomeCardRemoved)
         self._setPinnedHomeCards(cfg.pinnedHomeCards.value)
@@ -528,6 +718,18 @@ class MainWindow(MSFluentWindow):
         normalized = self.homePage.setApplicationCards(cards)
         if normalized != cards:
             cfg.set(cfg.pinnedHomeCards, normalized)
+
+    def _onAppStoreCacheCleared(self):
+        self.appStorePage.clearCachedImages()
+        cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
+        changed = False
+        for card in cards:
+            if card.get("icon_path"):
+                card["icon_path"] = ""
+                changed = True
+        if changed:
+            cfg.set(cfg.pinnedHomeCards, cards)
+        self._setPinnedHomeCards(cards)
 
     def _onPinnedHomeCardClicked(self, item):
         self.appStorePage.executePinnedCard(item)
@@ -670,6 +872,8 @@ class MainWindow(MSFluentWindow):
             return
         if interface is self.stackedWidget.currentWidget():
             return
+        if interface is self.appStorePage:
+            self.appStorePage.ensureLoaded()
 
         self._navigationTarget = interface
         if isBack:
@@ -743,6 +947,15 @@ class MainWindow(MSFluentWindow):
                     current
                 )
             )
+        if self._updateJobs:
+            requestId = self._updateRequestId
+            worker, thread, wasManual = self._updateJobs[requestId]
+            self._updateJobs[requestId] = (
+                worker,
+                thread,
+                wasManual or manual,
+            )
+            return
         self._updateRequestId += 1
         requestId = self._updateRequestId
         worker = UpdateWorker(requestId)
@@ -795,8 +1008,9 @@ class MainWindow(MSFluentWindow):
                 )
             return
 
-        latest_version = data.get("latest_version")
-        if not isinstance(latest_version, str) or not latest_version.strip():
+        try:
+            latest_version = normalizeReleaseVersion(data.get("latest_version"))
+        except ValueError:
             if manual:
                 InfoBar.error(
                     "检查更新失败",
@@ -806,8 +1020,6 @@ class MainWindow(MSFluentWindow):
                     parent=self,
                 )
             return
-        latest_version = latest_version.strip()
-
         if not isUpdateAvailable(VERSION, latest_version):
             if manual:
                 InfoBar.success(
@@ -820,11 +1032,11 @@ class MainWindow(MSFluentWindow):
             return
 
         note = str(data.get("update_note", ""))
-        if "\\u" in note:
-            try:
-                note = note.encode("utf-8").decode("unicode_escape")
-            except UnicodeDecodeError:
-                pass
+        note = re.sub(
+            r"(?:\\u[0-9a-fA-F]{4})+",
+            lambda match: json.loads(f'"{match.group(0)}"'),
+            note,
+        )
         note = note.replace("\\n", "\n")
         note = re.sub(r"\n+", "\n\n", note)
 
@@ -879,29 +1091,47 @@ class MainWindow(MSFluentWindow):
         if self._downloadWorker is not None:
             return
 
+        try:
+            version = normalizeReleaseVersion(version)
+        except ValueError as error:
+            InfoBar.error(
+                "无法下载更新",
+                str(error),
+                duration=3000,
+                position=InfoBarPosition.BOTTOM_RIGHT,
+                parent=self,
+            )
+            return
+
         self._closeUpdateInfoBar()
+        self._disposeDownloadStateToolTip()
 
         self._downloadVersion = str(version)
         self._quitAfterDownload = False
-        self._downloadStateToolTip = StateToolTip(
+        toolTip = StateToolTip(
             "正在下载更新",
             "正在连接下载服务器...",
             self,
         )
-        self._downloadStateToolTip.move(
-            self._downloadStateToolTip.getSuitablePos()
+        self._downloadStateToolTip = toolTip
+        toolTip.move(toolTip.getSuitablePos())
+        toolTip.show()
+        toolTip.closedSignal.connect(
+            lambda current=toolTip: self._onDownloadStateToolTipClosed(current)
         )
-        self._downloadStateToolTip.show()
-        self._downloadStateToolTip.closedSignal.connect(
-            self._onDownloadStateToolTipClosed
-        )
-        self._downloadStateToolTip.destroyed.connect(
-            self._clearDownloadStateToolTip
+        toolTip.destroyed.connect(
+            lambda _=None, current=toolTip: self._clearDownloadStateToolTip(
+                current
+            )
         )
 
+        architecture = clientArchitecture()
         self._downloadWorker = UpdateDownloadWorker(
-            DOWNLOAD_URL,
+            updateDownloadUrl(version, architecture),
             UPDATE_INSTALLER_PATH,
+            requireHttps=True,
+            maxBytes=MAX_UPDATE_BYTES,
+            checksumUrl=updateChecksumUrl(version, architecture),
         )
         self._downloadWorker.progressChanged.connect(
             self._queueUpdateDownloadProgress
@@ -961,11 +1191,13 @@ class MainWindow(MSFluentWindow):
                 f"下载失败，正在重试 {retry}/{retryCount}..."
             )
 
-    def _onDownloadStateToolTipClosed(self):
-        toolTip = self._downloadStateToolTip
-        if toolTip is not None:
-            self._downloadStateToolTip = None
-            toolTip.deleteLater()
+    def _onDownloadStateToolTipClosed(self, toolTip=None):
+        if toolTip is None:
+            toolTip = self._downloadStateToolTip
+        if toolTip is None or self._downloadStateToolTip is not toolTip:
+            return
+        self._downloadStateToolTip = None
+        toolTip.deleteLater()
 
     def _clearDownloadStateToolTip(self, toolTip=None):
         if toolTip is None or self._downloadStateToolTip is toolTip:
@@ -1102,6 +1334,9 @@ class MainWindow(MSFluentWindow):
         if self._resourcesShutdown:
             return
         self._resourcesShutdown = True
+        self._audioTaskQueue.clear()
+        self._audioTaskActive = False
+        self._activeAudioKind = ""
         self._updateRequestId += 1
         self._pendingNavigation = None
         self.stackedWidget.view._stopAnimation()
@@ -1113,6 +1348,14 @@ class MainWindow(MSFluentWindow):
         self._cleanupEdgeTtsFile()
         self._pendingDownloadProgress = None
         self._downloadProgressTimer.stop()
+        if getattr(self, "settingPage", None) is not None:
+            self.settingPage.aiStyleCard.flushPendingSave()
+        for page in (
+            getattr(self, "schedulePage", None),
+            getattr(self, "shutdownPage", None),
+        ):
+            if page is not None:
+                page.flushPendingSave()
         for page in (
             getattr(self, "homePage", None),
             getattr(self, "appStorePage", None),
@@ -1160,4 +1403,3 @@ class MainWindow(MSFluentWindow):
         self._saveGeometry()
         event.ignore()
         self.hide()
-        QTimer.singleShot(0, self, emptyWorkingSet)

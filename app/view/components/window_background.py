@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPixmap
@@ -24,6 +25,8 @@ class WindowBackground(QWidget):
         self._themeColor = themeColor or (lambda: qconfig.themeColor.value)
         self._cachedKey = None
         self._cachedPixmap = None
+        self._sourceKey = None
+        self._sourcePixmap = None
         self.setObjectName("window-background")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
@@ -48,12 +51,11 @@ class WindowBackground(QWidget):
         width, height = self.width(), self.height()
         if not path or width <= 0 or height <= 0:
             return None
-        key = (path, width, height, self._scaleModeItem.value)
+        source = self._sourceImage(path)
+        key = (self._sourceKey, width, height, self._scaleModeItem.value)
         if key == self._cachedKey:
             return self._cachedPixmap
-
-        source = QPixmap(path)
-        if source.isNull():
+        if source is None:
             self._cachedKey = key
             self._cachedPixmap = None
             return None
@@ -91,6 +93,18 @@ class WindowBackground(QWidget):
         self._cachedKey = key
         self._cachedPixmap = target
         return target
+
+    def _sourceImage(self, path: str) -> QPixmap | None:
+        try:
+            stamp = Path(path).stat().st_mtime_ns
+        except OSError:
+            stamp = None
+        key = (path, stamp)
+        if key != self._sourceKey:
+            source = QPixmap(path)
+            self._sourceKey = key
+            self._sourcePixmap = None if source.isNull() else source
+        return self._sourcePixmap
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)

@@ -115,6 +115,30 @@ class HomeCardEditTest(TestCase):
             firstCard.testAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents)
         )
 
+    def testEditAndDeleteButtonsRespondToTouchInEditingMode(self):
+        card = self.page.all_cards["全屏投送"]
+        card.setEditable(True)
+        card.setRemovable(True)
+        card.setEditing(True)
+        editClicks = []
+        deleteClicks = []
+        card.editButton.clicked.connect(lambda: editClicks.append(True))
+        card.deleteButton.clicked.connect(lambda: deleteClicks.append(True))
+        device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
+
+        for button, clicks in (
+            (card.editButton, editClicks),
+            (card.deleteButton, deleteClicks),
+        ):
+            position = button.geometry().center()
+            QTest.touchEvent(card, device).press(0, position, card).commit()
+            self.app.processEvents()
+            QTest.touchEvent(card, device).release(0, position, card).commit()
+            self.app.processEvents()
+            self.assertEqual(clicks, [True])
+
+        self.assertFalse(self.page.dragPreview.isVisible())
+
     def testCardPreviewFollowsMouse(self):
         QTest.mouseClick(self.page.sortBtn, Qt.MouseButton.LeftButton)
         card = self.page.all_cards["全屏投送"]
@@ -202,7 +226,6 @@ class HomeCardEditTest(TestCase):
         descriptionLines = card._descriptionElideFilter.displayLines(
             card.contentLabel
         )
-
         self.assertEqual(len(titleLines), 1)
         self.assertTrue(titleLines[0].endswith("…"))
         self.assertEqual(len(descriptionLines), 2)
@@ -284,3 +307,17 @@ class HomeCardEditTest(TestCase):
             self.page._card_order,
             ["考试倒计时", "全屏投送", "定时关机", "定时播报"],
         )
+
+    def testCardDragAutoScrollsNearViewportEdge(self):
+        scrollBar = self.page.verticalScrollBar()
+        scrollBar.setRange(0, 1000)
+        scrollBar.setValue(0)
+        card = self.page.all_cards["全屏投送"]
+        self.page._drag_card = card
+        self.page._drag_position = self.page.viewport().mapToGlobal(
+            QPoint(self.page.viewport().width() // 2, self.page.viewport().height() - 1)
+        )
+
+        self.page._autoScrollCardDrag()
+
+        self.assertGreater(scrollBar.value(), 0)

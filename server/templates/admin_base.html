@@ -40,6 +40,9 @@
                     <a class="side-link side-child {% if current_page == 'app_store_apps' %}active{% endif %}" href="{{ url_for('app_store.adminApps') }}" {% if current_page == 'app_store_apps' %}aria-current="page"{% endif %}>
                         软件管理
                     </a>
+                    <a class="side-link side-child {% if current_page == 'app_store_recommendations' %}active{% endif %}" href="{{ url_for('app_store.adminRecommendations') }}" {% if current_page == 'app_store_recommendations' %}aria-current="page"{% endif %}>
+                        推荐软件管理
+                    </a>
                     <a class="side-link side-child {% if current_page == 'app_store_ads' %}active{% endif %}" href="{{ url_for('app_store.adminAds') }}" {% if current_page == 'app_store_ads' %}aria-current="page"{% endif %}>
                         广告管理
                     </a>

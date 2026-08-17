@@ -2,28 +2,36 @@ import os
 import sys
 import threading
 import time
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, QPoint, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QInputDevice
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QScroller, QStackedWidget
+from PySide6.QtTest import QSignalSpy, QTest
+from PySide6.QtWidgets import QApplication, QLabel, QScroller, QWidget
 from qfluentwidgets import (
     CardWidget,
-    DrillInTransitionStackedWidget,
     InfoBar,
     MessageBox,
     PrimaryPushButton,
+    PushButton,
     ToggleToolButton,
-    ToolTipFilter,
 )
 
 from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
-from app.view.pages.app_store_page import ApplicationCard, AppStorePage, CatalogWorker
+from app.view.pages.app_store_page import (
+    ApplicationCard,
+    AppStorePage,
+    CatalogImageWorker,
+    CatalogWorker,
+    HorizontalTransitionStackedWidget,
+)
 
 
 class _Store:
@@ -31,6 +39,9 @@ class _Store:
 
     def mergeInstalled(self, apps):
         return list(apps)
+
+    def shutdown(self):
+        pass
 
 
 class _CancelableWorker(QObject):
@@ -75,6 +86,7 @@ class _SlowImageStore:
     def __init__(self):
         self.imageStarted = threading.Event()
         self.releaseImage = threading.Event()
+        self.imageFinished = threading.Event()
 
     def fetchCatalog(self):
         return {
@@ -85,6 +97,7 @@ class _SlowImageStore:
     def imagePath(self, _url):
         self.imageStarted.set()
         self.releaseImage.wait()
+        self.imageFinished.set()
         return "cached.png"
 
 
@@ -111,7 +124,14 @@ class AppStorePageTest(TestCase):
     def setUp(self):
         with patch("app.view.pages.app_store_page.ApplicationStore", return_value=_Store()):
             self.page = AppStorePage()
-        self.addCleanup(self.page.deleteLater)
+        self.page._catalogLoaded = True
+
+    def tearDown(self):
+        self.page.shutdown()
+        self.page.close()
+        self.page.deleteLater()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.qtApp.processEvents()
 
     def testPagerClickDoesNotRebuildItems(self):
         apps = _apps(16)
@@ -162,6 +182,19 @@ class AppStorePageTest(TestCase):
         self.assertTrue(self.page.pager.isHidden())
         self.assertEqual(self.page.allGrid.count(), 16)
 
+    def testRecommendedCategoryUsesItsIndependentServerOrder(self):
+        apps = _apps(3)
+        for app, order in zip(apps, (2, 0, 1)):
+            app["recommended"] = True
+            app["recommended_order"] = order
+        self.page.catalog = apps
+        self.page.categoryPivot.setCurrentItem("recommended")
+
+        self.assertEqual(
+            [app["id"] for app in self.page._allAppsForPage()],
+            [1, 2, 0],
+        )
+
     def testProgressUpdatesExistingCardAndDisablesAction(self):
         apps = _apps(1)
         self.page._allAppsForPage = lambda: apps
@@ -170,6 +203,7 @@ class AppStorePageTest(TestCase):
         self.page._downloadJobs[0] = object()
 
         self.page._onDownloadProgress(0, 50, 100)
+        self.page._downloadJobs.pop(0)
 
         self.assertIs(self.page.allGrid.itemAtPosition(0, 0).widget(), card)
         self.assertEqual(card.actionButton.text(), "下载中 50%")
@@ -219,7 +253,7 @@ class AppStorePageTest(TestCase):
         expectedWidth = (self.page.allGridWidget.width() - 24) // 3
         self.assertLessEqual(max(widths), expectedWidth + 6)
 
-    def testDescriptionUsesTwoLinesAndFluentToolTip(self):
+    def testDescriptionUsesTwoLinesWithoutRedundantToolTip(self):
         card = ApplicationCard()
         lineHeight = card.descriptionLabel.fontMetrics().lineSpacing()
         card.resize(320, card.height())
@@ -234,8 +268,8 @@ class AppStorePageTest(TestCase):
 
         self.assertTrue(card.descriptionLabel.wordWrap())
         self.assertGreaterEqual(card.descriptionLabel.minimumHeight(), lineHeight * 2)
-        self.assertTrue(card.descriptionLabel.findChildren(ToolTipFilter))
-        self.assertTrue(card.titleLabel.findChildren(ToolTipFilter))
+        self.assertEqual(card.descriptionLabel.toolTip(), "")
+        self.assertEqual(card.titleLabel.toolTip(), "")
         lines = card._descriptionElideFilter.displayLines(card.descriptionLabel)
         self.assertEqual(len(lines), 2)
         self.assertTrue(lines[-1].endswith("…"))
@@ -297,9 +331,70 @@ class AppStorePageTest(TestCase):
         self.assertLessEqual(margins.top(), 12)
         self.assertLessEqual(cardTop - titleBottom, 24)
 
-    def testDetailStackDoesNotAnimateStaleContent(self):
-        self.assertIs(type(self.page.stack), QStackedWidget)
-        self.assertNotIsInstance(self.page.stack, DrillInTransitionStackedWidget)
+    def testCatalogAndDetailUseHorizontalSnapshotTransitions(self):
+        self.assertIsInstance(
+            self.page.catalogStack,
+            HorizontalTransitionStackedWidget,
+        )
+        self.assertIsInstance(
+            self.page.stack,
+            HorizontalTransitionStackedWidget,
+        )
+
+        self.page.resize(900, 600)
+        self.page.show()
+        animationFinished = QSignalSpy(self.page.stack.aniFinished)
+        self.page._showDetail(_apps(1)[0])
+        self.assertTrue(animationFinished.wait(1000))
+
+        self.assertTrue(self.page.stack._currentSnapshot.pixmap().isNull())
+        self.assertTrue(self.page.stack._nextSnapshot.pixmap().isNull())
+
+    def testRapidCatalogTabReversalEndsOnLatestTab(self):
+        self.page.resize(900, 600)
+        self.page.show()
+
+        self.page.pivot.setCurrentItem("all")
+        self.page._switchCatalogTab(1)
+        self.page.pivot.setCurrentItem("installed")
+        self.page._switchCatalogTab(0)
+
+        deadline = time.monotonic() + 1
+        while (
+            self.page.catalogStack.currentWidget() is not self.page.overview
+            and time.monotonic() < deadline
+        ):
+            QTest.qWait(10)
+        self.assertIs(self.page.catalogStack.currentWidget(), self.page.overview)
+
+    def testRepeatedDetailNavigationReleasesTransientPresetWidgets(self):
+        app = _apps(1)[0] | {
+            "installed": True,
+            "presets": [
+                {
+                    "id": index,
+                    "title": f"Preset {index}",
+                    "description": "Description",
+                    "action": {"type": "program", "target": "app.exe"},
+                }
+                for index in range(8)
+            ],
+        }
+        self.page.stack.setAnimationEnabled(False)
+        self.page.show()
+
+        def cycle():
+            self.page._showDetail(app)
+            self.page._backToOverview()
+            QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            self.qtApp.processEvents()
+
+        cycle()
+        baseline = len(self.page.findChildren(QWidget))
+        for _ in range(20):
+            cycle()
+
+        self.assertLessEqual(len(self.page.findChildren(QWidget)), baseline + 2)
 
     def testDetailContentIsReadyBeforeThePageSwitch(self):
         app = _apps(1)[0]
@@ -309,7 +404,9 @@ class AppStorePageTest(TestCase):
         with patch.object(
             self.page.stack,
             "setCurrentWidget",
-            side_effect=lambda _widget: observed.append(self.page.detailName.text()),
+            side_effect=lambda _widget, **_kwargs: observed.append(
+                self.page.detailName.text()
+            ),
         ):
             self.page._showDetail(app)
 
@@ -332,7 +429,7 @@ class AppStorePageTest(TestCase):
         self.page.resize(900, 420)
         self.page.show()
         self.page._showDetail(app)
-        QTest.qWait(20)
+        QTest.qWait(220)
 
         self.assertIsInstance(self.page.detailLeftScroll, ScrollArea)
         self.assertIsInstance(self.page.presetScroll, ScrollArea)
@@ -365,12 +462,84 @@ class AppStorePageTest(TestCase):
         self.assertEqual(leftScroll.value(), 0)
         self.assertEqual(outerScroll.value(), 0)
         self.assertIsInstance(self.page.presetGroup, CardWidget)
+        self.assertFalse(
+            any(
+                label.text() == "可用卡片"
+                for label in self.page.presetGroup.findChildren(QLabel)
+            )
+        )
         self.assertEqual(
             len(self.page.presetGroup.findChildren(ToggleToolButton)),
             len(app["presets"]),
         )
 
         self.page._backToOverview()
+
+    def testDetailPresetCanBeOpenedWithInstalledAction(self):
+        catalogAction = {"type": "program", "target": "new.exe"}
+        installedAction = {"type": "program", "target": "current.exe"}
+        app = _apps(1)[0] | {
+            "id": 7,
+            "installed": True,
+            "presets": [
+                {
+                    "id": 11,
+                    "title": "静默启动",
+                    "description": "使用本机版本的预设",
+                    "action": catalogAction,
+                }
+            ],
+            "installed_presets": [
+                {
+                    "id": 11,
+                    "title": "静默启动",
+                    "action": installedAction,
+                }
+            ],
+        }
+        installed = SimpleNamespace(
+            metadata={"presets": app["installed_presets"]}
+        )
+        self.page.store.installed = Mock(return_value={7: installed})
+        self.page.store.executeAction = Mock()
+
+        self.page._renderPresets(app)
+        openButton = next(
+            button
+            for button in self.page.presetGroup.findChildren(PushButton)
+            if button.text() == "打开"
+        )
+
+        self.assertGreaterEqual(openButton.height(), 40)
+        self.assertTrue(openButton.isEnabled())
+        openButton.click()
+        self.page.store.executeAction.assert_called_once_with(
+            installed, installedAction
+        )
+
+    def testDetailPresetOpenIsDisabledUntilInstalledPresetExists(self):
+        app = _apps(1)[0] | {
+            "id": 7,
+            "installed": True,
+            "presets": [
+                {
+                    "id": 11,
+                    "title": "新版预设",
+                    "description": "需要更新后使用",
+                    "action": {"type": "program", "target": "new.exe"},
+                }
+            ],
+            "installed_presets": [],
+        }
+
+        self.page._renderPresets(app)
+        openButton = next(
+            button
+            for button in self.page.presetGroup.findChildren(PushButton)
+            if button.text() == "打开"
+        )
+
+        self.assertFalse(openButton.isEnabled())
 
     def testDetailHidesCatalogRefreshButton(self):
         self.page.show()
@@ -439,8 +608,8 @@ class AppStorePageTest(TestCase):
         self.assertGreaterEqual(card.removeButton.width(), 40)
         self.assertGreaterEqual(card.pinButton.height(), 40)
         self.assertGreaterEqual(card.pinButton.width(), 40)
-        self.assertGreaterEqual(self.page.adPrevious.width(), 40)
-        self.assertGreaterEqual(self.page.adNext.width(), 40)
+        self.assertEqual(self.page.adPrevious.size(), QSize(32, 32))
+        self.assertEqual(self.page.adNext.size(), QSize(32, 32))
         card.deleteLater()
 
     def testInstalledApplicationCanBePinnedDirectlyFromItsCard(self):
@@ -488,14 +657,154 @@ class AppStorePageTest(TestCase):
         finally:
             setattr(item, "_ConfigItem__value", oldValue)
 
+    def testBackgroundLaunchFailureIsShownOnTheVisibleWindow(self):
+        with patch.object(InfoBar, "error") as showError:
+            self.page._launchFailed.emit("程序启动后立即退出")
+
+        showError.assert_called_once()
+        self.assertIs(showError.call_args.kwargs["parent"], self.page.window())
+
     def testInstalledApplicationWithoutOpenActionCannotBePinned(self):
-        app = _apps(1)[0] | {"id": 1, "installed": True, "open_action": None}
+        app = _apps(1)[0] | {
+            "id": 1,
+            "installed": True,
+            "open_action": {"type": "program", "target": "catalog.exe"},
+            "installed_open_action": None,
+        }
 
         self.page._renderGrid(self.page.installedGrid, [app], True)
         card = self.page.installedGrid.itemAtPosition(0, 0).widget()
 
         self.assertFalse(card.pinButton.isHidden())
         self.assertFalse(card.pinButton.isEnabled())
+        self.assertEqual(card.actionButton.text(), "未配置打开动作")
+        self.assertFalse(card.actionButton.isEnabled())
+        self.assertTrue(card.removeButton.isEnabled())
+
+        self.page.currentApp = app
+        self.page._updateDetailAction()
+        self.assertEqual(self.page.detailAction.text(), "未配置打开动作")
+        self.assertFalse(self.page.detailAction.isEnabled())
+
+    def testDetailDownloadUsesValidatedArchitectureFlag(self):
+        app = _apps(1)[0] | {
+            "id": 1,
+            "installed": False,
+            "architecture_supported": False,
+            "packages": {self.page.store.architecture: {"enabled": True}},
+        }
+
+        self.page.currentApp = app
+        self.page._updateDetailAction()
+
+        self.assertEqual(self.page.detailAction.text(), "下载")
+        self.assertFalse(self.page.detailAction.isEnabled())
+
+    def testInstalledActionUsesLocalManifestInsteadOfNewCatalogAction(self):
+        installed = object()
+        self.page.store = Mock()
+        self.page.store.installed.return_value = {1: installed}
+        app = _apps(1)[0] | {
+            "id": 1,
+            "installed": True,
+            "open_action": {"type": "program", "target": "new.exe"},
+        }
+
+        self.page._onAppAction(app)
+
+        self.page.store.executeAction.assert_called_once_with(installed)
+
+    def testDirectPinnedCardUsesLocalManifestAction(self):
+        installed = object()
+        self.page.store = Mock()
+        self.page.store.installed.return_value = {1: installed}
+
+        self.page.executePinnedCard(
+            {
+                "app_id": 1,
+                "preset_id": 0,
+                "title": "Ghost Downloader",
+                "description": "下载工具",
+                "action": {"type": "program", "target": "new.exe"},
+            }
+        )
+
+        self.page.store.executeAction.assert_called_once_with(installed)
+
+    def testPresetPinnedCardUsesMatchingInstalledPresetAction(self):
+        installed = SimpleNamespace(
+            metadata={
+                "presets": [
+                    {
+                        "id": 7,
+                        "action": {
+                            "type": "program",
+                            "target": "new.exe",
+                        },
+                    }
+                ]
+            }
+        )
+        self.page.store = Mock()
+        self.page.store.installed.return_value = {1: installed}
+
+        self.page.executePinnedCard(
+            {
+                "app_id": 1,
+                "preset_id": 7,
+                "title": "打开设置",
+                "description": "",
+                "action": {"type": "program", "target": "old.exe"},
+            }
+        )
+
+        self.page.store.executeAction.assert_called_once_with(
+            installed,
+            {"type": "program", "target": "new.exe"},
+        )
+
+    def testCatalogRefreshKeepsPinnedActionAndCachedIconUntilReplacementLoads(self):
+        item = cfg.pinnedHomeCards
+        oldValue = item.value
+        originalAction = {"type": "program", "target": "old.exe"}
+        pinned = {
+            "app_id": 1,
+            "preset_id": 0,
+            "title": "Old name",
+            "description": "Old description",
+            "action": originalAction,
+            "icon_url": "https://example.test/old.png",
+            "icon_path": "old-cache.png",
+        }
+
+        def setConfig(configItem, value):
+            setattr(configItem, "_ConfigItem__value", value)
+
+        setattr(item, "_ConfigItem__value", [pinned])
+        self.page.catalog = [
+            _apps(1)[0]
+            | {
+                "id": 1,
+                "name": "New name",
+                "description": "New description",
+                "install_dir": "ghost-downloader",
+                "icon_url": "https://example.test/new.png",
+                "open_action": {"type": "program", "target": "new.exe"},
+            }
+        ]
+        self.page._mergedCatalog = None
+        try:
+            with patch.object(cfg, "set", side_effect=setConfig):
+                self.page._syncPinnedMetadata()
+
+            updated = cfg.pinnedHomeCards.value[0]
+            self.assertEqual(updated["title"], "New name")
+            self.assertEqual(updated["description"], "New description")
+            self.assertEqual(updated["action"], originalAction)
+            self.assertEqual(updated["icon_path"], "old-cache.png")
+            self.assertEqual(updated["icon_url"], "https://example.test/new.png")
+        finally:
+            setattr(item, "_ConfigItem__value", oldValue)
 
     def testAdsOnlyAdvanceOnVisibleAllAppsPage(self):
         self.page.ads = [{"id": 1, "title": "Ad", "image_url": ""}]
@@ -504,6 +813,7 @@ class AppStorePageTest(TestCase):
         self.assertFalse(self.page.adTimer.isActive())
 
         self.page._switchCatalogTab(1)
+        QTest.qWait(220)
         self.assertTrue(self.page.adTimer.isActive())
 
         self.page._showDetail(_apps(1)[0])
@@ -518,14 +828,91 @@ class AppStorePageTest(TestCase):
         self.page.show()
         self.page._switchCatalogTab(1)
         self.page._prepareAds()
-        self.qtApp.processEvents()
+        QTest.qWait(500)
 
         self.assertTrue(self.page.adOverlay.isVisible())
-        start = QPoint(self.page.adOverlay.width() - 30, 40)
-        end = QPoint(30, 40)
-        QTest.mousePress(self.page.adOverlay, Qt.MouseButton.LeftButton, pos=start)
-        QTest.mouseMove(self.page.adOverlay, end)
-        QTest.mouseRelease(self.page.adOverlay, Qt.MouseButton.LeftButton, pos=end)
+        start = QPoint(self.page.adOverlay.width() - 100, 90)
+        end = QPoint(100, 90)
+        pageStart = self.page.adOverlay.mapTo(self.page, start)
+        pageEnd = self.page.adOverlay.mapTo(self.page, end)
+        device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
+        QTest.touchEvent(self.page, device).press(
+            0, pageStart, self.page
+        ).commit()
+        self.qtApp.processEvents()
+        QTest.touchEvent(self.page, device).move(
+            0, pageEnd, self.page
+        ).commit()
+        self.qtApp.processEvents()
+        QTest.touchEvent(self.page, device).release(
+            0, pageEnd, self.page
+        ).commit()
+        self.qtApp.processEvents()
+
+        self.assertEqual(self.page.adFlipView.currentIndex(), 1)
+
+    def testAdvertisementTouchJitterDoesNotLockTheSwipeAxis(self):
+        self.page.ads = [
+            {"id": 1, "title": "First", "image_url": ""},
+            {"id": 2, "title": "Second", "image_url": ""},
+        ]
+        self.page.resize(1000, 800)
+        self.page.show()
+        self.page._switchCatalogTab(1)
+        self.page._prepareAds()
+        QTest.qWait(20)
+
+        start = QPoint(self.page.adOverlay.width() // 2, 30)
+        jitter = start + QPoint(2, 1)
+
+        def sendTouch(eventType, position):
+            point = Mock()
+            point.globalPosition.return_value.toPoint.return_value = (
+                self.page.adOverlay.mapToGlobal(position)
+            )
+            event = Mock()
+            event.type.return_value = eventType
+            event.points.return_value = [point]
+            self.page.adOverlay.event(event)
+
+        sendTouch(QEvent.Type.TouchBegin, start)
+        sendTouch(QEvent.Type.TouchUpdate, jitter)
+
+        self.assertIsNone(self.page.adOverlay._touchAxis)
+
+        sendTouch(QEvent.Type.TouchCancel, jitter)
+
+    def testAdvertisementArrowCanBeActivatedByTouch(self):
+        self.page.ads = [
+            {"id": 1, "title": "First", "image_url": ""},
+            {"id": 2, "title": "Second", "image_url": ""},
+        ]
+        self.page.resize(1000, 800)
+        self.page.show()
+        self.page._switchCatalogTab(1)
+        self.page._prepareAds()
+        QTest.qWait(20)
+
+        globalPosition = self.page.adNext.mapToGlobal(
+            self.page.adNext.rect().center()
+        )
+        self.assertIs(
+            self.page.adOverlay._buttonAt(
+                self.page.adOverlay.mapFromGlobal(globalPosition)
+            ),
+            self.page.adNext,
+        )
+
+        def sendTouch(eventType):
+            point = Mock()
+            point.globalPosition.return_value.toPoint.return_value = globalPosition
+            event = Mock()
+            event.type.return_value = eventType
+            event.points.return_value = [point]
+            self.page.adOverlay.event(event)
+
+        sendTouch(QEvent.Type.TouchBegin)
+        sendTouch(QEvent.Type.TouchEnd)
 
         self.assertEqual(self.page.adFlipView.currentIndex(), 1)
 
@@ -535,7 +922,7 @@ class AppStorePageTest(TestCase):
         self.page.show()
         self.page._switchCatalogTab(1)
         self.page._prepareAds()
-        QTest.qWait(20)
+        QTest.qWait(220)
 
         self.assertGreaterEqual(self.page.adFrame.width(), 998)
         self.assertLessEqual(self.page.adFrame.width(), 1000)
@@ -564,7 +951,10 @@ class AppStorePageTest(TestCase):
         QTest.qWait(20)
 
         self.assertIsInstance(self.page.adButton, PrimaryPushButton)
-        self.assertGreaterEqual(self.page.adButton.height(), 40)
+        self.assertEqual(self.page.adButton.height(), 32)
+        self.assertEqual(self.page.adTimer.interval(), 5000)
+        self.assertEqual(self.page.adTitle.toolTip(), "")
+        self.assertEqual(self.page.adDescription.toolTip(), "")
         self.assertIn("QWidget#AdvertisementOverlay", self.page.adOverlay.styleSheet())
         self.assertLess(
             self.page.adPrevious.geometry().center().x(),
@@ -577,8 +967,20 @@ class AppStorePageTest(TestCase):
 
     def testAdvertisementKeepsNativeFlipViewShapeAndControls(self):
         self.page.ads = [
-            {"id": 1, "title": "First", "image_url": ""},
-            {"id": 2, "title": "Second", "image_url": ""},
+            {
+                "id": 1,
+                "title": "First",
+                "description": "Description",
+                "image_url": "",
+                "app_id": 1,
+            },
+            {
+                "id": 2,
+                "title": "Second",
+                "description": "Description",
+                "image_url": "",
+                "app_id": 1,
+            },
         ]
         self.page.resize(1000, 800)
         self.page.show()
@@ -586,16 +988,117 @@ class AppStorePageTest(TestCase):
         self.page._prepareAds()
         QTest.qWait(20)
 
-        self.assertLessEqual(self.page.adFrame.height(), 240)
+        self.assertLessEqual(self.page.adFrame.height(), 200)
         self.assertEqual(self.page.adFlipView.borderRadius, 12)
         self.assertIn("border-radius: 12px", self.page.adOverlay.styleSheet())
         self.assertIs(self.page.adPrevious, self.page.adFlipView.preButton)
         self.assertIs(self.page.adNext, self.page.adFlipView.nextButton)
+        self.assertEqual(self.page.adPrevious.size(), QSize(32, 32))
+        self.assertEqual(self.page.adNext.size(), QSize(32, 32))
+        self.assertLessEqual(
+            abs(
+                self.page.adPrevious.geometry().center().y()
+                - self.page.adOverlay.geometry().center().y()
+            ),
+            1,
+        )
+        self.assertGreaterEqual(
+            self.page.adTitle.geometry().top(),
+            self.page.adOverlay.height() // 2 - 8,
+        )
+        self.assertGreaterEqual(
+            self.page.adDescription.geometry().top(),
+            self.page.adOverlay.height() // 2,
+        )
+        self.assertGreaterEqual(
+            self.page.adButton.geometry().top(),
+            self.page.adOverlay.height() // 2,
+        )
+        self.assertGreaterEqual(
+            self.page.adTitle.geometry().left(),
+            self.page.adPrevious.geometry().right() + 8,
+        )
+        self.assertGreaterEqual(
+            self.page.adTitle.width(),
+            self.page.adOverlay.width() - 120,
+        )
 
         self.page.adNext.click()
         self.assertEqual(self.page.adFlipView.currentIndex(), 1)
         self.page.adPrevious.click()
         self.assertEqual(self.page.adFlipView.currentIndex(), 0)
+
+    def testInstalledEmptyStateHasIconAndBrowseAction(self):
+        self.page.catalog = []
+        self.page.resize(900, 600)
+        self.page.show()
+        self.page._renderInstalled()
+        self.qtApp.processEvents()
+
+        self.assertFalse(self.page.installedEmpty.isHidden())
+        self.assertFalse(self.page.installedEmptyIcon.pixmap().isNull())
+        self.assertGreaterEqual(self.page.installedEmptyButton.height(), 40)
+
+        self.page.installedEmptyButton.click()
+        deadline = time.monotonic() + 1
+        while (
+            self.page.catalogStack.currentWidget() is not self.page.allPage
+            and time.monotonic() < deadline
+        ):
+            QTest.qWait(10)
+
+        self.assertEqual(self.page.pivot.currentRouteKey(), "all")
+        self.assertIs(self.page.catalogStack.currentWidget(), self.page.allPage)
+
+    def testInstalledSearchEmptyStateClearsSearchInsteadOfLeavingPage(self):
+        app = _apps(1)[0]
+        app["installed"] = True
+        self.page._mergedCatalog = [app]
+        self.page.setSearchText("not-found")
+
+        self.assertFalse(self.page.installedEmpty.isHidden())
+        self.assertEqual(
+            self.page.installedEmptyTitle.text(),
+            "未找到匹配的已安装应用",
+        )
+        self.assertEqual(self.page.installedEmptyButton.text(), "清除搜索")
+
+        self.page.installedEmptyButton.click()
+
+        self.assertEqual(self.page.searchText, "")
+        self.assertEqual(self.page.pivot.currentRouteKey(), "installed")
+
+    def testCategoryRerenderKeepsViewportFrozenUntilLayoutSettles(self):
+        apps = _apps(18)
+        for app in apps:
+            app["recommended"] = True
+        self.page.catalog = apps
+        self.page.resize(700, 420)
+        self.page.show()
+        self.page.pivot.setCurrentItem("all")
+        self.page._switchCatalogTab(1)
+        QTest.qWait(220)
+        self.page.categoryPivot.setCurrentItem("all")
+        self.page._renderAll()
+        self.page.verticalScrollBar().setValue(80)
+        before = self.page.verticalScrollBar().value()
+
+        self.page.categoryPivot.setCurrentItem("recommended")
+        self.page._switchCategory(0)
+
+        self.assertFalse(self.page.viewport().updatesEnabled())
+        QTest.qWait(30)
+        self.assertTrue(self.page.viewport().updatesEnabled())
+        self.assertEqual(self.page.verticalScrollBar().value(), before)
+
+    def testViewportFreezeStopsOuterTouchScroller(self):
+        scroller = QScroller.scroller(self.page.viewport())
+
+        with patch.object(scroller, "stop") as stop:
+            self.page._beginViewportUpdate()
+            self.page._finishViewportUpdate()
+
+        stop.assert_called_once_with()
 
     def testAdvertisementGradientDarkensTheWholeLowerArea(self):
         self.page.resize(1000, 800)
@@ -706,6 +1209,29 @@ class AppStorePageTest(TestCase):
         self.assertEqual(self.page.adFlipView.currentIndex(), 0)
         self.page._openAdApp()
 
+    @patch("app.view.pages.app_store_page.QDesktopServices.openUrl")
+    def testAdvertisementButtonCanOpenHttpsUrlInSystemBrowser(self, openUrl):
+        self.page.ads = [
+            {
+                "id": 1,
+                "title": "Website",
+                "image_url": "",
+                "button_type": "url",
+                "button_url": "https://example.test/product",
+            }
+        ]
+        self.page._prepareAds()
+
+        self.assertFalse(self.page.adButton.isHidden())
+        self.assertEqual(self.page.adButton.text(), "打开网页")
+        self.page._openAdApp()
+
+        openUrl.assert_called_once()
+        self.assertEqual(
+            openUrl.call_args.args[0].toString(),
+            "https://example.test/product",
+        )
+
     def testDetailStartsAtTopAndBackRestoresCatalogScroll(self):
         apps = _apps(20)
         for app in apps:
@@ -732,6 +1258,27 @@ class AppStorePageTest(TestCase):
         QTest.qWait(20)
 
         self.assertEqual(scrollBar.value(), original)
+
+    def testReloadLeavesRemovedLocalOnlyApplicationDetail(self):
+        app = _apps(1)[0] | {"id": 7, "installed": True}
+        self.page.stack.setAnimationEnabled(False)
+        self.page._showDetail(app)
+
+        with patch.object(self.page, "_mergedApps", return_value=[]):
+            self.page._reloadState()
+
+        self.assertIsNone(self.page.currentApp)
+        self.assertIs(self.page.stack.currentWidget(), self.page.catalogPage)
+
+    def testCatalogRefreshLeavesDetailWhenApplicationWasRemoved(self):
+        app = _apps(1)[0] | {"id": 7}
+        self.page.stack.setAnimationEnabled(False)
+        self.page._showDetail(app)
+
+        self.page._onCatalogLoaded({"apps": [], "ads": []}, {}, "")
+
+        self.assertIsNone(self.page.currentApp)
+        self.assertIs(self.page.stack.currentWidget(), self.page.catalogPage)
 
     def testSearchEnteredInDetailAppliesWhenReturningToList(self):
         apps = _apps(2)
@@ -775,11 +1322,9 @@ class AppStorePageTest(TestCase):
 
     def testCatalogIsPublishedBeforeSlowImagesFinish(self):
         store = _SlowImageStore()
-        worker = CatalogWorker(store)
-        results = []
+        worker = CatalogImageWorker(store, ["https://example.test/icon.png"])
         images = []
         completed = threading.Event()
-        worker.finished.connect(lambda *result: results.append(result))
         worker.imageLoaded.connect(lambda *result: images.append(result))
         worker.completed.connect(completed.set)
         thread = threading.Thread(target=worker.run)
@@ -787,7 +1332,6 @@ class AppStorePageTest(TestCase):
         self.assertTrue(store.imageStarted.wait(1))
         QTest.qWait(20)
 
-        self.assertEqual(results[0][0]["apps"][0]["id"], 1)
         self.assertEqual(images, [])
 
         store.releaseImage.set()
@@ -795,6 +1339,157 @@ class AppStorePageTest(TestCase):
         QTest.qWait(20)
         self.assertTrue(completed.is_set())
         self.assertEqual(images, [("https://example.test/icon.png", "cached.png")])
+
+    def testCanceledImageWorkerDoesNotWaitForBlockedRequest(self):
+        store = _SlowImageStore()
+        worker = CatalogImageWorker(store, ["https://example.test/icon.png"])
+        thread = threading.Thread(target=worker.run)
+        thread.start()
+        self.assertTrue(store.imageStarted.wait(1))
+
+        worker.cancel()
+        thread.join(1)
+
+        try:
+            self.assertFalse(thread.is_alive())
+        finally:
+            store.releaseImage.set()
+            self.assertTrue(store.imageFinished.wait(1))
+
+    def testRepeatedImageCancellationKeepsTheSharedPoolBounded(self):
+        store = _SlowImageStore()
+        outerThreads = []
+        try:
+            for generation in range(5):
+                worker = CatalogImageWorker(
+                    store,
+                    [
+                        f"https://example.test/{generation}-{index}.png"
+                        for index in range(4)
+                    ],
+                )
+                thread = threading.Thread(target=worker.run)
+                thread.start()
+                outerThreads.append(thread)
+                self.assertTrue(store.imageStarted.wait(1))
+                worker.cancel()
+                thread.join(1)
+                self.assertFalse(thread.is_alive())
+
+            poolThreads = [
+                thread
+                for thread in threading.enumerate()
+                if thread.name.startswith("app-store-image-")
+            ]
+            self.assertLessEqual(len(poolThreads), CatalogImageWorker._poolSize)
+        finally:
+            store.releaseImage.set()
+            for thread in outerThreads:
+                thread.join(1)
+
+    def testCatalogFailureStillRendersInstalledApplications(self):
+        app = _apps(1)[0] | {
+            "id": 1,
+            "installed": True,
+            "open_action": {"type": "program", "target": "app.exe"},
+        }
+        self.page.store = Mock()
+        self.page.store.mergeInstalled.return_value = [app]
+
+        with patch.object(InfoBar, "error"):
+            self.page._onCatalogLoaded({}, {}, "offline")
+
+        self.assertIsNotNone(self.page.installedGrid.itemAtPosition(0, 0))
+
+    def testCatalogNormalizesMalformedAdvertisements(self):
+        for ads in (None, [None, {"id": 1, "title": "Valid"}]):
+            with self.subTest(ads=ads):
+                self.page._onCatalogLoaded(
+                    {"apps": [], "ads": ads},
+                    {},
+                    "",
+                )
+                self.assertTrue(all(isinstance(ad, dict) for ad in self.page.ads))
+
+    def testCatalogImageWorkerIgnoresMalformedAndDuplicateUrls(self):
+        worker = CatalogImageWorker(
+            self.page.store,
+            [
+                "https://example.test/icon.png",
+                ["not", "a", "url"],
+                None,
+                "https://example.test/icon.png",
+                "",
+            ],
+        )
+
+        self.assertEqual(worker.urls, ("https://example.test/icon.png",))
+
+    def testCatalogNormalizesMalformedImageUrlsBeforeRendering(self):
+        self.page._onCatalogLoaded(
+            {
+                "apps": [_apps(1)[0] | {"icon_url": ["invalid"]}],
+                "ads": [
+                    {
+                        "id": 1,
+                        "title": "Ad",
+                        "image_url": {"invalid": True},
+                    }
+                ],
+            },
+            {},
+            "",
+        )
+
+        self.assertEqual(self.page.catalog[0]["icon_url"], "")
+        self.assertEqual(self.page.ads[0]["image_url"], "")
+
+    def testDownloadThreadConstructionFailureRollsBackStartup(self):
+        app = _apps(1)[0]
+        worker = Mock()
+        self.page.store.downloadSlots = Mock()
+
+        with patch(
+            "app.view.pages.app_store_page.downloadWorker",
+            return_value=worker,
+        ), patch(
+            "app.view.pages.app_store_page.threading.Thread",
+            side_effect=RuntimeError("thread construction failed"),
+        ), patch.object(InfoBar, "error") as showError:
+            self.page._onAppAction(app)
+
+        self.page.store.downloadSlots.acquire.assert_called_once_with()
+        self.page.store.downloadSlots.release.assert_called_once_with()
+        worker.deleteLater.assert_called_once_with()
+        showError.assert_called_once()
+        self.assertNotIn(app["id"], self.page._downloadJobs)
+        self.assertNotIn(app["id"], self.page._downloadStates)
+
+    def testInstallThreadConstructionFailureRollsBackStartup(self):
+        app = _apps(1)[0]
+        appId = app["id"]
+        self.page.store.downloadSlots = Mock()
+        self.page._downloadJobs[appId] = (Mock(), Mock())
+
+        with TemporaryDirectory() as directory:
+            package = Path(directory) / "demo.zip"
+            package.write_bytes(b"package")
+            with patch(
+                "app.view.pages.app_store_page.threading.Thread",
+                side_effect=RuntimeError("thread construction failed"),
+            ), patch(
+                "app.view.pages.app_store_page.endAppStorePackageOperation"
+            ) as endOperation, patch.object(InfoBar, "error") as showError:
+                self.page._onDownloadFinished(app, str(package), "", False)
+
+            self.assertFalse(package.exists())
+
+        self.page.store.downloadSlots.release.assert_called_once_with()
+        endOperation.assert_called_once_with()
+        showError.assert_called_once()
+        self.assertNotIn(appId, self.page._downloadJobs)
+        self.assertNotIn(appId, self.page._installing)
+        self.assertNotIn(appId, self.page._downloadStates)
 
     def testShutdownWaitsForCooperativeDownloadThread(self):
         worker = _CancelableWorker()
@@ -810,6 +1505,107 @@ class AppStorePageTest(TestCase):
         self.assertFalse(thread.is_alive())
         self.assertNotIn(1, self.page._downloadJobs)
         self.page.store.downloadSlots.release.assert_called_once_with()
+
+    def testShutdownDefersDownloadReleaseUntilThreadStops(self):
+        app = _apps(2)[1]
+        worker = _IgnoringCancelWorker()
+
+        def run():
+            worker.run()
+            self.page._downloadFinishedSignal.emit(app, "", "", True)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        self.page.store.downloadSlots = Mock()
+        self.page._downloadJobs[app["id"]] = (thread, worker)
+        slotReleased = threading.Event()
+        operationEnded = threading.Event()
+        self.page.store.downloadSlots.release.side_effect = slotReleased.set
+
+        try:
+            with patch(
+                "app.view.pages.app_store_page.SHUTDOWN_WAIT_SECONDS",
+                0.01,
+            ), patch(
+                "app.view.pages.app_store_page.endAppStorePackageOperation",
+                side_effect=operationEnded.set,
+            ) as endOperation:
+                self.page.shutdown()
+                self.page.shutdown()
+
+                self.assertTrue(worker.canceled.is_set())
+                self.assertTrue(thread.is_alive())
+                self.assertFalse(slotReleased.is_set())
+                self.assertFalse(operationEnded.is_set())
+
+                worker.release.set()
+                self.assertTrue(operationEnded.wait(1))
+                QTest.qWait(20)
+
+            self.page.store.downloadSlots.release.assert_called_once_with()
+            endOperation.assert_called_once_with()
+        finally:
+            worker.release.set()
+            thread.join(1)
+
+    def testShutdownDefersInstallReleaseUntilThreadStops(self):
+        app = _apps(1)[0]
+        appId = app["id"]
+        installStarted = threading.Event()
+        allowInstallToFinish = threading.Event()
+        slotReleased = threading.Event()
+        operationEnded = threading.Event()
+        installThread = None
+        self.page.store.downloadSlots = Mock()
+        self.page.store.downloadSlots.release.side_effect = slotReleased.set
+        self.page._downloadJobs[appId] = (Mock(), Mock())
+
+        def installZip(_app, _path, _cancelEvent):
+            installStarted.set()
+            allowInstallToFinish.wait()
+            return None
+
+        self.page.store.installZip = installZip
+        with TemporaryDirectory() as directory:
+            package = Path(directory) / "demo.zip"
+            package.write_bytes(b"package")
+            try:
+                with patch(
+                    "app.view.pages.app_store_page.SHUTDOWN_WAIT_SECONDS",
+                    0.01,
+                ), patch(
+                    "app.view.pages.app_store_page.endAppStorePackageOperation",
+                    side_effect=operationEnded.set,
+                ) as endOperation:
+                    self.page._onDownloadFinished(
+                        app,
+                        str(package),
+                        "",
+                        False,
+                    )
+                    self.assertTrue(installStarted.wait(1))
+                    with self.page._fileOperationLock:
+                        installThread = next(
+                            iter(self.page._fileOperationThreads)
+                        )
+
+                    self.page.shutdown()
+                    self.page.shutdown()
+
+                    self.assertTrue(installThread.is_alive())
+                    self.assertFalse(slotReleased.is_set())
+                    self.assertFalse(operationEnded.is_set())
+
+                    allowInstallToFinish.set()
+                    self.assertTrue(operationEnded.wait(1))
+                    self.page._onInstallFinished(appId, None, "")
+
+                self.page.store.downloadSlots.release.assert_called_once_with()
+                endOperation.assert_called_once_with()
+            finally:
+                allowInstallToFinish.set()
+                if installThread is not None:
+                    installThread.join(1)
 
     def testShutdownHasBoundedWaitForUncooperativeDownload(self):
         worker = _IgnoringCancelWorker()

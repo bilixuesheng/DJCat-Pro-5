@@ -15,7 +15,7 @@
 <section class="section-block" aria-labelledby="today-title">
     <div class="section-heading">
         <div><span class="section-index">01</span><h2 id="today-title">今日数据</h2></div>
-        <span>所有时间按北京时间计算</span>
+        <span>每 10 秒自动更新</span>
     </div>
     <div class="metric-grid" aria-label="今日统计">
         <article class="metric-card metric-card-accent"><span>今日 AI 请求</span><strong data-stat="today.ai_requests">{{ stats.today.ai_requests }}</strong><small>AI REQUESTS TODAY</small></article>
@@ -57,7 +57,7 @@
             <p>把作业清单或任务转换为适合屏幕展示的标准 Markdown。</p>
             <dl class="service-meta">
                 <div><dt>模型</dt><dd>{{ model }}</dd></div>
-                <div><dt>单机额度</dt><dd>{{ daily_limit }} 次 / 天</dd></div>
+                <div><dt>单机额度</dt><dd>{{ daily_limit }} 点 / 天</dd></div>
                 <div><dt>高峰扣除</dt><dd>{{ '双倍' if peak_enabled else '标准' }}</dd></div>
             </dl>
         </div>

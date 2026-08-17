@@ -2,6 +2,7 @@ import os
 import tempfile
 from pathlib import Path
 from unittest import TestCase
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -151,3 +152,28 @@ class CountdownWindowTest(TestCase):
                 for child in self.window.findChildren(Flyout)
             )
         )
+
+    def testCountdownUsesElapsedTimeAfterEventLoopStall(self):
+        with patch("app.view.pages.countdown_page.time.monotonic") as monotonic:
+            monotonic.return_value = 100.0
+            self.window.startCountdown("测试", 60, False)
+            monotonic.return_value = 105.2
+            self.window._tickCountdown()
+
+        self.assertEqual(self.window.remaining, 55)
+
+    def testPauseAndAdjustRebuildMonotonicDeadline(self):
+        with patch("app.view.pages.countdown_page.time.monotonic") as monotonic:
+            monotonic.return_value = 100.0
+            self.window.startCountdown("测试", 60, False)
+            monotonic.return_value = 105.2
+            self.window._onPause()
+            self.assertEqual(self.window.remaining, 55)
+
+            monotonic.return_value = 200.0
+            self.window._onPause()
+            self.window._onAdjust(-30)
+            monotonic.return_value = 205.1
+            self.window._tickCountdown()
+
+        self.assertEqual(self.window.remaining, 20)

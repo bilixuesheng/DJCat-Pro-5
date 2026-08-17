@@ -1,0 +1,51 @@
+{% extends "admin_base.html" %}
+
+{% block title %}应用市场 · 推荐软件{% endblock %}
+{% block page_name %}推荐软件管理{% endblock %}
+
+{% block content %}
+<div class="market-page">
+    <header class="page-header">
+        <div>
+            <div class="eyebrow">应用市场 / 推荐软件管理</div>
+            <h1>推荐软件</h1>
+            <p>独立维护客户端“推荐”分类，不改变全部应用中的软件顺序。</p>
+        </div>
+        <div class="page-header-actions">
+            <div class="machine-count"><strong data-item-count>{{ apps|length }}</strong><span>个推荐</span></div>
+            <a class="button button-primary" href="{{ url_for('app_store.adminNewRecommendation') }}">新增推荐</a>
+        </div>
+    </header>
+
+    <section class="section-block" aria-labelledby="recommendations-title">
+        <div class="section-heading">
+            <div><span class="section-index">01</span><h2 id="recommendations-title">当前推荐</h2></div>
+            <span>拖动调整推荐顺序，方向键同样可用</span>
+        </div>
+        <div class="table-wrap">
+            <table data-empty-message="还没有推荐软件。" data-sortable-table data-order-url="{{ url_for('app_store.adminOrderRecommendations') }}" data-csrf-token="{{ csrf_token }}">
+                <thead><tr><th>顺序</th><th>编号</th><th>软件</th><th>版本</th><th>开发者</th><th>操作</th></tr></thead>
+                <tbody>
+                {% for app in apps %}
+                    <tr data-sort-id="{{ app.id }}">
+                        <td><span class="drag-order"><button class="drag-handle" type="button" aria-label="拖动调整 {{ app.name }} 的推荐顺序，方向键也可调整">⠿</button><code data-order-position>{{ '%02d'|format(loop.index) }}</code></span></td>
+                        <td><code>{{ app.id }}</code></td>
+                        <td><strong>{{ app.name }}</strong></td>
+                        <td>{{ app.version }}</td>
+                        <td>{{ app.developer or '未填写' }}</td>
+                        <td>
+                            <form method="post" action="{{ url_for('app_store.adminDeleteRecommendation', app_id=app.id) }}" data-async-form data-remove-on-success="tr" data-confirm="确认取消推荐 {{ app.name }} 吗？">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button class="table-action" type="submit">取消推荐</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% else %}
+                    <tr><td class="empty" colspan="6">还没有推荐软件，点击“新增推荐”开始配置。</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}

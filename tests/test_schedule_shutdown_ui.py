@@ -1,21 +1,24 @@
 import os
+import threading
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QAbstractAnimation, QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QImage, QPixmap, QWheelEvent
+from PySide6.QtGui import QImage, QInputDevice, QPixmap, QWheelEvent
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
     QScroller,
     QSizePolicy,
+    QVBoxLayout,
     QWidget,
 )
 from shiboken6 import delete, isValid
 
+from app.view.components.scroll_area import ScrollArea
 from app.view.components.task_picker import TouchTimePicker
 from app.view.pages.schedule_page import (
     BroadcastSettingCard,
@@ -104,6 +107,44 @@ class ScheduleShutdownUiTest(TestCase):
 
             with self.subTest(card=type(card).__name__):
                 self.assertFalse(card.expandCard.isExpand)
+
+    def testTouchDragStartingOnTaskHeaderScrollsOuterPage(self):
+        scroll = ScrollArea()
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        cards = [TaskCard(broadcast_task()) for _ in range(8)]
+        for card in cards:
+            layout.addWidget(card)
+        scroll.setWidget(content)
+        scroll.setWidgetResizable(True)
+        scroll.resize(640, 280)
+        scroll.show()
+        self.addCleanup(scroll.deleteLater)
+        self.app.processEvents()
+        self.assertGreater(scroll.verticalScrollBar().maximum(), 0)
+
+        header = cards[0].expandCard.card
+        device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
+        start = header.rect().center()
+        end = start + QPoint(0, -120)
+        QTest.touchEvent(header, device).press(0, start, header).commit()
+        self.app.processEvents()
+        QTest.touchEvent(header, device).move(0, end, header).commit()
+        QTest.qWait(100)
+        QTest.touchEvent(header, device).release(0, end, header).commit()
+        QTest.qWait(200)
+        self.assertGreater(scroll.verticalScrollBar().value(), 0)
+        self.assertFalse(cards[0].expandCard.isExpand)
+
+    def testSmoothScrollBarAnimationsFollowTheirOwner(self):
+        scroll = ScrollArea()
+        self.addCleanup(scroll.deleteLater)
+        delegate = getattr(scroll, "delegate", None)
+        if delegate is None:
+            self.skipTest("当前平台使用原生滚动条")
+        for name in ("vScrollBar", "hScrollBar"):
+            bar = getattr(delegate, name)
+            self.assertIs(bar.ani.parent(), bar)
 
     def testTaskHeadersWaitForReleaseAndShowPressedMaterial(self):
         cards = (TaskCard(broadcast_task()), ShutdownTaskCard(shutdown_task()))
@@ -483,6 +524,88 @@ class ScheduleShutdownUiTest(TestCase):
         loader._load()
 
         loadVoices.assert_called_once()
+
+    def testVoiceLoadIsSharedAcrossTaskCards(self):
+        loaderType = ChineseVoiceLoader
+        with loaderType._lock:
+            previous = (
+                loaderType._loading,
+                loaderType._cachedVoices,
+                loaderType._waiters,
+            )
+            loaderType._loading = False
+            loaderType._cachedVoices = None
+            loaderType._waiters = []
+        started = threading.Event()
+        release = threading.Event()
+        voice = {"name": "zh-CN-XiaoxiaoNeural", "label": "晓晓"}
+
+        def load():
+            started.set()
+            release.wait(1)
+            return [voice]
+
+        first = loaderType()
+        second = loaderType()
+        self.addCleanup(first.deleteLater)
+        self.addCleanup(second.deleteLater)
+        firstResult = QSignalSpy(first.finished)
+        secondResult = QSignalSpy(second.finished)
+        try:
+            with patch(
+                "app.view.pages.schedule_page.load_chinese_voices",
+                side_effect=load,
+            ) as loadVoices:
+                first.start()
+                second.start()
+                self.assertTrue(started.wait(1))
+                self.assertEqual(loadVoices.call_count, 1)
+                release.set()
+                self.assertTrue(firstResult.wait(1000))
+                if not secondResult:
+                    self.assertTrue(secondResult.wait(1000))
+                self.assertEqual(loadVoices.call_count, 1)
+                self.assertEqual(firstResult.at(0)[0], [voice])
+                self.assertEqual(secondResult.at(0)[0], [voice])
+        finally:
+            release.set()
+            if first._thread is not None:
+                first._thread.join(1)
+            with loaderType._lock:
+                (
+                    loaderType._loading,
+                    loaderType._cachedVoices,
+                    loaderType._waiters,
+                ) = previous
+
+    def testTaskEditsAreSavedAfterOneDebounce(self):
+        cases = (
+            (
+                SchedulePage,
+                broadcast_task(),
+                "app.view.pages.schedule_page.cfg.set",
+            ),
+            (
+                ShutdownPage,
+                shutdown_task(),
+                "app.view.pages.shutdown_page.cfg.set",
+            ),
+        )
+        for pageType, task, setting in cases:
+            with self.subTest(page=pageType.__name__), patch.object(
+                pageType,
+                "_loadTasks",
+                lambda page: setattr(page, "current_tasks", []),
+            ):
+                page = pageType()
+                self.addCleanup(page.deleteLater)
+                page.current_tasks = [task]
+                with patch(setting) as save:
+                    page._updateTask(0, task | {"name": "第一次"})
+                    page._updateTask(0, task | {"name": "第二次"})
+                    save.assert_not_called()
+                    QTest.qWait(350)
+                    save.assert_called_once()
 
     @patch("app.view.pages.schedule_page.AddTaskDialog")
     def testClosedBroadcastTaskDialogIsDeleted(self, dialogType):

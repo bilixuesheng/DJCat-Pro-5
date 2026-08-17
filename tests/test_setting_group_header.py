@@ -83,6 +83,39 @@ class SettingGroupHeaderTest(TestCase):
             page.aboutGroup.settingCards(),
         )
 
+    @patch("app.view.pages.setting_page.appStoreImageCache")
+    @patch("app.view.pages.setting_page.threading.Thread")
+    def testCacheCardShowsSizeAndDisablesTrashButtonWhenEmpty(
+        self, _, imageCache
+    ):
+        cache = imageCache
+        cache.size.return_value = 1536
+        page = SettingPage()
+        self.addCleanup(page.deleteLater)
+
+        self.assertEqual(page.clearAppStoreCacheCard.titleLabel.text(), "缓存")
+        self.assertIn("1.5 KB", page.clearAppStoreCacheCard.contentLabel.text())
+        self.assertTrue(page.clearAppStoreCacheCard.clearButton.isEnabled())
+        self.assertEqual(
+            page.clearAppStoreCacheCard.clearButton.accessibleName(),
+            "清除缓存",
+        )
+
+        cache.size.return_value = 0
+        page._refreshAppStoreCacheSize()
+
+        self.assertIn("0 B", page.clearAppStoreCacheCard.contentLabel.text())
+        self.assertFalse(page.clearAppStoreCacheCard.clearButton.isEnabled())
+
+    @patch("app.view.pages.setting_page.threading.Thread")
+    def testErrorLogIsBetweenAuthorAndAboutCards(self, _):
+        page = SettingPage()
+        self.addCleanup(page.deleteLater)
+
+        cards = page.aboutGroup.settingCards()
+        self.assertIs(cards[1], page.errorLogCard)
+        self.assertIs(cards[2], page.aboutCard)
+
     @patch("app.view.pages.setting_page.threading.Thread")
     def testHeaderGeometryStaysFixedDuringExpandAnimation(self, _):
         page = SettingPage()
@@ -165,6 +198,7 @@ class SettingGroupHeaderTest(TestCase):
         self.app.processEvents()
         card = page.aiStyleCard
         card.setExpandedImmediately(False)
+        self.app.processEvents()
         editorGeometry = card.editorWidget.geometry()
         self.assertIsNotNone(card.viewContent.graphicsEffect())
 

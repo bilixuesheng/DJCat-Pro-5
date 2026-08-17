@@ -18,6 +18,26 @@ from app.platform import application
 REPO = Path(__file__).resolve().parents[1]
 
 
+def test_simultaneous_second_instance_uses_lock_created_during_race():
+    cleanup = MagicMock()
+    cleanup.attach.return_value = False
+    memory = MagicMock()
+    memory.attach.side_effect = [False, True]
+    memory.create.return_value = False
+    owner = types.SimpleNamespace(_key="race", _memory=None)
+
+    with (
+        patch.object(application, "QSharedMemory", side_effect=[cleanup, memory]),
+        patch.object(application, "_sendToRunningWindows") as wake,
+        pytest.raises(SystemExit) as stopped,
+    ):
+        application.SingletonApplication._lockSingleInstance(owner)
+
+    assert stopped.value.code == 0
+    wake.assert_called_once_with()
+    memory.detach.assert_not_called()
+
+
 def test_raiseWindow_restores_minimized_window():
     window = MagicMock()
     window.windowState.return_value = Qt.WindowState.WindowMinimized

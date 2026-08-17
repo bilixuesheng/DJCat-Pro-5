@@ -57,14 +57,13 @@ class SingletonApplication(QApplication):
         if self._memory.create(1):
             return
 
-        try:
-            self._memory.attach()
-            self._memory.detach()
-            if not self._memory.create(1):
-                raise RuntimeError(self._memory.errorString())
-        except Exception as error:
-            logger.opt(exception=error).error("创建单实例共享内存失败")
-            raise
+        if self._memory.attach():
+            _sendToRunningWindows()
+            raise SystemExit(0)
+
+        error = RuntimeError(self._memory.errorString())
+        logger.opt(exception=error).error("创建单实例共享内存失败")
+        raise error
 
     def _unlockSingleInstance(self) -> None:
         if self._memory is not None and self._memory.isAttached():

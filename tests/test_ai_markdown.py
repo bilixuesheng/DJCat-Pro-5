@@ -1,21 +1,23 @@
 import os
+import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QScroller, QWidget
 
 from app.common import ai_markdown as client_ai_markdown
 from app.config.cfg import cfg
 from app.view.pages.broadcast_page import (
     AIMarkdownDialog,
     BroadcastEditPage,
+    BroadcastWindow,
     _iterSseContent,
 )
 from app.view.pages.setting_page import CUSTOM_STYLE_PLACEHOLDER, SettingPage
@@ -120,6 +122,7 @@ class AIMarkdownTest(unittest.TestCase):
         firstStyle = dialog.inputEdit.styleSheet()
         dialog._updateBusyStyle()
         self.assertIn("qlineargradient", firstStyle)
+        self.assertIn("border: 5px solid", firstStyle)
         self.assertNotEqual(firstStyle, dialog.inputEdit.styleSheet())
         dialog._stopBusyStyle()
         self.assertIn("border-radius", dialog.inputEdit.styleSheet())
@@ -127,7 +130,7 @@ class AIMarkdownTest(unittest.TestCase):
         dialog._onQuotaReceived(8, 15, 2, True, "DJ-000123")
         self.assertIn("每天 0 点刷新", dialog.quotaLabel.text())
         self.assertIn("9:00–12:00、14:00–18:00", dialog.quotaLabel.text())
-        self.assertIn("当前每次扣 2 次", dialog.quotaLabel.text())
+        self.assertIn("当前每次扣 2 点", dialog.quotaLabel.text())
         self.assertIn("设置", dialog.quotaLabel.text())
         dialog._onQuotaReceived(-1, 15, 1, None, "")
         self.assertIn("暂时无法获取", dialog.quotaLabel.text())
@@ -140,6 +143,78 @@ class AIMarkdownTest(unittest.TestCase):
         parent.resize(760, 500)
         self.app.processEvents()
         self.assertEqual(dialog.widget.width(), 680)
+
+    def testAIDialogCanCancelAnActiveStreamAndBatchesChunks(self):
+        parent = QWidget()
+        self.addCleanup(parent.close)
+        with patch.object(AIMarkdownDialog, "_fetchQuota"):
+            dialog = AIMarkdownDialog("原内容", parent)
+        self.addCleanup(dialog.close)
+        response = MagicMock()
+        dialog._running = True
+        dialog._activeResponse = response
+
+        dialog.reject()
+
+        self.assertTrue(dialog._cancelEvent.is_set())
+        self.assertFalse(dialog._running)
+        response.close.assert_called_once()
+
+        with patch.object(AIMarkdownDialog, "_fetchQuota"):
+            batchingDialog = AIMarkdownDialog("", parent)
+        self.addCleanup(batchingDialog.close)
+        batchingDialog.inputEdit.clear()
+        for chunk in ("第一段", "第二段", "第三段"):
+            batchingDialog._appendChunk(chunk)
+        self.assertTrue(batchingDialog._flushTimer.isActive())
+        self.assertEqual(batchingDialog.inputEdit.toPlainText(), "")
+
+        batchingDialog._flushTimer.stop()
+        batchingDialog._flushChunks()
+
+        self.assertEqual(batchingDialog.resultText(), "第一段第二段第三段")
+        self.assertEqual(
+            batchingDialog.inputEdit.toPlainText(), "第一段第二段第三段"
+        )
+
+    def testFailedStreamDiscardsChunksThatHaveNotBeenPainted(self):
+        parent = QWidget()
+        self.addCleanup(parent.close)
+        with patch.object(AIMarkdownDialog, "_fetchQuota"):
+            dialog = AIMarkdownDialog("原内容", parent)
+        self.addCleanup(dialog.close)
+        dialog.inputEdit.clear()
+        dialog._appendChunk("不完整结果")
+
+        with (
+            patch.object(dialog, "_refreshQuota"),
+            patch("app.view.pages.broadcast_page.MessageBox") as messageBox,
+        ):
+            dialog._onConversionFailed("流式响应中断", 10, 15, 1)
+
+        dialog._flushChunks()
+        self.assertFalse(dialog._flushTimer.isActive())
+        self.assertEqual(dialog.inputEdit.toPlainText(), "原内容")
+        self.assertEqual(dialog.resultText(), "")
+        messageBox.return_value.exec.assert_called_once_with()
+
+    def testLongTextAreasSupportNativeTouchScrolling(self):
+        page = BroadcastEditPage()
+        window = BroadcastWindow()
+        parent = QWidget()
+        self.addCleanup(page.close)
+        self.addCleanup(window.close)
+        self.addCleanup(parent.close)
+        with patch.object(AIMarkdownDialog, "_fetchQuota"):
+            dialog = AIMarkdownDialog("", parent)
+        self.addCleanup(dialog.close)
+
+        for viewport in (
+            page.contentInput.viewport(),
+            window.contentEdit.viewport(),
+            dialog.inputEdit.viewport(),
+        ):
+            self.assertTrue(QScroller.hasScroller(viewport))
 
     def testAIStyleSettings(self):
         oldFile = cfg.file
@@ -172,6 +247,15 @@ class AIMarkdownTest(unittest.TestCase):
                 page.hide()
                 self.app.processEvents()
                 self.assertEqual(cfg.aiMarkdownCustomStyle.value, "只使用列表")
+
+                page.aiStyleCard.textEdit.setPlainText("a" * 4001)
+                self.assertEqual(
+                    len(page.aiStyleCard.textEdit.toPlainText()),
+                    4000,
+                )
+                self.assertIn("已截去", page.aiStyleCard.limitLabel.text())
+                page.aiStyleCard.flushPendingSave()
+                self.assertEqual(len(cfg.aiMarkdownCustomStyle.value), 4000)
 
                 page._onAIQuotaReceived(8, 15, 2, True, "DJ-000124")
                 self.assertEqual(page.aiQuotaLabel.text(), "8 / 15")
@@ -310,6 +394,41 @@ class AIMarkdownTest(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 400)
 
+    def testServerRejectsOversizedRequestBodyBeforeParsing(self):
+        response = ai_markdown.app.test_client().post(
+            "/ai/markdown",
+            data=(b"{" + b"x" * (ai_markdown.MAX_REQUEST_BYTES + 1) + b"}"),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.get_json()["message"], "请求内容过大")
+
+    def testQuotaLookupDoesNotRegisterUnknownMachine(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(
+                ai_markdown,
+                "DATABASE_PATH",
+                Path(directory) / "usage.sqlite3",
+            ),
+            patch.dict(
+                os.environ,
+                {"DJCATAI_RATE_LIMIT_SALT": "test-only"},
+            ),
+        ):
+            response = ai_markdown.app.test_client().get(
+                "/ai/markdown/quota",
+                query_string={"machine_id": "a" * 64},
+            )
+            with closing(ai_markdown._connect()) as database:
+                machines = database.execute(
+                    "SELECT COUNT(*) FROM machines"
+                ).fetchone()[0]
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(machines, 0)
+
     def testServerForwardsCustomStyle(self):
         upstream = MagicMock()
         upstream.iter_lines.return_value = [b"data:[DONE]"]
@@ -386,6 +505,236 @@ class AIMarkdownTest(unittest.TestCase):
             stats = ai_markdown._dashboardStats()
             self.assertEqual(stats["failed"], 1)
             self.assertEqual(stats["consumed"], 0)
+
+    def testRejectedUpstreamResponseIsClosedEvenWhenFalsy(self):
+        upstream = MagicMock()
+        upstream.__bool__.return_value = False
+        upstream.raise_for_status.side_effect = ai_markdown.requests.HTTPError()
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(
+                ai_markdown,
+                "DATABASE_PATH",
+                Path(directory) / "usage.sqlite3",
+            ),
+            patch.dict(
+                os.environ,
+                {
+                    "DEEPSEEK_API_KEY": "test-only",
+                    "DJCATAI_RATE_LIMIT_SALT": "test-only",
+                },
+            ),
+            patch.object(ai_markdown.requests, "post", return_value=upstream),
+        ):
+            response = ai_markdown.app.test_client().post(
+                "/ai/markdown",
+                json={"content": "作业", "machine_id": "a" * 64},
+            )
+
+        self.assertEqual(response.status_code, 502)
+        upstream.close.assert_called_once_with()
+
+    def testUpstreamSerializationFailureRefundsClaimedQuota(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(
+                ai_markdown,
+                "DATABASE_PATH",
+                Path(directory) / "usage.sqlite3",
+            ),
+            patch.dict(
+                os.environ,
+                {
+                    "DEEPSEEK_API_KEY": "test-only",
+                    "DJCATAI_RATE_LIMIT_SALT": "test-only",
+                },
+            ),
+            patch.object(
+                ai_markdown.requests,
+                "post",
+                side_effect=ValueError("cannot serialize"),
+            ),
+        ):
+            machineId = ai_markdown._machineId("a" * 64)
+            response = ai_markdown.app.test_client().post(
+                "/ai/markdown",
+                json={"content": "作业", "machine_id": "a" * 64},
+            )
+            remaining = ai_markdown._remaining(machineId)
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(remaining, 15)
+
+    def testStaleProcessingRequestIsFailedAndRefunded(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(
+                ai_markdown,
+                "DATABASE_PATH",
+                Path(directory) / "usage.sqlite3",
+            ),
+            patch.dict(
+                os.environ,
+                {"DJCATAI_RATE_LIMIT_SALT": "test-only"},
+            ),
+        ):
+            machineId = ai_markdown._machineId("a" * 64)
+            day = ai_markdown._today()
+            oldTime = (
+                datetime.now(ai_markdown.TIMEZONE) - timedelta(hours=1)
+            ).isoformat(timespec="seconds")
+            with closing(ai_markdown._connect()) as database:
+                database.execute(
+                    "INSERT INTO usage(day, machine_id, count) VALUES (?, ?, 2)",
+                    (day, machineId),
+                )
+                database.execute(
+                    """
+                    INSERT INTO request_log(
+                        day, machine_id, requested_at, cost, status
+                    ) VALUES (?, ?, ?, 2, 'processing')
+                    """,
+                    (day, machineId, oldTime),
+                )
+                database.commit()
+
+            stats = ai_markdown._dashboardStats()
+
+            self.assertEqual(ai_markdown._remaining(machineId), 15)
+            self.assertEqual(stats["processing"], 0)
+            self.assertEqual(stats["failed"], 1)
+
+    def testRecoveredRequestCannotBeSettledOrRefundedTwice(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(
+                ai_markdown,
+                "DATABASE_PATH",
+                Path(directory) / "usage.sqlite3",
+            ),
+            patch.dict(
+                os.environ,
+                {"DJCATAI_RATE_LIMIT_SALT": "test-only"},
+            ),
+        ):
+            machineId = ai_markdown._machineId("b" * 64)
+            day = ai_markdown._today()
+            oldTime = (
+                datetime.now(ai_markdown.TIMEZONE) - timedelta(hours=1)
+            ).isoformat(timespec="seconds")
+            with closing(ai_markdown._connect()) as database:
+                database.execute(
+                    "INSERT INTO usage(day, machine_id, count) VALUES (?, ?, 2)",
+                    (day, machineId),
+                )
+                requestId = database.execute(
+                    """
+                    INSERT INTO request_log(
+                        day, machine_id, requested_at, cost, status
+                    ) VALUES (?, ?, ?, 2, 'processing')
+                    """,
+                    (day, machineId, oldTime),
+                ).lastrowid
+                database.commit()
+
+            ai_markdown._recoverStaleRequests()
+            with closing(ai_markdown._connect()) as database:
+                database.execute(
+                    "UPDATE usage SET count = 2 WHERE day = ? AND machine_id = ?",
+                    (day, machineId),
+                )
+                database.commit()
+
+            ai_markdown._requestFinished(
+                requestId,
+                False,
+                machineId,
+                2,
+                day,
+            )
+
+            self.assertEqual(ai_markdown._remaining(machineId, day, 15), 13)
+
+    def testOldRequestLogsAreRolledUpOnceWithoutLosingStatistics(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(
+                ai_markdown,
+                "DATABASE_PATH",
+                Path(directory) / "usage.sqlite3",
+            ),
+        ):
+            machineId = "machine-one"
+            oldDay = (
+                datetime.now(ai_markdown.TIMEZONE).date()
+                - timedelta(days=ai_markdown.REQUEST_LOG_RETENTION_DAYS + 1)
+            ).isoformat()
+            with closing(ai_markdown._connect()) as database:
+                database.execute(
+                    """
+                    INSERT INTO machines(machine_id, registered_at, last_seen_at)
+                    VALUES (?, ?, ?)
+                    """,
+                    (machineId, oldDay, oldDay),
+                )
+                database.execute(
+                    "INSERT INTO usage(day, machine_id, count) VALUES (?, ?, 2)",
+                    (oldDay, machineId),
+                )
+                database.executemany(
+                    """
+                    INSERT INTO request_log(
+                        day, machine_id, requested_at, cost, status
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (oldDay, machineId, oldDay, 2, "success"),
+                        (oldDay, machineId, oldDay, 1, "failed"),
+                    ],
+                )
+                database.commit()
+
+            self.assertEqual(ai_markdown._rollupOldRequests(force=True), 1)
+            self.assertEqual(ai_markdown._rollupOldRequests(force=True), 0)
+
+            stats = ai_markdown._dashboardStats()
+            machines = ai_markdown._machineRows()
+            with closing(ai_markdown._connect()) as database:
+                remainingLogs = database.execute(
+                    "SELECT COUNT(*) FROM request_log WHERE day = ?", (oldDay,)
+                ).fetchone()[0]
+                remainingUsage = database.execute(
+                    "SELECT COUNT(*) FROM usage WHERE day = ?", (oldDay,)
+                ).fetchone()[0]
+
+            self.assertEqual(remainingLogs, 0)
+            self.assertEqual(remainingUsage, 0)
+            self.assertEqual(stats["all"]["ai_requests"], 2)
+            self.assertEqual(stats["all"]["ai_success"], 1)
+            self.assertEqual(stats["all"]["ai_failed"], 1)
+            self.assertEqual(stats["all_consumed"], 2)
+            self.assertEqual(machines[0]["requests"], 2)
+
+    def testReplacingDatabaseAtSamePathReinitializesSchema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "usage.sqlite3"
+            with patch.object(ai_markdown, "DATABASE_PATH", path):
+                with closing(ai_markdown._connect()) as database:
+                    database.execute("SELECT 1 FROM usage LIMIT 1")
+
+                path.unlink()
+                sqlite3.connect(path).close()
+
+                with closing(ai_markdown._connect()) as database:
+                    tables = {
+                        row[0]
+                        for row in database.execute(
+                            "SELECT name FROM sqlite_master WHERE type = 'table'"
+                        )
+                    }
+
+        self.assertIn("usage", tables)
+        self.assertIn("request_log", tables)
 
     def testRequestLogFailureDoesNotConsumeQuota(self):
         with (

@@ -1,6 +1,8 @@
 import os
 import threading
+import weakref
 from copy import deepcopy
+from typing import ClassVar
 
 from PySide6.QtCore import QObject, Qt, QTime, QTimer, Signal
 from PySide6.QtWidgets import (
@@ -53,26 +55,69 @@ class BroadcastSettingCard(TaskFormSettingCard):
 
 class ChineseVoiceLoader(QObject):
     finished = Signal(list, str)
+    _lock: ClassVar = threading.Lock()
+    _loading: ClassVar = False
+    _cachedVoices: ClassVar = None
+    _waiters: ClassVar = []
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._thread = None
+        self._waiting = False
 
     def start(self):
-        if self._thread and self._thread.is_alive():
+        with self._lock:
+            if self._cachedVoices is not None:
+                voices = list(self._cachedVoices)
+            else:
+                voices = None
+                if not self._waiting:
+                    self._waiters.append(weakref.ref(self))
+                    self._waiting = True
+                if self._loading:
+                    return
+                type(self)._loading = True
+
+        if voices is not None:
+            QTimer.singleShot(0, lambda: self._emit(voices, ""))
             return
-        self._thread = threading.Thread(target=self._load, daemon=True)
+        self._thread = threading.Thread(
+            target=type(self)._loadShared,
+            daemon=True,
+            name="djcat-edge-voices",
+        )
         self._thread.start()
 
-    def _load(self):
+    @classmethod
+    def _loadShared(cls):
+        voices, error = cls._fetch()
+        with cls._lock:
+            if not error:
+                cls._cachedVoices = list(voices)
+            waiters = cls._waiters
+            cls._waiters = []
+            cls._loading = False
+        for reference in waiters:
+            loader = reference()
+            if loader is not None:
+                loader._emit(voices, error)
+
+    @staticmethod
+    def _fetch():
         try:
-            voices, error = load_chinese_voices(), ""
+            return load_chinese_voices(), ""
         except Exception as exception:
-            voices, error = [], str(exception)
+            return [], str(exception)
+
+    def _emit(self, voices, error):
+        self._waiting = False
         try:
             self.finished.emit(voices, error)
         except RuntimeError:
             pass
+
+    def _load(self):
+        self._emit(*self._fetch())
 
 
 def create_task_form(parent_widget, initial_data=None):
@@ -422,6 +467,11 @@ class SchedulePage(ScrollArea):
         self.setWidget(self.view)
         self.setWidgetResizable(True)
         self.enableTransparentBackground()
+        self.saveTimer = QTimer(self)
+        self.saveTimer.setSingleShot(True)
+        self.saveTimer.setInterval(300)
+        self.saveTimer.timeout.connect(self.flushPendingSave)
+        self._savePending = False
 
         self._loadTasks()
         cfg.broadcastTasks.valueChanged.connect(self._onTasksChanged)
@@ -449,9 +499,18 @@ class SchedulePage(ScrollArea):
 
     def _updateTask(self, index, updated_data):
         self.current_tasks[index] = updated_data
+        self._savePending = True
+        self.saveTimer.start()
+
+    def flushPendingSave(self):
+        if not self._savePending:
+            return
+        self._savePending = False
+        self.saveTimer.stop()
         cfg.set(cfg.broadcastTasks, self.current_tasks)
 
     def _addTask(self):
+        self.flushPendingSave()
         dialog = AddTaskDialog(self.window())
         try:
             if dialog.exec():
@@ -463,6 +522,12 @@ class SchedulePage(ScrollArea):
             dialog.deleteLater()
 
     def _removeTask(self, data):
+        self.saveTimer.stop()
+        self._savePending = False
         self.current_tasks.remove(data)
         cfg.set(cfg.broadcastTasks, self.current_tasks)
         self._loadTasks()
+
+    def hideEvent(self, event):
+        self.flushPendingSave()
+        super().hideEvent(event)

@@ -15,7 +15,7 @@ from qfluentwidgets import (
     RoundMenu,
     ToggleToolButton,
     ToolTipFilter,
-    qconfig,
+    themeColor,
 )
 
 from app.common.home_cards import (
@@ -267,7 +267,7 @@ class HomeCustomCardTest(TestCase):
             self.assertEqual(len(selected), 1)
             self.assertIsInstance(selected[0], ToggleToolButton)
             self.assertIn(
-                qconfig.themeColor.value.name().lower(),
+                themeColor().name().lower(),
                 selected[0].styleSheet().lower(),
             )
             dialog._clearGrid()
@@ -443,8 +443,21 @@ class HomeCustomCardTest(TestCase):
             worker._run()
         self.assertEqual(calls, ["one", "two", "three"])
 
+    def testSequenceReportsActionConfigFailureAndFinishes(self):
+        def broken(_card_id):
+            raise RuntimeError("配置已损坏")
+
+        worker = ActionSequenceWorker("card", broken)
+        result = []
+        worker.finished.connect(lambda card_id, errors: result.append((card_id, errors)))
+
+        worker._run()
+
+        self.assertEqual(result[0][0], "card")
+        self.assertIn("配置已损坏", result[0][1][0])
+
     @mock.patch("app.common.home_cards.subprocess.Popen")
-    def testCancelStopsWaitingProcess(self, popen):
+    def testCancelStopsSequenceWithoutTerminatingUserProcess(self, popen):
         process = popen.return_value
         process.poll.return_value = None
         process.wait.return_value = 0
@@ -457,11 +470,11 @@ class HomeCustomCardTest(TestCase):
         )
 
         self.assertIsNone(error)
-        process.terminate.assert_called_once_with()
-        process.wait.assert_called_once_with(timeout=2)
+        process.terminate.assert_not_called()
+        process.kill.assert_not_called()
 
     @mock.patch("app.common.home_cards.subprocess.Popen")
-    def testCancelStopsProcessAfterItHasStarted(self, popen):
+    def testCancelAfterLaunchLeavesUserProcessRunning(self, popen):
         process = popen.return_value
         process.poll.return_value = None
         process.wait.return_value = 0
@@ -475,8 +488,8 @@ class HomeCustomCardTest(TestCase):
         )
 
         self.assertIsNone(error)
-        process.terminate.assert_called_once_with()
-        process.wait.assert_called_once_with(timeout=2)
+        process.terminate.assert_not_called()
+        process.kill.assert_not_called()
 
     def testDeletingPageWhileCardRunsDoesNotDestroyWorkerSignalSource(self):
         page = HomePage()
@@ -502,6 +515,23 @@ class HomeCustomCardTest(TestCase):
 
         self.assertFalse(worker._thread.is_alive())
         self.assertEqual(errors, [])
+
+    def testShutdownUsesOneSharedWorkerDeadline(self):
+        workers = [mock.Mock() for _ in range(3)]
+        self.page._customWorkers = {"running": workers}
+
+        with mock.patch(
+            "app.view.pages.home_page.monotonic",
+            side_effect=[10, 10.25, 10.8, 11.2],
+        ):
+            self.page.shutdown()
+
+        self.assertAlmostEqual(workers[0].wait.call_args.args[0], 0.75)
+        self.assertAlmostEqual(workers[1].wait.call_args.args[0], 0.2)
+        self.assertEqual(workers[2].wait.call_args.args[0], 0)
+        for worker in workers:
+            worker.cancel.assert_called_once_with()
+            worker.deleteLater.assert_called_once_with()
 
     def testAddMenuIsDeletedAfterClosing(self):
         def closeMenu(menu, *_):
@@ -594,6 +624,41 @@ class HomeCustomCardTest(TestCase):
         self.page.setApplicationCards(cards)
         self.assertIn("app:7:0", self.page.all_cards)
 
+    def testApplicationCardFallsBackWhenCachedIconWasDeleted(self):
+        missingIcon = Path(self.temp_dir.name) / "deleted-cache.png"
+        cards = [
+            {
+                "app_id": 7,
+                "preset_id": 0,
+                "title": "Ghost Downloader",
+                "description": "下载工具",
+                "action": {"type": "program", "target": "ghost.exe"},
+                "icon_path": str(missingIcon),
+            }
+        ]
+
+        self.page.setApplicationCards(cards)
+
+        card = self.page.all_cards["app:7:0"]
+        self.assertFalse(card.iconWidget.getIcon().isNull())
+
+    def testApplicationCardsStayEditableWhenRefreshedDuringEditing(self):
+        self.page._toggleCardEditing()
+        self.page.setApplicationCards(
+            [
+                {
+                    "app_id": 7,
+                    "preset_id": 0,
+                    "title": "打开应用",
+                    "action": {"type": "program", "target": "demo.exe"},
+                }
+            ]
+        )
+
+        card = self.page.all_cards["app:7:0"]
+        self.assertTrue(card._editing)
+        self.assertFalse(card.deleteButton.isHidden())
+
     def testMalformedDefaultAndOrderConfigDoesNotBreakHomePage(self):
         cfg.set(cfg.visibleDefaultHomeCards, [[], DEFAULT_HOME_CARD_NAMES[0]])
         cfg.set(cfg.homeCardOrder, [[], DEFAULT_HOME_CARD_NAMES[0]])
@@ -615,6 +680,7 @@ class HomeCustomCardTest(TestCase):
         popen.assert_called_once_with(
             ["demo.exe", "two words", "--flag"],
             cwd=None,
+            env=os.environ,
         )
 
     @mock.patch("app.common.home_cards.subprocess.Popen")
@@ -637,6 +703,10 @@ class HomeCustomCardTest(TestCase):
 
     def testActionValidationRejectsUnsafeUrl(self):
         self.assertIn("HTTP", validate_action({"type": "url", "target": "file:///bad"}))
+        self.assertEqual(
+            validate_action({"type": "url", "target": "https://["}),
+            "网页地址无效",
+        )
 
     @unittest.skipUnless(os.name == "nt", "Windows icon resources are platform-specific")
     def testExtractsMultipleWindowsIcons(self):

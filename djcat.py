@@ -74,8 +74,15 @@ def main():
     from app.config.cfg import cfg
     from app.config.paths import CONFIG_PATH
 
-    clearUpdateDirectory()
     configureLogging()
+    failedCleanup = clearUpdateDirectory()
+    if failedCleanup:
+        from loguru import logger
+
+        logger.warning(
+            "暂时无法清理更新目录中的 {} 个文件，将在下次启动时重试",
+            len(failedCleanup),
+        )
     sys.excepthook = exceptionHook
     qconfig.load(CONFIG_PATH, cfg)
     setThemeColor(QColor(49, 101, 49))

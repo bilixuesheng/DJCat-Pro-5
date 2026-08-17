@@ -20,6 +20,7 @@ from pyqt_github_markdown.theme import Theme
 _TASK_RE = re.compile(r"^\s*\[([ xX])\]\s+")
 _ALERT_RE = re.compile(r"^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]")
 _ALERT_STRIP_RE = re.compile(r"^\s*\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*")
+_MAX_DOCUMENT_IMAGES = 8
 
 
 def _leadingText(node: SyntaxTreeNode) -> str:
@@ -50,7 +51,11 @@ def _cellAlign(cell: SyntaxTreeNode) -> Qt.AlignmentFlag:
 
 class MarkdownRenderer:
     def buildDocument(self, tree: SyntaxTreeNode, theme: Theme) -> list[QWidget]:
-        return [w for node in tree.children if (w := self._buildBlock(node, theme))]
+        self._imageCount = 0
+        try:
+            return [w for node in tree.children if (w := self._buildBlock(node, theme))]
+        finally:
+            self._imageCount = 0
 
     def _buildBlock(self, node: SyntaxTreeNode, theme: Theme) -> QWidget | None:
         match node.type:
@@ -88,6 +93,12 @@ class MarkdownRenderer:
             return label
         image = self._soleImage(node)
         if image is not None:
+            if self._imageCount >= _MAX_DOCUMENT_IMAGES:
+                label = QLabel(f"[图片过多：{image.content or '未命名图片'}]")
+                label.setObjectName("paragraph")
+                _setupTextLabel(label)
+                return label
+            self._imageCount += 1
             return ImagePlaceholder(image.content, image.attrs.get("src", ""))
         label = QLabel(inlineHtmlOf(node, theme.inlineCode))
         label.setObjectName("paragraph")

@@ -25,10 +25,9 @@
                 <label>软件名称<input name="name" maxlength="120" value="{{ form.name or '' }}" required></label>
                 <label>开发者<input name="developer" maxlength="120" value="{{ form.developer or '' }}"></label>
                 <label>版本号<input name="version" maxlength="64" value="{{ form.version or '' }}" required></label>
-                <label>安装目录<input name="install_dir" maxlength="64" value="{{ form.install_dir or '' }}" placeholder="例如 ClassIsland 2" required><small>可以包含空格；客户端会安装到 Program/该目录，不能填写路径分隔符。</small></label>
+                <label>安装目录<input name="install_dir" maxlength="64" value="{{ form.install_dir or '' }}" placeholder="例如 ClassIsland 2" required {% if app %}readonly{% endif %}><small>{% if app %}已发布软件的安装目录不可直接修改；迁移目录请新建软件。{% else %}可以包含空格；客户端会安装到 Program/该目录，不能填写路径分隔符。{% endif %}</small></label>
                 <label class="full">简介<textarea name="description" maxlength="1000" rows="3">{{ form.description or '' }}</textarea></label>
                 <label class="full">图标 HTTPS 链接<input type="url" name="icon_url" maxlength="2048" value="{{ form.icon_url or '' }}"></label>
-                <label class="option-row full"><span><strong>设为推荐</strong><small>显示在全部应用的推荐分类。</small></span><input type="checkbox" name="recommended" value="1" {% if form.recommended %}checked{% endif %}></label>
             </div>
         </section>
 
@@ -40,6 +39,7 @@
                 <div class="option-list package-option">
                     <label class="option-row"><span><strong>{{ architecture }}</strong><small>按客户端架构提供 ZIP 安装包。</small></span><input type="checkbox" name="{{ architecture }}_enabled" value="1" {% if package and package.enabled %}checked{% endif %}></label>
                     <label class="package-url-field">ZIP 下载 HTTPS 链接<input type="url" name="{{ architecture }}_url" maxlength="2048" value="{{ package.download_url if package else '' }}" placeholder="https://下载域名/软件/{{ architecture }}.zip"><small>示例：<code>https://cdn.example.com/classisland-x86_64.zip</code></small></label>
+                    <label class="package-url-field">ZIP SHA-256<input name="{{ architecture }}_sha256" maxlength="64" value="{{ package.sha256 if package else '' }}" placeholder="64 位十六进制摘要"><small>发布前对 ZIP 计算 SHA-256；客户端会在安装前核对。</small></label>
                 </div>
             {% endfor %}
             </div>

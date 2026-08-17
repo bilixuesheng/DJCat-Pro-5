@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication
 from app.common.edge_tts import (
     DEFAULT_EDGE_VOICE,
     EdgeSpeechWorker,
+    cleanup_edge_speech_files,
     filter_chinese_voices,
     synthesize_edge_speech,
 )
@@ -52,6 +53,19 @@ class EdgeTtsVoiceTest(TestCase):
             ["zh-CN-YunxiNeural", "zh-TW-HsiaoChenNeural"],
         )
         self.assertEqual([voice["gender"] for voice in voices], ["男声", "女声"])
+
+    def testStartupCleanupRemovesStaleSpeechFilesOnly(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stale = root / "djcat-edge-tts-stale.mp3"
+            keep = root / "other.mp3"
+            stale.write_bytes(b"stale")
+            keep.write_bytes(b"keep")
+
+            self.assertEqual(cleanup_edge_speech_files(root), [])
+
+            self.assertFalse(stale.exists())
+            self.assertTrue(keep.exists())
 
     @patch.object(ChineseVoiceLoader, "start")
     def testEdgeTtsSelectionShowsVoicePickerAndPersistsVoice(self, start_loader):
@@ -170,7 +184,7 @@ class EdgeTtsVoiceTest(TestCase):
         window = MagicMock()
         window._resourcesShutdown = False
 
-        MainWindow._playAudioTask(
+        started = MainWindow._startAudioTask(
             window,
             {
                 "type": "Edge TTS（需要联网）",
@@ -181,6 +195,7 @@ class EdgeTtsVoiceTest(TestCase):
             },
         )
 
+        self.assertTrue(started)
         window._setBroadcastVolume.assert_called_once_with(70)
         window._startEdgeTts.assert_called_once_with(
             "测试播报",

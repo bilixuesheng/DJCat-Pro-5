@@ -1,12 +1,14 @@
 import os
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent
+from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import MSFluentWindow
@@ -98,6 +100,35 @@ class SettingSearchTest(TestCase):
         titleEdit.setText("   ")
         titleEdit.editingFinished.emit()
         self.assertEqual(self.window.windowTitle(), APP_NAME)
+
+    def testClearingStoreCacheDropsPinnedIconPathsAndKeepsFallback(self):
+        item = cfg.pinnedHomeCards
+        oldValue = item.value
+        cachedIcon = Path(self.tempDir.name) / "cached-icon.png"
+        cachedIcon.write_bytes(b"stale")
+        cards = [
+            {
+                "app_id": 7,
+                "preset_id": 0,
+                "title": "Ghost Downloader",
+                "description": "下载工具",
+                "action": {"type": "program", "target": "ghost.exe"},
+                "install_dir": "ghost-downloader",
+                "icon_url": "https://example.test/icon.png",
+                "icon_path": str(cachedIcon),
+            }
+        ]
+        try:
+            cfg.set(item, cards)
+            self.window._setPinnedHomeCards(cards)
+
+            self.window.settingPage.appStoreCacheCleared.emit()
+
+            self.assertEqual(cfg.pinnedHomeCards.value[0]["icon_path"], "")
+            stored = next(iter(self.window.homePage._applicationCardData.values()))
+            self.assertEqual(stored["icon_path"], "")
+        finally:
+            cfg.set(item, oldValue)
 
     def testBannerPresetsUseExpectedAssetsAndDefault(self):
         self.assertEqual(
@@ -222,21 +253,244 @@ class SettingSearchTest(TestCase):
                 QTest.qWait(500)
 
     def testBackgroundSchedulesDoNotLoadManagementPages(self):
-        broadcastTask = {"type": "系统TTS", "content": "测试"}
-        shutdownTask = {"notify": False}
+        broadcastTask = {
+            "enabled": True,
+            "weeks": [0],
+            "time": "08:00:00",
+            "type": "系统TTS",
+            "content": "测试",
+        }
+        shutdownTask = {
+            "enabled": True,
+            "weeks": [0],
+            "time": "08:00:00",
+            "notify": False,
+        }
 
         with (
-            patch.object(
-                self.window,
-                "_scheduledTask",
-                side_effect=(broadcastTask, shutdownTask),
-            ),
             patch.object(self.window, "_playAudioTask") as playAudio,
             patch.object(self.window, "_handleShutdownTask") as handleShutdown,
         ):
-            self.window._checkSchedule()
+            self.window._runScheduledTasks(
+                "broadcast",
+                [broadcastTask],
+                "2026-08-17",
+                "08:00:00",
+                0,
+                playAudio,
+            )
+            self.window._runScheduledTasks(
+                "shutdown",
+                [shutdownTask],
+                "2026-08-17",
+                "08:00:00",
+                0,
+                handleShutdown,
+            )
 
         playAudio.assert_called_once_with(broadcastTask)
         handleShutdown.assert_called_once_with(shutdownTask)
         self.assertIsNone(self.window.schedulePage)
         self.assertIsNone(self.window.shutdownPage)
+
+    def testSchedulesRunEveryDayWithoutRestarting(self):
+        task = {
+            "enabled": True,
+            "weeks": [0],
+            "time": "08:00:00",
+            "type": "系统TTS",
+            "content": "测试",
+        }
+        with patch.object(self.window, "_playAudioTask") as playAudio:
+            self.window._runScheduledTasks(
+                "broadcast", [task], "2026-08-17", "08:00:00", 0, playAudio
+            )
+            self.window._runScheduledTasks(
+                "broadcast", [task], "2026-08-17", "08:00:00", 0, playAudio
+            )
+            self.window._runScheduledTasks(
+                "broadcast", [task], "2026-08-18", "08:00:00", 0, playAudio
+            )
+
+        self.assertEqual(playAudio.call_count, 2)
+
+    def testAllSchedulesAtTheSameSecondRunOnce(self):
+        tasks = [
+            {
+                "enabled": True,
+                "weeks": [0],
+                "time": "08:00:00",
+                "type": "系统TTS",
+                "content": content,
+            }
+            for content in ("第一条", "第二条")
+        ]
+        with patch.object(self.window, "_playAudioTask") as playAudio:
+            self.window._runScheduledTasks(
+                "broadcast", tasks, "2026-08-17", "08:00:00", 0, playAudio
+            )
+            self.window._runScheduledTasks(
+                "broadcast", tasks, "2026-08-17", "08:00:00", 0, playAudio
+            )
+
+        self.assertEqual(
+            [call.args[0]["content"] for call in playAudio.call_args_list],
+            ["第一条", "第二条"],
+        )
+
+    def testAudioTasksAtTheSameSecondArePlayedInOrder(self):
+        first = {"type": "系统TTS", "content": "第一条"}
+        second = {"type": "系统TTS", "content": "第二条"}
+        with patch.object(
+            self.window, "_startAudioTask", return_value=True, create=True
+        ) as start:
+            self.window._playAudioTask(first)
+            self.window._playAudioTask(second)
+            self.assertEqual(start.call_args_list, [call(first)])
+
+            self.window._finishAudioTask()
+            self.app.processEvents()
+
+        self.assertEqual(start.call_args_list, [call(first), call(second)])
+
+    def testMediaErrorAdvancesTheScheduledAudioQueue(self):
+        nextTask = {"type": "系统TTS", "content": "下一条"}
+        self.window._audioTaskActive = True
+        self.window._activeAudioKind = "media"
+        self.window._audioTaskQueue.append(nextTask)
+
+        with patch.object(
+            self.window, "_startAudioTask", return_value=True
+        ) as start:
+            self.window.player.errorOccurred.emit(
+                QMediaPlayer.Error.ResourceError,
+                "decoder failed",
+            )
+            self.app.processEvents()
+
+        start.assert_called_once_with(nextTask)
+        self.assertTrue(self.window._audioTaskActive)
+
+    def testScheduleCatchesUpWhenGuiSkipsTheTargetSecond(self):
+        task = {
+            "enabled": True,
+            "weeks": [0],
+            "time": "08:00:00",
+            "type": "系统TTS",
+            "content": "测试",
+        }
+        timezone = datetime.now().astimezone().tzinfo
+        with patch.object(self.window, "_playAudioTask") as playAudio:
+            self.window._checkScheduleAt(
+                datetime(2026, 8, 17, 7, 59, 59, tzinfo=timezone),
+                [task],
+                [],
+            )
+            self.window._checkScheduleAt(
+                datetime(2026, 8, 17, 8, 0, 1, tzinfo=timezone),
+                [task],
+                [],
+            )
+
+        playAudio.assert_called_once_with(task)
+
+    def testScheduleCatchesUpAfterLongGuiBlock(self):
+        task = {
+            "enabled": True,
+            "weeks": [0],
+            "time": "08:00:00",
+            "type": "系统TTS",
+            "content": "长阻塞后补播",
+        }
+        timezone = datetime.now().astimezone().tzinfo
+        with patch.object(self.window, "_playAudioTask") as playAudio:
+            self.window._checkScheduleAt(
+                datetime(2026, 8, 17, 7, 59, 30, tzinfo=timezone),
+                [task],
+                [],
+            )
+            self.window._checkScheduleAt(
+                datetime(2026, 8, 17, 8, 0, 30, tzinfo=timezone),
+                [task],
+                [],
+            )
+
+        playAudio.assert_called_once_with(task)
+
+    def testShutdownDoesNotReplayAStaleTriggerAfterGuiBlock(self):
+        task = {
+            "enabled": True,
+            "weeks": [0],
+            "time": "08:00:00",
+            "action": "关机",
+        }
+        timezone = datetime.now().astimezone().tzinfo
+        with patch.object(self.window, "_handleShutdownTask") as handleShutdown:
+            self.window._checkScheduleAt(
+                datetime(2026, 8, 17, 7, 59, 30, tzinfo=timezone),
+                [],
+                [task],
+            )
+            self.window._checkScheduleAt(
+                datetime(2026, 8, 17, 8, 0, 30, tzinfo=timezone),
+                [],
+                [task],
+            )
+
+        handleShutdown.assert_not_called()
+
+    def testScheduleCatchUpHandlesMidnight(self):
+        task = {
+            "enabled": True,
+            "weeks": [1],
+            "time": "00:00:00",
+            "type": "系统TTS",
+            "content": "跨日",
+        }
+        timezone = datetime.now().astimezone().tzinfo
+        with patch.object(self.window, "_playAudioTask") as playAudio:
+            self.window._checkScheduleAt(
+                datetime(2026, 8, 17, 23, 59, 59, tzinfo=timezone),
+                [task],
+                [],
+            )
+            self.window._checkScheduleAt(
+                datetime(2026, 8, 18, 0, 0, 1, tzinfo=timezone),
+                [task],
+                [],
+            )
+
+        playAudio.assert_called_once_with(task)
+
+    def testScheduleDoesNotReplayHoursOldTaskAfterResume(self):
+        broadcast = {
+            "enabled": True,
+            "weeks": [0],
+            "time": "12:30:00",
+            "type": "系统TTS",
+            "content": "已过期",
+        }
+        shutdown = {
+            "enabled": True,
+            "weeks": [0],
+            "time": "18:00:00",
+            "action": "关机",
+        }
+        timezone = datetime.now().astimezone().tzinfo
+        with (
+            patch.object(self.window, "_playAudioTask") as playAudio,
+            patch.object(self.window, "_handleShutdownTask") as handleShutdown,
+        ):
+            self.window._checkScheduleAt(
+                datetime(2026, 8, 17, 8, 0, 0, tzinfo=timezone),
+                [broadcast],
+                [shutdown],
+            )
+            self.window._checkScheduleAt(
+                datetime(2026, 8, 18, 8, 0, 0, tzinfo=timezone),
+                [broadcast],
+                [shutdown],
+            )
+
+        playAudio.assert_not_called()
+        handleShutdown.assert_not_called()

@@ -8,6 +8,7 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 from cryptography.fernet import Fernet, InvalidToken
@@ -30,12 +31,37 @@ DAILY_LIMIT = 15
 MAX_CONTENT_LENGTH = 12_000
 MAX_CUSTOM_STYLE_LENGTH = 4_000
 MAX_SYSTEM_PROMPT_LENGTH = 20_000
+MAX_REQUEST_BYTES = 64 * 1024
+PROCESSING_TIMEOUT = timedelta(minutes=15)
+REQUEST_LOG_RETENTION_DAYS = 180
 DATABASE_PATH = Path(
     os.environ.get("DJCATAI_DATABASE_PATH", "ai_markdown_usage.sqlite3")
 )
 TIMEZONE = timezone(timedelta(hours=8))
 PEAK_HOURS = ((9, 12), (14, 18))
 DEEPSEEK_API = "https://api.deepseek.com/chat/completions"
+
+
+def _httpsResponseChain(response, requestedUrl):
+    urls = [requestedUrl]
+    history = getattr(response, "history", ())
+    if isinstance(history, (list, tuple)):
+        urls.extend(
+            item.url
+            for item in history
+            if isinstance(getattr(item, "url", None), str)
+        )
+    effectiveUrl = getattr(response, "url", None)
+    urls.append(effectiveUrl if isinstance(effectiveUrl, str) else requestedUrl)
+    for url in urls:
+        try:
+            if urlparse(url).scheme.lower() != "https":
+                return False
+        except ValueError:
+            return False
+    return True
+
+
 SYSTEM_PROMPT = """你现在需要转换用户的纯文本内容，用户发来的内容可能是一份作业清单，也可能是一份任务，你需要将其转换为简洁标准的markdown格式。
 你可以使用的markdown语法有：加粗**ABC**，分割线---（少用），分点- ，以及这个>。当遇到任务一部分是正常的任务，一部分是其他的警告比如要值日，必须要像下面的示例一样用---分开
 此处给一些格式示例：
@@ -93,6 +119,7 @@ CUSTOM_STYLE_PREFIX = """
 
 app = Flask(__name__)
 app.config.update(
+    MAX_CONTENT_LENGTH=MAX_REQUEST_BYTES,
     PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
@@ -102,7 +129,17 @@ if os.environ.get("DJCATAI_ADMIN_SESSION_SECRET"):
     app.config["SECRET_KEY"] = os.environ["DJCATAI_ADMIN_SESSION_SECRET"]
 
 _databaseInitLock = threading.Lock()
-_initializedDatabases = set()
+_initializedDatabases = {}
+
+
+def _databaseIdentity(path):
+    try:
+        info = os.stat(path)
+    except OSError:
+        return None
+    # ctime and size change during ordinary request writes; only the file
+    # identity belongs in the schema-initialization cache key.
+    return (info.st_dev, info.st_ino)
 
 
 def _systemPrompt(customStyle):
@@ -150,9 +187,11 @@ def _connect():
     database.row_factory = sqlite3.Row
     database.execute("PRAGMA foreign_keys = ON")
     databaseKey = str(DATABASE_PATH.resolve())
-    if databaseKey not in _initializedDatabases:
+    identity = _databaseIdentity(databaseKey)
+    if _initializedDatabases.get(databaseKey) != identity:
         with _databaseInitLock:
-            if databaseKey not in _initializedDatabases:
+            identity = _databaseIdentity(databaseKey)
+            if _initializedDatabases.get(databaseKey) != identity:
                 database.executescript(
                     """
         PRAGMA journal_mode = WAL;
@@ -183,6 +222,19 @@ def _connect():
         CREATE INDEX IF NOT EXISTS request_log_day_idx ON request_log(day);
         CREATE INDEX IF NOT EXISTS request_log_machine_idx
             ON request_log(machine_id);
+        CREATE INDEX IF NOT EXISTS request_log_status_requested_idx
+            ON request_log(status, requested_at);
+        CREATE TABLE IF NOT EXISTS request_daily_stats (
+            day TEXT PRIMARY KEY,
+            requests INTEGER NOT NULL DEFAULT 0,
+            success INTEGER NOT NULL DEFAULT 0,
+            failed INTEGER NOT NULL DEFAULT 0,
+            consumed INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS machine_request_totals (
+            machine_id TEXT PRIMARY KEY,
+            requests INTEGER NOT NULL DEFAULT 0
+        );
         INSERT OR IGNORE INTO machines(machine_id, registered_at, last_seen_at)
         SELECT
             machine_id,
@@ -192,7 +244,7 @@ def _connect():
         GROUP BY machine_id;
                     """
                 )
-                _initializedDatabases.add(databaseKey)
+                _initializedDatabases[databaseKey] = _databaseIdentity(databaseKey)
     return database
 
 
@@ -239,7 +291,6 @@ def _saveAISettings(
     dailyLimit,
     peakEnabled,
     model,
-    systemPrompt,
     apiKey="",
     clearApiKey=False,
 ):
@@ -247,7 +298,6 @@ def _saveAISettings(
         ("daily_limit", str(dailyLimit)),
         ("peak_enabled", "1" if peakEnabled else "0"),
         ("deepseek_model", model),
-        ("system_prompt", systemPrompt),
     ]
     if apiKey and not clearApiKey:
         settings.append(
@@ -308,6 +358,14 @@ def _registerMachine(machineId):
     return f"DJ-{machineNumber:06d}"
 
 
+def _registeredMachineCode(machineId):
+    with closing(_connect()) as database:
+        row = database.execute(
+            "SELECT id FROM machines WHERE machine_id = ?", (machineId,)
+        ).fetchone()
+    return f"DJ-{row['id']:06d}" if row else ""
+
+
 def _recordFailedRequest(machineId, cost, day=None):
     day = day or _today()
     with closing(_connect()) as database:
@@ -324,6 +382,16 @@ def _recordFailedRequest(machineId, cost, day=None):
 def _requestFinished(requestId, success, machineId=None, cost=0, day=None):
     with closing(_connect()) as database:
         database.execute("BEGIN IMMEDIATE")
+        cursor = database.execute(
+            """
+            UPDATE request_log SET status = ?
+            WHERE id = ? AND status = 'processing'
+            """,
+            ("success" if success else "failed", requestId),
+        )
+        if cursor.rowcount != 1:
+            database.commit()
+            return False
         if not success and machineId:
             database.execute(
                 """
@@ -332,11 +400,145 @@ def _requestFinished(requestId, success, machineId=None, cost=0, day=None):
                 """,
                 (cost, day or _today(), machineId, cost),
             )
+        database.commit()
+    return True
+
+
+def _recoverStaleRequests():
+    cutoff = (datetime.now(TIMEZONE) - PROCESSING_TIMEOUT).isoformat(
+        timespec="seconds"
+    )
+    with closing(_connect()) as database:
+        rows = database.execute(
+            """
+            SELECT id, day, machine_id, cost
+            FROM request_log
+            WHERE status = 'processing' AND requested_at < ?
+            """,
+            (cutoff,),
+        ).fetchall()
+        if not rows:
+            return 0
+        database.execute("BEGIN IMMEDIATE")
+        for row in rows:
+            cursor = database.execute(
+                """
+                UPDATE request_log SET status = 'failed'
+                WHERE id = ? AND status = 'processing'
+                """,
+                (row["id"],),
+            )
+            if cursor.rowcount != 1:
+                continue
+            database.execute(
+                """
+                UPDATE usage SET count = MAX(0, count - ?)
+                WHERE day = ? AND machine_id = ?
+                """,
+                (row["cost"], row["day"], row["machine_id"]),
+            )
+        database.commit()
+    return len(rows)
+
+
+def _rollupOldRequests(force=False):
+    cutoff = (
+        datetime.now(TIMEZONE).date() - timedelta(days=REQUEST_LOG_RETENTION_DAYS)
+    ).isoformat()
+    today = _today()
+    with closing(_connect()) as database:
+        marker = database.execute(
+            "SELECT value FROM settings WHERE key = 'request_log_rollup_day'"
+        ).fetchone()
+        if not force and marker and marker[0] == today:
+            return 0
+        database.execute("BEGIN IMMEDIATE")
+        if not force:
+            marker = database.execute(
+                "SELECT value FROM settings WHERE key = 'request_log_rollup_day'"
+            ).fetchone()
+            if marker and marker[0] == today:
+                database.commit()
+                return 0
+        candidate = database.execute(
+            """
+            SELECT 1 FROM request_log
+            WHERE day < ? AND status <> 'processing'
+            LIMIT 1
+            """,
+            (cutoff,),
+        ).fetchone()
+        if not candidate:
+            database.execute(
+                "INSERT INTO settings(key, value) VALUES ('request_log_rollup_day', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (today,),
+            )
+            database.commit()
+            return 0
+        dailyRows = database.execute(
+            """
+            SELECT day, COUNT(*) AS requests,
+                   SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success,
+                   SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+                   SUM(CASE WHEN status = 'success' THEN cost ELSE 0 END) AS consumed
+            FROM request_log
+            WHERE day < ? AND status <> 'processing'
+            GROUP BY day
+            """,
+            (cutoff,),
+        ).fetchall()
+        machineRows = database.execute(
+            """
+            SELECT machine_id, COUNT(*) AS requests
+            FROM request_log
+            WHERE day < ? AND status <> 'processing'
+            GROUP BY machine_id
+            """,
+            (cutoff,),
+        ).fetchall()
+        database.executemany(
+            """
+            INSERT INTO request_daily_stats(day, requests, success, failed, consumed)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(day) DO UPDATE SET
+                requests = requests + excluded.requests,
+                success = success + excluded.success,
+                failed = failed + excluded.failed,
+                consumed = consumed + excluded.consumed
+            """,
+            [
+                (
+                    row["day"],
+                    row["requests"],
+                    row["success"],
+                    row["failed"],
+                    row["consumed"],
+                )
+                for row in dailyRows
+            ],
+        )
+        database.executemany(
+            """
+            INSERT INTO machine_request_totals(machine_id, requests)
+            VALUES (?, ?)
+            ON CONFLICT(machine_id) DO UPDATE SET
+                requests = requests + excluded.requests
+            """,
+            [(row["machine_id"], row["requests"]) for row in machineRows],
+        )
         database.execute(
-            "UPDATE request_log SET status = ? WHERE id = ?",
-            ("success" if success else "failed", requestId),
+            "DELETE FROM request_log WHERE day < ? AND status <> 'processing'",
+            (cutoff,),
+        )
+        database.execute("DELETE FROM usage WHERE day < ?", (cutoff,))
+        database.execute(
+            "INSERT INTO settings(key, value) VALUES ('request_log_rollup_day', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (today,),
         )
         database.commit()
+    return len(dailyRows)
 
 
 def _remaining(machineId, day=None, limit=None):
@@ -383,6 +585,7 @@ def _claim(machineId, cost, day=None, limit=None):
 
 
 def _claimRequest(machineId, cost, day, limit):
+    _recoverStaleRequests()
     with closing(_connect()) as database:
         database.execute("BEGIN IMMEDIATE")
         remaining = _claimInTransaction(database, machineId, cost, day, limit)
@@ -419,6 +622,11 @@ def _error(message, status):
     return response
 
 
+@app.errorhandler(413)
+def _requestTooLarge(error):
+    return _error("请求内容过大", 413)
+
+
 @app.post("/ai/markdown/register")
 def registerMachine():
     try:
@@ -426,7 +634,7 @@ def registerMachine():
         return jsonify({"machine_code": _registerMachine(machineId)})
     except ValueError as error:
         return _error(str(error), 400)
-    except RuntimeError as error:
+    except (RuntimeError, sqlite3.Error) as error:
         return _error(str(error), 503)
 
 
@@ -434,7 +642,10 @@ def registerMachine():
 def quota():
     try:
         machineId = _machineId(request.args.get("machine_id"))
-        machineCode = _registerMachine(machineId)
+        machineCode = _registeredMachineCode(machineId)
+        if not machineCode:
+            return _error("设备尚未注册", 404)
+        _recoverStaleRequests()
         peakEnabled = _setting("peak_enabled", "1") == "1"
         return jsonify(
             {
@@ -447,12 +658,14 @@ def quota():
         )
     except ValueError as error:
         return _error(str(error), 400)
-    except RuntimeError as error:
+    except (RuntimeError, sqlite3.Error) as error:
         return _error(str(error), 503)
 
 
 @app.post("/ai/markdown")
 def convert():
+    if request.content_length and request.content_length > MAX_REQUEST_BYTES:
+        return _error("请求内容过大", 413)
     try:
         apiKey = _deepseekApiKey()
     except RuntimeError as error:
@@ -483,11 +696,15 @@ def convert():
     except RuntimeError as error:
         return _error(str(error), 503)
 
-    _registerMachine(machineId)
     day = _today()
-    limit = _dailyLimit()
-    cost = _quotaCost()
-    model = _deepseekModel()
+    try:
+        _registerMachine(machineId)
+        limit = _dailyLimit()
+        cost = _quotaCost()
+        model = _deepseekModel()
+        systemPrompt = _systemPrompt(customStyle)
+    except (RuntimeError, sqlite3.Error):
+        return _error("AI 配置暂时不可用，请稍后再试。", 503)
     try:
         remaining, requestId = _claimRequest(machineId, cost, day, limit)
     except sqlite3.Error:
@@ -517,7 +734,7 @@ def convert():
             json={
                 "model": model,
                 "messages": [
-                    {"role": "system", "content": _systemPrompt(customStyle)},
+                    {"role": "system", "content": systemPrompt},
                     {"role": "user", "content": content.strip()},
                 ],
                 "thinking": {"type": "disabled"},
@@ -527,9 +744,11 @@ def convert():
             stream=True,
             timeout=(10, 120),
         )
+        if not _httpsResponseChain(upstream, DEEPSEEK_API):
+            raise requests.RequestException("AI 服务连接未保持 HTTPS")
         upstream.raise_for_status()
-    except requests.RequestException:
-        if upstream:
+    except (requests.RequestException, TypeError, ValueError):
+        if upstream is not None:
             upstream.close()
         _requestFinished(requestId, False, machineId, cost, day)
         return _error("AI 服务暂时不可用，请稍后再试。", 502)
@@ -544,14 +763,16 @@ def convert():
                         completed = True
                     yield line + b"\n\n"
         finally:
-            _requestFinished(
-                requestId,
-                completed,
-                machineId if not completed else None,
-                cost,
-                day,
-            )
-            upstream.close()
+            try:
+                upstream.close()
+            finally:
+                _requestFinished(
+                    requestId,
+                    completed,
+                    machineId if not completed else None,
+                    cost,
+                    day,
+                )
 
     return Response(
         stream(),
@@ -641,55 +862,63 @@ def _loginRequired(view):
 
 def _dashboardStats():
     day = _today()
+    retentionStart = (
+        datetime.now(TIMEZONE).date() - timedelta(days=REQUEST_LOG_RETENTION_DAYS)
+    ).isoformat()
+    _recoverStaleRequests()
+    _rollupOldRequests()
     with closing(_connect()) as database:
         machines = database.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
-        todayStats = database.execute(
-            """
-            SELECT
-                COUNT(*) AS requests,
-                COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS success,
-                COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
-                COALESCE(SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END), 0) AS processing
-            FROM request_log WHERE day = ?
-            """,
-            (day,),
-        ).fetchone()
         consumed = database.execute(
             "SELECT COALESCE(SUM(count), 0) FROM usage WHERE day = ?", (day,)
         ).fetchone()[0]
-        allStats = database.execute(
+        recentStats = database.execute(
             """
             SELECT
                 COUNT(*) AS requests,
                 COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS success,
                 COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
-                COALESCE(SUM(CASE WHEN status IN ('success', 'processing') THEN cost ELSE 0 END), 0) AS consumed
-            FROM request_log
+                COALESCE(SUM(CASE WHEN status IN ('success', 'processing') THEN cost ELSE 0 END), 0) AS consumed,
+                COALESCE(SUM(CASE WHEN day = ? THEN 1 ELSE 0 END), 0) AS today_requests,
+                COALESCE(SUM(CASE WHEN day = ? AND status = 'success' THEN 1 ELSE 0 END), 0) AS today_success,
+                COALESCE(SUM(CASE WHEN day = ? AND status = 'failed' THEN 1 ELSE 0 END), 0) AS today_failed,
+                COALESCE(SUM(CASE WHEN day = ? AND status = 'processing' THEN 1 ELSE 0 END), 0) AS today_processing
+            FROM request_log WHERE day >= ?
+            """,
+            (day, day, day, day, retentionStart),
+        ).fetchone()
+        summaryStats = database.execute(
+            """
+            SELECT COALESCE(SUM(requests), 0) AS requests,
+                   COALESCE(SUM(success), 0) AS success,
+                   COALESCE(SUM(failed), 0) AS failed,
+                   COALESCE(SUM(consumed), 0) AS consumed
+            FROM request_daily_stats
             """
         ).fetchone()
     market = marketplaceStats(_connect, day)
     today = {
-        "ai_requests": todayStats["requests"],
-        "ai_success": todayStats["success"],
-        "ai_failed": todayStats["failed"],
+        "ai_requests": recentStats["today_requests"],
+        "ai_success": recentStats["today_success"],
+        "ai_failed": recentStats["today_failed"],
         "market_downloads": market["today_downloads"],
     }
     allData = {
-        "ai_requests": allStats["requests"],
-        "ai_success": allStats["success"],
-        "ai_failed": allStats["failed"],
+        "ai_requests": recentStats["requests"] + summaryStats["requests"],
+        "ai_success": recentStats["success"] + summaryStats["success"],
+        "ai_failed": recentStats["failed"] + summaryStats["failed"],
         "market_downloads": market["downloads"],
     }
     return {
         "machines": machines,
-        "requests": todayStats["requests"],
-        "success": todayStats["success"],
-        "failed": todayStats["failed"],
-        "processing": todayStats["processing"],
+        "requests": recentStats["today_requests"],
+        "success": recentStats["today_success"],
+        "failed": recentStats["today_failed"],
+        "processing": recentStats["today_processing"],
         "consumed": consumed,
         "today": today,
         "all": allData,
-        "all_consumed": allStats["consumed"],
+        "all_consumed": recentStats["consumed"] + summaryStats["consumed"],
         "market": market,
     }
 
@@ -697,6 +926,7 @@ def _dashboardStats():
 def _machineRows(search="", sort="registered"):
     day = _today()
     limit = _dailyLimit()
+    _rollupOldRequests()
     with closing(_connect()) as database:
         rows = database.execute(
             """
@@ -706,11 +936,14 @@ def _machineRows(search="", sort="registered"):
                 m.registered_at,
                 m.last_seen_at,
                 COALESCE(u.count, 0) AS used,
-                COUNT(r.id) AS requests
+                COALESCE(t.requests, 0) + COALESCE(r.requests, 0) AS requests
             FROM machines m
             LEFT JOIN usage u ON u.machine_id = m.machine_id AND u.day = ?
-            LEFT JOIN request_log r ON r.machine_id = m.machine_id
-            GROUP BY m.id
+            LEFT JOIN machine_request_totals t ON t.machine_id = m.machine_id
+            LEFT JOIN (
+                SELECT machine_id, COUNT(*) AS requests
+                FROM request_log GROUP BY machine_id
+            ) r ON r.machine_id = m.machine_id
             """,
             (day,),
         ).fetchall()
@@ -747,18 +980,26 @@ def _machineRows(search="", sort="registered"):
 
 
 def _resetMachine(alias):
-    match = re.fullmatch(r"DJ-(\d{6})", alias)
+    match = re.fullmatch(r"DJ-(\d{6,})", alias)
     if not match:
         return False
     with closing(_connect()) as database:
+        database.execute("BEGIN IMMEDIATE")
         row = database.execute(
             "SELECT machine_id FROM machines WHERE id = ?", (int(match.group(1)),)
         ).fetchone()
         if not row:
+            database.rollback()
             return False
+        day = _today()
+        database.execute(
+            "UPDATE request_log SET status = 'reset' "
+            "WHERE day = ? AND machine_id = ? AND status = 'processing'",
+            (day, row["machine_id"]),
+        )
         database.execute(
             "DELETE FROM usage WHERE day = ? AND machine_id = ?",
-            (_today(), row["machine_id"]),
+            (day, row["machine_id"]),
         )
         database.commit()
     return True
@@ -888,7 +1129,6 @@ def adminSettings():
     except ValueError:
         dailyLimit = 0
     model = submitted["model"].strip()
-    systemPrompt = _setting("system_prompt", SYSTEM_PROMPT)
     if not 1 <= dailyLimit <= 10_000:
         return _adminResponse(
             "每日额度必须在 1 到 10000 之间",
@@ -905,22 +1145,6 @@ def adminSettings():
             400,
             renderer=lambda: _renderAdminSettings(submitted),
         )
-    elif not systemPrompt:
-        return _adminResponse(
-            "系统提示词不能为空",
-            "error",
-            "adminSettings",
-            400,
-            renderer=lambda: _renderAdminSettings(submitted),
-        )
-    elif len(systemPrompt) > MAX_SYSTEM_PROMPT_LENGTH:
-        return _adminResponse(
-            f"系统提示词不能超过 {MAX_SYSTEM_PROMPT_LENGTH} 个字符",
-            "error",
-            "adminSettings",
-            400,
-            renderer=lambda: _renderAdminSettings(submitted),
-        )
     else:
         apiKey = request.form.get("api_key", "").strip()
         try:
@@ -928,7 +1152,6 @@ def adminSettings():
                 dailyLimit,
                 submitted["peak_enabled"],
                 model,
-                systemPrompt,
                 apiKey,
                 submitted["clear_api_key"],
             )
@@ -1034,7 +1257,14 @@ def adminResetMachine(alias):
 def adminResetAll():
     _checkCsrf()
     with closing(_connect()) as database:
-        database.execute("DELETE FROM usage WHERE day = ?", (_today(),))
+        database.execute("BEGIN IMMEDIATE")
+        day = _today()
+        database.execute(
+            "UPDATE request_log SET status = 'reset' "
+            "WHERE day = ? AND status = 'processing'",
+            (day,),
+        )
+        database.execute("DELETE FROM usage WHERE day = ?", (day,))
         database.commit()
     return _adminResponse("所有机器今日额度已重置", "success", "adminMachines")
 

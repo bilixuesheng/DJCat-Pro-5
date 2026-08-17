@@ -16,6 +16,7 @@ from PySide6.QtGui import QIcon, QImage
 from qfluentwidgets import FluentIcon as FIF
 
 from app.config.paths import HOME_CARD_ICON_DIR
+from app.common.process_environment import externalProcessEnvironment
 
 
 DEFAULT_HOME_CARD_NAMES = ("全屏投送", "考试倒计时", "定时关机", "定时播报")
@@ -79,9 +80,12 @@ def normalize_custom_cards(value) -> list[dict]:
         if not isinstance(raw, dict):
             continue
         title = _text(raw.get("title"))
+        rawActions = raw.get("actions", [])
+        if not isinstance(rawActions, list):
+            continue
         actions = [
             action
-            for action in (normalize_action(item) for item in raw.get("actions", []))
+            for action in (normalize_action(item) for item in rawActions)
             if action is not None
         ]
         if not title or not actions:
@@ -262,27 +266,25 @@ def validate_action(action: dict) -> str:
     if action_type == "program":
         if not action["target"]:
             return "请输入程序或命令"
-        if action["working_dir"] and not Path(os.path.expandvars(action["working_dir"])).is_dir():
-            return "工作目录不存在"
     elif action_type == "shell":
         if not action["command"]:
             return "请输入 Shell 命令"
-        if action["working_dir"] and not Path(os.path.expandvars(action["working_dir"])).is_dir():
-            return "工作目录不存在"
     elif action_type == "url":
         target = action["target"]
         if not target:
             return "请输入网页地址"
         if "://" not in target:
             target = f"https://{target}"
-        parsed = urlparse(target)
+        try:
+            parsed = urlparse(target)
+        except ValueError:
+            return "网页地址无效"
         if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc or any(
             char in target for char in "\r\n\x00"
         ):
             return "网页地址只支持 HTTP 或 HTTPS"
-    elif action_type == "path":
-        if not action["target"] or not Path(os.path.expandvars(action["target"])).exists():
-            return "本地文件或文件夹不存在"
+    elif action_type == "path" and not action["target"]:
+        return "请输入本地文件或文件夹"
     return ""
 
 
@@ -292,13 +294,6 @@ def _wait_process(
 ) -> str | None:
     while process.poll() is None:
         if cancel.wait(0.1):
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
             return None
     return f"进程退出码: {process.returncode}" if process.returncode else None
 
@@ -312,7 +307,8 @@ def execute_action(action: dict, cancel: threading.Event) -> str | None:
         return error
     action_type = action["type"]
     if action_type == "delay":
-        return None if not cancel.wait(action["seconds"]) else None
+        cancel.wait(action["seconds"])
+        return None
     if action_type == "url":
         target = action["target"]
         target = target if "://" in target else f"https://{target}"
@@ -333,7 +329,11 @@ def execute_action(action: dict, cancel: threading.Event) -> str | None:
         if action_type == "program":
             target = os.path.expandvars(action["target"])
             arguments = QProcess.splitCommand(action["arguments"])
-            process = subprocess.Popen([target, *arguments], cwd=working_dir)
+            process = subprocess.Popen(
+                [target, *arguments],
+                cwd=working_dir,
+                env=externalProcessEnvironment(globals().get("__compiled__")),
+            )
         else:
             flags = 0
             if os.name == "nt":
@@ -347,6 +347,7 @@ def execute_action(action: dict, cancel: threading.Event) -> str | None:
                 cwd=working_dir,
                 shell=True,
                 creationflags=flags,
+                env=externalProcessEnvironment(globals().get("__compiled__")),
             )
     except (OSError, ValueError) as error:
         return str(error)
@@ -372,21 +373,34 @@ class ActionSequenceWorker(QObject):
     def cancel(self) -> None:
         self.cancel_event.set()
 
-    def wait(self) -> None:
+    def wait(self, timeout=None) -> None:
         if self._thread is not None:
-            self._thread.join()
+            self._thread.join(timeout)
 
     def _run(self) -> None:
         executed = set()
         errors = []
         while not self.cancel_event.is_set():
-            actions = self.get_actions(self.card_id)
+            try:
+                actions = self.get_actions(self.card_id)
+            except Exception as error:
+                errors.append(f"动作配置: {error}")
+                break
             if actions is None:
                 break
-            action = next(
-                (item for item in actions if item.get("id") not in executed),
-                None,
-            )
+            try:
+                action = next(
+                    (
+                        item
+                        for item in actions
+                        if isinstance(item, dict)
+                        and item.get("id") not in executed
+                    ),
+                    None,
+                )
+            except Exception as error:
+                errors.append(f"动作配置: {error}")
+                break
             if action is None:
                 break
             executed.add(action["id"])

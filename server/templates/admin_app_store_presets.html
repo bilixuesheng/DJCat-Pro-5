@@ -48,67 +48,30 @@
         </div>
     </section>
     {% else %}
-    <form class="config-form" method="post" action="{{ url_for('app_store.adminPreset', preset_id=edit_preset.id) if editing else url_for('app_store.adminPresets') }}" data-action-form>
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="preset_app_id" value="{{ selected_app.id }}">
-        <section class="form-section">
-            <div class="form-section-title">
-                <span>01</span>
-                <div>
-                    <h2>{{ '编辑预设卡片' if editing else '新增预设卡片' }}</h2>
-                    <p>卡片顺序在下方列表中单独调整。</p>
-                </div>
-            </div>
-            <div class="form-fields two-columns">
-                <label>卡片标题<input name="preset_title" maxlength="80" value="{{ edit_preset.title if edit_preset else '' }}" placeholder="例如：打开 {{ selected_app.name }}" required></label>
-                <label>卡片简介<input name="preset_description" maxlength="240" value="{{ edit_preset.description if edit_preset else '' }}" placeholder="安装后点击卡片启动主程序"></label>
-                <label>卡片类型（操作）
-                    <select name="preset_action_type" data-action-type>
-                        <option value="program" {% if not edit_preset or edit_preset.action_type == 'program' %}selected{% endif %}>程序</option>
-                        <option value="url" {% if edit_preset and edit_preset.action_type == 'url' %}selected{% endif %}>HTTPS 网页</option>
-                        <option value="uri" {% if edit_preset and edit_preset.action_type == 'uri' %}selected{% endif %}>系统协议</option>
-                    </select>
-                </label>
-                <label>操作目标<input name="preset_action_target" data-action-target maxlength="2048" value="{{ edit_preset.action_target if edit_preset else '' }}" placeholder="classisland.exe 或 https://example.com" required></label>
-                <label class="full" data-action-arguments-wrapper>程序参数<textarea name="preset_action_arguments" data-action-arguments maxlength="4096" rows="3" placeholder="--minimized&#10;--profile default">{{ edit_preset.action_arguments if edit_preset else '' }}</textarea><small>仅程序动作使用，每行一个参数；程序目标必须是安装目录内的相对 EXE。</small></label>
-                <p class="action-help full" data-action-help>网页必须使用 HTTPS；系统协议会按客户端安全规则校验。</p>
-            </div>
-            <div class="form-actions full">
-                <a href="{{ url_for('app_store.adminPresets') }}">← 返回软件列表</a>
-                <span class="form-action-buttons">
-                    {% if editing %}<button class="button button-danger" type="submit" name="delete" value="1" data-confirm="确认删除这张预设卡片吗？">删除</button>{% endif %}
-                    <button class="button button-primary" type="submit">{{ '保存卡片' if editing else '新增卡片' }}</button>
-                </span>
-            </div>
-        </section>
-    </form>
-
     <section class="section-block" aria-labelledby="preset-list-title">
         <div class="section-heading">
-            <div><span class="section-index">02</span><h2 id="preset-list-title">已配置卡片</h2></div>
-            {% if editing %}<a href="{{ url_for('app_store.adminPresets', app_id=selected_app.id) }}">取消编辑</a>{% endif %}
+            <div><span class="section-index">01</span><h2 id="preset-list-title">已配置卡片</h2></div>
+            <div class="section-heading-actions">
+                <a class="button button-primary" href="{{ url_for('app_store.adminNewPreset', app_id=selected_app.id) }}">新增预设卡片</a>
+                <a href="{{ url_for('app_store.adminPresets') }}">← 返回软件列表</a>
+            </div>
         </div>
         <div class="table-wrap">
-            <table>
+            <table data-sortable-table data-order-url="{{ url_for('app_store.adminOrderPresets', app_id=selected_app.id) }}" data-csrf-token="{{ csrf_token }}">
                 <thead><tr><th>顺序</th><th>标题</th><th>类型</th><th>操作目标</th><th>操作</th></tr></thead>
                 <tbody>
                 {% for preset in presets %}
-                    <tr>
+                    <tr data-sort-id="{{ preset.id }}">
                         <td>
-                            <form class="order-controls" method="post" action="{{ url_for('app_store.adminMovePreset', preset_id=preset.id) }}" aria-label="调整 {{ preset.title }} 的顺序">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                <span>{{ '%02d'|format(loop.index) }}</span>
-                                <button type="submit" name="direction" value="up" aria-label="上移 {{ preset.title }}" {% if loop.first %}disabled{% endif %}>↑</button>
-                                <button type="submit" name="direction" value="down" aria-label="下移 {{ preset.title }}" {% if loop.last %}disabled{% endif %}>↓</button>
-                            </form>
+                            <span class="drag-order"><button class="drag-handle" type="button" aria-label="拖动调整 {{ preset.title }} 的顺序，方向键也可调整">⠿</button><code data-order-position>{{ '%02d'|format(loop.index) }}</code></span>
                         </td>
                         <td><strong>{{ preset.title }}</strong><br><small>{{ preset.description or '无简介' }}</small></td>
                         <td>{{ preset.action_type }}</td>
-                        <td><code>{{ preset.action_target }}</code></td>
-                        <td><a class="table-action" href="{{ url_for('app_store.adminPresets', app_id=selected_app.id, edit=preset.id) }}">编辑</a></td>
+                        <td><code>{{ preset.action_target }}</code>{% if preset.action_arguments %}<br><small>{{ preset.action_arguments }}</small>{% endif %}</td>
+                        <td><a class="table-action" href="{{ url_for('app_store.adminPreset', app_id=selected_app.id, preset_id=preset.id) }}">编辑</a></td>
                     </tr>
                 {% else %}
-                    <tr><td class="empty" colspan="5">该软件还没有预设卡片，请在上方新增。</td></tr>
+                    <tr><td class="empty" colspan="5">该软件还没有预设卡片，点击“新增预设卡片”开始配置。</td></tr>
                 {% endfor %}
                 </tbody>
             </table>

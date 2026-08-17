@@ -290,7 +290,8 @@ class CollapsibleSettingCard(QWidget):
         self.setProperty("isExpand", isExpand)
         self.setStyle(QApplication.style())
         self.card.expandButton.setExpand(isExpand)
-        height = self._contentHeight() if isExpand else 0
+        contentHeight = self._contentHeight()
+        height = contentHeight if isExpand else 0
         self.view.setMaximumHeight(QWIDGETSIZE_MAX if isExpand else 0)
         self._onExpandValueChanged(height)
 

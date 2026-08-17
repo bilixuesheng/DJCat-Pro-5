@@ -1,0 +1,36 @@
+{% extends "admin_base.html" %}
+
+{% block title %}新增推荐 · 应用市场{% endblock %}
+{% block page_name %}推荐软件管理{% endblock %}
+
+{% block page_actions %}<a class="button button-secondary" href="{{ url_for('app_store.adminRecommendations') }}">返回推荐列表</a>{% endblock %}
+
+{% block content %}
+<div class="market-page">
+    <header class="page-header">
+        <div>
+            <div class="eyebrow">应用市场 / 推荐软件管理</div>
+            <h1>新增推荐</h1>
+            <p>从已发布软件中选择一项；保存后可在推荐列表拖动排序。</p>
+        </div>
+    </header>
+
+    <form class="config-form" method="post" action="{{ url_for('app_store.adminNewRecommendation') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <section class="form-section">
+            <div class="form-section-title"><span>01</span><div><h2>选择软件</h2><p>已推荐的软件不会重复出现在选项中。</p></div></div>
+            <div class="form-fields">
+                <label>软件
+                    <select name="app_id" required {% if not apps %}disabled{% endif %}>
+                        {% for app in apps %}<option value="{{ app.id }}">{{ app.name }} · {{ app.version }}</option>{% endfor %}
+                    </select>
+                </label>
+            </div>
+        </section>
+        <div class="form-actions">
+            <a href="{{ url_for('app_store.adminRecommendations') }}">← 返回推荐列表</a>
+            <button class="button button-primary" type="submit" {% if not apps %}disabled{% endif %}>{{ '没有可推荐的软件' if not apps else '新增推荐' }}</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

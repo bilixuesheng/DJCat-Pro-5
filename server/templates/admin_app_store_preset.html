@@ -1,0 +1,48 @@
+{% extends "admin_base.html" %}
+
+{% block title %}{{ '编辑预设卡片' if editing else '新增预设卡片' }} · 应用市场{% endblock %}
+{% block page_name %}预设卡片管理{% endblock %}
+
+{% block page_actions %}<a class="button button-secondary" href="{{ url_for('app_store.adminPresets', app_id=selected_app.id) }}">返回卡片列表</a>{% endblock %}
+
+{% block content %}
+<div class="market-page">
+    <header class="page-header">
+        <div>
+            <div class="eyebrow">应用市场 / 预设卡片管理 / {{ selected_app.name }}</div>
+            <h1>{{ '编辑预设卡片' if editing else '新增预设卡片' }}</h1>
+            <p>配置固定到客户端主页后的标题、简介和执行动作。</p>
+        </div>
+    </header>
+
+    <form class="config-form" method="post" action="{{ url_for('app_store.adminPreset', app_id=selected_app.id, preset_id=preset.id) if editing else url_for('app_store.adminNewPreset', app_id=selected_app.id) }}" data-action-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="preset_app_id" value="{{ selected_app.id }}">
+        <section class="form-section">
+            <div class="form-section-title"><span>01</span><div><h2>卡片内容</h2><p>保存后可回到列表拖动排序。</p></div></div>
+            <div class="form-fields two-columns">
+                <label>卡片标题<input name="preset_title" maxlength="80" value="{{ preset.title if preset else '' }}" placeholder="例如：打开 {{ selected_app.name }}" required></label>
+                <label>卡片简介<input name="preset_description" maxlength="240" value="{{ preset.description if preset else '' }}" placeholder="安装后点击卡片启动主程序"></label>
+                <label>卡片类型（操作）
+                    <select name="preset_action_type" data-action-type>
+                        <option value="program" {% if not preset or preset.action_type == 'program' %}selected{% endif %}>程序</option>
+                        <option value="url" {% if preset and preset.action_type == 'url' %}selected{% endif %}>HTTPS 网页</option>
+                        <option value="uri" {% if preset and preset.action_type == 'uri' %}selected{% endif %}>系统协议</option>
+                    </select>
+                </label>
+                <label>操作目标<input name="preset_action_target" data-action-target maxlength="2048" value="{{ preset.action_target if preset else '' }}" placeholder="classisland.exe 或 https://example.com" required></label>
+                <label class="full" data-action-arguments-wrapper>程序参数<textarea name="preset_action_arguments" data-action-arguments maxlength="4096" rows="3" placeholder="--minimized&#10;--profile default">{{ preset.action_arguments if preset else '' }}</textarea><small>仅程序动作使用，每行一个参数；程序目标必须是安装目录内的相对 EXE。</small></label>
+                <p class="action-help full" data-action-help>网页必须使用 HTTPS；系统协议会按客户端安全规则校验。</p>
+                <small class="full">系统协议示例：classisland://app/settings/general/</small>
+            </div>
+        </section>
+        <div class="form-actions">
+            <a href="{{ url_for('app_store.adminPresets', app_id=selected_app.id) }}">← 返回卡片列表</a>
+            <span class="form-action-buttons">
+                {% if editing %}<button class="button button-danger" type="submit" name="delete" value="1" data-confirm="确认删除这张预设卡片吗？">删除</button>{% endif %}
+                <button class="button button-primary" type="submit">{{ '保存卡片' if editing else '新增卡片' }}</button>
+            </span>
+        </div>
+    </form>
+</div>
+{% endblock %}

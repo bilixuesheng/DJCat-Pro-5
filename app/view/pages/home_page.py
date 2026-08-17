@@ -1,8 +1,19 @@
 import os
 from copy import deepcopy
+from pathlib import Path
 from threading import RLock
+from time import monotonic
 
-from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QPoint,
+    QRectF,
+    QSize,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import (
     QColor,
     QIcon,
@@ -78,8 +89,10 @@ class ActionCard(CardWidget):
         self._drag_position = QPoint()
         self._press_position = None
         self._editable = False
+        self._touch_button = None
         super().__init__(parent)
         self.setFixedSize(210, 120)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setClickEnabled(True)
 
@@ -141,6 +154,11 @@ class ActionCard(CardWidget):
         layout.addWidget(self.contentLabel)
         layout.addStretch(1)
 
+    def sizeHint(self):
+        # FlowLayout uses sizeHint instead of the fixed geometry when it
+        # calculates rows; keep the card's compact dimensions authoritative.
+        return QSize(210, 120)
+
     def setRemovable(self, removable: bool) -> None:
         self.deleteButton.setEnabled(removable)
         self.deleteButton.setToolTip("删除主页卡片" if removable else "系统卡片不可删除")
@@ -182,13 +200,45 @@ class ActionCard(CardWidget):
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.dragFinished.emit(self)
 
+    def _touchButtonAt(self, position):
+        buttons = [
+            button
+            for button in (self.editButton, self.deleteButton)
+            if not button.isHidden()
+            and button.isEnabled()
+            and button.geometry().adjusted(-8, -8, 8, 8).contains(position)
+        ]
+        return min(
+            buttons,
+            key=lambda button: (
+                button.geometry().center() - position
+            ).manhattanLength(),
+            default=None,
+        )
+
     def event(self, event):
         if self._editing and event.type() == QEvent.Type.TouchBegin:
             point = event.points()[0]
+            self._touch_button = self._touchButtonAt(
+                point.position().toPoint()
+            )
+            if self._touch_button is not None:
+                self._touch_button.setDown(True)
+                event.accept()
+                return True
             self._start_dragging(point.globalPosition().toPoint())
             event.accept()
             return True
         if self._editing and event.type() == QEvent.Type.TouchUpdate:
+            if self._touch_button is not None and event.points():
+                self._touch_button.setDown(
+                    self._touchButtonAt(
+                        event.points()[0].position().toPoint()
+                    )
+                    is self._touch_button
+                )
+                event.accept()
+                return True
             if self._dragging and event.points():
                 position = event.points()[0].globalPosition().toPoint()
                 if position == self._drag_position:
@@ -205,6 +255,17 @@ class ActionCard(CardWidget):
             QEvent.Type.TouchEnd,
             QEvent.Type.TouchCancel,
         ):
+            if self._touch_button is not None:
+                button = self._touch_button
+                self._touch_button = None
+                shouldClick = (
+                    event.type() == QEvent.Type.TouchEnd and button.isDown()
+                )
+                button.setDown(False)
+                if shouldClick:
+                    button.click()
+                event.accept()
+                return True
             self._finish_dragging()
             event.accept()
             return True
@@ -283,6 +344,8 @@ class BannerWidget(QWidget):
 
         self._cached_pixmap = None  # 预渲染的最终图片
         self._cache_size = None     # 缓存对应的窗口尺寸
+        self._source_key = None
+        self._source_pixmap = None
 
         self.vBoxLayout = QVBoxLayout(self)
         self.galleryLabel = QLabel('主页', self)
@@ -320,7 +383,9 @@ class BannerWidget(QWidget):
         if not os.path.exists(img_path):
             return None
 
-        pixmap = QPixmap(img_path)
+        pixmap = self._source_image(img_path)
+        if pixmap is None:
+            return None
         mode = cfg.bannerScaleMode.value
         w, h = width, height
 
@@ -357,6 +422,25 @@ class BannerWidget(QWidget):
         painter.end()
 
         return temp_pixmap
+
+    def _source_image(self, path):
+        try:
+            stamp = Path(path).stat().st_mtime_ns
+        except OSError:
+            stamp = None
+        key = (path, stamp)
+        if key != self._source_key:
+            pixmap = QPixmap(path)
+            if pixmap.isNull() and path != str(
+                ASSET_DIR / BANNER_IMAGE_PRESETS[DEFAULT_BANNER_IMAGE_SOURCE]
+            ):
+                fallback = str(
+                    ASSET_DIR / BANNER_IMAGE_PRESETS[DEFAULT_BANNER_IMAGE_SOURCE]
+                )
+                pixmap = QPixmap(fallback)
+            self._source_key = key
+            self._source_pixmap = None if pixmap.isNull() else pixmap
+        return self._source_pixmap
 
     def paintEvent(self, e):
         super().paintEvent(e)
@@ -400,6 +484,8 @@ class HomePage(ScrollArea):
         self._card_order = []
         self._drag_offset = QPoint()
         self._drag_target = None
+        self._drag_card = None
+        self._drag_position = QPoint()
         self._applicationCardKeys = set()
         self._applicationCardData = {}
         self._customCardKeys = set()
@@ -507,6 +593,9 @@ class HomePage(ScrollArea):
             Qt.WidgetAttribute.WA_TransparentForMouseEvents
         )
         self.dragPreview.hide()
+        self._dragScrollTimer = QTimer(self)
+        self._dragScrollTimer.setInterval(16)
+        self._dragScrollTimer.timeout.connect(self._autoScrollCardDrag)
 
     def setApplicationCards(self, cards) -> list[dict]:
         cards = normalize_pinned_cards(cards)
@@ -518,7 +607,9 @@ class HomePage(ScrollArea):
         self._applicationCardData.clear()
         for item in cards or []:
             key = f"app:{item['app_id']}:{item['preset_id']}"
-            icon = QIcon(item["icon_path"]) if item.get("icon_path") else FIF.APPLICATION
+            icon = QIcon(item["icon_path"]) if item.get("icon_path") else QIcon()
+            if icon.isNull():
+                icon = FIF.APPLICATION
             card = ActionCard(
                 icon,
                 item.get("title", "应用预设"),
@@ -535,6 +626,7 @@ class HomePage(ScrollArea):
             card.dragStarted.connect(self._startCardDrag)
             card.dragMoved.connect(self._moveCard)
             card.dragFinished.connect(self._finishCardDrag)
+            card.setEditing(self._editing_cards)
             self.all_cards[key] = card
             self._applicationCardKeys.add(key)
             self._applicationCardData[key] = dict(item)
@@ -611,8 +703,9 @@ class HomePage(ScrollArea):
         ]
         for worker in workers:
             worker.cancel()
+        deadline = monotonic() + 1
         for worker in workers:
-            worker.wait()
+            worker.wait(max(0, deadline - monotonic()))
             worker.deleteLater()
         self._customWorkers.clear()
 
@@ -705,7 +798,16 @@ class HomePage(ScrollArea):
             data = deepcopy(self._customCardData.get(card_id))
         if data is None:
             return
-        if not MessageBox("删除主页卡片", f"确定删除“{data['title']}”吗？", self.window()).exec():
+        box = MessageBox(
+            "删除主页卡片",
+            f"确定删除“{data['title']}”吗？",
+            self.window(),
+        )
+        try:
+            accepted = box.exec()
+        finally:
+            box.deleteLater()
+        if not accepted:
             return
         for worker in self._customWorkers.get(card_id, []):
             worker.cancel()
@@ -729,12 +831,18 @@ class HomePage(ScrollArea):
 
     def _runCustomCard(self, card_id):
         workers = self._customWorkers.setdefault(card_id, [])
-        if workers and not MessageBox(
-            "卡片正在运行",
-            "是否再运行一遍该卡片的动作？",
-            self.window(),
-        ).exec():
-            return
+        if workers:
+            box = MessageBox(
+                "卡片正在运行",
+                "是否再运行一遍该卡片的动作？",
+                self.window(),
+            )
+            try:
+                accepted = box.exec()
+            finally:
+                box.deleteLater()
+            if not accepted:
+                return
         worker = ActionSequenceWorker(card_id, self._getCustomActions)
         worker.finished.connect(self._customSequenceFinished)
         workers.append(worker)
@@ -818,6 +926,8 @@ class HomePage(ScrollArea):
 
     def _startCardDrag(self, card, global_position):
         self._drag_target = None
+        self._drag_card = card
+        self._drag_position = QPoint(global_position)
         self._drag_offset = global_position - card.mapToGlobal(QPoint())
         self.dragPreview.setPixmap(card.grab())
         self.dragPreview.resize(card.size())
@@ -827,6 +937,7 @@ class HomePage(ScrollArea):
         effect = QGraphicsOpacityEffect(card)
         effect.setOpacity(0.2)
         card.setGraphicsEffect(effect)
+        self._dragScrollTimer.start()
 
     def _moveDragPreview(self, global_position):
         self.dragPreview.move(
@@ -834,7 +945,12 @@ class HomePage(ScrollArea):
         )
 
     def _moveCard(self, card, global_position):
+        self._drag_card = card
+        self._drag_position = QPoint(global_position)
         self._moveDragPreview(global_position)
+        self._reorderCardAt(card, global_position)
+
+    def _reorderCardAt(self, card, global_position):
         position = self.cardsWidget.mapFromGlobal(global_position)
         hit_margin = 32
         target = min(
@@ -875,7 +991,29 @@ class HomePage(ScrollArea):
         self.flowLayout._anis.insert(to_index, animation)
         self.flowLayout.setGeometry(self.flowLayout.geometry())
 
+    def _autoScrollCardDrag(self):
+        if self._drag_card is None:
+            return
+        position = self.viewport().mapFromGlobal(self._drag_position)
+        edge = min(72, max(28, self.viewport().height() // 4))
+        if position.y() < edge:
+            distance = position.y() - edge
+        elif position.y() > self.viewport().height() - edge:
+            distance = position.y() - (self.viewport().height() - edge)
+        else:
+            return
+
+        scrollBar = self.verticalScrollBar()
+        step = max(-18, min(18, distance // 4))
+        previous = scrollBar.value()
+        scrollBar.setValue(previous + step)
+        if scrollBar.value() != previous:
+            self._moveDragPreview(self._drag_position)
+            self._reorderCardAt(self._drag_card, self._drag_position)
+
     def _finishCardDrag(self, card):
+        self._dragScrollTimer.stop()
+        self._drag_card = None
         self.dragPreview.hide()
         card.setGraphicsEffect(None)
         self._saveCardOrder()

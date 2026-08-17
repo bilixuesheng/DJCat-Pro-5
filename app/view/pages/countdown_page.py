@@ -1,3 +1,6 @@
+import math
+import time
+
 from PySide6.QtCore import QPropertyAnimation, QSize, Qt, QTime, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QFontMetrics
 from PySide6.QtMultimedia import QSoundEffect
@@ -174,7 +177,9 @@ class CountdownWindow(FramelessWindow):
 
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
-        self.timer.timeout.connect(lambda: self._setRemaining(self.remaining - 1))
+        self.timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self.timer.timeout.connect(self._tickCountdown)
+        self._deadline = None
 
         self.sound = QSoundEffect(self)
 
@@ -193,7 +198,7 @@ class CountdownWindow(FramelessWindow):
         self.is_windowed = False
         self._setupCornerButtons()
         self._applyWindowState()
-        self.timer.start()
+        self._startTimer()
 
     def _resetCountdown(self):
         self.ended = False
@@ -202,7 +207,7 @@ class CountdownWindow(FramelessWindow):
         self.titleLabel.setText(self.title_text)
         self.btn_pause.setIcon(FIF.PAUSE)
         self._updateDisplay()
-        self.timer.start()
+        self._startTimer()
 
     def resetCountdown(self):
         if not cfg.confirmBeforeResetCountdown.value:
@@ -225,16 +230,33 @@ class CountdownWindow(FramelessWindow):
         if self.ended:
             return
         if self.timer.isActive():
+            self._tickCountdown()
             self.timer.stop()
+            self._deadline = None
             self.btn_pause.setIcon(FIF.PLAY)
         else:
-            self.timer.start()
+            self._startTimer()
             self.btn_pause.setIcon(FIF.PAUSE)
         self.hideControlsTimer.start()
 
     def _onAdjust(self, delta):
+        was_active = self.timer.isActive()
+        if was_active:
+            self._tickCountdown()
         self._setRemaining(self.remaining + delta)
+        if was_active and self.remaining > 0:
+            self._deadline = time.monotonic() + self.remaining
         self.hideControlsTimer.start()
+
+    def _startTimer(self):
+        self._deadline = time.monotonic() + self.remaining
+        self.timer.start()
+
+    def _tickCountdown(self):
+        if self._deadline is None or not self.timer.isActive():
+            return
+        remaining = max(0, math.ceil(self._deadline - time.monotonic()))
+        self._setRemaining(remaining)
 
     def _setRemaining(self, value):
         prev = self.remaining
@@ -244,7 +266,7 @@ class CountdownWindow(FramelessWindow):
         if self.ended and self.remaining > 0:
             self.ended = False
             self.titleLabel.setText(self.title_text)
-            self.timer.start()
+            self._startTimer()
 
         if (
             self.voice_enabled
@@ -257,6 +279,7 @@ class CountdownWindow(FramelessWindow):
         if self.remaining == 0 and not self.ended:
             self.ended = True
             self.timer.stop()
+            self._deadline = None
             self.titleLabel.setText("考试结束")
             if self.voice_enabled:
                 self._playSound("end.wav")

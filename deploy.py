@@ -8,6 +8,13 @@ from app.common.config import VERSION
 from app.config.constants import APP_NAME, AUTHOR, YEAR
 
 
+def _numeric_version(version: str) -> str:
+    match = re.fullmatch(r"(\d+\.\d+\.\d+)(?:\.(\d+)|-pre\.(\d+))?", version)
+    if not match:
+        return "1.0.0.0"
+    return f"{match.group(1)}.{match.group(2) or match.group(3) or '0'}"
+
+
 def build_args() -> list[str]:
     nuitka_command = f'"{sys.executable}" -m nuitka'
 
@@ -26,8 +33,7 @@ def build_args() -> list[str]:
         print("Please ensure these files are committed to Git.")
         sys.exit(1)
 
-    match = re.match(r"^(\d+\.\d+\.\d+(?:\.\d+)?)", VERSION)
-    clean_version = match.group(1) if match else "1.0.0"
+    clean_version = _numeric_version(VERSION)
     return [
         nuitka_command,
         "--standalone",

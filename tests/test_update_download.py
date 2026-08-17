@@ -17,10 +17,13 @@ from PySide6.QtWidgets import QApplication
 from shiboken6 import delete
 
 import djcat
+from app.common import update_download as updateDownloadModule
 from app.common.update_download import (
     DOWNLOAD_RETRY_COUNT,
+    DownloadCanceled,
     DownloadSegment,
     INITIAL_THREAD_COUNT,
+    MAX_RETRIES,
     MIN_REASSIGN_SIZE,
     SMART_THREAD_STEP,
     SmartAccelerationController,
@@ -28,20 +31,32 @@ from app.common.update_download import (
     clearUpdateDirectory,
 )
 from app.config.cfg import cfg
-from app.config.constants import DOWNLOAD_URL
+from app.config.constants import (
+    DOWNLOAD_URL,
+    normalizeReleaseVersion,
+    updateChecksumUrl,
+    updateDownloadUrl,
+)
 from app.view.pages.setting_page import SettingPage
 from app.view.shell.tray import SystemTrayIcon
 from app.view.windows.main_window import MainWindow, UpdateWorker
 
 
 class FakeResponse:
-    def __init__(self, chunks, contentLength=None, statusCode=200, headers=None):
+    def __init__(
+        self,
+        chunks,
+        contentLength=None,
+        statusCode=200,
+        headers=None,
+        url=DOWNLOAD_URL,
+    ):
         self.chunks = chunks
         self.headers = dict(headers or {})
         if contentLength is not None:
             self.headers["Content-Length"] = str(contentLength)
         self.status_code = statusCode
-        self.url = DOWNLOAD_URL
+        self.url = url
         self.closed = False
 
     def __enter__(self):
@@ -209,6 +224,115 @@ class UpdateDownloadTest(TestCase):
 
             self.assertTrue(updateDir.is_dir())
             self.assertEqual(list(updateDir.iterdir()), [])
+
+    def testStartupCleanupDoesNotFailWhenInstallerStillLocksAFile(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            updateDir = Path(tempDir) / "Updata"
+            updateDir.mkdir()
+            locked = updateDir / "DJCat-Pro.exe"
+            locked.write_bytes(b"MZ")
+
+            with patch.object(Path, "unlink", side_effect=PermissionError):
+                failed = clearUpdateDirectory(updateDir)
+
+            self.assertEqual(failed, [locked])
+            self.assertTrue(locked.exists())
+
+    def testDeclaredOversizedDownloadIsRejectedBeforeAllocation(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            worker = UpdateDownloadWorker(
+                DOWNLOAD_URL,
+                Path(tempDir) / "update.exe",
+                maxBytes=1024,
+            )
+            with (
+                patch.object(
+                    worker,
+                    "_probeDownload",
+                    return_value=(DOWNLOAD_URL, 1025, True),
+                ),
+                patch.object(worker, "_downloadRanged") as ranged,
+                self.assertRaisesRegex(OSError, "安全大小限制"),
+            ):
+                worker._downloadAttempt()
+
+            ranged.assert_not_called()
+
+    def testDownloadedFileMustMatchExpectedSha256(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            path = Path(tempDir) / "update.exe.part"
+            path.write_bytes(b"MZ-test")
+            worker = UpdateDownloadWorker(
+                DOWNLOAD_URL,
+                Path(tempDir) / "update.exe",
+                expectedSha256="0" * 64,
+            )
+
+            with self.assertRaisesRegex(OSError, "SHA-256"):
+                worker._validateChecksum(path)
+
+    def testCancelDuringValidatorDoesNotPublishDownloadedFile(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            worker = UpdateDownloadWorker(
+                DOWNLOAD_URL,
+                Path(tempDir) / "update.exe",
+            )
+
+            def download(_url, _total):
+                worker.partialPath.write_bytes(b"MZ")
+
+            worker.validator = lambda _path: worker.cancel()
+            with (
+                patch.object(
+                    worker,
+                    "_probeDownload",
+                    return_value=(DOWNLOAD_URL, 2, False),
+                ),
+                patch.object(worker, "_downloadSingle", side_effect=download),
+                self.assertRaises(DownloadCanceled),
+            ):
+                worker._downloadAttempt()
+
+            self.assertFalse(worker.targetPath.exists())
+
+    def testChecksumDownloadStreamsAndStopsAtFourKilobytes(self):
+        response = FakeResponse([b"a" * 4096, b"b"])
+        with tempfile.TemporaryDirectory() as tempDir:
+            worker = UpdateDownloadWorker(
+                DOWNLOAD_URL,
+                Path(tempDir) / "update.exe",
+                checksumUrl=f"{DOWNLOAD_URL}.sha256",
+            )
+            with (
+                patch(
+                    "app.common.update_download.requests.get",
+                    return_value=response,
+                ) as get,
+                self.assertRaisesRegex(OSError, "校验文件过大"),
+            ):
+                worker._fetchChecksum()
+
+        self.assertTrue(get.call_args.kwargs["stream"])
+        self.assertTrue(response.closed)
+
+    def testUnknownLengthDownloadStopsAtSizeLimit(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            worker = UpdateDownloadWorker(
+                DOWNLOAD_URL,
+                Path(tempDir) / "update.exe",
+                maxBytes=4,
+            )
+            response = FakeResponse([b"MZ12", b"3"], contentLength=0)
+            with (
+                patch(
+                    "app.common.update_download.requests.get",
+                    return_value=response,
+                ),
+                self.assertRaisesRegex(OSError, "安全大小限制"),
+            ):
+                worker._downloadSingle(DOWNLOAD_URL, 0)
+
+            self.assertEqual(worker.partialPath.read_bytes(), b"MZ12")
 
     def testLoggingKeepsFourteenDays(self):
         with patch("loguru.logger.add") as add:
@@ -382,6 +506,66 @@ class UpdateDownloadTest(TestCase):
         self.assertGreaterEqual(len(dataRanges), INITIAL_THREAD_COUNT)
         self.assertGreater(state["maxActive"], 1)
 
+    def testConcurrentDownloadsShareAGlobalWorkerLimit(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            worker = UpdateDownloadWorker(
+                DOWNLOAD_URL,
+                Path(tempDir) / "update.exe",
+            )
+            gate = threading.Event()
+            saturated = threading.Event()
+            state = {"active": 0, "peak": 0}
+            stateLock = threading.Lock()
+            errors = []
+
+            def downloadSegment(_url, segment):
+                with stateLock:
+                    state["active"] += 1
+                    state["peak"] = max(state["peak"], state["active"])
+                    if state["active"] >= 2:
+                        saturated.set()
+                try:
+                    gate.wait(1)
+                    with segment.lock:
+                        received = segment.remainingBytes
+                        segment.receivedBytes += received
+                    with worker._progressLock:
+                        worker._downloaded += received
+                finally:
+                    with stateLock:
+                        state["active"] -= 1
+
+            def run():
+                try:
+                    worker._downloadRanged(DOWNLOAD_URL, 32)
+                except Exception as error:
+                    errors.append(error)
+
+            with (
+                patch.object(
+                    updateDownloadModule,
+                    "_DOWNLOAD_THREAD_SLOTS",
+                    threading.BoundedSemaphore(2),
+                    create=True,
+                ),
+                patch.object(
+                    worker,
+                    "_downloadSegment",
+                    side_effect=downloadSegment,
+                ),
+            ):
+                thread = threading.Thread(target=run)
+                thread.start()
+                self.assertTrue(saturated.wait(1))
+                time.sleep(0.05)
+                self.assertLessEqual(state["peak"], 2)
+                gate.set()
+                thread.join(3)
+
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(errors, [])
+            self.assertEqual(worker._downloaded, 32)
+
     def testRangeChunksDoNotFloodProgressSignalQueue(self):
         chunks = [b"x" * 64 for _ in range(200)]
         total = sum(map(len, chunks))
@@ -411,6 +595,86 @@ class UpdateDownloadTest(TestCase):
         self.assertLess(len(progress), len(chunks) // 10)
         self.assertEqual(progress[-1][:2], (total, total))
 
+    def testEmptyPartialRangeResponseStopsAfterBoundedRetries(self):
+        responses = [
+            FakeResponse(
+                [],
+                statusCode=206,
+                headers={"Content-Range": "bytes 0-9/10"},
+            )
+            for _ in range(MAX_RETRIES)
+        ]
+        with tempfile.TemporaryDirectory() as tempDir:
+            worker = UpdateDownloadWorker(
+                DOWNLOAD_URL,
+                Path(tempDir) / "update.exe",
+            )
+            worker.partialPath.touch()
+            worker.partialPath.write_bytes(b"\0" * 10)
+            segment = DownloadSegment(0, 0, 9)
+            with (
+                patch(
+                    "app.common.update_download.requests.get",
+                    side_effect=responses,
+                ) as get,
+                patch.object(worker._cancelEvent, "wait", return_value=False),
+            ):
+                with self.assertRaisesRegex(OSError, "分段下载响应不完整"):
+                    worker._downloadSegment(DOWNLOAD_URL, segment)
+
+        self.assertEqual(get.call_count, MAX_RETRIES)
+        self.assertTrue(all(response.closed for response in responses))
+
+    def testEveryDownloadResponseMustRemainHttps(self):
+        insecureUrl = "http://example.test/update.exe"
+        single = FakeResponse([b"MZ"], contentLength=2, url=insecureUrl)
+        ranged = FakeResponse(
+            [b"MZ"],
+            statusCode=206,
+            headers={"Content-Range": "bytes 0-1/2"},
+            url=insecureUrl,
+        )
+        with tempfile.TemporaryDirectory() as tempDir:
+            worker = UpdateDownloadWorker(
+                DOWNLOAD_URL,
+                Path(tempDir) / "update.exe",
+                requireHttps=True,
+            )
+            worker.partialPath.touch()
+            worker.partialPath.write_bytes(b"\0\0")
+            with patch(
+                "app.common.update_download.requests.get",
+                side_effect=[single, ranged],
+            ):
+                with self.assertRaisesRegex(OSError, "必须保持 HTTPS"):
+                    worker._downloadSingle(DOWNLOAD_URL, 2)
+                with self.assertRaisesRegex(OSError, "必须保持 HTTPS"):
+                    worker._downloadSegment(
+                        DOWNLOAD_URL,
+                        DownloadSegment(0, 0, 1),
+                    )
+
+        self.assertTrue(single.closed)
+        self.assertTrue(ranged.closed)
+
+    def testDownloadRejectsHttpInIntermediateRedirect(self):
+        response = FakeResponse([b"MZ"], contentLength=2)
+        response.history = [Mock(url="http://mirror.example.test/update.exe")]
+        with tempfile.TemporaryDirectory() as tempDir:
+            worker = UpdateDownloadWorker(
+                DOWNLOAD_URL,
+                Path(tempDir) / "update.exe",
+                requireHttps=True,
+            )
+            with patch(
+                "app.common.update_download.requests.get",
+                return_value=response,
+            ):
+                with self.assertRaisesRegex(OSError, "必须保持 HTTPS"):
+                    worker._downloadSingle(DOWNLOAD_URL, 2)
+
+        self.assertTrue(response.closed)
+
     def testSmartAccelerationMatchesCloudGhostPolicy(self):
         controller = SmartAccelerationController()
 
@@ -424,6 +688,65 @@ class UpdateDownloadTest(TestCase):
 
         controller.sample(1_000_000, 36, 11)
         self.assertTrue(controller.disabled)
+
+    def testCancelWaitsForOpenPartialFileBeforeFinishing(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            app = QApplication.instance() or QApplication([])
+            worker = UpdateDownloadWorker(
+                DOWNLOAD_URL,
+                Path(tempDir) / "update.exe",
+            )
+            started = threading.Event()
+            release = threading.Event()
+            errors = []
+            results = []
+
+            def blockedSegment(_url, _segment):
+                with worker.partialPath.open("r+b"):
+                    started.set()
+                    release.wait(2)
+
+            worker.finished.connect(lambda *args: results.append(args))
+
+            with (
+                patch("app.common.update_download.INITIAL_THREAD_COUNT", 1),
+                patch.object(
+                    worker,
+                    "_probeDownload",
+                    return_value=(DOWNLOAD_URL, 1024, True),
+                ),
+                patch.object(worker, "_downloadSegment", side_effect=blockedSegment),
+            ):
+                thread = threading.Thread(
+                    target=lambda: self._captureError(
+                        errors,
+                        worker.run,
+                    )
+                )
+                try:
+                    thread.start()
+                    self.assertTrue(started.wait(1))
+                    worker.cancel()
+                    thread.join(0.4)
+                    self.assertTrue(thread.is_alive())
+                    self.assertEqual(results, [])
+                    self.assertEqual(errors, [])
+                finally:
+                    release.set()
+                    thread.join(2)
+                    app.processEvents()
+
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(errors, [])
+            self.assertEqual(results, [("", "", True)])
+            self.assertFalse(worker.partialPath.exists())
+
+    @staticmethod
+    def _captureError(errors, callback, *args):
+        try:
+            callback(*args)
+        except Exception as error:
+            errors.append(error)
 
     def testSlowestSegmentSplitKeepsCompleteNonOverlappingCoverage(self):
         worker = UpdateDownloadWorker(DOWNLOAD_URL, Path("DJCat-Pro.exe"))
@@ -487,6 +810,10 @@ class UpdateWindowLifecycleTest(TestCase):
                 "app.view.windows.main_window.threading.Thread",
                 return_value=thread,
             ),
+            patch(
+                "app.view.windows.main_window.clientArchitecture",
+                return_value="x86_64",
+            ),
         ):
             self.window._onUpdateChecked(
                 {"latest_version": "9999.0.0", "update_note": "note"},
@@ -514,7 +841,77 @@ class UpdateWindowLifecycleTest(TestCase):
         self.assertEqual(self.window._downloadStateToolTip.y(), firstY)
         self.assertEqual(self.window._downloadStateToolTip.suitablePosCalls, 1)
         workerFactory.assert_called_once()
-        self.assertEqual(workerFactory.call_args.args[0], DOWNLOAD_URL)
+        self.assertEqual(
+            workerFactory.call_args.args[0],
+            updateDownloadUrl("9999.0.0", "x86_64"),
+        )
+        self.assertTrue(workerFactory.call_args.kwargs["requireHttps"])
+        self.assertEqual(
+            workerFactory.call_args.kwargs["checksumUrl"],
+            updateChecksumUrl("9999.0.0", "x86_64"),
+        )
+
+    def testArm64UpdateUsesArm64ReleaseInstaller(self):
+        worker = DownloadWorkerStub("", Path())
+        thread = ThreadStub(lambda: None, True)
+        with (
+            patch(
+                "app.view.windows.main_window.StateToolTip",
+                StateToolTipStub,
+            ),
+            patch(
+                "app.view.windows.main_window.UpdateDownloadWorker",
+                return_value=worker,
+            ) as workerFactory,
+            patch(
+                "app.view.windows.main_window.threading.Thread",
+                return_value=thread,
+            ),
+            patch(
+                "app.view.windows.main_window.clientArchitecture",
+                return_value="arm64",
+            ),
+        ):
+            self.window._startUpdateDownload("5.0.0-pre.22")
+
+        self.assertEqual(
+            workerFactory.call_args.args[0],
+            updateDownloadUrl("5.0.0-pre.22", "arm64"),
+        )
+        self.assertIn("Windows-arm64-Setup.exe", workerFactory.call_args.args[0])
+
+    def testStartingAnotherDownloadDisposesOnlyThePreviousTooltip(self):
+        oldToolTip = StateToolTipStub("old", "old", self.window)
+        oldToolTip.destroyed.connect(
+            lambda _=None, current=oldToolTip: self.window._clearDownloadStateToolTip(
+                current
+            )
+        )
+        self.window._downloadStateToolTip = oldToolTip
+        worker = DownloadWorkerStub("", Path())
+        thread = ThreadStub(lambda: None, True)
+        with (
+            patch(
+                "app.view.windows.main_window.StateToolTip",
+                StateToolTipStub,
+            ),
+            patch(
+                "app.view.windows.main_window.UpdateDownloadWorker",
+                return_value=worker,
+            ),
+            patch(
+                "app.view.windows.main_window.threading.Thread",
+                return_value=thread,
+            ),
+        ):
+            self.window._startUpdateDownload("5.0.0-pre.22")
+
+        newToolTip = self.window._downloadStateToolTip
+        self.assertIsNot(newToolTip, oldToolTip)
+        self.assertTrue(oldToolTip.hidden)
+        self.assertTrue(oldToolTip.deleted)
+        oldToolTip.destroyed.emit(object())
+        self.assertIs(self.window._downloadStateToolTip, newToolTip)
 
     def testDownloadProgressIsCoalescedBeforeUpdatingTooltip(self):
         toolTip = StateToolTipStub("", "", self.window)
@@ -762,6 +1159,7 @@ class UpdateWindowLifecycleTest(TestCase):
             results,
             [(17, {"latest_version": "9999.0.0"}, "")],
         )
+        response.close.assert_called_once_with()
 
     def testUpdateCheckRetriesThreeTimesBeforeSucceeding(self):
         response = Mock()
@@ -789,6 +1187,7 @@ class UpdateWindowLifecycleTest(TestCase):
             results,
             [(18, {"latest_version": "9999.0.0"}, "")],
         )
+        response.close.assert_called_once_with()
 
     def testUpdateWorkerRejectsNonObjectJson(self):
         response = Mock()
@@ -808,6 +1207,49 @@ class UpdateWindowLifecycleTest(TestCase):
 
         self.assertEqual(results[0][:2], (19, {}))
         self.assertIn("格式无效", results[0][2])
+        response.close.assert_called_once_with()
+
+    def testUpdateWorkerRejectsHttpInIntermediateRedirect(self):
+        response = Mock()
+        response.url = "https://api.djcatpro.top/beta/"
+        response.history = [Mock(url="http://mirror.example.test/beta/")]
+        response.json.return_value = {"latest_version": "9999.0.0"}
+        results = []
+        worker = UpdateWorker(20)
+        worker.finished.connect(lambda *args: results.append(args))
+
+        with (
+            patch.object(worker, "RETRY_COUNT", 0),
+            patch(
+                "app.view.windows.main_window.requests.get",
+                return_value=response,
+            ),
+        ):
+            worker.run()
+
+        self.assertEqual(results[0][:2], (20, {}))
+        self.assertIn("必须保持 HTTPS", results[0][2])
+        response.close.assert_called_once_with()
+
+    def testMalformedRemoteVersionIsRejectedBeforeShowingUpdate(self):
+        with (
+            patch.object(self.window, "_showUpdateInfoBar") as showUpdate,
+            patch("app.view.windows.main_window.InfoBar.error") as showError,
+        ):
+            self.window._onUpdateChecked(
+                {"latest_version": "9999/evil", "update_note": "bad"},
+                "",
+                True,
+            )
+
+        showUpdate.assert_not_called()
+        showError.assert_called_once()
+
+    def testReleaseVersionNormalizationRejectsMalformedValues(self):
+        self.assertEqual(normalizeReleaseVersion("v5.0.0-pre.22"), "5.0.0-pre.22")
+        for version in (None, "", "nonsense", "9999/evil"):
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                normalizeReleaseVersion(version)
 
     def testOlderRemoteVersionDoesNotShowUpdate(self):
         with (
@@ -822,6 +1264,19 @@ class UpdateWindowLifecycleTest(TestCase):
 
         showUpdate.assert_not_called()
         self.assertIsNone(self.window._pendingUpdateNotification)
+
+    def testEscapedUpdateNoteDoesNotCorruptExistingChinese(self):
+        with patch.object(self.window, "_showUpdateInfoBar") as showUpdate:
+            self.window._onUpdateChecked(
+                {
+                    "latest_version": "9999.0.0",
+                    "update_note": r"更新 \u4f60\u597d",
+                },
+                "",
+                True,
+            )
+
+        self.assertEqual(showUpdate.call_args.args[1], "更新 你好")
 
     def testManualCheckClosesPendingBarBeforeShowingResult(self):
         order = []
@@ -845,6 +1300,31 @@ class UpdateWindowLifecycleTest(TestCase):
 
         self.assertEqual(order, ["close", "result"])
         self.assertIsNone(self.window._updateCheckInfoBar)
+
+    def testRepeatedUpdateChecksReuseTheInFlightRequest(self):
+        worker = Mock()
+        worker.finished = SignalStub()
+        thread = ThreadStub(worker.run, True)
+        with (
+            patch("app.view.windows.main_window.InfoBar", InfoBarStub),
+            patch(
+                "app.view.windows.main_window.UpdateWorker",
+                return_value=worker,
+            ) as workerFactory,
+            patch(
+                "app.view.windows.main_window.threading.Thread",
+                return_value=thread,
+            ) as threadFactory,
+        ):
+            self.window.checkForUpdates(False)
+            self.window.checkForUpdates(True)
+
+        self.assertEqual(workerFactory.call_count, 1)
+        self.assertEqual(threadFactory.call_count, 1)
+        self.assertEqual(len(self.window._updateJobs), 1)
+        self.assertTrue(next(iter(self.window._updateJobs.values()))[2])
+        self.assertIsNotNone(self.window._updateCheckInfoBar)
+        self.window._updateJobs.clear()
 
     def testUpdateDialogIsScheduledForDeletionAfterClosing(self):
         dialog = Mock()

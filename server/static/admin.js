@@ -102,6 +102,24 @@
         syncActionFields(form);
     });
 
+    document.querySelectorAll("[data-ad-button-form]").forEach((form) => {
+        const type = form.querySelector("[data-ad-button-type]");
+        const appField = form.querySelector("[data-ad-app-field]");
+        const urlField = form.querySelector("[data-ad-url-field]");
+        const sync = () => {
+            const isApp = type.value === "app";
+            const isUrl = type.value === "url";
+            appField.hidden = !isApp;
+            urlField.hidden = !isUrl;
+            appField.querySelector("select").disabled = !isApp;
+            appField.querySelector("select").required = isApp;
+            urlField.querySelector("input").disabled = !isUrl;
+            urlField.querySelector("input").required = isUrl;
+        };
+        type.addEventListener("change", sync);
+        sync();
+    });
+
     const dismissToast = (toast) => {
         if (toast.classList.contains("is-leaving")) return;
         toast.classList.add("is-leaving");
@@ -175,6 +193,188 @@
         prepareToast(toast);
     };
 
+    const sortableRows = (table) => [
+        ...table.querySelectorAll("tbody > tr[data-sort-id]"),
+    ];
+
+    const refreshTableOrder = (table) => {
+        sortableRows(table).forEach((row, index) => {
+            const position = row.querySelector("[data-order-position]");
+            if (position) position.textContent = String(index + 1).padStart(2, "0");
+        });
+    };
+
+    const saveTableOrder = async (table) => {
+        const data = new FormData();
+        data.append("csrf_token", table.dataset.csrfToken);
+        table.dataset.sortRevision.split(",").filter(Boolean).forEach((id) => {
+            data.append("expected_item_id", id);
+        });
+        sortableRows(table).forEach((row) => data.append("item_id", row.dataset.sortId));
+        const response = await fetch(table.dataset.orderUrl, {
+            method: "POST",
+            body: data,
+            credentials: "same-origin",
+            headers: {
+                Accept: "application/json",
+                "X-Requested-With": "XMLHttpRequest",
+            },
+        });
+        let payload = null;
+        try {
+            payload = await response.json();
+        } catch (_) {
+            payload = null;
+        }
+        if (!response.ok || !payload) {
+            throw new Error(payload?.message || "排序保存失败，请刷新后重试");
+        }
+        table.dataset.sortRevision = sortableRows(table)
+            .map((row) => row.dataset.sortId).join(",");
+        showToast(payload.message || "顺序已更新", payload.category || "success");
+    };
+
+    document.querySelectorAll("[data-sortable-table]").forEach((table) => {
+        const body = table.tBodies[0];
+        if (!body) return;
+        let drag = null;
+        let scrollFrame = null;
+        table.dataset.sortRevision = sortableRows(table)
+            .map((row) => row.dataset.sortId).join(",");
+
+        const restore = (ids) => {
+            const rows = new Map(sortableRows(table).map((row) => [row.dataset.sortId, row]));
+            ids.forEach((id) => {
+                const row = rows.get(id);
+                if (row) body.append(row);
+            });
+            refreshTableOrder(table);
+        };
+
+        const persist = async (previousOrder) => {
+            if (table.dataset.sortSaving === "true") return;
+            table.dataset.sortSaving = "true";
+            try {
+                await saveTableOrder(table);
+            } catch (error) {
+                restore(previousOrder);
+                showToast(error.message || "排序保存失败，请刷新后重试", "error");
+            } finally {
+                delete table.dataset.sortSaving;
+            }
+        };
+
+        const moveDraggedRow = (clientX, clientY) => {
+            if (!drag) return;
+            const target = document.elementFromPoint(clientX, clientY)
+                ?.closest("tr[data-sort-id]");
+            if (!target || target === drag.row || target.parentElement !== body) return;
+            const bounds = target.getBoundingClientRect();
+            body.insertBefore(
+                drag.row,
+                clientY < bounds.top + bounds.height / 2
+                    ? target
+                    : target.nextElementSibling,
+            );
+            drag.changed = true;
+            refreshTableOrder(table);
+        };
+
+        const autoScroll = () => {
+            scrollFrame = null;
+            if (!drag) return;
+            const edge = Math.min(64, window.innerHeight / 4);
+            let delta = 0;
+            if (drag.clientY < edge) delta = -Math.ceil((edge - drag.clientY) / 6);
+            else if (drag.clientY > window.innerHeight - edge) {
+                delta = Math.ceil((drag.clientY - window.innerHeight + edge) / 6);
+            }
+            if (!delta) return;
+            window.scrollBy(0, delta);
+            moveDraggedRow(drag.clientX, drag.clientY);
+            scrollFrame = window.requestAnimationFrame(autoScroll);
+        };
+
+        const finishDrag = (pointerId, save) => {
+            if (!drag || drag.pointerId !== pointerId) return;
+            const current = drag;
+            drag = null;
+            if (scrollFrame !== null) {
+                window.cancelAnimationFrame(scrollFrame);
+                scrollFrame = null;
+            }
+            current.row.classList.remove("is-dragging");
+            table.classList.remove("is-sorting");
+            if (current.handle.hasPointerCapture(pointerId)) {
+                current.handle.releasePointerCapture(pointerId);
+            }
+            if (!save) restore(current.order);
+            else if (current.changed) persist(current.order);
+        };
+
+        table.querySelectorAll(".drag-handle").forEach((handle) => {
+            handle.addEventListener("pointerdown", (event) => {
+                if (event.button !== 0 || table.dataset.sortSaving === "true") return;
+                const row = handle.closest("tr[data-sort-id]");
+                drag = {
+                    pointerId: event.pointerId,
+                    row,
+                    handle,
+                    order: sortableRows(table).map((item) => item.dataset.sortId),
+                    changed: false,
+                    clientX: event.clientX,
+                    clientY: event.clientY,
+                };
+                handle.setPointerCapture(event.pointerId);
+                row.classList.add("is-dragging");
+                table.classList.add("is-sorting");
+                event.preventDefault();
+            });
+
+            handle.addEventListener("pointermove", (event) => {
+                if (!drag || drag.pointerId !== event.pointerId) return;
+                drag.clientX = event.clientX;
+                drag.clientY = event.clientY;
+                moveDraggedRow(event.clientX, event.clientY);
+                if (scrollFrame === null) {
+                    scrollFrame = window.requestAnimationFrame(autoScroll);
+                }
+                event.preventDefault();
+            });
+
+            handle.addEventListener("pointerup", (event) => {
+                finishDrag(event.pointerId, true);
+            });
+            handle.addEventListener("pointercancel", (event) => {
+                finishDrag(event.pointerId, false);
+            });
+            handle.addEventListener("lostpointercapture", (event) => {
+                finishDrag(event.pointerId, false);
+            });
+
+            handle.addEventListener("keydown", (event) => {
+                if (!["ArrowUp", "ArrowDown"].includes(event.key)
+                    || table.dataset.sortSaving === "true") return;
+                const row = handle.closest("tr[data-sort-id]");
+                const sibling = event.key === "ArrowUp"
+                    ? row.previousElementSibling
+                    : row.nextElementSibling;
+                if (!sibling?.matches("tr[data-sort-id]")) return;
+                const previousOrder = sortableRows(table).map((item) => item.dataset.sortId);
+                body.insertBefore(
+                    row,
+                    event.key === "ArrowUp" ? sibling : sibling.nextElementSibling,
+                );
+                refreshTableOrder(table);
+                persist(previousOrder);
+                event.preventDefault();
+            });
+        });
+        window.addEventListener("blur", () => {
+            if (drag) finishDrag(drag.pointerId, false);
+        });
+    });
+
     document.querySelectorAll("[data-toast]").forEach(prepareToast);
 
     const setButtonLoading = (form, loading) => {
@@ -215,18 +415,6 @@
         });
     };
 
-    const refreshTableOrder = (table) => {
-        const controls = [...(table?.querySelectorAll("tbody .order-controls") || [])];
-        controls.forEach((control, index) => {
-            const position = control.querySelector(":scope > span");
-            const up = control.querySelector('button[value="up"]');
-            const down = control.querySelector('button[value="down"]');
-            if (position) position.textContent = String(index + 1).padStart(2, "0");
-            if (up) up.disabled = index === 0;
-            if (down) down.disabled = index === controls.length - 1;
-        });
-    };
-
     const submitAsync = async (form) => {
         if (form.dataset.submitting === "true") return;
         form.dataset.submitting = "true";
@@ -257,6 +445,10 @@
                 const table = target?.closest("table");
                 target?.remove();
                 refreshTableOrder(table);
+                if (table?.matches("[data-sortable-table]")) {
+                    table.dataset.sortRevision = sortableRows(table)
+                        .map((row) => row.dataset.sortId).join(",");
+                }
                 if (table?.dataset.emptyMessage && !table.tBodies[0]?.rows.length) {
                     const row = table.tBodies[0].insertRow();
                     const cell = row.insertCell();

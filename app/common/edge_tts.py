@@ -12,6 +12,21 @@ DEFAULT_EDGE_VOICE = "zh-CN-XiaoxiaoNeural"
 EDGE_SPEECH_PREFIX = "djcat-edge-tts-"
 
 
+def cleanup_edge_speech_files(directory=None):
+    root = Path(directory or tempfile.gettempdir())
+    failed = []
+    try:
+        paths = tuple(root.glob(f"{EDGE_SPEECH_PREFIX}*.mp3"))
+    except OSError:
+        return [root]
+    for path in paths:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            failed.append(path)
+    return failed
+
+
 def filter_chinese_voices(voices):
     """Return normalized Edge TTS voices whose locale is Chinese."""
     result = []

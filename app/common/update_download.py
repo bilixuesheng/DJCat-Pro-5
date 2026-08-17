@@ -1,9 +1,10 @@
+import hashlib
+import hmac
 import queue
 import re
 import shutil
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -17,24 +18,56 @@ from app.config.paths import UPDATE_DIR
 
 INITIAL_THREAD_COUNT = 32
 MAX_THREAD_COUNT = 256
+MAX_GLOBAL_THREAD_COUNT = 64
 SMART_THREAD_STEP = 4
 MIN_REASSIGN_SIZE = 64 * 1024
 CHUNK_SIZE = 64 * 1024
 REQUEST_TIMEOUT = (10, 30)
 MAX_RETRIES = 3
 DOWNLOAD_RETRY_COUNT = 3
+MAX_UPDATE_BYTES = 1024 * 1024 * 1024
 PROGRESS_EMIT_INTERVAL = 0.05
 PERMANENT_STATUS = frozenset({400, 401, 403, 404, 405, 410, 451})
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_DOWNLOAD_THREAD_SLOTS = threading.BoundedSemaphore(MAX_GLOBAL_THREAD_COUNT)
 
 
-def clearUpdateDirectory(directory: Path = UPDATE_DIR) -> None:
+def isHttpsResponseChain(response, requestedUrl: str) -> bool:
+    urls = [requestedUrl]
+    history = getattr(response, "history", ())
+    if isinstance(history, (list, tuple)):
+        for item in history:
+            url = getattr(item, "url", None)
+            if isinstance(url, str):
+                urls.append(url)
+    effectiveUrl = getattr(response, "url", None)
+    urls.append(effectiveUrl if isinstance(effectiveUrl, str) else requestedUrl)
+    for url in urls:
+        try:
+            if urlparse(url).scheme.lower() != "https":
+                return False
+        except ValueError:
+            return False
+    return True
+
+
+def clearUpdateDirectory(directory: Path = UPDATE_DIR) -> list[Path]:
     """Remove every leftover update file while keeping the update directory."""
-    directory.mkdir(parents=True, exist_ok=True)
-    for path in directory.iterdir():
-        if path.is_dir() and not path.is_symlink():
-            shutil.rmtree(path)
-        else:
-            path.unlink()
+    failed = []
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        paths = tuple(directory.iterdir())
+    except OSError:
+        return [directory]
+    for path in paths:
+        try:
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        except OSError:
+            failed.append(path)
+    return failed
 
 
 class DownloadCanceled(Exception):
@@ -140,12 +173,30 @@ class UpdateDownloadWorker(QObject):
         targetPath: Path,
         validator: Callable[[Path], None] | None = None,
         requireHttps: bool = False,
+        maxBytes: int | None = None,
+        expectedSha256: str | None = None,
+        checksumUrl: str | None = None,
     ):
         super().__init__()
         self.url = url
         self.targetPath = Path(targetPath)
         self.validator = validator or self._validateExecutable
         self.requireHttps = requireHttps
+        if maxBytes is not None and maxBytes <= 0:
+            raise ValueError("下载大小上限必须大于 0")
+        self.maxBytes = maxBytes
+        expectedSha256 = str(expectedSha256 or "").strip().lower()
+        if expectedSha256 and not _SHA256.fullmatch(expectedSha256):
+            raise ValueError("SHA-256 校验值无效")
+        checksumUrl = str(checksumUrl or "").strip()
+        try:
+            checksumScheme = urlparse(checksumUrl).scheme.lower() if checksumUrl else ""
+        except ValueError:
+            checksumScheme = ""
+        if checksumUrl and checksumScheme != "https":
+            raise ValueError("校验文件链接必须使用 HTTPS")
+        self._expectedSha256 = expectedSha256 or None
+        self.checksumUrl = checksumUrl or None
         self.partialPath = self.targetPath.with_suffix(
             f"{self.targetPath.suffix}.part"
         )
@@ -200,8 +251,12 @@ class UpdateDownloadWorker(QObject):
                 self._rangeStopEvent.set()
                 self._closeResponses()
                 if not resultPath:
-                    self._removeFile(self.partialPath)
-                    self._removeFile(self.targetPath)
+                    for path in (self.partialPath, self.targetPath):
+                        try:
+                            self._removeFile(path)
+                        except OSError as cleanupError:
+                            if not canceled and not errorMessage:
+                                errorMessage = str(cleanupError)
 
         self.finished.emit(resultPath, errorMessage, canceled)
 
@@ -215,7 +270,10 @@ class UpdateDownloadWorker(QObject):
         self._removeFile(self.targetPath)
 
     def _downloadAttempt(self) -> str:
+        if self._expectedSha256 is None and self.checksumUrl:
+            self._expectedSha256 = self._fetchChecksum()
         effectiveUrl, total, supportsRange = self._probeDownload()
+        self._ensureSizeAllowed(total)
         if self.requireHttps and urlparse(effectiveUrl).scheme.lower() != "https":
             raise OSError("下载链接必须保持 HTTPS")
         if self._cancelEvent.is_set():
@@ -237,9 +295,61 @@ class UpdateDownloadWorker(QObject):
             raise DownloadCanceled()
 
         self.validator(self.partialPath)
+        if self._cancelEvent.is_set():
+            raise DownloadCanceled()
+        self._validateChecksum(self.partialPath)
+        if self._cancelEvent.is_set():
+            raise DownloadCanceled()
 
         self.partialPath.replace(self.targetPath)
         return str(self.targetPath)
+
+    def _fetchChecksum(self) -> str:
+        response = requests.get(
+            self.checksumUrl,
+            timeout=REQUEST_TIMEOUT,
+            stream=True,
+        )
+        self._trackResponse(response)
+        try:
+            self._ensureResponseHttps(response, self.checksumUrl)
+            response.raise_for_status()
+            contentLength = str(response.headers.get("Content-Length", ""))
+            if contentLength.isdigit() and int(contentLength) > 4096:
+                raise OSError("校验文件过大")
+            content = bytearray()
+            for chunk in response.iter_content(chunk_size=1024):
+                if self._cancelEvent.is_set():
+                    raise DownloadCanceled()
+                if not chunk:
+                    continue
+                content.extend(chunk)
+                if len(content) > 4096:
+                    raise OSError("校验文件过大")
+            fields = bytes(content).decode("ascii").split(maxsplit=1)
+            value = fields[0].lower() if fields else ""
+            if not _SHA256.fullmatch(value):
+                raise OSError("校验文件格式无效")
+            return value
+        finally:
+            self._untrackResponse(response)
+            response.close()
+
+    def _validateChecksum(self, path: Path) -> None:
+        if self._expectedSha256 is None:
+            return
+        digest = hashlib.sha256()
+        with path.open("rb") as file:
+            for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                if self._cancelEvent.is_set():
+                    raise DownloadCanceled()
+                digest.update(chunk)
+        if not hmac.compare_digest(digest.hexdigest(), self._expectedSha256):
+            raise OSError("下载文件 SHA-256 校验失败")
+
+    def _ensureResponseHttps(self, response, requestedUrl: str) -> None:
+        if self.requireHttps and not isHttpsResponseChain(response, requestedUrl):
+            raise OSError("下载链接必须保持 HTTPS")
 
     def _probeDownload(self) -> tuple[str, int, bool]:
         statusCode, headers, effectiveUrl = self._requestProbe("bytes=1-1")
@@ -277,6 +387,7 @@ class UpdateDownloadWorker(QObject):
         )
         self._trackResponse(response)
         try:
+            self._ensureResponseHttps(response, self.url)
             statusCode = response.status_code
             if statusCode not in {200, 206, 416}:
                 response.raise_for_status()
@@ -318,10 +429,13 @@ class UpdateDownloadWorker(QObject):
         )
         self._trackResponse(response)
         try:
+            self._ensureResponseHttps(response, url)
             response.raise_for_status()
             contentLength = response.headers.get("Content-Length", "")
-            if not total and contentLength.isdigit():
-                total = int(contentLength)
+            responseTotal = int(contentLength) if contentLength.isdigit() else 0
+            self._ensureSizeAllowed(responseTotal)
+            if not total:
+                total = responseTotal
 
             with self.partialPath.open("wb") as file:
                 for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
@@ -329,6 +443,7 @@ class UpdateDownloadWorker(QObject):
                         raise DownloadCanceled()
                     if not chunk:
                         continue
+                    self._ensureSizeAllowed(self._downloaded + len(chunk))
                     file.write(chunk)
                     with self._progressLock:
                         self._downloaded += len(chunk)
@@ -347,24 +462,54 @@ class UpdateDownloadWorker(QObject):
             )
 
     def _downloadRanged(self, url: str, total: int) -> None:
+        self._ensureSizeAllowed(total)
         self._segments = self._buildSegments(total, INITIAL_THREAD_COUNT)
         self.partialPath.touch()
         with self.partialPath.open("r+b") as file:
             file.truncate(total)
 
         completionQueue = queue.Queue()
-        executor = ThreadPoolExecutor(
-            max_workers=MAX_THREAD_COUNT,
-            thread_name_prefix="djcat-update",
-        )
+        workerThreads = []
         controller = SmartAccelerationController()
         lastDownloaded = 0
         nextSample = time.monotonic() + 1
 
         def submit(segment: DownloadSegment) -> None:
+            while not _DOWNLOAD_THREAD_SLOTS.acquire(timeout=0.1):
+                if self._cancelEvent.is_set():
+                    raise DownloadCanceled()
+                if self._rangeStopEvent.is_set():
+                    return
+            if self._cancelEvent.is_set() or self._rangeStopEvent.is_set():
+                _DOWNLOAD_THREAD_SLOTS.release()
+                if self._cancelEvent.is_set():
+                    raise DownloadCanceled()
+                return
             self._activeWorkers += 1
-            future = executor.submit(self._downloadSegment, url, segment)
-            future.add_done_callback(completionQueue.put)
+
+            def runSegment():
+                try:
+                    self._downloadSegment(url, segment)
+                except Exception as error:
+                    completionQueue.put(error)
+                else:
+                    completionQueue.put(None)
+                finally:
+                    _DOWNLOAD_THREAD_SLOTS.release()
+
+            thread = threading.Thread(
+                target=runSegment,
+                daemon=True,
+                name=f"djcat-update-{segment.index}",
+            )
+            workerThreads.append(thread)
+            try:
+                thread.start()
+            except Exception:
+                workerThreads.pop()
+                self._activeWorkers -= 1
+                _DOWNLOAD_THREAD_SLOTS.release()
+                raise
 
         try:
             for segment in self._segments:
@@ -375,15 +520,19 @@ class UpdateDownloadWorker(QObject):
                     raise DownloadCanceled()
 
                 now = time.monotonic()
-                timeout = max(0, nextSample - now)
+                timeout = max(0, min(0.1, nextSample - now))
                 try:
-                    future = completionQueue.get(timeout=timeout)
+                    error = completionQueue.get(timeout=timeout)
                 except queue.Empty:
-                    future = None
+                    error = None
+                    completed = False
+                else:
+                    completed = True
 
-                if future is not None:
+                if completed:
                     self._activeWorkers -= 1
-                    future.result()
+                    if error is not None:
+                        raise error
                     if not self._rangeStopEvent.is_set():
                         newSegment = self._splitSlowest()
                         if newSegment is not None:
@@ -397,7 +546,7 @@ class UpdateDownloadWorker(QObject):
                     lastDownloaded = downloaded
                     extraThreads = controller.sample(
                         self._currentSpeed,
-                        self._segmentCount(),
+                        self._activeWorkers,
                         now,
                     )
                     for _ in range(extraThreads):
@@ -419,7 +568,10 @@ class UpdateDownloadWorker(QObject):
             self._closeResponses()
             raise
         finally:
-            executor.shutdown(wait=True, cancel_futures=True)
+            self._rangeStopEvent.set()
+            self._closeResponses()
+            for thread in workerThreads:
+                thread.join()
             self._activeWorkers = 0
 
         if self._downloaded != total:
@@ -453,6 +605,7 @@ class UpdateDownloadWorker(QObject):
                     timeout=REQUEST_TIMEOUT,
                 )
                 self._trackResponse(response)
+                self._ensureResponseHttps(response, url)
                 if response.status_code == 200:
                     raise RangeNotSupportedError()
                 response.raise_for_status()
@@ -497,10 +650,14 @@ class UpdateDownloadWorker(QObject):
                         if len(data) < len(chunk):
                             break
 
-                attempts = 0
                 with segment.lock:
                     if segment.remainingBytes == 0:
                         return
+                attempts += 1
+                if attempts >= MAX_RETRIES:
+                    raise OSError("分段下载响应不完整")
+                if self._cancelEvent.wait(1):
+                    raise DownloadCanceled()
             except (DownloadCanceled, RangeNotSupportedError):
                 raise
             except requests.RequestException:
@@ -579,6 +736,10 @@ class UpdateDownloadWorker(QObject):
                 return
             self._lastProgressEmit = now
         self.progressChanged.emit(downloaded, total, speed, workers)
+
+    def _ensureSizeAllowed(self, size: int) -> None:
+        if self.maxBytes is not None and size > self.maxBytes:
+            raise OSError("下载文件超过安全大小限制")
 
     def _totalSize(self) -> int:
         with self._segmentsLock:

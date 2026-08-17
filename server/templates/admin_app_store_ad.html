@@ -1,0 +1,59 @@
+{% extends "admin_base.html" %}
+
+{% block title %}{{ '编辑广告' if editing else '新增广告' }} · 应用市场{% endblock %}
+{% block page_name %}广告管理{% endblock %}
+
+{% block page_actions %}<a class="button button-secondary" href="{{ url_for('app_store.adminAds') }}">返回广告列表</a>{% endblock %}
+
+{% block content %}
+<div class="market-page">
+    <header class="page-header">
+        <div>
+            <div class="eyebrow">应用市场 / 广告管理</div>
+            <h1>{{ '编辑广告' if editing else '新增广告' }}</h1>
+            <p>配置轮播文案、图片、投放状态及跳转目标；保存后返回广告列表排序。</p>
+        </div>
+    </header>
+
+    {% set button_type = ad.button_type if ad and ad.button_type else ('app' if ad and ad.app_id else ('url' if ad and ad.button_url else 'none')) %}
+    <form class="config-form" method="post" action="{{ url_for('app_store.adminAd', ad_id=ad.id) if editing else url_for('app_store.adminNewAd') }}" data-ad-button-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <section class="form-section">
+            <div class="form-section-title">
+                <span>01</span>
+                <div><h2>广告内容</h2><p>标题和简介会叠加显示在横幅下半区。</p></div>
+            </div>
+            <div class="form-fields two-columns">
+                <label>标题<input name="title" maxlength="120" value="{{ ad.title if ad else '' }}" required></label>
+                <label>按钮类型
+                    <select name="button_type" data-ad-button-type>
+                        <option value="none" {% if button_type == 'none' %}selected{% endif %}>不显示按钮</option>
+                        <option value="app" {% if button_type == 'app' %}selected{% endif %}>绑定软件</option>
+                        <option value="url" {% if button_type == 'url' %}selected{% endif %}>跳转浏览器链接</option>
+                    </select>
+                </label>
+                <label data-ad-app-field>绑定软件
+                    <select name="app_id">
+                        <option value="">请选择软件</option>
+                        {% for app in apps %}<option value="{{ app.id }}" {% if ad and ad.app_id == app.id %}selected{% endif %}>{{ app.name }}</option>{% endfor %}
+                    </select>
+                </label>
+                <label data-ad-url-field>浏览器 HTTPS 链接<input type="url" name="button_url" maxlength="2048" value="{{ ad.button_url if ad else '' }}" placeholder="https://example.com/product"></label>
+                <label class="full">简介<textarea name="description" maxlength="300" rows="2">{{ ad.description if ad else '' }}</textarea></label>
+                <label class="full">图片 HTTPS 链接<input type="url" name="image_url" maxlength="2048" value="{{ ad.image_url if ad else '' }}" required></label>
+                <label class="option-row full">
+                    <span><strong>{{ '启用投放' if editing else '立即投放' }}</strong><small>关闭后仍保留配置，但客户端不会收到这条广告。</small></span>
+                    <input type="checkbox" name="enabled" value="1" {% if not ad or ad.enabled %}checked{% endif %}>
+                </label>
+            </div>
+        </section>
+        <div class="form-actions">
+            <span>{{ '广告编号 ' ~ ad.id if editing else '新广告会追加到轮播末尾。' }}</span>
+            <span class="form-action-buttons">
+                {% if editing %}<button class="button button-danger" type="submit" name="delete" value="1" data-confirm="确认删除这条广告吗？">删除</button>{% endif %}
+                <button class="button button-primary" type="submit">{{ '保存广告' if editing else '新增广告' }}</button>
+            </span>
+        </div>
+    </form>
+</div>
+{% endblock %}

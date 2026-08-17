@@ -73,7 +73,7 @@ Application Catalog 中一个可下载产品，拥有稳定 ID、名称、版本
 _Avoid_: 软件、程序（仅保留在既有 UI 文案中）、package
 
 **Package**:
-一个 Application 面向某一客户端架构发布的 ZIP 安装包；当前架构为 x86_64 或 arm64。Package 是否启用决定该架构能否下载该 Application。
+一个 Application 面向某一客户端架构发布的 ZIP 安装包；当前架构为 x86_64 或 arm64。Package 带有 SHA-256 完整性校验值；只有启用且校验值有效时，该架构才能下载该 Application。
 _Avoid_: Application、Client Installer、binary
 
 **Installed Application**:
@@ -81,7 +81,7 @@ _Avoid_: Application、Client Installer、binary
 _Avoid_: downloaded application、Package
 
 **Application Action**:
-由 Application Catalog 提供、在 Application 边界内执行的受限动作，类型为启动安装目录内的程序、打开 HTTPS 网页或调用允许的系统 URI。作为应用默认入口时称 Open Action；由 Application Preset 引用时称 Preset Action。
+由 Application Catalog 提供、在 Application 边界内执行的受限动作，类型为启动安装目录内的程序、打开 HTTPS 网页或调用允许的系统 URI。启动程序时以该 Application 的安装目录为工作目录，并清理 DJCat 自身的运行时路径，以兼容 Python/Nuitka 打包的 Application。作为应用默认入口时称 Open Action；由 Application Preset 引用时称 Preset Action。
 _Avoid_: Home Action、Shell action
 
 **Application Preset**:
@@ -111,7 +111,7 @@ _Avoid_: chat、generation、Projection
 _Avoid_: account、license、raw hardware ID
 
 **Machine Code**:
-服务器为 Machine Identity 分配的用户可见别名，格式为 `DJ-` 加六位数字。它便于用户和管理员识别额度记录，不具备认证或授权能力。
+服务器为 Machine Identity 分配的用户可见别名，格式为 `DJ-` 加六位起的数字。它便于用户和管理员识别额度记录，不具备认证或授权能力。
 _Avoid_: Machine Identity、activation code、license key
 
 **Daily Quota**:
@@ -133,7 +133,7 @@ DJCat Pro 5 自身的新版本，通过专用更新信息和 Windows 安装程�
 _Avoid_: Application Update；不加限定地称 update
 
 **Application Update**:
-同一 Application 在 Application Catalog 中的版本高于 Installed Application 版本时形成的更新，用新 Package 替换该应用的本地安装。它不会升级 DJCat 客户端。
+同一 Application 在 Application Catalog 中的版本高于 Installed Application，或本地执行清单修订落后时形成的更新，用新 Package 替换该应用的本地安装。它不会升级 DJCat 客户端。
 _Avoid_: Client Update；不加限定地称 update
 
 ## Example dialogue

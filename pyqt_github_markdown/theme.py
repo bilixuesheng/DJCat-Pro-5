@@ -34,10 +34,10 @@ QLabel#h6 { font-size: 13px; font-weight: 600; color: $mutedText; }
 QLabel#paragraph { font-size: 16px; }
 QFrame#hr { background: $border; border: none; }
 
-#blockquote { border-left: 4px solid $border; }
+#blockquote { border-left: 6px solid $border; }
 #blockquote QLabel { color: $mutedText; }
 
-#alert { border-left: 4px solid $border; }
+#alert { border-left: 6px solid $border; }
 #alert[kind="note"]      { border-left-color: $noteColor; }
 #alert[kind="tip"]       { border-left-color: $tipColor; }
 #alert[kind="important"] { border-left-color: $importantColor; }
