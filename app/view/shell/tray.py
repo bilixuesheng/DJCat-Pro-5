@@ -19,6 +19,7 @@ from qfluentwidgets.components.widgets.menu import MenuActionListWidget
 from qframelesswindow import WindowEffect
 
 from app.config.cfg import cfg
+from app.config.constants import APP_NAME
 from app.config.paths import ASSET_DIR
 
 
@@ -121,9 +122,9 @@ class SystemTrayIcon(QSystemTrayIcon):
         super().__init__(parent=parent)
         self.setIcon(QIcon(str(ASSET_DIR / "logo.png")))
 
-        self.setToolTip(cfg.trayTooltip.value)
+        self._updateTrayTooltip(cfg.trayTooltip.value)
 
-        cfg.trayTooltip.valueChanged.connect(self.setToolTip)
+        cfg.trayTooltip.valueChanged.connect(self._updateTrayTooltip)
 
         self._homeCards = []
         cfg.broadcastTasks.valueChanged.connect(self._refreshBroadcastAction)
@@ -134,6 +135,9 @@ class SystemTrayIcon(QSystemTrayIcon):
         cfg.trayHomeCardsInSubmenu.valueChanged.connect(self._rebuildMenu)
         self._rebuildMenu()
         self.activated.connect(self.onTrayIconClick)
+
+    def _updateTrayTooltip(self, text):
+        self.setToolTip(text.strip() or APP_NAME)
 
     def setHomeCards(self, entries) -> None:
         self._homeCards = []

@@ -75,7 +75,7 @@ class Config(QConfig):
         QColor(*THEME_COLOR_PRESETS[0][1]),
     )
     windowTitle = ConfigItem("Personalization", "WindowTitle", "")
-    trayTooltip = ConfigItem("Personalization", "TrayTooltip", "电教猫 Pro 5")
+    trayTooltip = ConfigItem("Personalization", "TrayTooltip", "")
 
     trayLeftClickAction = OptionsConfigItem(
         "Tray",

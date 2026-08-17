@@ -13,6 +13,7 @@ from PySide6.QtTest import QTest
 from qfluentwidgets import FluentIcon as FIF, RoundMenu
 
 from app.config.cfg import cfg
+from app.config.constants import APP_NAME
 from app.view.pages.home_page import HomePage
 from app.view.pages.setting_page import SettingPage
 from app.view.windows.main_window import MainWindow
@@ -21,6 +22,7 @@ from app.view.windows.main_window import MainWindow
 class TrayConfigTest(TestCase):
     def testDefaultsPreserveExistingTrayBehavior(self):
         self.assertEqual(cfg.trayLeftClickAction.defaultValue, "ShowWindow")
+        self.assertEqual(cfg.trayTooltip.defaultValue, "")
         self.assertTrue(cfg.showBroadcastTrayAction.defaultValue)
         self.assertTrue(cfg.showShutdownTrayAction.defaultValue)
         self.assertEqual(cfg.trayHomeCardKeys.defaultValue, [])
@@ -320,6 +322,7 @@ class TrayMenuTest(TestCase):
                 cfg.shutdownTasks,
                 cfg.showBroadcastTrayAction,
                 cfg.showShutdownTrayAction,
+                cfg.trayTooltip,
                 cfg.trayHomeCardKeys,
                 cfg.trayHomeCardsInSubmenu,
             )
@@ -363,6 +366,33 @@ class TrayMenuTest(TestCase):
             ]
         )
         return tray
+
+    def testBlankTrayTooltipUsesApplicationNameAndEditingUpdatesIt(self):
+        from app.view.shell.tray import SystemTrayIcon
+
+        cfg.set(cfg.trayTooltip, "")
+        tray = SystemTrayIcon(self.parent)
+        page = SettingPage()
+        try:
+            tooltipCard = next(
+                card
+                for card in page.personalGroup.settingCards()
+                if card.titleLabel.text() == "自定义托盘文本"
+            )
+            self.assertEqual(tooltipCard.lineEdit.placeholderText(), APP_NAME)
+            self.assertEqual(tray.toolTip(), APP_NAME)
+
+            tooltipCard.lineEdit.setText("值班托盘")
+            tooltipCard.lineEdit.editingFinished.emit()
+            self.assertEqual(cfg.trayTooltip.value, "值班托盘")
+            self.assertEqual(tray.toolTip(), "值班托盘")
+
+            tooltipCard.lineEdit.setText("   ")
+            tooltipCard.lineEdit.editingFinished.emit()
+            self.assertEqual(tray.toolTip(), APP_NAME)
+        finally:
+            page.deleteLater()
+            tray.deleteLater()
 
     def testMenuKeepsFixedEntriesAndPlacesCardsAfterTaskActions(self):
         tray = self._createTray()

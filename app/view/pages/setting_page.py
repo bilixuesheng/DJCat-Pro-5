@@ -417,9 +417,9 @@ class SettingPage(ScrollArea):
                 LineEditSettingCard(
                     FluentIcon.INFO,
                     "自定义托盘文本",
-                    "设置鼠标悬停在系统托盘图标上时显示的文字",
+                    "设置鼠标悬停在系统托盘图标上时显示的文字，留空时使用默认文本",
                     configItem=cfg.trayTooltip,
-                    placeholder="请输入内容",
+                    placeholder=APP_NAME,
                 ),
                 self.themeColorCard,
             ]
