@@ -68,6 +68,7 @@ from app.view.components.tool_tip import setFluentToolTip
 
 SHUTDOWN_WAIT_SECONDS = 0.5
 QWIDGETSIZE_MAX = (1 << 24) - 1
+_LIVE_CATALOG_URI_SCHEMES = frozenset({"classisland"})
 _packageOperationReleaseLock = threading.Lock()
 
 
@@ -791,7 +792,7 @@ class AppStorePage(ScrollArea):
             "}"
         )
         overlayLayout = QVBoxLayout(self.adOverlay)
-        overlayLayout.setContentsMargins(52, 0, 52, 10)
+        overlayLayout.setContentsMargins(20, 0, 20, 10)
         overlayLayout.setSpacing(4)
         overlayLayout.addStretch(1)
         self.adTitle = SubtitleLabel(self.adOverlay)
@@ -884,10 +885,14 @@ class AppStorePage(ScrollArea):
         layout = QVBoxLayout(self.detail)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
-        back = PushButton(FIF.LEFT_ARROW, "返回应用列表", self.detail)
-        back.setMinimumHeight(40)
-        back.clicked.connect(self._backToOverview)
-        layout.addWidget(back, 0, Qt.AlignmentFlag.AlignLeft)
+        self.detailBackButton = PushButton(
+            FIF.LEFT_ARROW, "返回应用列表", self.detail
+        )
+        self.detailBackButton.setFixedHeight(36)
+        self.detailBackButton.clicked.connect(self._backToOverview)
+        layout.addWidget(
+            self.detailBackButton, 0, Qt.AlignmentFlag.AlignLeft
+        )
         columns = QHBoxLayout()
         columns.setSpacing(16)
 
@@ -937,21 +942,28 @@ class AppStorePage(ScrollArea):
         presetLayout = QVBoxLayout(self.presetPanel)
         presetLayout.setContentsMargins(8, 8, 8, 8)
         presetLayout.setSpacing(10)
-        presetLayout.addWidget(SubtitleLabel("主页预设卡片", self.presetPanel))
-        self.announcementLabel = QLabel(self.presetPanel)
+
+        self.presetGroup = CardWidget(self.presetPanel)
+        groupLayout = QVBoxLayout(self.presetGroup)
+        groupLayout.setContentsMargins(16, 16, 16, 16)
+        groupLayout.setSpacing(10)
+        self.presetTitle = SubtitleLabel("主页预设卡片", self.presetGroup)
+        groupLayout.addWidget(self.presetTitle)
+        self.presetHeaderDivider = QFrame(self.presetGroup)
+        self.presetHeaderDivider.setFrameShape(QFrame.Shape.HLine)
+        self.presetHeaderDivider.setStyleSheet(
+            "border: none; border-top: 1px solid rgba(128, 128, 128, 0.2);"
+        )
+        groupLayout.addWidget(self.presetHeaderDivider)
+        self.announcementLabel = QLabel(self.presetGroup)
         self.announcementLabel.setWordWrap(True)
         self.announcementLabel.setStyleSheet(
             "padding: 10px 12px; border-radius: 8px; background: #fff4e6; color: #8a4b08;"
         )
-        presetLayout.addWidget(self.announcementLabel)
-
-        self.presetGroup = CardWidget(self.presetPanel)
-        groupLayout = QVBoxLayout(self.presetGroup)
-        groupLayout.setContentsMargins(16, 4, 16, 4)
-        groupLayout.setSpacing(0)
+        groupLayout.addWidget(self.announcementLabel)
         self.presetCards = QVBoxLayout()
         self.presetCards.setContentsMargins(0, 0, 0, 0)
-        self.presetCards.setSpacing(0)
+        self.presetCards.setSpacing(10)
         groupLayout.addLayout(self.presetCards)
         presetLayout.addWidget(self.presetGroup)
         presetLayout.addStretch(1)
@@ -1287,6 +1299,12 @@ class AppStorePage(ScrollArea):
                     app.get("icon_url", ""), card.get("icon_path", "")
                 ),
             }
+            if card["preset_id"] != DIRECT_APPLICATION_PRESET_ID:
+                currentAction = self._currentCatalogPresetAction(
+                    card["app_id"], card["preset_id"]
+                )
+                if currentAction is not None:
+                    values["action"] = currentAction
             for key, value in values.items():
                 if card.get(key) != value:
                     card[key] = value
@@ -1717,6 +1735,7 @@ class AppStorePage(ScrollArea):
         if not self.currentApp:
             return
         appId = int(self.currentApp["id"])
+        supported = bool(self.currentApp.get("architecture_supported"))
         hasOpenAction = isinstance(
             self._installedOpenAction(self.currentApp), dict
         )
@@ -1731,11 +1750,9 @@ class AppStorePage(ScrollArea):
                 else "未配置打开动作"
             )
         else:
-            self.detailAction.setText("下载")
-        # The store validates package hashes before publishing this flag. Keep the
-        # detail action in lockstep with cards so malformed catalog entries cannot
-        # enable a download that will only fail after the user clicks it.
-        supported = bool(self.currentApp.get("architecture_supported"))
+            self.detailAction.setText("下载" if supported else "不支持")
+        # Keep the detail action in lockstep with cards so an unavailable
+        # architecture cannot enable a download that will fail after a click.
         if self.currentApp.get("installed") and not self.currentApp.get(
             "update_available"
         ):
@@ -2049,17 +2066,10 @@ class AppStorePage(ScrollArea):
             str(preset.get("id", ""))
             for preset in app.get("installed_presets", []) or []
         }
-        for index, preset in enumerate(presets):
-            if index:
-                divider = QFrame(self.presetGroup)
-                divider.setFrameShape(QFrame.Shape.HLine)
-                divider.setStyleSheet(
-                    "border: none; border-top: 1px solid rgba(128, 128, 128, 0.2);"
-                )
-                self.presetCards.addWidget(divider)
-            item = QWidget(self.presetGroup)
+        for preset in presets:
+            item = CardWidget(self.presetGroup)
             row = QHBoxLayout(item)
-            row.setContentsMargins(0, 10, 0, 10)
+            row.setContentsMargins(14, 10, 14, 10)
             row.setSpacing(12)
             copy = QVBoxLayout()
             copy.setSpacing(4)
@@ -2071,7 +2081,10 @@ class AppStorePage(ScrollArea):
             copy.addWidget(description)
             row.addLayout(copy, 1)
             key = (int(app["id"]), int(preset["id"]))
-            available = str(preset.get("id", "")) in installedPresetIds
+            available = bool(app.get("installed")) and (
+                str(preset.get("id", "")) in installedPresetIds
+                or self._catalogExternalAction(preset) is not None
+            )
             busy = (
                 key[0] in self._downloadJobs
                 or key[0] in self._installing
@@ -2107,6 +2120,62 @@ class AppStorePage(ScrollArea):
             row.addWidget(pin)
             self.presetCards.addWidget(item)
 
+    @staticmethod
+    def _catalogExternalAction(preset):
+        action = preset.get("action") if isinstance(preset, dict) else None
+        if not isinstance(action, dict):
+            return None
+        actionType = str(action.get("type", "")).lower()
+        target = str(action.get("target", "")).strip()
+        if any(char in target for char in "\r\n\x00"):
+            return None
+        url = QUrl(target)
+        if not url.isValid():
+            return None
+        if actionType == "url":
+            if (
+                url.scheme().lower() != "https"
+                or not url.host()
+                or url.userName()
+                or url.password()
+            ):
+                return None
+        elif (
+            actionType != "uri"
+            or url.scheme().lower() not in _LIVE_CATALOG_URI_SCHEMES
+        ):
+            return None
+        return action
+
+    def _currentCatalogPreset(self, appId, presetId):
+        app = next(
+            (
+                item
+                for item in self.catalog
+                if isinstance(item, dict)
+                and str(item.get("id", "")) == str(appId)
+            ),
+            None,
+        )
+        if app is None:
+            return None
+        presets = app.get("presets")
+        if not isinstance(presets, list):
+            return None
+        return next(
+            (
+                item
+                for item in presets
+                if isinstance(item, dict)
+                and str(item.get("id", "")) == str(presetId)
+            ),
+            None,
+        )
+
+    def _currentCatalogPresetAction(self, appId, presetId):
+        preset = self._currentCatalogPreset(appId, presetId)
+        return self._catalogExternalAction(preset)
+
     def _openPreset(self, app, preset):
         appId = int(app["id"])
         if (
@@ -2134,6 +2203,8 @@ class AppStorePage(ScrollArea):
             None,
         )
         action = installedPreset.get("action") if installedPreset else None
+        if not isinstance(action, dict):
+            action = self._catalogExternalAction(preset)
         if not isinstance(action, dict):
             InfoBar.warning(
                 "预设不可用",
@@ -2216,27 +2287,46 @@ class AppStorePage(ScrollArea):
         cards = normalize_pinned_cards([item])
         if not cards:
             InfoBar.warning("预设卡片无效", "请重新固定这张主页卡片。", duration=3000, position=InfoBarPosition.BOTTOM_RIGHT, parent=noticeParent)
-            return
+            return False
         item = cards[0]
         appId = item["app_id"]
         installed = self.store.installed().get(appId)
         if not installed:
             InfoBar.warning("应用尚未安装", "请先安装对应应用后再使用主页预设卡片。", duration=3000, position=InfoBarPosition.BOTTOM_RIGHT, parent=noticeParent)
-            return
+            return False
         try:
             if item["preset_id"] == DIRECT_APPLICATION_PRESET_ID:
                 self.store.executeAction(installed)
             else:
-                preset = next(
+                localPreset = next(
                     (
                         preset
                         for preset in installed.metadata.get("presets", [])
-                        if str(preset.get("id", ""))
+                        if isinstance(preset, dict)
+                        and str(preset.get("id", ""))
                         == str(item["preset_id"])
                     ),
                     None,
                 )
-                action = preset.get("action") if preset else None
+                action = None
+                if self._catalogLoaded:
+                    catalogPreset = self._currentCatalogPreset(
+                        appId, item["preset_id"]
+                    )
+                    if catalogPreset is not None:
+                        catalogAction = self._catalogExternalAction(catalogPreset)
+                        if catalogAction is not None:
+                            action = catalogAction
+                        elif (
+                            isinstance(catalogPreset.get("action"), dict)
+                            and catalogPreset["action"].get("type") == "program"
+                            and isinstance(localPreset, dict)
+                        ):
+                            action = localPreset.get("action")
+                elif isinstance(localPreset, dict):
+                    action = localPreset.get("action")
+                if not isinstance(action, dict) and not self._catalogLoaded:
+                    action = self._catalogExternalAction(item)
                 if not isinstance(action, dict):
                     InfoBar.warning(
                         "主页卡片已失效",
@@ -2245,10 +2335,12 @@ class AppStorePage(ScrollArea):
                         position=InfoBarPosition.BOTTOM_RIGHT,
                         parent=noticeParent,
                     )
-                    return
+                    return False
                 self.store.executeAction(installed, action)
+            return True
         except (ApplicationStoreError, OSError, ValueError) as error:
             InfoBar.error("执行预设失败", str(error), duration=4000, position=InfoBarPosition.BOTTOM_RIGHT, parent=noticeParent)
+            return False
 
     def refreshPinnedCards(self):
         cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)

@@ -618,3 +618,15 @@ class AIAdminTest(TestCase):
         self.assertNotIn("submitter.dataset.confirmed", javascript)
         self.assertNotIn("button.dataset.confirmed", javascript)
         self.assertIn("X-Requested-With", javascript)
+        self.assertIn(
+            'document.addEventListener("pointermove", handlePointerMove',
+            javascript,
+        )
+        self.assertIn(
+            'document.addEventListener("pointerup", handlePointerUp',
+            javascript,
+        )
+        self.assertNotIn(
+            'handle.addEventListener("lostpointercapture"',
+            javascript,
+        )

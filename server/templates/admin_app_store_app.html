@@ -39,7 +39,6 @@
                 <div class="option-list package-option">
                     <label class="option-row"><span><strong>{{ architecture }}</strong><small>按客户端架构提供 ZIP 安装包。</small></span><input type="checkbox" name="{{ architecture }}_enabled" value="1" {% if package and package.enabled %}checked{% endif %}></label>
                     <label class="package-url-field">ZIP 下载 HTTPS 链接<input type="url" name="{{ architecture }}_url" maxlength="2048" value="{{ package.download_url if package else '' }}" placeholder="https://下载域名/软件/{{ architecture }}.zip"><small>示例：<code>https://cdn.example.com/classisland-x86_64.zip</code></small></label>
-                    <label class="package-url-field">ZIP SHA-256<input name="{{ architecture }}_sha256" maxlength="64" value="{{ package.sha256 if package else '' }}" placeholder="64 位十六进制摘要"><small>发布前对 ZIP 计算 SHA-256；客户端会在安装前核对。</small></label>
                 </div>
             {% endfor %}
             </div>

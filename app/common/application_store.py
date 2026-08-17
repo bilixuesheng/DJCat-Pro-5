@@ -1083,15 +1083,10 @@ class ApplicationStore:
                 if local
                 else 0
             )
-            item["architecture_supported"] = self.architecture in {
-                architecture
-                for architecture, package in packages.items()
-                if (
-                    isinstance(package, dict)
-                    and package.get("enabled")
-                    and _validSha256(package.get("sha256"))
-                )
-            }
+            package = packages.get(self.architecture)
+            item["architecture_supported"] = bool(
+                package and package.get("enabled")
+            )
             item["update_available"] = bool(
                 local
                 and item["architecture_supported"]
@@ -1209,7 +1204,7 @@ def downloadWorker(app: dict, store: ApplicationStore):
     package = (app.get("packages") or {}).get(store.architecture) or {}
     expectedSha256 = str(package.get("sha256", "")).strip().lower()
     if not _validSha256(expectedSha256):
-        raise ApplicationStoreError("安装包缺少有效的 SHA-256 校验值")
+        expectedSha256 = ""
     target = store.downloadPath(app)
     target.parent.mkdir(parents=True, exist_ok=True)
     return UpdateDownloadWorker(
@@ -1218,7 +1213,7 @@ def downloadWorker(app: dict, store: ApplicationStore):
         validator=validateZip,
         requireHttps=True,
         maxBytes=MAX_ZIP_COMPRESSED,
-        expectedSha256=expectedSha256,
+        expectedSha256=expectedSha256 or None,
     )
 
 

@@ -21,6 +21,7 @@ from app.common.application_store import (
     DownloadSlots,
     ImageCache,
     UnsafeArchiveError,
+    clientArchitecture,
     downloadWorker,
     isUpdateAvailable,
     validateZip,
@@ -159,9 +160,47 @@ class ApplicationStoreTest(TestCase):
         self.assertFalse(merged[0]["architecture_supported"])
 
         merged = self.store.mergeInstalled(
-            [{"id": 3, "packages": {"x86_64": {"enabled": True}}}]
+            [
+                {
+                    "id": 3,
+                    "packages": {self.store.architecture: {"enabled": True}},
+                }
+            ]
         )
-        self.assertFalse(merged[0]["architecture_supported"])
+        self.assertTrue(merged[0]["architecture_supported"])
+
+    @patch("app.common.application_store.platform.machine", return_value="AMD64")
+    def testAmd64SourceRuntimeUsesX8664CatalogPackages(self, _machine):
+        self.assertEqual(clientArchitecture(), "x86_64")
+        self.store.architecture = clientArchitecture()
+
+        merged = self.store.mergeInstalled(
+            [
+                {
+                    "id": 3,
+                    "packages": {
+                        "x86_64": {"enabled": True}
+                    },
+                }
+            ]
+        )
+
+        self.assertTrue(merged[0]["architecture_supported"])
+
+    def testEnabledPackageDoesNotRequireChecksum(self):
+        merged = self.store.mergeInstalled(
+            [
+                {
+                    "id": 3,
+                    "packages": {
+                        self.store.architecture: {"enabled": True}
+                    },
+                }
+            ]
+        )
+
+        self.assertTrue(merged[0]["architecture_supported"])
+        self.assertNotIn("download_unavailable_reason", merged[0])
 
     def testInstallDoesNotReplaceDirectoryOwnedByAnotherApplication(self):
         self.store.installZip(self._app(), self._zip(content=b"first"))
@@ -780,7 +819,7 @@ class ApplicationStoreTest(TestCase):
         self.assertRegex(first["token"][0], r"^[a-f0-9]{32}$")
         self.assertNotEqual(first["token"], second["token"])
 
-    def testPackageDownloadRequiresCatalogSha256(self):
+    def testPackageDownloadUsesOptionalCatalogSha256(self):
         app = self._app() | {
             "packages": {
                 self.store.architecture: {
@@ -793,8 +832,14 @@ class ApplicationStoreTest(TestCase):
         worker = downloadWorker(app, self.store)
 
         self.assertEqual(worker._expectedSha256, "a" * 64)
-        with self.assertRaisesRegex(ApplicationStoreError, "SHA-256"):
-            downloadWorker(self._app(), self.store)
+        worker = downloadWorker(
+            self._app()
+            | {
+                "packages": {self.store.architecture: {"enabled": True}}
+            },
+            self.store,
+        )
+        self.assertIsNone(worker._expectedSha256)
 
     def testVersionComparison(self):
         self.assertTrue(isUpdateAvailable("1.0.0", "1.1.0"))

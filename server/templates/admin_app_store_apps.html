@@ -14,14 +14,6 @@
         <div class="machine-count"><strong data-item-count>{{ apps|length }}</strong><span>个软件</span></div>
     </header>
 
-    {% if integrity_issues %}
-    <div class="notice error" role="alert">
-        <strong>{{ integrity_issues|length }} 个已启用安装包缺少有效的 SHA-256，相关架构已暂停下载。</strong>
-        请编辑软件并补齐校验值：
-        {% for issue in integrity_issues %}{{ issue.name }}（{{ issue.architecture }}）{% if not loop.last %}、{% endif %}{% endfor %}。
-    </div>
-    {% endif %}
-
     <section class="section-block" aria-labelledby="apps-title">
         <div class="section-heading">
             <div><span class="section-index">01</span><h2 id="apps-title">已发布软件</h2></div>
@@ -43,7 +35,7 @@
                         </td>
                         <td><code>{{ app.id }}</code></td>
                         <td><span>{{ app.name }}</span><br><small>{{ app.developer or '未填写开发者' }}</small></td>
-                        <td>{{ app.version }}{% if app.id in integrity_app_ids %}<br><small>校验值待补齐</small>{% endif %}</td>
+                        <td>{{ app.version }}</td>
                         <td><code>{{ app.install_dir }}</code></td>
                         <td>{{ '是' if app.recommended else '否' }}</td>
                         <td>{{ app.download_count }}</td>

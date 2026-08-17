@@ -427,9 +427,7 @@ def _appPayload(row, packages, presets):
     for package in packages:
         sha256 = _safeSha256(package["sha256"])
         packageMap[package["architecture"]] = {
-            # A package without an integrity value must not be advertised as
-            # downloadable; otherwise the client can only fail after a click.
-            "enabled": bool(package["enabled"]) and bool(sha256),
+            "enabled": bool(package["enabled"]),
             "sha256": sha256,
         }
     return {
@@ -707,7 +705,7 @@ def register_app_store(
         with closing(connect()) as database:
             row = database.execute(
                 """
-                SELECT p.download_url, p.sha256
+                SELECT p.download_url
                 FROM market_packages p
                 JOIN market_applications a ON a.id = p.app_id
                 WHERE a.id = ? AND p.architecture = ? AND p.enabled = 1
@@ -719,8 +717,6 @@ def register_app_store(
             url = _safeUrl(row["download_url"])
             if not url:
                 return jsonify(message="安装包链接配置无效"), 503
-            if not _safeSha256(row["sha256"]):
-                return jsonify(message="安装包缺少有效的 SHA-256 校验值"), 503
             token = request.args.get("token", "").strip().lower()
             shouldCount = False
             if _DOWNLOAD_TOKEN.fullmatch(token):
@@ -768,22 +764,11 @@ def register_app_store(
             rows = database.execute(
                 "SELECT * FROM market_applications ORDER BY sort_order, id"
             ).fetchall()
-            packageRows = database.execute(
-                "SELECT p.app_id, p.architecture, p.sha256, a.name "
-                "FROM market_packages p "
-                "JOIN market_applications a ON a.id = p.app_id "
-                "WHERE p.enabled = 1 ORDER BY a.sort_order, a.id, p.architecture"
-            ).fetchall()
-        integrityIssues = [
-            row for row in packageRows if not _safeSha256(row["sha256"])
-        ]
         return render_template(
             "admin_app_store_apps.html",
             csrf_token=csrf_token(),
             current_page="app_store_apps",
             apps=rows,
-            integrity_issues=integrityIssues,
-            integrity_app_ids={row["app_id"] for row in integrityIssues},
         )
 
     @blueprint.route("/admin/app-store/apps/new", methods=["GET", "POST"])
@@ -873,8 +858,8 @@ def register_app_store(
                 errors.append(f"{architecture} 安装包启用时必须填写 HTTPS 链接")
             elif rawUrl and not url:
                 errors.append(f"{architecture} 安装包链接无效")
-            if (enabled or rawUrl or sha256) and not _SHA256.fullmatch(sha256):
-                errors.append(f"{architecture} 安装包必须填写 64 位 SHA-256")
+            if sha256 and not _SHA256.fullmatch(sha256):
+                errors.append(f"{architecture} 安装包 SHA-256 格式无效")
             if url:
                 packages[architecture] = (enabled, url, sha256)
         submitted = {

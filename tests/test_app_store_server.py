@@ -550,13 +550,20 @@ class AppStoreServerTest(TestCase):
 
         self.assertFalse(any("CREATE TABLE" in statement for statement in statements))
 
-    def testAdminWarnsWhenAnEnabledLegacyPackageNeedsASha256(self):
+    def testEnabledPackageWithoutSha256RemainsDownloadable(self):
         self._createApp()
         with closing(ai_markdown._connect()) as database:
             database.execute(
                 "UPDATE market_packages SET sha256 = '' WHERE architecture = 'x86_64'"
             )
             database.commit()
+        catalog = self.client.get(
+            "/app-store/catalog",
+            base_url="https://api.djcatpro.top",
+        )
+        package = catalog.json["apps"][0]["packages"]["x86_64"]
+        self.assertTrue(package["enabled"])
+        self.assertEqual(package["sha256"], "")
         self._login()
 
         response = self.client.get(
@@ -566,8 +573,18 @@ class AppStoreServerTest(TestCase):
 
         body = response.get_data(as_text=True)
         self.assertEqual(response.status_code, 200)
-        self.assertIn("已暂停下载", body)
-        self.assertIn("Demo（x86_64）", body)
+        self.assertNotIn("已暂停下载", body)
+
+        editPage = self.client.get(
+            "/admin/app-store/apps/1",
+            base_url="https://dash.djcatpro.top",
+        )
+        self.assertNotIn("ZIP SHA-256", editPage.get_data(as_text=True))
+        download = self.client.get(
+            "/app-store/apps/1/download?arch=x86_64&token=" + "b" * 32,
+            base_url="https://api.djcatpro.top",
+        )
+        self.assertEqual(download.status_code, 302)
 
     def testDownloadRetriesWithSameTokenCountOnce(self):
         self._createApp()

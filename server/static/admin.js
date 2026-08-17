@@ -305,12 +305,35 @@
             }
             current.row.classList.remove("is-dragging");
             table.classList.remove("is-sorting");
-            if (current.handle.hasPointerCapture(pointerId)) {
+            if (current.handle.hasPointerCapture?.(pointerId)) {
                 current.handle.releasePointerCapture(pointerId);
             }
             if (!save) restore(current.order);
             else if (current.changed) persist(current.order);
         };
+
+        const handlePointerMove = (event) => {
+            if (!drag || drag.pointerId !== event.pointerId) return;
+            drag.clientX = event.clientX;
+            drag.clientY = event.clientY;
+            moveDraggedRow(event.clientX, event.clientY);
+            if (scrollFrame === null) {
+                scrollFrame = window.requestAnimationFrame(autoScroll);
+            }
+            event.preventDefault();
+        };
+
+        const handlePointerUp = (event) => {
+            finishDrag(event.pointerId, true);
+        };
+
+        const handlePointerCancel = (event) => {
+            finishDrag(event.pointerId, false);
+        };
+
+        document.addEventListener("pointermove", handlePointerMove, { passive: false });
+        document.addEventListener("pointerup", handlePointerUp);
+        document.addEventListener("pointercancel", handlePointerCancel);
 
         table.querySelectorAll(".drag-handle").forEach((handle) => {
             handle.addEventListener("pointerdown", (event) => {
@@ -329,27 +352,6 @@
                 row.classList.add("is-dragging");
                 table.classList.add("is-sorting");
                 event.preventDefault();
-            });
-
-            handle.addEventListener("pointermove", (event) => {
-                if (!drag || drag.pointerId !== event.pointerId) return;
-                drag.clientX = event.clientX;
-                drag.clientY = event.clientY;
-                moveDraggedRow(event.clientX, event.clientY);
-                if (scrollFrame === null) {
-                    scrollFrame = window.requestAnimationFrame(autoScroll);
-                }
-                event.preventDefault();
-            });
-
-            handle.addEventListener("pointerup", (event) => {
-                finishDrag(event.pointerId, true);
-            });
-            handle.addEventListener("pointercancel", (event) => {
-                finishDrag(event.pointerId, false);
-            });
-            handle.addEventListener("lostpointercapture", (event) => {
-                finishDrag(event.pointerId, false);
             });
 
             handle.addEventListener("keydown", (event) => {

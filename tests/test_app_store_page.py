@@ -447,15 +447,21 @@ class AppStorePageTest(TestCase):
         leftScroll = self.page.detailLeftScroll.verticalScrollBar()
         rightScroll = self.page.presetScroll.verticalScrollBar()
         device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
-        viewport = self.page.presetScroll.viewport()
-        start = viewport.rect().center()
+        touchTarget = self.page.presetCards.itemAt(0).widget()
+        start = touchTarget.rect().center()
         end = start + QPoint(0, -80)
 
-        QTest.touchEvent(viewport, device).press(0, start, viewport).commit()
+        QTest.touchEvent(touchTarget, device).press(
+            0, start, touchTarget
+        ).commit()
         self.qtApp.processEvents()
-        QTest.touchEvent(viewport, device).move(0, end, viewport).commit()
+        QTest.touchEvent(touchTarget, device).move(
+            0, end, touchTarget
+        ).commit()
         QTest.qWait(100)
-        QTest.touchEvent(viewport, device).release(0, end, viewport).commit()
+        QTest.touchEvent(touchTarget, device).release(
+            0, end, touchTarget
+        ).commit()
         QTest.qWait(200)
 
         self.assertGreater(rightScroll.value(), 0)
@@ -472,8 +478,23 @@ class AppStorePageTest(TestCase):
             len(self.page.presetGroup.findChildren(ToggleToolButton)),
             len(app["presets"]),
         )
+        self.assertIs(self.page.presetTitle.parentWidget(), self.page.presetGroup)
+        self.assertIs(
+            self.page.presetHeaderDivider.parentWidget(), self.page.presetGroup
+        )
+        for index in range(self.page.presetCards.count()):
+            self.assertIsInstance(
+                self.page.presetCards.itemAt(index).widget(), CardWidget
+            )
 
         self.page._backToOverview()
+
+    def testAdvertisementCopyAndDetailBackButtonUseCompactGeometry(self):
+        margins = self.page.adOverlay.layout().contentsMargins()
+
+        self.assertEqual(margins.left(), 20)
+        self.assertEqual(margins.right(), 20)
+        self.assertEqual(self.page.detailBackButton.height(), 36)
 
     def testDetailPresetCanBeOpenedWithInstalledAction(self):
         catalogAction = {"type": "program", "target": "new.exe"}
@@ -527,6 +548,63 @@ class AppStorePageTest(TestCase):
                     "title": "新版预设",
                     "description": "需要更新后使用",
                     "action": {"type": "program", "target": "new.exe"},
+                }
+            ],
+            "installed_presets": [],
+        }
+
+        self.page._renderPresets(app)
+        openButton = next(
+            button
+            for button in self.page.presetGroup.findChildren(PushButton)
+            if button.text() == "打开"
+        )
+
+        self.assertFalse(openButton.isEnabled())
+
+    def testCatalogUriPresetCanOpenBeforeInstalledManifestRefresh(self):
+        action = {"type": "uri", "target": "classisland://app/class-swap"}
+        app = _apps(1)[0] | {
+            "id": 7,
+            "installed": True,
+            "presets": [
+                {
+                    "id": 11,
+                    "title": "换课",
+                    "description": "打开换课界面",
+                    "action": action,
+                }
+            ],
+            "installed_presets": [],
+        }
+        installed = SimpleNamespace(metadata={"presets": []})
+        self.page.store.installed = Mock(return_value={7: installed})
+        self.page.store.executeAction = Mock()
+
+        self.page._renderPresets(app)
+        openButton = next(
+            button
+            for button in self.page.presetGroup.findChildren(PushButton)
+            if button.text() == "打开"
+        )
+
+        self.assertTrue(openButton.isEnabled())
+        openButton.click()
+        self.page.store.executeAction.assert_called_once_with(installed, action)
+
+    def testCatalogPresetRejectsUnapprovedUriScheme(self):
+        app = _apps(1)[0] | {
+            "id": 7,
+            "installed": True,
+            "presets": [
+                {
+                    "id": 11,
+                    "title": "未知协议",
+                    "description": "不应从实时目录直接执行",
+                    "action": {
+                        "type": "uri",
+                        "target": "arbitrary-handler://payload",
+                    },
                 }
             ],
             "installed_presets": [],
@@ -697,7 +775,7 @@ class AppStorePageTest(TestCase):
         self.page.currentApp = app
         self.page._updateDetailAction()
 
-        self.assertEqual(self.page.detailAction.text(), "下载")
+        self.assertEqual(self.page.detailAction.text(), "不支持")
         self.assertFalse(self.page.detailAction.isEnabled())
 
     def testInstalledActionUsesLocalManifestInsteadOfNewCatalogAction(self):
@@ -747,6 +825,20 @@ class AppStorePageTest(TestCase):
         )
         self.page.store = Mock()
         self.page.store.installed.return_value = {1: installed}
+        self.page.catalog = [
+            {
+                "id": 1,
+                "presets": [
+                    {
+                        "id": 7,
+                        "action": {
+                            "type": "program",
+                            "target": "catalog.exe",
+                        },
+                    }
+                ],
+            }
+        ]
 
         self.page.executePinnedCard(
             {
@@ -762,6 +854,91 @@ class AppStorePageTest(TestCase):
             installed,
             {"type": "program", "target": "new.exe"},
         )
+
+    def testColdStartPinnedCatalogUriUsesStoredSafeAction(self):
+        action = {"type": "uri", "target": "classisland://app/class-swap"}
+        installed = SimpleNamespace(metadata={"presets": []})
+        self.page.store = Mock()
+        self.page.store.installed.return_value = {1: installed}
+        self.page._catalogLoaded = False
+
+        self.page.executePinnedCard(
+            {
+                "app_id": 1,
+                "preset_id": 7,
+                "title": "换课",
+                "description": "",
+                "action": action,
+            }
+        )
+
+        self.page.store.executeAction.assert_called_once_with(installed, action)
+
+    def testPinnedCatalogUriPresetSurvivesInstalledManifestLag(self):
+        currentAction = {
+            "type": "uri",
+            "target": "classisland://app/class-swap",
+        }
+        installed = SimpleNamespace(metadata={"presets": []})
+        self.page.store = Mock()
+        self.page.store.installed.return_value = {1: installed}
+        self.page.catalog = [
+            {
+                "id": 1,
+                "presets": [{"id": 7, "action": currentAction}],
+            }
+        ]
+
+        self.page.executePinnedCard(
+            {
+                "app_id": 1,
+                "preset_id": 7,
+                "title": "换课",
+                "description": "",
+                "action": {
+                    "type": "uri",
+                    "target": "classisland://app/old-target",
+                },
+            }
+        )
+
+        self.page.store.executeAction.assert_called_once_with(
+            installed, currentAction
+        )
+
+    def testWithdrawnCatalogPresetDoesNotUseStoredExternalAction(self):
+        installed = SimpleNamespace(
+            metadata={
+                "presets": [
+                    {
+                        "id": 7,
+                        "action": {
+                            "type": "uri",
+                            "target": "classisland://app/withdrawn",
+                        },
+                    }
+                ]
+            }
+        )
+        self.page.store = Mock()
+        self.page.store.installed.return_value = {1: installed}
+        self.page.catalog = [{"id": 1, "presets": "malformed"}]
+
+        with patch.object(InfoBar, "warning"):
+            self.page.executePinnedCard(
+                {
+                    "app_id": 1,
+                    "preset_id": 7,
+                    "title": "已撤回预设",
+                    "description": "",
+                    "action": {
+                        "type": "uri",
+                        "target": "classisland://app/withdrawn",
+                    },
+                }
+            )
+
+        self.page.store.executeAction.assert_not_called()
 
     def testCatalogRefreshKeepsPinnedActionAndCachedIconUntilReplacementLoads(self):
         item = cfg.pinnedHomeCards
@@ -1014,10 +1191,7 @@ class AppStorePageTest(TestCase):
             self.page.adButton.geometry().top(),
             self.page.adOverlay.height() // 2,
         )
-        self.assertGreaterEqual(
-            self.page.adTitle.geometry().left(),
-            self.page.adPrevious.geometry().right() + 8,
-        )
+        self.assertEqual(self.page.adTitle.geometry().left(), 20)
         self.assertGreaterEqual(
             self.page.adTitle.width(),
             self.page.adOverlay.width() - 120,
