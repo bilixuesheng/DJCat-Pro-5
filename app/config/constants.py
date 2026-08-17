@@ -1,6 +1,6 @@
 from app.common.config import VERSION
 
-APP_NAME = "电教猫 Pro 5 Beta"
+APP_NAME = "电教猫 Pro 5"
 YEAR = 2026
 AUTHOR = "XUESHENG"
 
