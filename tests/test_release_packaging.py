@@ -78,7 +78,7 @@ def test_release_workflow_uses_native_windows_runners_and_four_packages():
     assert 'release_args=()' in workflow
     assert 'if [[ "$TAG" == *-* ]]; then' in workflow
     assert "--prerelease" in workflow
-    assert "cancel-in-progress: false" in workflow
+    assert "cancel-in-progress: true" in workflow
     assert '-OutFile "scripts\\ChineseSimplified.isl"' in workflow
     assert 'find release-assets -type f -name "$file"' in workflow
     assert 'cp "${matches[0]}" "release-files/$file"' in workflow
