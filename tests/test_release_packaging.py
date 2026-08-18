@@ -78,7 +78,7 @@ def test_release_workflow_uses_native_windows_runners_and_four_packages():
     assert 'release_args=()' in workflow
     assert 'if [[ "$TAG" == *-* ]]; then' in workflow
     assert "--prerelease" in workflow
-    assert "cancel-in-progress: true" in workflow
+    assert "cancel-in-progress: false" in workflow
     assert '-OutFile "scripts\\ChineseSimplified.isl"' in workflow
     assert 'find release-assets -type f -name "$file"' in workflow
     assert 'cp "${matches[0]}" "release-files/$file"' in workflow
@@ -103,16 +103,15 @@ def test_pre_release_number_is_preserved_in_windows_file_version(monkeypatch):
     assert "--product-version=5.0.0.22" in args
 
 
-def test_release_installs_project_and_dev_dependencies_with_pip():
+def test_release_uses_the_committed_lock_for_tests_and_builds():
     workflow = (REPO / ".github" / "workflows" / "main.yml").read_text(
         encoding="utf-8"
     )
 
-    assert "setup-uv" not in workflow
-    assert "uv sync --frozen" not in workflow
-    assert workflow.count("python -m pip install . --group dev") == 2
-    assert "python -m pytest -q" in workflow
-    assert "python deploy.py" in workflow
+    assert (REPO / "uv.lock").is_file()
+    assert "uv.lock" not in (REPO / ".gitignore").read_text(encoding="utf-8")
+    assert workflow.count("uv sync --frozen") == 2
+    assert "uv run --frozen python -m pytest -q" in workflow
     assert '"Flask>=3.0"' in (REPO / "pyproject.toml").read_text(encoding="utf-8")
 
 
