@@ -27,3 +27,4 @@ jobs:
             -f message="ci: capture latest release runs" \
             -f content="$content" \
             -f branch="$GITHUB_REF_NAME"
+          # refresh after ARM64 lock verification
