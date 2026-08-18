@@ -12,6 +12,7 @@ import sqlite3
 import threading
 from contextlib import closing
 from functools import wraps
+from pathlib import Path
 from urllib.parse import urlparse
 
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request
@@ -210,6 +211,8 @@ def _ensureSchema(connect):
     with closing(connect()) as database, _schemaInitLock:
         databaseRow = database.execute("PRAGMA database_list").fetchone()
         databaseKey = databaseRow[2] if databaseRow else ""
+        if databaseKey:
+            databaseKey = str(Path(databaseKey).resolve())
         identity = _schemaIdentity(databaseKey)
         if (
             databaseKey

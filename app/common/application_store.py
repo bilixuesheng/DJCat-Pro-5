@@ -684,7 +684,7 @@ class ApplicationStore:
         onLaunchFailure=None,
     ):
         self.apiBaseUrl = (apiBaseUrl or os.environ.get("DJCATAI_API_BASE_URL", "https://api.djcatpro.top")).rstrip("/") + "/"
-        self.programDir = Path(programDir)
+        self.programDir = Path(programDir).resolve()
         self.programDir.mkdir(parents=True, exist_ok=True)
         self.cache = cache or appStoreImageCache
         self.architecture = clientArchitecture()
