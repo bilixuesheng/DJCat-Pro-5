@@ -107,12 +107,16 @@ def test_release_uses_the_committed_lock_for_tests_and_builds():
     workflow = (REPO / ".github" / "workflows" / "main.yml").read_text(
         encoding="utf-8"
     )
+    metadata = (REPO / "pyproject.toml").read_text(encoding="utf-8")
 
     assert (REPO / "uv.lock").is_file()
     assert "uv.lock" not in (REPO / ".gitignore").read_text(encoding="utf-8")
     assert workflow.count("uv sync --frozen") == 2
     assert "uv run --frozen python -m pytest -q" in workflow
-    assert '"Flask>=3.0"' in (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    assert "      - pyproject.toml" in workflow
+    assert "      - uv.lock" in workflow
+    assert '"cryptography==46.0.3"' in metadata
+    assert '"Flask>=3.0"' in metadata
 
 
 def test_release_assets_are_not_overwritten_for_an_existing_tag():
