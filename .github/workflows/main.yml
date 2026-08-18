@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: djcat-release-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   PYTHONUTF8: 1
@@ -26,8 +26,6 @@ env:
 jobs:
   prepare:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     outputs:
       version: ${{ steps.release.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
@@ -35,7 +33,6 @@ jobs:
       notes_file: ${{ steps.release.outputs.notes_file }}
     steps:
       - name: Checkout
-        id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -75,89 +72,37 @@ jobs:
           echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
           echo "notes_file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
 
-      - name: Record prepare failure
-        if: failure()
-        continue-on-error: true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          body=$(printf '%s\n' \
-            'job=prepare' \
-            'checkout=${{ steps.checkout.outcome }}' \
-            'release=${{ steps.release.outcome }}')
-          content=$(printf '%s' "$body" | base64 -w0)
-          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/.ci/release-${GITHUB_RUN_ID}-prepare.txt" \
-            -f message="ci: record release diagnostics" \
-            -f content="$content" \
-            -f branch="$GITHUB_REF_NAME"
-
   test-windows:
     needs: prepare
     runs-on: windows-2022
-    permissions:
-      contents: write
     steps:
       - name: Checkout release source
-        id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.source_sha }}
 
       - name: Set up Python
-        id: setup_python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           architecture: x64
 
-      - name: Upgrade pip
-        id: upgrade_pip
-        run: python -m pip install --upgrade pip
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.12.1"
+          enable-cache: true
 
-      - name: Install dependencies
-        id: install
-        run: python -m pip install . --group dev
-
-      - name: Run tests
-        id: pytest
-        run: python -m pytest -q
-
-      - name: Compile Python sources
-        id: compile
-        run: python -m compileall -q app server tests
-
-      - name: Check admin JavaScript
-        id: node
-        run: node --check server/static/admin.js
-
-      - name: Record Windows test failure
-        if: failure()
-        continue-on-error: true
+      - name: Install and test
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          $body = @(
-            "job=test-windows",
-            "checkout=${{ steps.checkout.outcome }}",
-            "setup_python=${{ steps.setup_python.outcome }}",
-            "upgrade_pip=${{ steps.upgrade_pip.outcome }}",
-            "install=${{ steps.install.outcome }}",
-            "pytest=${{ steps.pytest.outcome }}",
-            "compile=${{ steps.compile.outcome }}",
-            "node=${{ steps.node.outcome }}"
-          ) -join "`n"
-          $content = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($body))
-          gh api --method PUT "repos/$env:GITHUB_REPOSITORY/contents/.ci/release-$env:GITHUB_RUN_ID-test-windows.txt" `
-            -f "message=ci: record release diagnostics" `
-            -f "content=$content" `
-            -f "branch=$env:GITHUB_REF_NAME"
+          uv sync --frozen
+          uv run --frozen python -m pytest -q
+          uv run --frozen python -m compileall -q app server tests
+          node --check server/static/admin.js
 
   build-windows:
     needs: [ prepare, test-windows ]
-    permissions:
-      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -177,20 +122,23 @@ jobs:
       INNO_ARCH: ${{ matrix.inno_arch }}
     steps:
       - name: Checkout release source
-        id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.source_sha }}
 
       - name: Set up Python
-        id: setup_python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           architecture: ${{ matrix.python_arch }}
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.12.1"
+          enable-cache: true
+
       - name: Verify runner architecture
-        id: verify_runner
         shell: pwsh
         run: |
           $actual = python -c "import platform; print(platform.machine().lower())"
@@ -199,63 +147,29 @@ jobs:
             throw "Runner Python architecture is '$actual'; expected '$expected'."
           }
 
-      - name: Upgrade pip
-        id: upgrade_pip
-        run: python -m pip install --upgrade pip
-
       - name: Install build dependencies
-        id: install
-        run: python -m pip install . --group dev
+        run: uv sync --frozen
 
       - name: Test native ARM64 runtime
-        id: arm_pytest
         if: matrix.architecture == 'arm64'
-        run: python -m pytest -q
-
-      - name: Compile native ARM64 sources
-        id: arm_compile
-        if: matrix.architecture == 'arm64'
-        run: python -m compileall -q app server tests
-
-      - name: Check native ARM64 admin JavaScript
-        id: arm_node
-        if: matrix.architecture == 'arm64'
-        run: node --check server/static/admin.js
+        shell: pwsh
+        run: |
+          uv run --frozen python -m pytest -q
+          uv run --frozen python -m compileall -q app server tests
+          node --check server/static/admin.js
 
       - name: Build standalone application
-        id: build
-        run: python deploy.py
+        run: uv run --frozen python deploy.py
 
       - name: Verify executable architecture
-        id: verify_exe
-        run: python scripts/verify_pe_arch.py dist/djcat.dist/djcat.exe ${{ matrix.architecture }}
+        run: uv run --frozen python scripts/verify_pe_arch.py dist/djcat.dist/djcat.exe ${{ matrix.architecture }}
 
-      - name: Build portable ZIP
-        id: zip
+      - name: Build portable ZIP and installer
         shell: pwsh
         run: |
           $zipFile = "DJCat-Pro-v$env:VERSION-Windows-$env:BUILD_ARCH.zip"
           7z a -tzip -mx=9 -m0=LZMA $zipFile ".\dist\djcat.dist\*"
-          if (-not (Test-Path $zipFile)) {
-            throw "Expected portable ZIP was not generated."
-          }
 
-      - name: Download installer language
-        id: language
-        shell: pwsh
-        run: |
-          Invoke-WebRequest `
-            -Uri "https://raw.githubusercontent.com/jrsoftware/issrc/6ef32198ef1f7b7b375cd4b6b90896c2a58eb4c2/Files/Languages/ChineseSimplified.isl" `
-            -OutFile "scripts\ChineseSimplified.isl"
-          $languageHash = (Get-FileHash "scripts\ChineseSimplified.isl" -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($languageHash -ne "e0b0b350e2245f3c5e65586dfe43d574f6e7f06f2261149aba284954b3fc9a8d") {
-            throw "ChineseSimplified.isl checksum mismatch: $languageHash"
-          }
-
-      - name: Build installer
-        id: installer
-        shell: pwsh
-        run: |
           $iscc = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
           if (-not $iscc) {
             $candidates = @(
@@ -266,6 +180,14 @@ jobs:
           }
           if (-not $iscc) {
             throw "Inno Setup compiler (ISCC.exe) was not found."
+          }
+
+          Invoke-WebRequest `
+            -Uri "https://raw.githubusercontent.com/jrsoftware/issrc/6ef32198ef1f7b7b375cd4b6b90896c2a58eb4c2/Files/Languages/ChineseSimplified.isl" `
+            -OutFile "scripts\ChineseSimplified.isl"
+          $languageHash = (Get-FileHash "scripts\ChineseSimplified.isl" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($languageHash -ne "e0b0b350e2245f3c5e65586dfe43d574f6e7f06f2261149aba284954b3fc9a8d") {
+            throw "ChineseSimplified.isl checksum mismatch: $languageHash"
           }
 
           $baseVersion = [regex]::Match($env:VERSION, '^\d+\.\d+\.\d+').Value
@@ -286,19 +208,14 @@ jobs:
             throw "Inno Setup failed with exit code $LASTEXITCODE."
           }
 
-      - name: Create installer checksum
-        id: checksum
-        shell: pwsh
-        run: |
           $setupFile = "dist\DJCat-Pro-v$env:VERSION-Windows-$env:BUILD_ARCH-Setup.exe"
-          if (-not (Test-Path $setupFile)) {
-            throw "Expected installer was not generated."
+          if (-not (Test-Path $zipFile) -or -not (Test-Path $setupFile)) {
+            throw "Expected release package was not generated."
           }
           $setupHash = (Get-FileHash $setupFile -Algorithm SHA256).Hash.ToLowerInvariant()
           "$setupHash  $(Split-Path $setupFile -Leaf)" | Set-Content -Encoding ascii "$setupFile.sha256"
 
       - name: Upload architecture packages
-        id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: DJCat-Pro-v${{ env.VERSION }}-Windows-${{ matrix.architecture }}
@@ -307,37 +224,6 @@ jobs:
             dist/DJCat-Pro-v${{ env.VERSION }}-Windows-${{ matrix.architecture }}-Setup.exe
             dist/DJCat-Pro-v${{ env.VERSION }}-Windows-${{ matrix.architecture }}-Setup.exe.sha256
           if-no-files-found: error
-
-      - name: Record build failure
-        if: failure()
-        continue-on-error: true
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $body = @(
-            "job=build-$env:BUILD_ARCH",
-            "checkout=${{ steps.checkout.outcome }}",
-            "setup_python=${{ steps.setup_python.outcome }}",
-            "verify_runner=${{ steps.verify_runner.outcome }}",
-            "upgrade_pip=${{ steps.upgrade_pip.outcome }}",
-            "install=${{ steps.install.outcome }}",
-            "arm_pytest=${{ steps.arm_pytest.outcome }}",
-            "arm_compile=${{ steps.arm_compile.outcome }}",
-            "arm_node=${{ steps.arm_node.outcome }}",
-            "build=${{ steps.build.outcome }}",
-            "verify_exe=${{ steps.verify_exe.outcome }}",
-            "zip=${{ steps.zip.outcome }}",
-            "language=${{ steps.language.outcome }}",
-            "installer=${{ steps.installer.outcome }}",
-            "checksum=${{ steps.checksum.outcome }}",
-            "upload=${{ steps.upload.outcome }}"
-          ) -join "`n"
-          $content = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($body))
-          gh api --method PUT "repos/$env:GITHUB_REPOSITORY/contents/.ci/release-$env:GITHUB_RUN_ID-$env:BUILD_ARCH.txt" `
-            -f "message=ci: record release diagnostics" `
-            -f "content=$content" `
-            -f "branch=$env:GITHUB_REF_NAME"
 
   publish-release:
     needs: [ prepare, build-windows ]
@@ -351,13 +237,11 @@ jobs:
       NOTES_FILE: ${{ needs.prepare.outputs.notes_file }}
     steps:
       - name: Checkout release source
-        id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.SOURCE_SHA }}
 
       - name: Download release packages
-        id: download
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: DJCat-Pro-*
@@ -365,7 +249,6 @@ jobs:
           merge-multiple: true
 
       - name: Validate release packages
-        id: validate
         shell: bash
         run: |
           rm -rf release-files
@@ -394,7 +277,6 @@ jobs:
           (cd release-files && sha256sum -c -- *-Setup.exe.sha256)
 
       - name: Create release
-        id: release
         shell: bash
         run: |
           release_args=()
@@ -407,20 +289,3 @@ jobs:
             --notes-file "$NOTES_FILE" \
             "${release_args[@]}" \
             --repo "$GITHUB_REPOSITORY"
-
-      - name: Record publish failure
-        if: failure()
-        continue-on-error: true
-        shell: bash
-        run: |
-          body=$(printf '%s\n' \
-            'job=publish-release' \
-            'checkout=${{ steps.checkout.outcome }}' \
-            'download=${{ steps.download.outcome }}' \
-            'validate=${{ steps.validate.outcome }}' \
-            'release=${{ steps.release.outcome }}')
-          content=$(printf '%s' "$body" | base64 -w0)
-          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/.ci/release-${GITHUB_RUN_ID}-publish.txt" \
-            -f message="ci: record release diagnostics" \
-            -f content="$content" \
-            -f branch="$GITHUB_REF_NAME"
