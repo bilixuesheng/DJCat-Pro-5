@@ -1,0 +1,71 @@
+name: Repair release blockers
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - .github/workflows/repair-release.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Apply minimal path fixes
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+
+          replacements = {
+              Path("server/app_store.py"): [
+                  (
+                      "from functools import wraps\nfrom urllib.parse import urlparse\n",
+                      "from functools import wraps\nfrom pathlib import Path\nfrom urllib.parse import urlparse\n",
+                  ),
+                  (
+                      '        databaseKey = databaseRow[2] if databaseRow else ""\n'
+                      '        identity = _schemaIdentity(databaseKey)\n',
+                      '        databaseKey = databaseRow[2] if databaseRow else ""\n'
+                      '        if databaseKey:\n'
+                      '            databaseKey = str(Path(databaseKey).resolve())\n'
+                      '        identity = _schemaIdentity(databaseKey)\n',
+                  ),
+              ],
+              Path("app/common/application_store.py"): [
+                  (
+                      "        self.programDir = Path(programDir)\n",
+                      "        self.programDir = Path(programDir).resolve()\n",
+                  ),
+              ],
+          }
+
+          for path, edits in replacements.items():
+              text = path.read_text(encoding="utf-8")
+              for old, new in edits:
+                  if text.count(old) != 1:
+                      raise SystemExit(f"Expected exactly one match in {path}: {old!r}")
+                  text = text.replace(old, new)
+              path.write_text(text, encoding="utf-8")
+          '@ | python -
+
+          python -m compileall -q app/common/application_store.py server/app_store.py
+          git diff --check
+
+      - name: Commit fixes
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/common/application_store.py server/app_store.py
+          git diff --cached --exit-code; if ($LASTEXITCODE -eq 0) { throw "No source changes were produced." }
+          git commit -m "fix(app-store): 统一 Windows 路径规范化"
+          git push origin HEAD:main
