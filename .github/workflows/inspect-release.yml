@@ -27,3 +27,4 @@ jobs:
             -f message="ci: capture release runs" \
             -f content="$content" \
             -f branch="$GITHUB_REF_NAME"
+          # refreshed for the 5.0.0 lock update
