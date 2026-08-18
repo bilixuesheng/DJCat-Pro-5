@@ -103,15 +103,16 @@ def test_pre_release_number_is_preserved_in_windows_file_version(monkeypatch):
     assert "--product-version=5.0.0.22" in args
 
 
-def test_release_uses_the_committed_lock_for_tests_and_builds():
+def test_release_installs_project_and_dev_dependencies_with_pip():
     workflow = (REPO / ".github" / "workflows" / "main.yml").read_text(
         encoding="utf-8"
     )
 
-    assert (REPO / "uv.lock").is_file()
-    assert "uv.lock" not in (REPO / ".gitignore").read_text(encoding="utf-8")
-    assert workflow.count("uv sync --frozen") == 2
-    assert "uv run --frozen python -m pytest -q" in workflow
+    assert "setup-uv" not in workflow
+    assert "uv sync --frozen" not in workflow
+    assert workflow.count("python -m pip install . --group dev") == 2
+    assert "python -m pytest -q" in workflow
+    assert "python deploy.py" in workflow
     assert '"Flask>=3.0"' in (REPO / "pyproject.toml").read_text(encoding="utf-8")
 
 
