@@ -5,6 +5,8 @@ on:
     branches: [ main ]
     paths:
       - app/common/config.py
+      - pyproject.toml
+      - uv.lock
       - .github/release-notes/**
       - .github/workflows/main.yml
       - scripts/DJCat-Pro-5.iss
