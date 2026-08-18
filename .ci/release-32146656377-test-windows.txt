@@ -1,8 +1,0 @@
-job=test-windows
-checkout=success
-setup_python=success
-upgrade_pip=success
-install=success
-pytest=failure
-compile=skipped
-node=skipped
