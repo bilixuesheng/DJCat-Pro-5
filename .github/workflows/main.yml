@@ -87,18 +87,13 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           architecture: x64
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          version: "0.12.1"
-          enable-cache: true
-
       - name: Install and test
         shell: pwsh
         run: |
-          uv sync --frozen
-          uv run --frozen python -m pytest -q
-          uv run --frozen python -m compileall -q app server tests
+          python -m pip install --upgrade pip
+          python -m pip install . --group dev
+          python -m pytest -q
+          python -m compileall -q app server tests
           node --check server/static/admin.js
 
   build-windows:
@@ -132,12 +127,6 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           architecture: ${{ matrix.python_arch }}
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          version: "0.12.1"
-          enable-cache: true
-
       - name: Verify runner architecture
         shell: pwsh
         run: |
@@ -148,21 +137,23 @@ jobs:
           }
 
       - name: Install build dependencies
-        run: uv sync --frozen
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . --group dev
 
       - name: Test native ARM64 runtime
         if: matrix.architecture == 'arm64'
         shell: pwsh
         run: |
-          uv run --frozen python -m pytest -q
-          uv run --frozen python -m compileall -q app server tests
+          python -m pytest -q
+          python -m compileall -q app server tests
           node --check server/static/admin.js
 
       - name: Build standalone application
-        run: uv run --frozen python deploy.py
+        run: python deploy.py
 
       - name: Verify executable architecture
-        run: uv run --frozen python scripts/verify_pe_arch.py dist/djcat.dist/djcat.exe ${{ matrix.architecture }}
+        run: python scripts/verify_pe_arch.py dist/djcat.dist/djcat.exe ${{ matrix.architecture }}
 
       - name: Build portable ZIP and installer
         shell: pwsh
