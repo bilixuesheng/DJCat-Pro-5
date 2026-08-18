@@ -46,4 +46,6 @@ jobs:
           git diff --cached --exit-code
           if ($LASTEXITCODE -eq 0) { throw "uv.lock did not change." }
           git commit -m "chore(release): 锁定 ARM64 cryptography 46.0.3"
+          git fetch origin main
+          git rebase origin/main
           git push origin HEAD:main
