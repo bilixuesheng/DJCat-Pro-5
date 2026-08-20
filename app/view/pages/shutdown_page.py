@@ -1,6 +1,7 @@
 from copy import deepcopy
 
 from PySide6.QtCore import QRect, Qt, QTime, QTimer, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -441,6 +442,7 @@ class ShutdownPage(ScrollArea):
 class ShutdownPromptDialog(MessageBoxBase):
     def __init__(self, task, parent=None):
         super().__init__(parent)
+        self.setMaskColor(QColor(0, 0, 0, 128))
         self.remaining_seconds = max(1, int(task.get("waitSeconds", 30)))
         self.titleLabel = TitleLabel(
             task.get("promptTitle") or DEFAULT_PROMPT_TITLE,

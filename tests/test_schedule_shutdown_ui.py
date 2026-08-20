@@ -92,6 +92,17 @@ class ScheduleShutdownUiTest(TestCase):
         self.assertIs(buttons[2], dialog.skipButton)
         self.assertEqual(dialog.yesButton.text(), "立即关机")
 
+    def testPromptUsesDarkerMask(self):
+        parent = QWidget()
+        self.addCleanup(parent.deleteLater)
+        dialog = ShutdownPromptDialog(shutdown_task(), parent)
+        self.addCleanup(dialog.deleteLater)
+
+        self.assertIn(
+            "rgba(0, 0, 0, 128)",
+            dialog.windowMask.styleSheet(),
+        )
+
     def testTaskHeadersIgnoreReleaseAfterDrag(self):
         cards = (TaskCard(broadcast_task()), ShutdownTaskCard(shutdown_task()))
         for card in cards:
