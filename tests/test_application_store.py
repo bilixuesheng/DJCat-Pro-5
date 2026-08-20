@@ -169,7 +169,7 @@ class ApplicationStoreTest(TestCase):
         )
         self.assertTrue(merged[0]["architecture_supported"])
 
-    @patch("app.common.application_store.platform.machine", return_value="AMD64")
+    @patch("app.common.application_version.platform.machine", return_value="AMD64")
     def testAmd64SourceRuntimeUsesX8664CatalogPackages(self, _machine):
         self.assertEqual(clientArchitecture(), "x86_64")
         self.store.architecture = clientArchitecture()

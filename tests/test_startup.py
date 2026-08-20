@@ -76,7 +76,8 @@ class StartupTest(TestCase):
                 "pages = ('app_store_page', 'credits_page', "
                 "'tray_control_page', 'setting_page'); "
                 "print([f'app.view.pages.{page}' in sys.modules "
-                "for page in pages])",
+                "for page in pages] + "
+                "['app.common.application_store' in sys.modules])",
             ],
             cwd=repo,
             check=True,
@@ -85,5 +86,5 @@ class StartupTest(TestCase):
         )
         self.assertEqual(
             result.stdout.strip().splitlines()[-1],
-            "[False, False, False, False]",
+            "[False, False, False, False, False]",
         )

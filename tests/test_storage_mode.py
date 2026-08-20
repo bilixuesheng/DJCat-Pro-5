@@ -94,3 +94,4 @@ class StorageModeTest(TestCase):
 
             self.assertTrue(source.is_dir())
             self.assertFalse(target.exists())
+            self.assertFalse(target.with_name("DJCatPro.migrating").exists())

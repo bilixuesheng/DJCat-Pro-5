@@ -41,7 +41,7 @@ from qfluentwidgets import (
 )
 
 from app.common.ai_markdown import registerMachine
-from app.common.application_store import clientArchitecture, isUpdateAvailable
+from app.common.application_version import clientArchitecture, isUpdateAvailable
 from app.common.edge_tts import (
     DEFAULT_EDGE_VOICE,
     EdgeSpeechWorker,

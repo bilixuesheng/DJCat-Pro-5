@@ -650,6 +650,14 @@ class AppStorePageTest(TestCase):
         installedCard = self.page.installedGrid.itemAtPosition(0, 0).widget()
         self.assertTrue(installedCard.downloadCountLabel.isHidden())
 
+    def testInvalidDownloadCountFallsBackToZero(self):
+        card = ApplicationCard()
+        self.addCleanup(card.deleteLater)
+
+        card.setApplication(_apps(1)[0] | {"download_count": "unknown"})
+
+        self.assertEqual(card.downloadCountLabel.text(), "已下载 0 次")
+
     def testCardDragDoesNotOpenDetail(self):
         card = ApplicationCard()
         card.resize(320, 156)

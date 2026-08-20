@@ -105,7 +105,7 @@ class CacheSettingCard(SettingCard):
         super().__init__(
             FluentIcon.FOLDER,
             "缓存",
-            "缓存用于加快应用图片加载，清理后会在需要时重新下载",
+            "缓存应用图片和临时安装包，清理后会在需要时重新下载",
             parent,
         )
         self.sizeLabel = BodyLabel("0 B", self)

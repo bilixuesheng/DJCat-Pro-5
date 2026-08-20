@@ -76,10 +76,14 @@ def migrateAppData(target: Path) -> None:
         if staging.exists():
             shutil.rmtree(staging)
         staging.mkdir(parents=True)
-        if source.exists():
-            shutil.copytree(source, staging, dirs_exist_ok=True)
-        _rebaseConfigPaths(staging / CONFIG_PATH.name, source, target)
-        staging.replace(target)
+        try:
+            if source.exists():
+                shutil.copytree(source, staging, dirs_exist_ok=True)
+            _rebaseConfigPaths(staging / CONFIG_PATH.name, source, target)
+            staging.replace(target)
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
         return
 
     target.mkdir(parents=True, exist_ok=True)

@@ -442,7 +442,10 @@ class ApplicationCard(CardWidget):
         self.appData = app
         self.titleLabel.setText(str(app.get("name", "")))
         self.descriptionLabel.setText(str(app.get("description", "")))
-        count = max(0, int(app.get("download_count", 0) or 0))
+        try:
+            count = max(0, int(app.get("download_count", 0) or 0))
+        except (TypeError, ValueError):
+            count = 0
         self.downloadCountLabel.setText(f"已下载 {count:,} 次")
         self.setImage(imagePath)
 

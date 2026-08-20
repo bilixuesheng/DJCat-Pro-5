@@ -94,7 +94,7 @@ class SettingGroupHeaderTest(TestCase):
         self.addCleanup(page.deleteLater)
 
         self.assertEqual(page.clearAppStoreCacheCard.titleLabel.text(), "缓存")
-        self.assertIn("加快应用图片加载", page.clearAppStoreCacheCard.contentLabel.text())
+        self.assertIn("临时安装包", page.clearAppStoreCacheCard.contentLabel.text())
         self.assertEqual(page.clearAppStoreCacheCard.sizeLabel.text(), "1.5 KB")
         self.assertTrue(page.clearAppStoreCacheCard.clearButton.isEnabled())
         self.assertEqual(

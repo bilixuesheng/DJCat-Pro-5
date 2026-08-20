@@ -150,6 +150,230 @@ _Avoid_: Application Update；不加限定地称 update
 同一 Application 在 Application Catalog 中的版本高于 Installed Application，或本地执行清单修订落后时形成的更新，用新 Package 替换该应用的本地安装。它不会升级 DJCat 客户端。
 _Avoid_: Client Update；不加限定地称 update
 
+**Application Download Count**:
+服务端记录的 Application 下载请求累计值。桌面端只在 Application Store 的“全部”卡片展示它；数值来自 Application Catalog，不由客户端本地推算。服务端用每次下载生成的随机 token 去重，同一 token 重试不会重复计数。
+_Avoid_: 本机安装次数、当前用户下载次数、完成安装次数
+
+### 配置存储
+
+**App Data Directory**:
+DJCat 所有可迁移数据的根目录，包含 `UserConfig.json`、`Program/`、`AppStoreCache/` 和 `HomeCardIcons/`。进程启动时只确定一次，运行期间不切换。
+_Avoid_: APP_DIR（程序文件所在目录）、只把它称为配置目录
+
+**Installed Mode**:
+App Data Directory 位于 `QStandardPaths.GenericDataLocation/DJCatPro` 的存储模式。它适合正常安装；这里的 Installed 指 DJCat 自身的存储模式，不是 Installed Application。
+_Avoid_: Application 安装状态、用户模式
+
+**Portable Mode**:
+App Data Directory 位于程序旁 `DJCatPro/` 的存储模式。启动时只要该目录存在就选择 Portable Mode，适用于系统盘有还原或需要随程序携带数据的场景。
+_Avoid_: 便携 ZIP 的文件格式、Application 的安装目录
+
+**Storage Migration**:
+切换 Installed Mode 与 Portable Mode 时，在应用完成正常关闭后复制整个 App Data Directory、改写配置中位于旧根目录下的绝对路径，并通过下一次启动重新选择模式。切到 Portable Mode 时保留原用户数据；切回 Installed Mode 时把原 Portable 目录改名为 `.bak` 备份，避免它继续被启动检测选中。
+_Avoid_: 只复制 `UserConfig.json`、运行中热切换路径
+
+### 页面加载
+
+**Lazy Page**:
+已注册导航身份但尚未创建真实页面 QWidget 的占位页。`LazyPage.ensureLoaded()` 在首次导航或确实需要页面能力时创建真实页面，并转发必要的信号和暂存输入。
+_Avoid_: 隐藏页面（隐藏的真实页面已经构造）、后台预加载
+
+## Relationships
+
+- 一个 **Home Card** 只能属于 Default、Custom 或 Application 三种来源之一；排序列表可以混排，但执行规则不合并。
+- **Application Home Card** 引用一个 Installed Application 的 Open Action 或 Application Preset；Application 被卸载或固定关系被移除后，相应主页和托盘入口同步失效。
+- **Application Catalog** 与本机安装清单按稳定 Application ID 合并，形成界面使用的 `installed`、`update_available`、`installed_version` 和架构支持状态。
+- **Application Update** 与首次安装使用同一 Package 下载和安装链路；差别只在目标目录已有受 DJCat 管理的 Installed Application。
+- **Projection** 的纯文本正文由 `QTextEdit` 渲染，Markdown 正文由 `MarkdownView(largeText=True)` 渲染；两者是同一 Projection 的互斥显示方式。
+- **Installed Mode** 与 **Portable Mode** 共享相同的目录结构，Storage Migration 移动的是整个 App Data Directory，不是单独的设置文件。
+- **Tray Card Shortcut**、主页固定项和 Application Store 共享 `cfg.pinnedHomeCards` 中的稳定引用；图片缓存路径只是可更新的派生元数据。
+
+## Ownership rules
+
+### 主窗口与页面
+
+**MainWindow** 是桌面端组合根和长生命周期运行时所有者。它负责：
+
+- 导航、搜索框和系统托盘的页面级绑定；
+- Scheduled Task 的定时匹配、音频播放和 Client Update 流程；
+- Projection、Exam Countdown 与 Shutdown Prompt 的窗口创建和回收；
+- 应用退出时停止页面工作线程、音频、下载和待保存编辑。
+
+**HomePage** 是唯一随 MainWindow 立即创建的导航页面。Application Store、Credits、Tray Control 和 Setting 使用 Lazy Page；Projection 编辑、Exam Countdown、Broadcast Task 和 Shutdown Task 页面通过 `_getTaskPage()` 系列方法首次打开时创建。
+
+Lazy Page 必须保留外部调用需要的最小接口：
+
+| Lazy Page | 加载前可暂存或转发的状态 |
+|---|---|
+| `LazyAppStorePage` | 搜索文字、固定卡片信号；清缓存和关闭在未加载时为空操作 |
+| `LazySettingPage` | 搜索文字、缓存清理信号；未加载时无需刷新 AI 风格草稿 |
+| `LazyTrayControlPage` | 最新 Home Card 列表 |
+| `LazyCreditsPage` | 无业务状态 |
+
+调用方不得直接依赖 `lazyPage.page` 的存在；需要真实页面时调用 `ensureLoaded()`，只做关闭或缓存失效时应保持未加载状态。
+
+### 应用市场
+
+**server/app_store.py** 拥有 Application Catalog、Package 配置、Application Download Count 和管理后台写入。桌面端只消费目录和下载重定向，不能自行增加下载次数。
+
+**ApplicationStore** 拥有本机 Application 规则：目录扫描、安装清单、版本合并、ZIP 安全校验、原子覆盖、卸载和 Application Action 执行。它不拥有界面按钮或 InfoBar。
+
+**AppStorePage** 拥有一次 UI 会话中的异步状态：
+
+| State | Meaning |
+|---|---|
+| `_downloadJobs` | 正在传输 Package 的 worker 与线程 |
+| `_downloadProgress` | 0–100 的确定下载百分比 |
+| `_installing` | 正在解压并原子替换的 Application ID |
+| `_uninstalling` | 正在移除的 Application ID |
+| `_downloadStates` | 卡片和详情按钮共享的用户可见状态文字 |
+
+下载阶段显示确定进度线；安装和卸载无法可靠计算百分比，显示不确定进度线。卡片和详情页必须从同一组状态读取，不能各自维护进度。
+
+`ApplicationStore.installZip()` 是安装与更新的共同提交点：先校验并解压到 `.staging-*`，已有版本先改名为 `.backup-*`，再原子替换目标；失败时恢复备份。启动扫描会恢复未完成替换留下的备份并清理残留操作目录。
+
+### 配置和文件
+
+`app/config/paths.py` 是 App Data Directory 及其所有派生目录的唯一来源。其他模块使用 `CONFIG_PATH`、`PROGRAM_DIR`、`APP_STORE_CACHE_DIR` 和 `HOME_CARD_ICON_DIR`，不得自行重新拼接另一套根目录。
+
+Storage Migration 的安全约束：
+
+- 迁移必须发生在 `qconfig.load` 之后、进程退出阶段；运行中的模块仍使用启动时的路径常量。
+- Installed → Portable 先写入 `.migrating`，成功后再提交为 Portable 目录；失败时清理临时目录，原数据和当前模式不变。
+- Portable → Installed 复制并改写目标配置成功后，才把 Portable 源目录改名为唯一 `.bak` 目录；源目录仍存在时下一次启动仍保持 Portable Mode。
+- 只改写配置值中位于旧 App Data Directory 下的绝对路径，不改写普通文案或外部路径。
+
+**ImageCache** 拥有应用图片和临时 Package 所在缓存根目录的清理互斥。存在下载或安装操作时拒绝清缓存；设置页只发出用户意图并显示 `ImageCache.size()`。
+
+### Projection 渲染
+
+Projection 的两种正文渲染器必须保持这些共同约束：
+
+- 左侧和顶部正文起点一致。大字号 `MarkdownView` 的内容边距固定为 4 px，与 `QTextDocument.documentMargin()` 默认值一致；普通更新日志的 MarkdownView 保留渲染器默认边距。
+- 纯文本和 Markdown 都使用 QFluentWidgets `SmoothScrollDelegate`，并在 viewport 上注册 `QScroller.TouchGesture`，支持鼠标滚轮和平滑单指触控。
+- Projection 关闭文本选择，手指拖动用于滚动而不是选择文字。
+
+AI Markdown 输入框的忙碌边框使用 2 px 渐变 QSS 边框。Qt 样式表会分别绘制边框各边，粗渐变边框在圆角处会出现斜向拼接；除非改为一次性自定义绘制完整圆角路径，否则不要再次只靠增加 QSS `border-width` 加粗。
+
+## Module topology
+
+### Desktop
+
+| Module | Responsibility |
+|---|---|
+| `djcat.py` | 进程入口、工作目录、单实例应用、日志、配置加载和 MainWindow 创建 |
+| `app/platform/` | Windows 单实例/IPC、唤起窗口和开机启动等平台适配 |
+| `app/config/` | 配置 schema、常量和 App Data Directory |
+| `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
+| `app/view/windows/main_window.py` | 桌面组合根、导航、长期运行任务和 Client Update UI |
+| `app/view/pages/` | 页面、临时展示窗口和页面级 worker 编排 |
+| `app/view/components/` | 多页面复用的 Markdown、背景、滚动和设置卡片组件 |
+| `pyqt_github_markdown/` | 项目内置 Markdown 渲染器；不承载 DJCat 业务规则 |
+
+`app/common/application_version.py` 只包含架构和版本比较等纯函数，允许 MainWindow 在启动阶段导入。重量较大的 `app/common/application_store.py` 由 Setting 或 Application Store 页面首次加载时导入，避免图片缓存扫描破坏页面懒加载的启动收益。
+
+### Server
+
+| Module | Responsibility |
+|---|---|
+| `server/ai_markdown.py` | Machine Identity、Daily Quota、AI Markdown Conversion 和管理接口 |
+| `server/app_store.py` | Application Catalog、下载重定向/计数和应用市场管理页面 |
+
+服务端模块不能导入桌面 View；桌面端通过 HTTPS API 消费服务端结果。桌面配置中的 `DJCATAI_API_BASE_URL` 环境变量只改变 API 根地址，不改变业务所有权。
+
+## App lifecycle
+
+### Startup (`djcat.py`)
+
+```text
+set working directory
+  → SingletonApplication (Windows single instance + IPC)
+  → configure logging and clear stale Client Update files
+  → qconfig.load(CONFIG_PATH, cfg)
+  → MainWindow(isSilent)
+      → HomePage eagerly
+      → register Lazy Pages without constructing their real pages
+      → create tray and long-lived timers/workers
+  → bind activation request and aboutToQuit
+  → Qt event loop
+```
+
+App Data Directory 必须在导入 `cfg` 和调用 `qconfig.load` 前由 `app/config/paths.py` 确定。第二个 Windows 实例只通知现有实例显示窗口，然后退出；它不创建 MainWindow。
+
+### Navigation loading
+
+```text
+switchTo(target)
+  → if another snapshot transition is active, keep only latest target
+  → ensureLoaded(target) when it is first requested
+  → run stacked-widget transition
+  → after currentChanged, navigate to the one queued target
+```
+
+排队目标在首个过渡期间可以提前构造，以免页面构造时间叠加到第二段动画；重复目标只执行一次。
+
+### Shutdown
+
+```text
+MainWindow._shutdownResources()
+  → stop navigation animation and timers
+  → cancel Edge TTS and stop audio players
+  → flush loaded Setting / Scheduled Task editors
+  → shutdown HomePage and loaded Application Store page
+  → cancel Client Update download and close InfoBars
+  → optional Storage Migration connected after normal shutdown
+  → QApplication exits and releases the single-instance lock
+```
+
+`_shutdownResources()` 必须幂等。Lazy Page 未加载时，关闭流程不能为了清理而创建它。
+
+## Code shape
+
+### Naming
+
+项目自有 Python 名称沿用现有风格：类使用 `PascalCase`，函数、方法和局部变量使用 `camelCase`，常量使用 `UPPER_SNAKE_CASE`，内部实现加 `_` 前缀。Qt 事件重载保留 Qt 名称，如 `showEvent`、`resizeEvent`。
+
+业务名称优先使用本文件 Language 中定义的词。特别注意：
+
+- Projection 与 Broadcast Task 不能共用无修饰的 `broadcast` 业务含义；
+- Client Update 与 Application Update 必须写明种类；
+- Home Action 与 Application Action 不能互换；
+- `APP_DIR` 是程序目录，`APP_DATA_DIR` 是可迁移数据目录。
+
+### QWidget initialization
+
+新增的复杂 QWidget/SettingCard 优先按四阶段组织：
+
+```python
+def __init__(self, parent=None):
+    super().__init__(parent)
+    self._initWidget()
+    self._initLayout()
+    self._bind()
+```
+
+`_initWidget()` 创建并设置子控件，`_initLayout()` 只组装布局，`_bind()` 最后连接信号。小型且只含少量控件的类可以保持内联，不为形式增加一次性包装函数。
+
+### Threads and Qt
+
+- 网络、文件复制、ZIP 解压和卸载不得阻塞 Qt 主线程。
+- worker 在线程中工作，通过 Qt Signal 把结果送回页面；只有主线程更新 QWidget。
+- 页面关闭时先设置 shutdown/cancel 状态，再等待有文件提交风险的线程；超时后也不能让回调访问已销毁控件。
+- 可计算总字节数的下载使用确定进度；无法可靠估计的文件操作使用不确定进度，不伪造百分比。
+
+### Comments
+
+代码默认依靠清晰命名表达行为。注释只解释隐藏约束、平台差异或看似多余但不能删除的顺序，例如原子替换、触控手势和 Qt 动画时序；不写逐行复述代码的注释。
+
+## Flagged ambiguities
+
+- “全屏投送”过去容易被称为 Broadcast，但项目中的 Broadcast Task 是音频定时播报。已统一用 **Projection** 表示文字展示。
+- “更新”可能指 DJCat 自身或市场 Application。已拆为 **Client Update** 与 **Application Update**。
+- “安装版”可能被误解为 Installed Application。已定义 **Installed Mode** 专指 DJCat 的 App Data Directory 位置。
+- “下载次数”并不证明 Package 已完整下载或安装。它是服务端去重后的下载重定向请求累计值。
+- “懒加载页面”不等于只隐藏 QWidget。真实页面及其重量级依赖必须尚未构造；纯版本比较被拆到轻量模块，避免 MainWindow 提前初始化应用市场缓存。
+- Application Store 的“全部”与“已安装”是两个操作上下文：即使存在 Application Update，“全部”卡片仍显示“打开”；“已安装”和详情页才显示“更新”。
+
 ## Example dialogue
 
 > **Dev:** “定时播报是不是把全屏投送安排到某个时间？”
@@ -172,3 +396,12 @@ _Avoid_: Client Update；不加限定地称 update
 
 > **Dev:** “发现新版本后直接走应用市场更新就行吗？”
 > **Domain expert:** “先说清是哪一种版本。Client Update 更新 DJCat；Application Update 更新市场里的某个 Application。”
+
+> **Dev:** “应用有更新，‘全部’卡片也应该显示更新吗？”
+> **Domain expert:** “不应该。‘全部’保持发现和打开语义；Application Update 只在‘已安装’和详情页提供。”
+
+> **Dev:** “切换到 Portable Mode 后能不能马上让当前进程改用新目录？”
+> **Domain expert:** “不能。当前进程的 App Data Directory 在启动时已经确定；正常关闭后迁移，下一次启动再选择新模式。”
+
+> **Dev:** “设置页没打开，退出时要不要先创建它再保存？”
+> **Domain expert:** “不要。未加载的 Lazy Page 没有待保存的页面草稿，关闭流程也不能因此破坏懒加载。”
