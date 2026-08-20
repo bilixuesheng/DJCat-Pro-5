@@ -117,6 +117,10 @@ class MarkdownRendererTest(TestCase):
         window = BroadcastWindow()
         window.setContent("title", "普通正文", is_markdown=False)
         plainFont = window.contentEdit.font()
+        markdownMargins = window.markdownView._contentLayout.contentsMargins()
+        documentMargin = round(window.contentEdit.document().documentMargin())
+        self.assertEqual(markdownMargins.left(), documentMargin)
+        self.assertEqual(markdownMargins.top(), documentMargin)
 
         window.setContent(
             "title",

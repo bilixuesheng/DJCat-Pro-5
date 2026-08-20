@@ -4,6 +4,7 @@ from loguru import logger
 from PySide6.QtCore import QUrl, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QFileDialog,
     QVBoxLayout,
@@ -19,6 +20,7 @@ from qfluentwidgets import (
     InfoBar,
     InfoBarPosition,
     LineEdit,
+    MessageBox,
     PrimaryPushSettingCard,
     PushSettingCard,
     RadioButton,
@@ -103,12 +105,14 @@ class CacheSettingCard(SettingCard):
         super().__init__(
             FluentIcon.FOLDER,
             "缓存",
-            "当前可清理：0 B",
+            "缓存用于加快应用图片加载，清理后会在需要时重新下载",
             parent,
         )
+        self.sizeLabel = BodyLabel("0 B", self)
         self.clearButton = ToolButton(FluentIcon.DELETE, self)
         self.clearButton.setAccessibleName("清除缓存")
         self.clearButton.clicked.connect(self.clicked)
+        self.hBoxLayout.addWidget(self.sizeLabel)
         self.hBoxLayout.addWidget(self.clearButton)
         self.hBoxLayout.addSpacing(16)
         self.setCacheSize(0)
@@ -123,7 +127,7 @@ class CacheSettingCard(SettingCard):
                 break
             value /= 1024
         text = f"{value:.1f} {unit}" if unit != "B" else f"{size} B"
-        self.contentLabel.setText(f"当前可清理：{text}")
+        self.sizeLabel.setText(text)
         self.clearButton.setEnabled(size > 0)
 
 
@@ -420,6 +424,12 @@ class SettingPage(ScrollArea):
                     configItem=cfg.trayTooltip,
                     placeholder=APP_NAME,
                 ),
+                SwitchSettingCard(
+                    FluentIcon.HEART,
+                    "显示特别鸣谢入口",
+                    "在侧边栏底部显示特别鸣谢页面入口",
+                    cfg.showCreditsPage,
+                ),
                 self.themeColorCard,
             ]
         )
@@ -649,6 +659,17 @@ class SettingPage(ScrollArea):
             cfg.autoRun,
         )
         self.clearAppStoreCacheCard = CacheSettingCard()
+        from app.config.paths import APP_DATA_DIR, isPortable
+
+        portable = isPortable()
+        currentMode = "便携版" if portable else "安装版"
+        self.storageModeCard = PushSettingCard(
+            "切换到安装版" if portable else "切换到便携版",
+            FluentIcon.SYNC,
+            "配置存储模式",
+            "安装版将配置和应用数据保存在用户目录；便携版保存在程序旁，"
+            f"适用于系统盘有还原的情况。当前：{currentMode}（{APP_DATA_DIR}）",
+        )
         self._refreshAppStoreCacheSize()
         self.softwareGroup.addSettingCards(
             [
@@ -659,6 +680,7 @@ class SettingPage(ScrollArea):
                     cfg.checkUpdateAtStartUp,
                 ),
                 self.autoRunCard,
+                self.storageModeCard,
                 self.clearAppStoreCacheCard,
             ]
         )
@@ -715,6 +737,7 @@ class SettingPage(ScrollArea):
         self.autoRunCard.checkedChanged.connect(self._onAutoRunChanged)
         self.aboutCard.clicked.connect(self._onAboutCardClicked)
         self.clearAppStoreCacheCard.clicked.connect(self._onClearAppStoreCache)
+        self.storageModeCard.clicked.connect(self._onStorageModeClicked)
         self.errorLogCard.clicked.connect(self._onOpenErrorLogClicked)
         self.aiQuotaReceived.connect(self._onAIQuotaReceived)
         cfg.bannerImageSource.valueChanged.connect(
@@ -820,6 +843,32 @@ class SettingPage(ScrollArea):
         except OSError as error:
             logger.exception("修改开机启动设置失败")
             signalBus.catchException.emit(str(error))
+
+    def _onStorageModeClicked(self) -> None:
+        from app.config.paths import (
+            PORTABLE_DATA_DIR,
+            USER_DATA_DIR,
+            isPortable,
+            migrateAppData,
+        )
+
+        portable = isPortable()
+        target = USER_DATA_DIR if portable else PORTABLE_DATA_DIR
+        mode = "安装版" if portable else "便携版"
+        dialog = MessageBox(
+            "切换配置存储模式",
+            f"确定切换到{mode}吗？\n\n数据会复制到新位置，程序随后退出；重新打开后生效。",
+            self.window(),
+        )
+        try:
+            accepted = dialog.exec()
+        finally:
+            dialog.deleteLater()
+        if not accepted:
+            return
+        application = QApplication.instance()
+        application.aboutToQuit.connect(lambda: migrateAppData(target))
+        application.quit()
 
     def setSearchText(self, text: str) -> None:
         self._searchText = text.strip().lower()

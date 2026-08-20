@@ -122,7 +122,7 @@ class AIMarkdownTest(unittest.TestCase):
         firstStyle = dialog.inputEdit.styleSheet()
         dialog._updateBusyStyle()
         self.assertIn("qlineargradient", firstStyle)
-        self.assertIn("border: 5px solid", firstStyle)
+        self.assertIn("border: 2px solid", firstStyle)
         self.assertNotEqual(firstStyle, dialog.inputEdit.styleSheet())
         dialog._stopBusyStyle()
         self.assertIn("border-radius", dialog.inputEdit.styleSheet())

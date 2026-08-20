@@ -411,6 +411,7 @@ class AppStoreServerTest(TestCase):
         self.assertEqual(preset.status_code, 302)
         catalog = self.client.get("/app-store/catalog", base_url="https://api.djcatpro.top")
         app = catalog.json["apps"][0]
+        self.assertEqual(app["download_count"], 0)
         self.assertEqual(app["announcement"], "维护公告")
         self.assertEqual(app["presets"][0]["action"]["target"], "demo.exe")
         self.assertEqual(app["presets"][0]["action"]["arguments"], {"args": ["--minimized"]})
@@ -426,6 +427,11 @@ class AppStoreServerTest(TestCase):
         with closing(ai_markdown._connect()) as database:
             self.assertEqual(database.execute("SELECT download_count FROM market_applications WHERE id = 1").fetchone()[0], 1)
             self.assertEqual(database.execute("SELECT COUNT(*) FROM market_download_events").fetchone()[0], 1)
+        updatedCatalog = self.client.get(
+            "/app-store/catalog", base_url="https://api.djcatpro.top"
+        )
+        self.assertEqual(updatedCatalog.json["apps"][0]["download_count"], 1)
+        self.assertNotEqual(updatedCatalog.headers["ETag"], catalog.headers["ETag"])
         self.client.get(
             "/app-store/apps/1/download?arch=x86_64",
             base_url="https://api.djcatpro.top",

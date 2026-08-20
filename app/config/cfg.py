@@ -76,6 +76,9 @@ class Config(QConfig):
     )
     windowTitle = ConfigItem("Personalization", "WindowTitle", "")
     trayTooltip = ConfigItem("Personalization", "TrayTooltip", "")
+    showCreditsPage = ConfigItem(
+        "Personalization", "ShowCreditsPage", True, BoolValidator()
+    )
 
     trayLeftClickAction = OptionsConfigItem(
         "Tray",

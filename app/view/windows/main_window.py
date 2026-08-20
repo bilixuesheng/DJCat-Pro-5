@@ -66,10 +66,7 @@ from app.config.constants import (
 from app.config.paths import ASSET_DIR, UPDATE_INSTALLER_PATH
 from app.signal_bus import signalBus
 from app.view.components.markdown_view import MarkdownView
-from app.view.pages.credits_page import CreditsPage
 from app.view.pages.home_page import HomePage
-from app.view.pages.setting_page import SettingPage
-from app.view.pages.tray_control_page import TrayControlPage
 from app.view.shell.tray import SystemTrayIcon
 
 
@@ -129,32 +126,105 @@ class MachineRegistrationWorker(QObject):
         self.finished.emit(registerMachine() or "")
 
 
-class LazyAppStorePage(QWidget):
-    pinnedCardsChanged = Signal(object)
-
-    def __init__(self, parent=None):
+class LazyPage(QWidget):
+    def __init__(self, objectName, parent=None):
         super().__init__(parent)
-        self.setObjectName("AppStorePage")
+        self.setObjectName(objectName)
         self.page = None
-        self._searchText = ""
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
-    def ensureLoaded(self):
-        if self.page is not None:
-            return self.page
-        from app.view.pages.app_store_page import AppStorePage
+    def _createPage(self):
+        raise NotImplementedError
 
-        self.page = AppStorePage(self)
-        self.page.pinnedCardsChanged.connect(self.pinnedCardsChanged)
-        self.layout.addWidget(self.page)
-        if self._searchText:
-            self.page.setSearchText(self._searchText)
+    def ensureLoaded(self):
+        if self.page is None:
+            self.page = self._createPage()
+            self.layout.addWidget(self.page)
         return self.page
 
     def showEvent(self, event):
         self.ensureLoaded()
         super().showEvent(event)
+
+
+class LazyCreditsPage(LazyPage):
+    def __init__(self, parent=None):
+        super().__init__("CreditsPage", parent)
+
+    def _createPage(self):
+        from app.view.pages.credits_page import CreditsPage
+
+        return CreditsPage(self)
+
+
+class LazyTrayControlPage(LazyPage):
+    def __init__(self, parent=None):
+        super().__init__("TrayControlPage", parent)
+        self._homeCards = []
+
+    def _createPage(self):
+        from app.view.pages.tray_control_page import TrayControlPage
+
+        page = TrayControlPage(self)
+        page.setHomeCards(self._homeCards)
+        return page
+
+    def setHomeCards(self, entries):
+        self._homeCards = list(entries or [])
+        if self.page is not None:
+            self.page.setHomeCards(self._homeCards)
+
+    @property
+    def homeCardSwitches(self):
+        return self.ensureLoaded().homeCardSwitches
+
+
+class LazySettingPage(LazyPage):
+    appStoreCacheCleared = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__("SettingPage", parent)
+        self._searchText = ""
+
+    def _createPage(self):
+        from app.view.pages.setting_page import SettingPage
+
+        page = SettingPage(self)
+        page.appStoreCacheCleared.connect(self.appStoreCacheCleared.emit)
+        if self._searchText:
+            page.setSearchText(self._searchText)
+        return page
+
+    def setSearchText(self, text):
+        self._searchText = text
+        if self.page is not None:
+            self.page.setSearchText(text)
+
+    def flushPendingSave(self):
+        if self.page is not None:
+            self.page.aiStyleCard.flushPendingSave()
+
+    @property
+    def windowTitleCard(self):
+        return self.ensureLoaded().windowTitleCard
+
+
+class LazyAppStorePage(LazyPage):
+    pinnedCardsChanged = Signal(object)
+
+    def __init__(self, parent=None):
+        super().__init__("AppStorePage", parent)
+        self._searchText = ""
+
+    def _createPage(self):
+        from app.view.pages.app_store_page import AppStorePage
+
+        page = AppStorePage(self)
+        page.pinnedCardsChanged.connect(self.pinnedCardsChanged)
+        if self._searchText:
+            page.setSearchText(self._searchText)
+        return page
 
     def clearCachedImages(self):
         if self.page is not None:
@@ -669,9 +739,9 @@ class MainWindow(MSFluentWindow):
     def initNavigation(self):
         self.homePage = HomePage(self)
         self.appStorePage = LazyAppStorePage(self)
-        self.creditsPage = CreditsPage(self)
-        self.trayControlPage = TrayControlPage(self)
-        self.settingPage = SettingPage(self)
+        self.creditsPage = LazyCreditsPage(self)
+        self.trayControlPage = LazyTrayControlPage(self)
+        self.settingPage = LazySettingPage(self)
         self.broadcastEditPage = None
         self.countdownPage = None
         self.schedulePage = None
@@ -686,12 +756,13 @@ class MainWindow(MSFluentWindow):
         self.stackedWidget.currentChanged.connect(self._onNavigationCompleted)
         self.addSubInterface(self.homePage, FIF.HOME, "主页")
         self.addSubInterface(self.appStorePage, FIF.APPLICATION, "应用下载")
-        self.addSubInterface(
+        self._creditsNavigationItem = self.addSubInterface(
             self.creditsPage,
             FIF.HEART,
             "特别鸣谢",
             position=NavigationItemPosition.BOTTOM,
         )
+        self._setCreditsPageVisible(cfg.showCreditsPage.value)
         self.addSubInterface(
             self.trayControlPage,
             FIF.MENU,
@@ -718,12 +789,18 @@ class MainWindow(MSFluentWindow):
         self.settingPage.appStoreCacheCleared.connect(
             self._onAppStoreCacheCleared
         )
+        cfg.showCreditsPage.valueChanged.connect(self._setCreditsPageVisible)
         self.homePage.homeCardsChanged.connect(self._onHomeCardsChanged)
         self._onHomeCardsChanged(self.homePage.homeCardEntries())
         self.homePage.applicationCardClicked.connect(self._onPinnedHomeCardClicked)
         self.homePage.applicationCardRemoved.connect(self._onPinnedHomeCardRemoved)
         self._setPinnedHomeCards(cfg.pinnedHomeCards.value)
         self._updateSearchEdit()
+
+    def _setCreditsPageVisible(self, visible):
+        self._creditsNavigationItem.setVisible(bool(visible))
+        if not visible and self.stackedWidget.currentWidget() is self.creditsPage:
+            self._navToHome()
 
     def _onHomeCardsChanged(self, entries):
         self.trayControlPage.setHomeCards(entries)
@@ -902,12 +979,16 @@ class MainWindow(MSFluentWindow):
             self._pendingNavigation = None
             return
         if self._navigationTarget is not None:
+            ensureLoaded = getattr(interface, "ensureLoaded", None)
+            if ensureLoaded is not None:
+                ensureLoaded()
             self._pendingNavigation = (interface, isBack)
             return
         if interface is self.stackedWidget.currentWidget():
             return
-        if interface is self.appStorePage:
-            self.appStorePage.ensureLoaded()
+        ensureLoaded = getattr(interface, "ensureLoaded", None)
+        if ensureLoaded is not None:
+            ensureLoaded()
 
         self._navigationTarget = interface
         if isBack:
@@ -1383,7 +1464,7 @@ class MainWindow(MSFluentWindow):
         self._pendingDownloadProgress = None
         self._downloadProgressTimer.stop()
         if getattr(self, "settingPage", None) is not None:
-            self.settingPage.aiStyleCard.flushPendingSave()
+            self.settingPage.flushPendingSave()
         for page in (
             getattr(self, "schedulePage", None),
             getattr(self, "shutdownPage", None),

@@ -918,7 +918,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self._borderIndex = (hue + 6) % 360
         background = "#343434" if isDarkTheme() else "#E8E8E8"
         self.inputEdit.setStyleSheet(
-            f"QTextEdit {{ background: {background}; border: 5px solid; "
+            f"QTextEdit {{ background: {background}; border: 2px solid; "
             f"border-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, {stops}); "
             "border-radius: 8px; }"
         )

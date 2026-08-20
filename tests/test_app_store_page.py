@@ -210,6 +210,7 @@ class AppStorePageTest(TestCase):
         self.assertEqual(card.actionButton.text(), "下载中 50%")
         self.assertFalse(card.actionButton.isEnabled())
         self.assertFalse(card.removeButton.isEnabled())
+        self.assertEqual(card.actionButton._progress, 50)
 
     def testRerenderReusesVisibleCardsWithoutABlankFrame(self):
         first = _apps(1)
@@ -631,10 +632,23 @@ class AppStorePageTest(TestCase):
         self.qtApp.processEvents()
 
         self.assertTrue(self.page.refreshButton.isHidden())
+        self.assertTrue(self.page.checkUpdatesButton.isHidden())
 
         self.page._backToOverview()
         self.qtApp.processEvents()
         self.assertFalse(self.page.refreshButton.isHidden())
+
+    def testDownloadCountIsShownOnlyOnAllApplicationCards(self):
+        app = _apps(1)[0] | {"download_count": 1234}
+
+        self.page._renderGrid(self.page.allGrid, [app])
+        allCard = self.page.allGrid.itemAtPosition(0, 0).widget()
+        self.assertEqual(allCard.downloadCountLabel.text(), "已下载 1,234 次")
+        self.assertFalse(allCard.downloadCountLabel.isHidden())
+
+        self.page._renderGrid(self.page.installedGrid, [app], True)
+        installedCard = self.page.installedGrid.itemAtPosition(0, 0).widget()
+        self.assertTrue(installedCard.downloadCountLabel.isHidden())
 
     def testCardDragDoesNotOpenDetail(self):
         card = ApplicationCard()
@@ -798,6 +812,48 @@ class AppStorePageTest(TestCase):
         self.page._onAppAction(app)
 
         self.page.store.executeAction.assert_called_once_with(installed)
+
+    def testUpdateButtonRulesFollowInstalledAllAndDetailContexts(self):
+        installed = object()
+        self.page.store = Mock()
+        self.page.store.installed.return_value = {1: installed}
+        app = _apps(1)[0] | {
+            "id": 1,
+            "installed": True,
+            "update_available": True,
+            "open_action": {"type": "program", "target": "demo.exe"},
+            "installed_open_action": {"type": "program", "target": "demo.exe"},
+        }
+
+        self.page._renderGrid(self.page.installedGrid, [app], True)
+        installedCard = self.page.installedGrid.itemAtPosition(0, 0).widget()
+        self.assertEqual(installedCard.actionButton.text(), "更新")
+
+        self.page._renderGrid(self.page.allGrid, [app])
+        allCard = self.page.allGrid.itemAtPosition(0, 0).widget()
+        self.assertEqual(allCard.actionButton.text(), "打开")
+        self.page._onAppAction(app, allowUpdate=False)
+        self.page.store.executeAction.assert_called_once_with(installed)
+
+        self.page.currentApp = app
+        self.page._updateDetailAction()
+        self.assertEqual(self.page.detailAction.text(), "更新")
+
+    def testInstallAndUninstallUseIndeterminateProgress(self):
+        app = _apps(1)[0]
+        card = ApplicationCard()
+        self.addCleanup(card.deleteLater)
+
+        self.page._installing.add(app["id"])
+        self.page._setCardState(card, app)
+        self.assertTrue(card.actionButton._indeterminate)
+        self.assertTrue(card.actionButton._progressTimer.isActive())
+
+        self.page._installing.clear()
+        self.page._uninstalling.add(app["id"])
+        self.page.currentApp = app
+        self.page._updateDetailAction()
+        self.assertTrue(self.page.detailAction._indeterminate)
 
     def testDirectPinnedCardUsesLocalManifestAction(self):
         installed = object()

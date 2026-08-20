@@ -38,6 +38,8 @@ class MarkdownView(MarkdownWidget):
         super().__init__(DARK if isDarkTheme() else LIGHT, parent)
         self._largeText = largeText
         self._transparentBackground = transparentBackground
+        if largeText:
+            self._contentLayout.setContentsMargins(4, 4, 4, 4)
         self._scrollDelegate = SmoothScrollDelegate(self._scroll, True)
         if transparentBackground:
             for widget in (self._scroll, self._scroll.viewport(), self._content):

@@ -94,7 +94,8 @@ class SettingGroupHeaderTest(TestCase):
         self.addCleanup(page.deleteLater)
 
         self.assertEqual(page.clearAppStoreCacheCard.titleLabel.text(), "缓存")
-        self.assertIn("1.5 KB", page.clearAppStoreCacheCard.contentLabel.text())
+        self.assertIn("加快应用图片加载", page.clearAppStoreCacheCard.contentLabel.text())
+        self.assertEqual(page.clearAppStoreCacheCard.sizeLabel.text(), "1.5 KB")
         self.assertTrue(page.clearAppStoreCacheCard.clearButton.isEnabled())
         self.assertEqual(
             page.clearAppStoreCacheCard.clearButton.accessibleName(),
@@ -104,7 +105,8 @@ class SettingGroupHeaderTest(TestCase):
         cache.size.return_value = 0
         page._refreshAppStoreCacheSize()
 
-        self.assertIn("0 B", page.clearAppStoreCacheCard.contentLabel.text())
+        self.assertEqual(page.clearAppStoreCacheCard.sizeLabel.text(), "0 B")
+        self.assertNotIn("0 B", page.clearAppStoreCacheCard.contentLabel.text())
         self.assertFalse(page.clearAppStoreCacheCard.clearButton.isEnabled())
 
     @patch("app.view.pages.setting_page.threading.Thread")

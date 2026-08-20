@@ -445,6 +445,7 @@ def _appPayload(row, packages, presets):
         "recommended_order": row["recommended_order"],
         "announcement": row["announcement"] or "",
         "manifest_revision": row["manifest_revision"],
+        "download_count": max(0, int(row["download_count"])),
         "open_action": _rowAction(row),
         "packages": packageMap,
         "presets": [

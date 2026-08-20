@@ -25,6 +25,7 @@ class TrayConfigTest(TestCase):
         self.assertEqual(cfg.trayTooltip.defaultValue, "")
         self.assertTrue(cfg.showBroadcastTrayAction.defaultValue)
         self.assertTrue(cfg.showShutdownTrayAction.defaultValue)
+        self.assertTrue(cfg.showCreditsPage.defaultValue)
         self.assertEqual(cfg.trayHomeCardKeys.defaultValue, [])
         self.assertFalse(cfg.trayHomeCardsInSubmenu.defaultValue)
 
@@ -252,6 +253,18 @@ class TrayControlNavigationTest(TestCase):
             list(self.window.trayControlPage.homeCardSwitches),
             ["全屏投送", "考试倒计时", "定时关机", "定时播报"],
         )
+
+    def testCreditsNavigationCanBeHiddenWithoutLoadingPage(self):
+        item = self.window._creditsNavigationItem
+        self.assertIsNone(self.window.creditsPage.page)
+
+        self.window._setCreditsPageVisible(False)
+
+        self.assertTrue(item.isHidden())
+        self.assertIsNone(self.window.creditsPage.page)
+
+        self.window._setCreditsPageVisible(True)
+        self.assertFalse(item.isHidden())
 
     def testTrayDefaultCardShowsMainWindowBeforeActivation(self):
         with (

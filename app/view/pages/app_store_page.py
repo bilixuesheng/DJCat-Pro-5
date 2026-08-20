@@ -10,13 +10,14 @@ from PySide6.QtCore import (
     QObject,
     QPoint,
     QPropertyAnimation,
+    QRectF,
     QSize,
     Qt,
     QTimer,
     QUrl,
     Signal,
 )
-from PySide6.QtGui import QDesktopServices, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractButton,
     QAbstractScrollArea,
@@ -33,6 +34,7 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     BodyLabel,
     CardWidget,
+    CaptionLabel,
     HorizontalFlipView,
     InfoBar,
     InfoBarPosition,
@@ -297,6 +299,63 @@ class CatalogImageWorker(QObject):
             self.completed.emit()
 
 
+class ActionProgressButton(PrimaryPushButton):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._progress = None
+        self._indeterminate = False
+        self._progressOffset = 0.0
+        self._progressTimer = QTimer(self)
+        self._progressTimer.setInterval(30)
+        self._progressTimer.timeout.connect(self._advanceProgress)
+
+    def setProgress(self, progress=None, indeterminate=False):
+        self._indeterminate = bool(indeterminate)
+        self._progress = (
+            max(0, min(100, int(progress)))
+            if progress is not None and not self._indeterminate
+            else None
+        )
+        if self._indeterminate:
+            self._progressTimer.start()
+        else:
+            self._progressTimer.stop()
+            self._progressOffset = 0.0
+        self.update()
+
+    def _advanceProgress(self):
+        self._progressOffset = (self._progressOffset + 0.025) % 1.0
+        self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self._progress is None and not self._indeterminate:
+            return
+        width = max(0.0, self.width() - 8.0)
+        if width <= 0:
+            return
+        track = QRectF(4.0, self.height() - 4.0, width, 2.0)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(255, 255, 255, 75))
+        painter.drawRoundedRect(track, 1.0, 1.0)
+        painter.setClipRect(track)
+        painter.setBrush(QColor(255, 255, 255, 230))
+        if self._indeterminate:
+            segment = max(24.0, width * 0.28)
+            x = track.left() - segment + (width + segment) * self._progressOffset
+            fill = QRectF(x, track.top(), segment, track.height())
+        else:
+            fill = QRectF(
+                track.left(),
+                track.top(),
+                width * self._progress / 100.0,
+                track.height(),
+            )
+        painter.drawRoundedRect(fill, 1.0, 1.0)
+
+
 class ApplicationCard(CardWidget):
     actionClicked = Signal()
     pinClicked = Signal()
@@ -334,11 +393,12 @@ class ApplicationCard(CardWidget):
         self._descriptionElideFilter = LabelElideFilter(maximumLines=2)
         self.titleLabel.installEventFilter(self._elideFilter)
         self.descriptionLabel.installEventFilter(self._descriptionElideFilter)
+        self.downloadCountLabel = CaptionLabel(self)
         self.pinButton = ToggleToolButton(FIF.PIN, self)
         self.pinButton.setAccessibleName("固定到主页")
         setFluentToolTip(self.pinButton, "固定到主页")
         self.pinButton.hide()
-        self.actionButton = PrimaryPushButton(self)
+        self.actionButton = ActionProgressButton(self)
         self.removeButton = ToolButton(FIF.DELETE, self)
         self.removeButton.setFixedSize(40, 40)
         setFluentToolTip(self.removeButton, "卸载")
@@ -351,7 +411,14 @@ class ApplicationCard(CardWidget):
         top = QHBoxLayout()
         top.setSpacing(12)
         top.addWidget(self.iconLabel)
-        top.addWidget(self.titleLabel, 1)
+        titleLayout = QVBoxLayout()
+        titleLayout.setContentsMargins(0, 0, 0, 0)
+        titleLayout.setSpacing(2)
+        titleLayout.addStretch(1)
+        titleLayout.addWidget(self.titleLabel)
+        titleLayout.addWidget(self.downloadCountLabel)
+        titleLayout.addStretch(1)
+        top.addLayout(titleLayout, 1)
         top.addWidget(self.pinButton)
         body = QVBoxLayout()
         body.setContentsMargins(14, 14, 14, 12)
@@ -375,7 +442,12 @@ class ApplicationCard(CardWidget):
         self.appData = app
         self.titleLabel.setText(str(app.get("name", "")))
         self.descriptionLabel.setText(str(app.get("description", "")))
+        count = max(0, int(app.get("download_count", 0) or 0))
+        self.downloadCountLabel.setText(f"已下载 {count:,} 次")
         self.setImage(imagePath)
+
+    def setDownloadCountVisible(self, visible: bool) -> None:
+        self.downloadCountLabel.setVisible(bool(visible))
 
     def setImage(self, imagePath: str = "") -> None:
         if imagePath and Path(imagePath).exists():
@@ -415,6 +487,9 @@ class ApplicationCard(CardWidget):
         )
         self.pinButton.setAccessibleName(tooltip)
         setFluentToolTip(self.pinButton, tooltip)
+
+    def setProgress(self, progress=None, indeterminate=False) -> None:
+        self.actionButton.setProgress(progress, indeterminate)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -641,6 +716,8 @@ class AppStorePage(ScrollArea):
         self._shuttingDown = False
         self._downloadJobs = {}
         self._downloadStates = {}
+        self._downloadProgress = {}
+        self._checkingUpdates = False
         self._installing = set()
         self._installThreads = {}
         self._uninstalling = set()
@@ -691,6 +768,11 @@ class AppStorePage(ScrollArea):
         header = QHBoxLayout()
         header.addWidget(self.pivot)
         header.addStretch(1)
+        self.checkUpdatesButton = PushButton(
+            FIF.SYNC, "检查更新", self.container
+        )
+        self.checkUpdatesButton.clicked.connect(self._checkInstalledUpdates)
+        header.addWidget(self.checkUpdatesButton)
         self.refreshButton = ToolButton(FIF.SYNC, self.container)
         setFluentToolTip(self.refreshButton, "刷新应用目录")
         self.refreshButton.clicked.connect(self._loadCatalog)
@@ -905,7 +987,7 @@ class AppStorePage(ScrollArea):
         self.detailName.setWordWrap(True)
         self.detailDeveloper = BodyLabel(self.detailLeft)
         self.detailVersion = BodyLabel(self.detailLeft)
-        self.detailAction = PrimaryPushButton(self.detailLeft)
+        self.detailAction = ActionProgressButton(self.detailLeft)
         self.detailAction.setMinimumHeight(48)
         self.detailAction.clicked.connect(self._onDetailAction)
         self.detailDescription = BodyLabel(self.detailLeft)
@@ -964,6 +1046,7 @@ class AppStorePage(ScrollArea):
 
     def _switchCatalogTab(self, index: int):
         self._beginViewportUpdate(0)
+        self.checkUpdatesButton.setVisible(index == 0)
         if index == 1:
             self._renderAll()
             self._resumeAds()
@@ -1096,6 +1179,7 @@ class AppStorePage(ScrollArea):
                 else:
                     _releasePackageOperation(self.store.downloadSlots)
             self._downloadStates.pop(appId, None)
+            self._downloadProgress.pop(appId, None)
             if threadAlive:
                 continue
             for attribute in ("targetPath", "partialPath"):
@@ -1120,6 +1204,7 @@ class AppStorePage(ScrollArea):
             self._installThreads.clear()
         for appId in self._uninstalling:
             self._downloadStates.pop(appId, None)
+            self._downloadProgress.pop(appId, None)
         self._uninstalling.clear()
 
     def closeEvent(self, event):
@@ -1131,6 +1216,7 @@ class AppStorePage(ScrollArea):
             return
         self._catalogLoading = True
         self.refreshButton.setEnabled(False)
+        self.checkUpdatesButton.setEnabled(False)
         worker = CatalogWorker(self.store)
         self._catalogWorker = worker
         thread = threading.Thread(target=worker.run, daemon=True)
@@ -1173,6 +1259,27 @@ class AppStorePage(ScrollArea):
         self._prepareAds()
         self._renderInstalled()
         self._renderAll()
+        if getattr(self, "_checkingUpdates", False):
+            updates = sum(
+                bool(app.get("installed") and app.get("update_available"))
+                for app in self._mergedApps()
+            )
+            if updates:
+                InfoBar.success(
+                    "检查完成",
+                    f"发现 {updates} 个可用更新。",
+                    duration=3000,
+                    position=InfoBarPosition.BOTTOM_RIGHT,
+                    parent=self,
+                )
+            else:
+                InfoBar.info(
+                    "检查完成",
+                    "已安装的软件均为最新版本。",
+                    duration=3000,
+                    position=InfoBarPosition.BOTTOM_RIGHT,
+                    parent=self,
+                )
         if self.currentApp:
             current = next((app for app in self._mergedApps() if app["id"] == self.currentApp["id"]), None)
             if current:
@@ -1254,6 +1361,14 @@ class AppStorePage(ScrollArea):
         self._catalogThread = None
         if not self._shuttingDown:
             self.refreshButton.setEnabled(True)
+            self.checkUpdatesButton.setEnabled(True)
+        self._checkingUpdates = False
+
+    def _checkInstalledUpdates(self):
+        if self._catalogLoading:
+            return
+        self._checkingUpdates = True
+        self._loadCatalog()
 
     def _syncPinnedMetadata(self):
         cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
@@ -1351,7 +1466,7 @@ class AppStorePage(ScrollArea):
         if state:
             actionText = state
             enabled = False
-        elif app.get("update_available"):
+        elif installedPage and app.get("update_available"):
             actionText = "更新"
             enabled = supported
         elif app.get("installed"):
@@ -1369,6 +1484,12 @@ class AppStorePage(ScrollArea):
             directKey in self._pinnedKeys(),
             removeEnabled=installedPage and not bool(state),
         )
+        if appId in self._installing or appId in self._uninstalling:
+            card.setProgress(indeterminate=True)
+        elif appId in self._downloadJobs:
+            card.setProgress(self._downloadProgress.get(appId, 0))
+        else:
+            card.setProgress()
 
     def _renderGrid(self, layout, apps, installedPage=False):
         cards = []
@@ -1389,7 +1510,9 @@ class AppStorePage(ScrollArea):
                         lambda card=card: self._showDetail(card.appData)
                     )
                     card.actionClicked.connect(
-                        lambda card=card: self._onAppAction(card.appData)
+                        lambda card=card: self._onAppAction(
+                            card.appData, allowUpdate=card.installedPage
+                        )
                     )
                     card.pinClicked.connect(
                         lambda card=card: self._toggleApplicationPin(card.appData)
@@ -1402,6 +1525,7 @@ class AppStorePage(ScrollArea):
                     self.imagePaths.get(app.get("icon_url", ""), ""),
                 )
                 card.installedPage = installedPage
+                card.setDownloadCountVisible(not installedPage)
                 self._setCardState(card, app, installedPage)
                 row, column = divmod(index, columns)
                 layout.addWidget(card, row, column)
@@ -1668,6 +1792,7 @@ class AppStorePage(ScrollArea):
         self.currentApp = app
         self._pauseAds()
         self.pivot.hide()
+        self.checkUpdatesButton.hide()
         self.refreshButton.hide()
         self.detailName.setText(str(app.get("name", "")))
         self.detailDeveloper.setText(f"开发者：{app.get('developer') or '未填写'}")
@@ -1699,6 +1824,9 @@ class AppStorePage(ScrollArea):
         self._beginViewportUpdate(self._catalogScrollPosition)
         self.currentApp = None
         self.pivot.show()
+        self.checkUpdatesButton.setVisible(
+            self.pivot.currentRouteKey() == "installed"
+        )
         self.refreshButton.show()
         self.stack.setMinimumHeight(0)
         self.stack.setMaximumHeight(QWIDGETSIZE_MAX)
@@ -1756,6 +1884,12 @@ class AppStorePage(ScrollArea):
             and appId not in self._uninstalling
             and actionEnabled
         )
+        if appId in self._installing or appId in self._uninstalling:
+            self.detailAction.setProgress(indeterminate=True)
+        elif appId in self._downloadJobs:
+            self.detailAction.setProgress(self._downloadProgress.get(appId, 0))
+        else:
+            self.detailAction.setProgress()
         busy = (
             appId in self._downloadJobs
             or appId in self._installing
@@ -1780,7 +1914,7 @@ class AppStorePage(ScrollArea):
             parent=self.window(),
         )
 
-    def _onAppAction(self, app):
+    def _onAppAction(self, app, allowUpdate=True):
         appId = int(app["id"])
         if (
             appId in self._downloadJobs
@@ -1788,7 +1922,9 @@ class AppStorePage(ScrollArea):
             or appId in self._uninstalling
         ):
             return
-        if app.get("installed") and not app.get("update_available"):
+        if app.get("installed") and (
+            not app.get("update_available") or not allowUpdate
+        ):
             try:
                 local = self.store.installed().get(appId)
                 self.store.executeAction(local or app)
@@ -1813,6 +1949,7 @@ class AppStorePage(ScrollArea):
         beginAppStorePackageOperation()
         self._downloadJobs[appId] = (thread, worker)
         self._downloadStates[appId] = "下载中 0%"
+        self._downloadProgress[appId] = 0
         worker.progressChanged.connect(
             lambda done, total, _speed, _workers, appId=appId: self._downloadProgressSignal.emit(
                 appId, done, total
@@ -1832,6 +1969,7 @@ class AppStorePage(ScrollArea):
         except Exception as error:
             self._downloadJobs.pop(appId, None)
             self._downloadStates.pop(appId, None)
+            self._downloadProgress.pop(appId, None)
             _releasePackageOperation(self.store.downloadSlots)
             worker.deleteLater()
             InfoBar.error("无法开始下载", str(error), duration=4000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
@@ -1860,6 +1998,7 @@ class AppStorePage(ScrollArea):
             return
         percent = int(done * 100 / total) if total else 0
         self._downloadStates[appId] = f"下载中 {percent}%"
+        self._downloadProgress[appId] = percent
         self._updateVisibleCardState(appId)
         if self.currentApp and int(self.currentApp["id"]) == appId:
             self._updateDetailAction()
@@ -1879,6 +2018,7 @@ class AppStorePage(ScrollArea):
         if canceled or error or not path:
             _releasePackageOperation(self.store.downloadSlots)
             self._downloadStates.pop(appId, None)
+            self._downloadProgress.pop(appId, None)
             self._updateVisibleCardState(appId)
             self._updateDetailAction()
             if error:
@@ -1886,6 +2026,7 @@ class AppStorePage(ScrollArea):
             return
         self._installing.add(appId)
         self._downloadStates[appId] = "安装中"
+        self._downloadProgress.pop(appId, None)
         self._updateVisibleCardState(appId)
         self._updateDetailAction()
         thread = None
@@ -1907,6 +2048,7 @@ class AppStorePage(ScrollArea):
             self._installing.discard(appId)
             _releasePackageOperation(self.store.downloadSlots)
             self._downloadStates.pop(appId, None)
+            self._downloadProgress.pop(appId, None)
             try:
                 Path(path).unlink(missing_ok=True)
             except OSError:
@@ -1952,6 +2094,7 @@ class AppStorePage(ScrollArea):
             self._installThreads.pop(appId, None)
         _releasePackageOperation(self.store.downloadSlots)
         self._downloadStates.pop(appId, None)
+        self._downloadProgress.pop(appId, None)
         if error:
             InfoBar.error("安装失败", error, duration=5000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
             self._updateVisibleCardState(appId)
@@ -2007,6 +2150,7 @@ class AppStorePage(ScrollArea):
             return
         self._uninstalling.discard(appId)
         self._downloadStates.pop(appId, None)
+        self._downloadProgress.pop(appId, None)
         if error:
             InfoBar.error("卸载失败", error, duration=4000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
             self._updateVisibleCardState(appId)
