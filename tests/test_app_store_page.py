@@ -134,7 +134,7 @@ class AppStorePageTest(TestCase):
         self.qtApp.processEvents()
 
     def testPagerClickDoesNotRebuildItems(self):
-        apps = _apps(16)
+        apps = _apps(7)
         self.page.categoryPivot.setCurrentItem("all")
         self.page._allAppsForPage = lambda: apps
         self.page._renderAll()
@@ -156,7 +156,7 @@ class AppStorePageTest(TestCase):
 
     def testPaginationButtonsAreTouchFriendlyAndNavigate(self):
         self.page.categoryPivot.setCurrentItem("all")
-        self.page._allAppsForPage = lambda: _apps(16)
+        self.page._allAppsForPage = lambda: _apps(7)
         self.page._renderAll()
 
         for button in (self.page.pagerPrevious, self.page.pagerNext):
@@ -170,6 +170,17 @@ class AppStorePageTest(TestCase):
 
         self.assertEqual(self.page._currentPage, 1)
         self.assertFalse(self.page.pagerNext.isEnabled())
+
+    def testAllCategoryShowsAtMostSixApplicationsPerPage(self):
+        apps = _apps(7)
+        self.page.categoryPivot.setCurrentItem("all")
+        self.page._allAppsForPage = lambda: apps
+
+        self.page._renderAll()
+        self.assertEqual(self.page.allGrid.count(), 6)
+
+        self.page.pagerNext.click()
+        self.assertEqual(self.page.allGrid.count(), 1)
 
     def testRecommendedCategoryShowsEveryRecommendedAppWithoutPager(self):
         apps = _apps(16)

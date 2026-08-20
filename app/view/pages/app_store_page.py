@@ -69,6 +69,7 @@ from app.view.components.setting_card_group import LabelElideFilter
 from app.view.components.tool_tip import setFluentToolTip
 
 SHUTDOWN_WAIT_SECONDS = 0.5
+ALL_APPS_PAGE_SIZE = 6
 QWIDGETSIZE_MAX = (1 << 24) - 1
 _LIVE_CATALOG_URI_SCHEMES = frozenset({"classisland"})
 _packageOperationReleaseLock = threading.Lock()
@@ -1635,7 +1636,11 @@ class AppStorePage(ScrollArea):
         try:
             apps = self._allAppsForPage()
             paginated = self.categoryPivot.currentRouteKey() == "all"
-            pageCount = max(1, (len(apps) + 14) // 15) if paginated else 1
+            pageCount = (
+                max(1, (len(apps) + ALL_APPS_PAGE_SIZE - 1) // ALL_APPS_PAGE_SIZE)
+                if paginated
+                else 1
+            )
             if self.pager.count() != pageCount:
                 self.pager.setPageNumber(pageCount)
             self._currentPage = min(self._currentPage, pageCount - 1)
@@ -1652,7 +1657,8 @@ class AppStorePage(ScrollArea):
     def _renderAllPage(self, apps=None):
         apps = self._allAppsForPage() if apps is None else apps
         if self.categoryPivot.currentRouteKey() == "all":
-            apps = apps[self._currentPage * 15 : (self._currentPage + 1) * 15]
+            start = self._currentPage * ALL_APPS_PAGE_SIZE
+            apps = apps[start : start + ALL_APPS_PAGE_SIZE]
         self._renderGrid(self.allGrid, apps)
 
     def _onPageChanged(self, index):

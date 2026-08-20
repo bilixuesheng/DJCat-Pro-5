@@ -446,6 +446,7 @@ def __init__(self, parent=None):
 - 主窗口右上角关闭曾被理解为退出。已消歧：**close** 只隐藏主窗口；**quit** 才清理资源并结束进程。
 - “解除 Qt 60 帧限制”容易被理解为绕过 VSync 或保证某个 FPS。已消歧：本实现只把 **Animation Tick** 的默认 16 ms 间隔改为 1 ms，不控制 **Presented Frame**。
 - “低配置机器按自身能力运行”不表示创建自适应刷新率策略。已消歧：所有机器使用同一最小非零 tick 间隔；事件循环繁忙时自然只能处理较少更新，不额外补跑积压帧。
+- Application Store 的“全部应用 → 全部”分类固定每页最多展示 6 个 Application；“推荐”分类展示全部推荐项，不参与分页。
 
 ## Example dialogue
 
