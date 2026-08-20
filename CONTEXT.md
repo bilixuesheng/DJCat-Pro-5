@@ -178,6 +178,51 @@ _Avoid_: 只复制 `UserConfig.json`、运行中热切换路径
 已注册导航身份但尚未创建真实页面 QWidget 的占位页。`LazyPage.ensureLoaded()` 在首次导航或确实需要页面能力时创建真实页面，并转发必要的信号和暂存输入。
 _Avoid_: 隐藏页面（隐藏的真实页面已经构造）、后台预加载
 
+### 动画
+
+**Animation Tick**:
+Qt 统一动画计时器推进 `QPropertyAnimation`、动画组和 QFluentWidgets 动画当前时间的一次更新。它决定属性更新的细密程度，不等同于一次窗口绘制，也不保证屏幕实际呈现一帧。
+_Avoid_: Render Frame、刷新率、渲染线程 sleep
+
+**Presented Frame**:
+Windows 合成器和显示设备最终呈现的一帧。它会受绘制耗时、DWM、VSync、显示器刷新率和机器负载约束，DJCat 的 Animation Tick 间隔不能解除这些约束。
+_Avoid_: Animation Tick；用 1 ms 调度间隔推断 1000 FPS
+
+### 动词词汇
+
+这些动词在项目内有固定含义；新的名称优先沿用它们，不用近义词制造第二套概念。
+
+**load**: 从本地配置、清单或资源读取数据。
+_Not_: fetch（网络请求）
+
+**save**: 把用户配置或本地状态持久化。
+
+**fetch**: 发起网络请求取得目录、额度、语音或更新信息。
+_Not_: load（本地读取）
+
+**normalize**: 在持久化或服务端数据进入业务逻辑前，将兼容旧格式、缺失字段和非法值收敛为可用结构。
+_Not_: validate（只判断能否接受）
+
+**validate**: 检查输入、下载包或完整性约束；失败时拒绝继续，不负责修正数据。
+
+**execute**: 执行已经验证的 Home Action 或 Application Action。
+
+**activate**: 唤起已经运行的窗口或进程，不创建第二份运行实例。
+
+**install / uninstall**: 将 Application 原子地放入安装目录，或从安装目录移除。
+
+**remove**: 从主页、菜单、内存集合或配置中移除引用。
+_Not_: uninstall、delete files
+
+**clear**: 清空缓存、输入或集合；不用于卸载 Application。
+
+**close**: 关闭一次 Projection、Exam Countdown 或对话框；主窗口的关闭按钮只隐藏窗口。
+_Not_: quit（结束 DJCat 进程）
+
+**quit**: 经统一资源清理流程退出 DJCat 进程。
+
+**on\***: Qt 信号、事件或异步结果的响应函数。
+
 ## Relationships
 
 - 一个 **Home Card** 只能属于 Default、Custom 或 Application 三种来源之一；排序列表可以混排，但执行规则不合并。
@@ -187,8 +232,18 @@ _Avoid_: 隐藏页面（隐藏的真实页面已经构造）、后台预加载
 - **Projection** 的纯文本正文由 `QTextEdit` 渲染，Markdown 正文由 `MarkdownView(largeText=True)` 渲染；两者是同一 Projection 的互斥显示方式。
 - **Installed Mode** 与 **Portable Mode** 共享相同的目录结构，Storage Migration 移动的是整个 App Data Directory，不是单独的设置文件。
 - **Tray Card Shortcut**、主页固定项和 Application Store 共享 `cfg.pinnedHomeCards` 中的稳定引用；图片缓存路径只是可更新的派生元数据。
+- **Custom Home Card** 包含一个 Action Sequence；`ActionSequenceWorker` 每次执行前读取最新动作列表，同一动作 ID 在一次运行中至多执行一次。
+- Broadcast Task 与 Shutdown Task 持久化在 `cfg`；对应设置页只编辑规则，MainWindow 的调度循环负责匹配时间并触发执行。
+- AI Markdown Conversion 使用 Machine Identity 领取和结算 Daily Quota；Machine Code 只是定位该身份的可见别名。
+- Animation Tick 推进动画属性；Qt/Windows 的绘制与合成链路再决定 Presented Frame。两者不能互换描述。
 
 ## Ownership rules
+
+**`cfg` 是客户端持久化设置的唯一来源。** 设置页、主页和托盘通过 `cfg.set(...)` 修改值；运行时对象不另建一份需要双向同步的配置副本。
+
+**`app/platform/animation_timer.py` 独占 Qt 全局 Animation Tick 间隔。** View 和业务模块不直接调用 Qt 私有动画 API；私有符号不可用时保留 Qt 默认行为。
+
+**Tray Menu 不拥有 Home Card。** 它只根据 HomePage 提供的入口快照重建菜单，并把稳定 key 交回 MainWindow/HomePage 执行。
 
 ### 主窗口与页面
 
@@ -262,7 +317,7 @@ AI Markdown 输入框的忙碌边框使用 2 px 渐变 QSS 边框。Qt 样式表
 | Module | Responsibility |
 |---|---|
 | `djcat.py` | 进程入口、工作目录、单实例应用、日志、配置加载和 MainWindow 创建 |
-| `app/platform/` | Windows 单实例/IPC、唤起窗口和开机启动等平台适配 |
+| `app/platform/` | Windows 单实例/IPC、唤起窗口、开机启动及 Qt 运行时适配 |
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
 | `app/view/windows/main_window.py` | 桌面组合根、导航、长期运行任务和 Client Update UI |
@@ -288,6 +343,7 @@ AI Markdown 输入框的忙碌边框使用 2 px 渐变 QSS 边框。Qt 样式表
 ```text
 set working directory
   → SingletonApplication (Windows single instance + IPC)
+  → unlockQtAnimations (before any QWidget animation is created)
   → configure logging and clear stale Client Update files
   → qconfig.load(CONFIG_PATH, cfg)
   → MainWindow(isSilent)
@@ -299,6 +355,8 @@ set working directory
 ```
 
 App Data Directory 必须在导入 `cfg` 和调用 `qconfig.load` 前由 `app/config/paths.py` 确定。第二个 Windows 实例只通知现有实例显示窗口，然后退出；它不创建 MainWindow。
+
+`unlockQtAnimations()` 必须在 QApplication 创建之后、任何动画启动之前、GUI 主线程上调用。它只针对项目锁定的 Qt 运行时查找私有符号；找不到符号或动态库时记录警告并保留 Qt 默认 16 ms 间隔，不允许加载系统中另一份 Qt 来凑合。
 
 ### Navigation loading
 
@@ -326,6 +384,17 @@ MainWindow._shutdownResources()
 ```
 
 `_shutdownResources()` 必须幂等。Lazy Page 未加载时，关闭流程不能为了清理而创建它。
+
+## Animation scheduling
+
+PySide6 6.10 没有绑定 `QAnimationDriver`，DJCat 因此把 Qt 私有 `QUnifiedTimer::setTimingInterval()` 封装在 `app/platform/animation_timer.py`，将默认 16 ms Animation Tick 间隔改为 1 ms。1 ms 是避免零间隔忙循环的最小非零调度间隔；事件循环繁忙时，逾期 tick 会在 GUI 线程恢复后推进，不再额外固定等待 16 ms。
+
+该适配有四条边界：
+
+- 动画 duration 仍按真实经过时间计算，不能按 tick 次数累计时间。
+- 不读取显示器刷新率，也不按 60/120/160 Hz 切换间隔；机器负载决定实际可处理的 tick 数。
+- 不承诺 Presented Frame 数；DWM、VSync 和绘制耗时仍可限制屏幕实际帧率。
+- Qt 版本或打包布局变化导致私有符号不可用时必须安全退回默认动画驱动；升级 PySide6 时需要在 Windows x64 与 ARM64 重新验证导出符号和端到端动画时长。
 
 ## Code shape
 
@@ -360,6 +429,7 @@ def __init__(self, parent=None):
 - worker 在线程中工作，通过 Qt Signal 把结果送回页面；只有主线程更新 QWidget。
 - 页面关闭时先设置 shutdown/cancel 状态，再等待有文件提交风险的线程；超时后也不能让回调访问已销毁控件。
 - 可计算总字节数的下载使用确定进度；无法可靠估计的文件操作使用不确定进度，不伪造百分比。
+- 新的私有 Qt/Windows API 必须封装、可失败、可回退，并有锁定版本的真实二进制验证。
 
 ### Comments
 
@@ -373,6 +443,9 @@ def __init__(self, parent=None):
 - “下载次数”并不证明 Package 已完整下载或安装。它是服务端去重后的下载重定向请求累计值。
 - “懒加载页面”不等于只隐藏 QWidget。真实页面及其重量级依赖必须尚未构造；纯版本比较被拆到轻量模块，避免 MainWindow 提前初始化应用市场缓存。
 - Application Store 的“全部”与“已安装”是两个操作上下文：即使存在 Application Update，“全部”卡片仍显示“打开”；“已安装”和详情页才显示“更新”。
+- 主窗口右上角关闭曾被理解为退出。已消歧：**close** 只隐藏主窗口；**quit** 才清理资源并结束进程。
+- “解除 Qt 60 帧限制”容易被理解为绕过 VSync 或保证某个 FPS。已消歧：本实现只把 **Animation Tick** 的默认 16 ms 间隔改为 1 ms，不控制 **Presented Frame**。
+- “低配置机器按自身能力运行”不表示创建自适应刷新率策略。已消歧：所有机器使用同一最小非零 tick 间隔；事件循环繁忙时自然只能处理较少更新，不额外补跑积压帧。
 
 ## Example dialogue
 
@@ -405,3 +478,6 @@ def __init__(self, parent=None):
 
 > **Dev:** “设置页没打开，退出时要不要先创建它再保存？”
 > **Domain expert:** “不要。未加载的 Lazy Page 没有待保存的页面草稿，关闭流程也不能因此破坏懒加载。”
+
+> **Dev:** “动画间隔改成 1 ms，是不是软件就能显示 1000 FPS？”
+> **Domain expert:** “不是。1 ms 只提高 Animation Tick 的调度密度；Presented Frame 仍由绘制耗时、DWM、VSync 和显示器决定。”

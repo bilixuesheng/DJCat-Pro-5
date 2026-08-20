@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from app.platform import animation_timer
 
 
@@ -35,3 +37,20 @@ def test_unlock_qt_animations_is_idempotent():
     setInterval.assert_called_once_with(
         animation_timer.UNLOCKED_TIMER_INTERVAL_MS
     )
+
+
+def test_qt_core_loader_stays_inside_pyside_runtime(tmp_path):
+    qtRoot = tmp_path / "runtime"
+    qtRoot.mkdir()
+    (tmp_path / "libQt6Core.so.6").touch()
+
+    with (
+        patch.object(animation_timer.sys, "platform", "linux"),
+        patch.object(
+            animation_timer.QLibraryInfo,
+            "path",
+            return_value=str(qtRoot),
+        ),
+        pytest.raises(RuntimeError, match="找不到 Qt6Core"),
+    ):
+        animation_timer._QtAnimationTimer._loadQtCore()

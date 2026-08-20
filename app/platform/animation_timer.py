@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ctypes
-import ctypes.util
 import sys
 from pathlib import Path
 
@@ -63,24 +62,24 @@ class _QtAnimationTimer:
 
         if sys.platform == "win32":
             names = ("Qt6Core.dll",)
+            load = ctypes.WinDLL
         elif sys.platform == "darwin":
             names = (
                 "QtCore.framework/QtCore",
                 "libQt6Core.6.dylib",
                 "libQt6Core.dylib",
             )
+            load = ctypes.CDLL
         else:
             names = ("libQt6Core.so.6", "libQt6Core.so")
+            load = ctypes.CDLL
 
-        for directory in (libraryPath, binariesPath, qtRoot, qtRoot.parent):
+        for directory in (libraryPath, binariesPath, qtRoot):
             for name in names:
                 path = directory / name
                 if path.is_file():
-                    return ctypes.CDLL(str(path))
+                    return load(str(path))
 
-        fallback = ctypes.util.find_library("Qt6Core")
-        if fallback:
-            return ctypes.CDLL(fallback)
         raise RuntimeError("找不到 Qt6Core 动态库")
 
     def setInterval(self, interval: int) -> None:
