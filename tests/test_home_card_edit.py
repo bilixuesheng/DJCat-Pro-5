@@ -51,12 +51,14 @@ class HomeCardEditTest(TestCase):
     def testCardsCanBeReorderedWithoutTouchScrolling(self):
         self.assertEqual(
             cfg.homeCardOrder.defaultValue,
-            ["全屏投送", "考试倒计时", "定时关机", "定时播报"],
+            ["全屏投送", "考试倒计时", "全屏时钟", "定时关机", "定时播报"],
         )
         touchGesture = QScroller.grabbedGesture(self.page.viewport())
         QTest.mouseClick(self.page.sortBtn, Qt.MouseButton.LeftButton)
 
-        for card in self.page.all_cards.values():
+        for card in (
+            self.page.all_cards[name] for name in self.page._card_order
+        ):
             self.assertEqual(card.size().toTuple(), (210, 120))
             self.assertTrue(card.deleteButton.isVisible())
             self.assertTrue(card.deleteButton.isEnabled())

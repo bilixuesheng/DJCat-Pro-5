@@ -240,6 +240,7 @@ class SettingSearchTest(TestCase):
 
                 self.window._navToHome()
                 QTest.qWait(500)
+
                 self.window.homePage.all_cards[title].clicked.emit()
                 QTest.qWait(500)
 
@@ -251,6 +252,66 @@ class SettingSearchTest(TestCase):
 
                 self.window._navToHome()
                 QTest.qWait(500)
+
+    def testFullscreenClockOpensDirectlyWithoutAddingEditorPage(self):
+        pageCount = self.window.stackedWidget.count()
+        currentPage = self.window.stackedWidget.currentWidget()
+        showMainWindow = cfg.showMainWindowAfterFullscreenClock.value
+        try:
+            cfg.set(cfg.showMainWindowAfterFullscreenClock, True)
+            self.window.homePage.all_cards["全屏时钟"].clicked.emit()
+            self.app.processEvents()
+
+            clock = self.window.fullscreenClockWindow
+            self.assertIsNotNone(clock)
+            self.assertTrue(clock.isVisible())
+            self.assertTrue(self.window.isHidden())
+            self.assertEqual(self.window.stackedWidget.count(), pageCount)
+            self.assertIs(self.window.stackedWidget.currentWidget(), currentPage)
+
+            clock.close()
+            QTest.qWait(500)
+            self.assertTrue(self.window.isVisible())
+            self.assertIs(
+                self.window.stackedWidget.currentWidget(),
+                self.window.homePage,
+            )
+        finally:
+            cfg.set(cfg.showMainWindowAfterFullscreenClock, showMainWindow)
+            if self.window.fullscreenClockWindow is not None:
+                self.window.fullscreenClockWindow.close()
+
+    def testFullscreenClockSettingsFollowRequestedGroupOrder(self):
+        page = self.window.settingPage.ensureLoaded()
+        groups = [
+            page.broadcastGroup,
+            page.aiMarkdownGroup,
+            page.countdownGroup,
+            page.fullscreenClockGroup,
+        ]
+
+        self.assertEqual(
+            [page.vBoxLayout.indexOf(group) for group in groups],
+            sorted(page.vBoxLayout.indexOf(group) for group in groups),
+        )
+        self.assertEqual(
+            [
+                card.titleLabel.text()
+                for card in page.fullscreenClockGroup.settingCards()
+            ],
+            [
+                "背景类型",
+                "背景颜色",
+                "自定义时钟背景",
+                "图片缩放模式",
+                "显示任务栏",
+                "全屏时置顶",
+                "窗口化时置顶",
+                "操作按钮位置",
+                "关闭后显示主页面",
+                "退出前询问",
+            ],
+        )
 
     def testBackgroundSchedulesDoNotLoadManagementPages(self):
         broadcastTask = {

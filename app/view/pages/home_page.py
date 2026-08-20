@@ -72,6 +72,7 @@ from app.view.components.tool_tip import setFluentToolTip
 DEFAULT_CARD_INFO = {
     "全屏投送": (FIF.FULL_SCREEN, "将信息以大字全屏展示"),
     "考试倒计时": (FIF.CALENDAR, "设定考试时长并全屏显示倒计时"),
+    "全屏时钟": (FIF.STOP_WATCH, "全屏显示当前系统时间"),
     "定时播报": (FIF.MEGAPHONE, "设置每日定点语音播报时间或播放音频"),
     "定时关机": (FIF.POWER_BUTTON, "设置指定时间提示或自动关闭计算机"),
 }
@@ -551,6 +552,12 @@ class HomePage(ScrollArea):
                 FIF.CALENDAR,
                 "考试倒计时",
                 "设定考试时长并全屏显示倒计时",
+                self.cardsWidget,
+            ),
+            "全屏时钟": ActionCard(
+                FIF.STOP_WATCH,
+                "全屏时钟",
+                "全屏显示当前系统时间",
                 self.cardsWidget,
             ),
             "定时播报": ActionCard(

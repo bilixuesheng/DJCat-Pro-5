@@ -354,11 +354,11 @@ class SettingPage(ScrollArea):
             content="投送窗口、操作按钮和关闭行为",
         )
         self.aiMarkdownGroup = CollapsibleSettingCardGroup(
-            "AI帮写Markdown设置",
+            "AI帮改Markdown设置",
             "aiMarkdown",
             self.container,
             icon=FluentIcon.EDIT,
-            content="AI 帮写功能和 Markdown 风格",
+            content="AI 帮改功能和 Markdown 风格",
         )
         self.countdownGroup = CollapsibleSettingCardGroup(
             "考试倒计时设置",
@@ -366,6 +366,13 @@ class SettingPage(ScrollArea):
             self.container,
             icon=FluentIcon.CALENDAR,
             content="倒计时窗口、提醒和重置行为",
+        )
+        self.fullscreenClockGroup = CollapsibleSettingCardGroup(
+            "全屏时钟设置",
+            "fullscreenClock",
+            self.container,
+            icon=FluentIcon.STOP_WATCH,
+            content="时钟窗口、操作按钮和关闭行为",
         )
         self.softwareGroup = CollapsibleSettingCardGroup(
             "应用",
@@ -451,6 +458,12 @@ class SettingPage(ScrollArea):
             FluentIcon.FOLDER,
             "自定义倒计时背景",
             "选择考试倒计时使用的本地背景图片",
+        )
+        self.fullscreenClockBackgroundImageCard = PushSettingCard(
+            "选择图片",
+            FluentIcon.FOLDER,
+            "自定义时钟背景",
+            "选择全屏时钟使用的本地背景图片",
         )
         self.bannerGroup.addSettingCards(
             [
@@ -652,6 +665,71 @@ class SettingPage(ScrollArea):
             ]
         )
 
+        self.fullscreenClockBackgroundColorCard = LocalizedColorSettingCard(
+            cfg.fullscreenClockBackgroundColor,
+            FluentIcon.PALETTE,
+            "背景颜色",
+            "纯色背景使用的颜色",
+        )
+        self.fullscreenClockBackgroundScaleCard = ComboBoxSettingCard(
+            cfg.fullscreenClockBackgroundScaleMode,
+            FluentIcon.ZOOM_IN,
+            "图片缩放模式",
+            "设置背景图片的缩放和对齐方式",
+            texts=WINDOW_BACKGROUND_SCALE_MODES,
+        )
+        self.fullscreenClockGroup.addSettingCards(
+            [
+                ComboBoxSettingCard(
+                    cfg.fullscreenClockBackgroundMode,
+                    FluentIcon.PHOTO,
+                    "背景类型",
+                    "选择主题色、纯色或图片背景",
+                    texts=WINDOW_BACKGROUND_MODES,
+                ),
+                self.fullscreenClockBackgroundColorCard,
+                self.fullscreenClockBackgroundImageCard,
+                self.fullscreenClockBackgroundScaleCard,
+                SwitchSettingCard(
+                    FluentIcon.APPLICATION,
+                    "显示任务栏",
+                    "全屏时钟显示时保留任务栏，方便切换应用并避免 Windows 进入免打扰模式",
+                    cfg.showTaskbarInFullscreenClock,
+                ),
+                SwitchSettingCard(
+                    FluentIcon.PIN,
+                    "全屏时置顶",
+                    "全屏时钟窗口始终显示在最顶层",
+                    cfg.fullscreenClockTopmostInFullscreen,
+                ),
+                SwitchSettingCard(
+                    FluentIcon.PIN,
+                    "窗口化时置顶",
+                    "时钟界面窗口化时始终显示在最顶层",
+                    cfg.fullscreenClockTopmostInWindowed,
+                ),
+                ComboBoxSettingCard(
+                    cfg.fullscreenClockActionButtonPosition,
+                    FluentIcon.LAYOUT,
+                    "操作按钮位置",
+                    "设置全屏时钟下方操作按钮的放置位置",
+                    texts=["左下角", "右下角"],
+                ),
+                SwitchSettingCard(
+                    FluentIcon.HOME,
+                    "关闭后显示主页面",
+                    "关闭全屏时钟后显示软件主页面",
+                    cfg.showMainWindowAfterFullscreenClock,
+                ),
+                SwitchSettingCard(
+                    FluentIcon.QUESTION,
+                    "退出前询问",
+                    "关闭全屏时钟前询问是否退出",
+                    cfg.confirmBeforeCloseFullscreenClock,
+                ),
+            ]
+        )
+
         self.autoRunCard = SwitchSettingCard(
             FluentIcon.VPN,
             "开机启动",
@@ -715,8 +793,9 @@ class SettingPage(ScrollArea):
         self.addSettingGroup(self.personalGroup)
         self.addSettingGroup(self.bannerGroup)
         self.addSettingGroup(self.broadcastGroup)
-        self.addSettingGroup(self.countdownGroup)
         self.addSettingGroup(self.aiMarkdownGroup)
+        self.addSettingGroup(self.countdownGroup)
+        self.addSettingGroup(self.fullscreenClockGroup)
         self.addSettingGroup(self.softwareGroup)
         self.addSettingGroup(self.aboutGroup)
 
@@ -732,6 +811,12 @@ class SettingPage(ScrollArea):
             lambda: self._onChooseBackgroundImageClicked(
                 cfg.countdownBackgroundImagePath,
                 cfg.countdownBackgroundMode,
+            )
+        )
+        self.fullscreenClockBackgroundImageCard.clicked.connect(
+            lambda: self._onChooseBackgroundImageClicked(
+                cfg.fullscreenClockBackgroundImagePath,
+                cfg.fullscreenClockBackgroundMode,
             )
         )
         self.autoRunCard.checkedChanged.connect(self._onAutoRunChanged)
@@ -750,6 +835,9 @@ class SettingPage(ScrollArea):
             self._refreshConditionalCards
         )
         cfg.countdownBackgroundMode.valueChanged.connect(
+            self._refreshConditionalCards
+        )
+        cfg.fullscreenClockBackgroundMode.valueChanged.connect(
             self._refreshConditionalCards
         )
         cfg.aiMarkdownMachineCode.valueChanged.connect(
@@ -776,6 +864,12 @@ class SettingPage(ScrollArea):
             self.countdownBackgroundImageCard: cfg.countdownBackgroundMode.value
             == "图片",
             self.countdownBackgroundScaleCard: cfg.countdownBackgroundMode.value
+            == "图片",
+            self.fullscreenClockBackgroundColorCard: cfg.fullscreenClockBackgroundMode.value
+            == "纯色",
+            self.fullscreenClockBackgroundImageCard: cfg.fullscreenClockBackgroundMode.value
+            == "图片",
+            self.fullscreenClockBackgroundScaleCard: cfg.fullscreenClockBackgroundMode.value
             == "图片",
         }
 

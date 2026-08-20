@@ -744,6 +744,7 @@ class MainWindow(MSFluentWindow):
         self.settingPage = LazySettingPage(self)
         self.broadcastEditPage = None
         self.countdownPage = None
+        self.fullscreenClockWindow = None
         self.schedulePage = None
         self.shutdownPage = None
         self.searchEdit = SearchLineEdit(self.titleBar)
@@ -780,6 +781,10 @@ class MainWindow(MSFluentWindow):
             self.homePage.all_cards["全屏投送"].clicked.connect(self._navToBroadcast)
         if "考试倒计时" in self.homePage.all_cards:
             self.homePage.all_cards["考试倒计时"].clicked.connect(self._navToCountdown)
+        if "全屏时钟" in self.homePage.all_cards:
+            self.homePage.all_cards["全屏时钟"].clicked.connect(
+                self._showFullscreenClock
+            )
         if "定时播报" in self.homePage.all_cards:
             self.homePage.all_cards["定时播报"].clicked.connect(self._navToSchedule)
         if "定时关机" in self.homePage.all_cards:
@@ -890,6 +895,16 @@ class MainWindow(MSFluentWindow):
             "CountdownPage",
         )
         return page
+
+    def _getFullscreenClockWindow(self):
+        if self.fullscreenClockWindow is None:
+            from app.view.pages.fullscreen_clock import FullscreenClockWindow
+
+            self.fullscreenClockWindow = FullscreenClockWindow()
+            self.fullscreenClockWindow.closeClicked.connect(
+                self._onFullscreenClockClosed
+            )
+        return self.fullscreenClockWindow
 
     def _getSchedulePage(self):
         from app.view.pages.schedule_page import SchedulePage
@@ -1011,6 +1026,20 @@ class MainWindow(MSFluentWindow):
     def _navToCountdown(self):
         self.switchTo(self._getCountdownPage())
         self.navigationInterface.setCurrentItem(None)
+
+    def _showFullscreenClock(self):
+        QApplication.instance().setQuitOnLastWindowClosed(False)
+        self._getFullscreenClockWindow().startClock()
+        self.hide()
+
+    def _onFullscreenClockClosed(self):
+        if self._resourcesShutdown:
+            return
+        showMainWindow = cfg.showMainWindowAfterFullscreenClock.value
+        QApplication.instance().setQuitOnLastWindowClosed(showMainWindow)
+        self._navToHome()
+        if showMainWindow:
+            self._showMainWindow()
 
     def _navToSchedule(self):
         self.switchTo(self._getSchedulePage())

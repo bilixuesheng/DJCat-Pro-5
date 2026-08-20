@@ -49,8 +49,8 @@ class HomeCustomCardTest(TestCase):
         self.visible_defaults = list(cfg.visibleDefaultHomeCards.value)
         self.custom_cards = list(cfg.customHomeCards.value)
         cfg.file = Path(self.temp_dir.name) / "config.json"
-        cfg.set(cfg.homeCardOrder, ["全屏投送", "考试倒计时", "定时关机", "定时播报"])
-        cfg.set(cfg.visibleDefaultHomeCards, ["全屏投送", "考试倒计时", "定时关机", "定时播报"])
+        cfg.set(cfg.homeCardOrder, list(DEFAULT_HOME_CARD_NAMES))
+        cfg.set(cfg.visibleDefaultHomeCards, list(DEFAULT_HOME_CARD_NAMES))
         cfg.set(cfg.customHomeCards, [])
         self.page = HomePage()
         self.page.resize(900, 700)

@@ -73,7 +73,7 @@ def main():
     from qfluentwidgets import qconfig, setThemeColor
 
     from app.common.update_download import clearUpdateDirectory
-    from app.config.cfg import cfg
+    from app.config.cfg import cfg, migrateConfig
     from app.config.paths import CONFIG_PATH
 
     configureLogging()
@@ -87,6 +87,7 @@ def main():
         )
     sys.excepthook = exceptionHook
     qconfig.load(CONFIG_PATH, cfg)
+    migrateConfig()
     setThemeColor(QColor(49, 101, 49))
 
     app.window = startApp(isSilent=isSilent)

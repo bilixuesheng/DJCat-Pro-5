@@ -11,7 +11,7 @@
 _Avoid_: shortcut、tile；不加限定地称 card
 
 **Default Home Card**:
-DJCat 自带的 Home Card，目前固定为“全屏投送”“考试倒计时”“定时播报”和“定时关机”。用户可以移除、恢复和排序，但不能改写它代表的功能。
+DJCat 自带的 Home Card，目前固定为“全屏投送”“考试倒计时”“全屏时钟”“定时播报”和“定时关机”。用户可以移除、恢复和排序，但不能改写它代表的功能。
 _Avoid_: built-in app、system card
 
 **Custom Home Card**:
@@ -49,6 +49,10 @@ _Avoid_: Broadcast、投屏（不传输屏幕或视频）、presentation
 **Exam Countdown**:
 “考试倒计时”产生的一次临时计时，具有初始时长、剩余时长、标题和语音提醒开关。它可运行、暂停、调整、重置或结束；关闭后不保存进度，从更长时间跨过 15 分钟及归零时可播放提醒音。
 _Avoid_: timer、Scheduled Task
+
+**Fullscreen Clock**:
+“全屏时钟”显示当前系统时间，进入后直接全屏展示，也可切换为固定大小的窗口。它没有计时控制或编辑页面，关闭后不保存状态。
+_Avoid_: Exam Countdown、timer、Scheduled Task
 
 ### 定时任务
 

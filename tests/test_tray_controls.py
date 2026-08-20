@@ -251,7 +251,7 @@ class TrayControlNavigationTest(TestCase):
 
         self.assertEqual(
             list(self.window.trayControlPage.homeCardSwitches),
-            ["全屏投送", "考试倒计时", "定时关机", "定时播报"],
+            ["全屏投送", "考试倒计时", "全屏时钟", "定时关机", "定时播报"],
         )
 
     def testCreditsNavigationCanBeHiddenWithoutLoadingPage(self):

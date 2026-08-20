@@ -14,6 +14,7 @@ from app.config.cfg import WINDOW_BACKGROUND_MODES, WINDOW_BACKGROUND_SCALE_MODE
 from app.view.components.window_background import WindowBackground
 from app.view.pages.broadcast_page import BroadcastWindow
 from app.view.pages.countdown_page import CountdownWindow
+from app.view.pages.fullscreen_clock import FullscreenClockWindow
 from app.view.pages.setting_page import SettingPage
 
 
@@ -36,6 +37,10 @@ class WindowBackgroundTest(TestCase):
             cfg.countdownBackgroundColor,
             cfg.countdownBackgroundImagePath,
             cfg.countdownBackgroundScaleMode,
+            cfg.fullscreenClockBackgroundMode,
+            cfg.fullscreenClockBackgroundColor,
+            cfg.fullscreenClockBackgroundImagePath,
+            cfg.fullscreenClockBackgroundScaleMode,
         )
         self.values = [(item, item.value) for item in self.items]
 
@@ -53,6 +58,7 @@ class WindowBackgroundTest(TestCase):
         )
         self.assertEqual(cfg.broadcastBackgroundMode.defaultValue, "主题色")
         self.assertEqual(cfg.countdownBackgroundMode.defaultValue, "主题色")
+        self.assertEqual(cfg.fullscreenClockBackgroundMode.defaultValue, "主题色")
 
     def testBackgroundPaintsSolidAndImageModes(self):
         parent = QWidget()
@@ -91,14 +97,18 @@ class WindowBackgroundTest(TestCase):
     def testWindowsKeepContentTransparentOverBackground(self):
         broadcast = BroadcastWindow()
         countdown = CountdownWindow()
+        clock = FullscreenClockWindow()
         self.addCleanup(broadcast.close)
         self.addCleanup(countdown.close)
+        self.addCleanup(clock.close)
 
         broadcast._applyStyle()
         broadcast.show()
         broadcast.resize(320, 200)
         countdown.resize(320, 200)
         countdown._applyWindowState()
+        clock.resize(320, 200)
+        clock._applyWindowState()
         self.app.processEvents()
 
         self.assertIn("background: transparent", broadcast.styleSheet())
@@ -106,6 +116,7 @@ class WindowBackgroundTest(TestCase):
         self.assertIn("background: transparent", countdown.titleLabel.styleSheet())
         self.assertEqual(broadcast.background.size(), broadcast.size())
         self.assertEqual(countdown.background.size(), countdown.size())
+        self.assertEqual(clock.background.size(), clock.size())
 
     @patch("app.view.pages.setting_page.QFileDialog.getOpenFileName")
     def testSettingPageSelectsImageAndEnablesImageMode(self, getOpenFileName):
@@ -138,6 +149,7 @@ class WindowBackgroundTest(TestCase):
             with self.subTest(mode=mode):
                 cfg.set(cfg.broadcastBackgroundMode, mode, save=False)
                 cfg.set(cfg.countdownBackgroundMode, mode, save=False)
+                cfg.set(cfg.fullscreenClockBackgroundMode, mode, save=False)
                 self.app.processEvents()
                 self.assertEqual(
                     page.broadcastBackgroundColorCard.isHidden(),
@@ -161,6 +173,18 @@ class WindowBackgroundTest(TestCase):
                 )
                 self.assertEqual(
                     page.countdownBackgroundScaleCard.isHidden(),
+                    not imageVisible,
+                )
+                self.assertEqual(
+                    page.fullscreenClockBackgroundColorCard.isHidden(),
+                    not colorVisible,
+                )
+                self.assertEqual(
+                    page.fullscreenClockBackgroundImageCard.isHidden(),
+                    not imageVisible,
+                )
+                self.assertEqual(
+                    page.fullscreenClockBackgroundScaleCard.isHidden(),
                     not imageVisible,
                 )
 

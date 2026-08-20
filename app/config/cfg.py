@@ -34,6 +34,14 @@ BANNER_PRESET_SCALE_MODES = {
 }
 WINDOW_BACKGROUND_MODES = ("主题色", "纯色", "图片")
 WINDOW_BACKGROUND_SCALE_MODES = ("拉伸", "缩放(上)", "缩放(中)", "缩放(下)")
+DEFAULT_HOME_CARDS = (
+    "全屏投送",
+    "考试倒计时",
+    "全屏时钟",
+    "定时关机",
+    "定时播报",
+)
+HOME_CARD_SCHEMA_VERSION = 1
 
 
 class GeometryValidator(ConfigValidator):
@@ -203,6 +211,46 @@ class Config(QConfig):
         OptionsValidator(WINDOW_BACKGROUND_SCALE_MODES),
     )
 
+    showTaskbarInFullscreenClock = ConfigItem(
+        "FullscreenClock", "ShowTaskbar", True, BoolValidator()
+    )
+    fullscreenClockTopmostInFullscreen = ConfigItem(
+        "FullscreenClock", "TopmostInFullscreen", False, BoolValidator()
+    )
+    fullscreenClockTopmostInWindowed = ConfigItem(
+        "FullscreenClock", "TopmostInWindowed", True, BoolValidator()
+    )
+    fullscreenClockActionButtonPosition = OptionsConfigItem(
+        "FullscreenClock",
+        "ActionButtonPosition",
+        "右下角",
+        OptionsValidator(["左下角", "右下角"]),
+    )
+    showMainWindowAfterFullscreenClock = ConfigItem(
+        "FullscreenClock", "ShowMainWindowAfterClose", True, BoolValidator()
+    )
+    confirmBeforeCloseFullscreenClock = ConfigItem(
+        "FullscreenClock", "ConfirmBeforeClose", True, BoolValidator()
+    )
+    fullscreenClockBackgroundMode = OptionsConfigItem(
+        "FullscreenClock",
+        "BackgroundMode",
+        "主题色",
+        OptionsValidator(WINDOW_BACKGROUND_MODES),
+    )
+    fullscreenClockBackgroundColor = ColorConfigItem(
+        "FullscreenClock", "BackgroundColor", QColor(*THEME_COLOR_PRESETS[0][1])
+    )
+    fullscreenClockBackgroundImagePath = ConfigItem(
+        "FullscreenClock", "BackgroundImagePath", ""
+    )
+    fullscreenClockBackgroundScaleMode = OptionsConfigItem(
+        "FullscreenClock",
+        "BackgroundScaleMode",
+        "缩放(中)",
+        OptionsValidator(WINDOW_BACKGROUND_SCALE_MODES),
+    )
+
     autoRun = ConfigItem("Software", "AutoRun", False, BoolValidator())
     checkUpdateAtStartUp = ConfigItem(
         "Software", "CheckUpdateAtStartUp", True, BoolValidator()
@@ -216,12 +264,13 @@ class Config(QConfig):
     )
 
     homeCardOrder = ConfigItem(
-        "HomePage", "CardOrder", ["全屏投送", "考试倒计时", "定时关机", "定时播报"]
+        "HomePage", "CardOrder", list(DEFAULT_HOME_CARDS)
     )
 
     visibleDefaultHomeCards = ConfigItem(
-        "HomePage", "VisibleDefaultCards", ["全屏投送", "考试倒计时", "定时关机", "定时播报"]
+        "HomePage", "VisibleDefaultCards", list(DEFAULT_HOME_CARDS)
     )
+    homeCardSchemaVersion = ConfigItem("HomePage", "SchemaVersion", 0)
     customHomeCards = ConfigItem("HomePage", "CustomCards", [])
 
     pinnedHomeCards = ConfigItem("HomePage", "PinnedApplicationCards", [])
@@ -234,3 +283,27 @@ class Config(QConfig):
 
 cfg = Config()
 cfg.file = CONFIG_PATH
+
+
+def migrateConfig() -> None:
+    try:
+        version = int(cfg.homeCardSchemaVersion.value)
+    except (TypeError, ValueError):
+        version = 0
+    if version >= HOME_CARD_SCHEMA_VERSION:
+        return
+
+    for item in (cfg.homeCardOrder, cfg.visibleDefaultHomeCards):
+        cards = (
+            list(item.value)
+            if isinstance(item.value, list)
+            else list(DEFAULT_HOME_CARDS)
+        )
+        if "全屏时钟" not in cards:
+            try:
+                index = cards.index("考试倒计时") + 1
+            except ValueError:
+                index = len(cards)
+            cards.insert(index, "全屏时钟")
+            cfg.set(item, cards, save=False)
+    cfg.set(cfg.homeCardSchemaVersion, HOME_CARD_SCHEMA_VERSION)

@@ -15,11 +15,12 @@ from PySide6.QtCore import QObject, QProcess, QSize, Signal
 from PySide6.QtGui import QIcon, QImage
 from qfluentwidgets import FluentIcon as FIF
 
-from app.config.paths import HOME_CARD_ICON_DIR
 from app.common.process_environment import externalProcessEnvironment
+from app.config.cfg import DEFAULT_HOME_CARDS
+from app.config.paths import HOME_CARD_ICON_DIR
 
 
-DEFAULT_HOME_CARD_NAMES = ("全屏投送", "考试倒计时", "定时关机", "定时播报")
+DEFAULT_HOME_CARD_NAMES = DEFAULT_HOME_CARDS
 DIRECT_APPLICATION_PRESET_ID = 0
 ACTION_TYPES = ("program", "shell", "url", "path", "delay")
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
