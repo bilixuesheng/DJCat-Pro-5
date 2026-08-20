@@ -31,6 +31,7 @@ jobs:
     outputs:
       version: ${{ steps.release.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
+      title: ${{ steps.release.outputs.title }}
       source_sha: ${{ steps.release.outputs.source_sha }}
       notes_file: ${{ steps.release.outputs.notes_file }}
     steps:
@@ -61,6 +62,20 @@ jobs:
             echo "Missing release notes: $NOTES_FILE" >&2
             exit 1
           }
+          TITLE=$(python - "$NOTES_FILE" "$TAG" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+          match = re.search(
+              r"^<!--\s*release-title:\s*(.+?)\s*-->$",
+              text,
+              re.MULTILINE,
+          )
+          print(match.group(1) if match else sys.argv[2])
+          PY
+          )
 
           git fetch --tags --force
           if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
@@ -71,6 +86,7 @@ jobs:
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
           echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
           echo "notes_file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
 
@@ -235,6 +251,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_TITLE: ${{ needs.prepare.outputs.title }}
       SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
       NOTES_FILE: ${{ needs.prepare.outputs.notes_file }}
     steps:
@@ -287,7 +304,7 @@ jobs:
           fi
           gh release create "$TAG" release-files/* \
             --target "$SOURCE_SHA" \
-            --title "$TAG" \
+            --title "$RELEASE_TITLE" \
             --notes-file "$NOTES_FILE" \
             "${release_args[@]}" \
             --repo "$GITHUB_REPOSITORY"
