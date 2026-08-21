@@ -34,8 +34,6 @@ from app.config.cfg import cfg
 from app.config.constants import (
     DOWNLOAD_URL,
     normalizeReleaseVersion,
-    updateChecksumUrl,
-    updateDownloadUrl,
 )
 from app.view.pages.setting_page import SettingPage
 from app.view.shell.tray import SystemTrayIcon
@@ -810,10 +808,6 @@ class UpdateWindowLifecycleTest(TestCase):
                 "app.view.windows.main_window.threading.Thread",
                 return_value=thread,
             ),
-            patch(
-                "app.view.windows.main_window.clientArchitecture",
-                return_value="x86_64",
-            ),
         ):
             self.window._onUpdateChecked(
                 {"latest_version": "9999.0.0", "update_note": "note"},
@@ -841,17 +835,12 @@ class UpdateWindowLifecycleTest(TestCase):
         self.assertEqual(self.window._downloadStateToolTip.y(), firstY)
         self.assertEqual(self.window._downloadStateToolTip.suitablePosCalls, 1)
         workerFactory.assert_called_once()
-        self.assertEqual(
-            workerFactory.call_args.args[0],
-            updateDownloadUrl("9999.0.0", "x86_64"),
-        )
+        self.assertEqual(workerFactory.call_args.args[0], DOWNLOAD_URL)
         self.assertTrue(workerFactory.call_args.kwargs["requireHttps"])
-        self.assertEqual(
-            workerFactory.call_args.kwargs["checksumUrl"],
-            updateChecksumUrl("9999.0.0", "x86_64"),
-        )
+        self.assertEqual(workerFactory.call_args.kwargs["maxBytes"], 1024**3)
+        self.assertNotIn("checksumUrl", workerFactory.call_args.kwargs)
 
-    def testArm64UpdateUsesArm64ReleaseInstaller(self):
+    def testUpdateAlwaysUsesBucketInstaller(self):
         worker = DownloadWorkerStub("", Path())
         thread = ThreadStub(lambda: None, True)
         with (
@@ -867,18 +856,10 @@ class UpdateWindowLifecycleTest(TestCase):
                 "app.view.windows.main_window.threading.Thread",
                 return_value=thread,
             ),
-            patch(
-                "app.view.windows.main_window.clientArchitecture",
-                return_value="arm64",
-            ),
         ):
             self.window._startUpdateDownload("5.0.0-pre.22")
 
-        self.assertEqual(
-            workerFactory.call_args.args[0],
-            updateDownloadUrl("5.0.0-pre.22", "arm64"),
-        )
-        self.assertIn("Windows-arm64-Setup.exe", workerFactory.call_args.args[0])
+        self.assertEqual(workerFactory.call_args.args[0], DOWNLOAD_URL)
 
     def testStartingAnotherDownloadDisposesOnlyThePreviousTooltip(self):
         oldToolTip = StateToolTipStub("old", "old", self.window)

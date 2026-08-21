@@ -147,7 +147,7 @@ _Avoid_: theme、CSS、System Prompt
 ### 更新
 
 **Client Update**:
-DJCat Pro 5 自身的新版本，通过专用更新信息和 Windows 安装程序交付。它独立于 Application Store，不使用 Application Catalog 或 Package。
+DJCat Pro 5 自身的新版本，通过专用更新信息和 Windows 安装程序交付。安装程序固定从 `DOWNLOAD_URL` 指向的雨云对象存储下载，不根据版本号或架构拼接 GitHub Release 地址。它独立于 Application Store，不使用 Application Catalog 或 Package。
 _Avoid_: Application Update；不加限定地称 update
 
 **Application Update**:

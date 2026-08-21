@@ -41,7 +41,7 @@ from qfluentwidgets import (
 )
 
 from app.common.ai_markdown import registerMachine
-from app.common.application_version import clientArchitecture, isUpdateAvailable
+from app.common.application_version import isUpdateAvailable
 from app.common.edge_tts import (
     DEFAULT_EDGE_VOICE,
     EdgeSpeechWorker,
@@ -57,11 +57,10 @@ from app.common.update_download import (
 from app.config.cfg import cfg
 from app.config.constants import (
     APP_NAME,
+    DOWNLOAD_URL,
     UPDATE_API,
     VERSION,
     normalizeReleaseVersion,
-    updateChecksumUrl,
-    updateDownloadUrl,
 )
 from app.config.paths import ASSET_DIR, UPDATE_INSTALLER_PATH
 from app.signal_bus import signalBus
@@ -1269,13 +1268,11 @@ class MainWindow(MSFluentWindow):
             )
         )
 
-        architecture = clientArchitecture()
         self._downloadWorker = UpdateDownloadWorker(
-            updateDownloadUrl(version, architecture),
+            DOWNLOAD_URL,
             UPDATE_INSTALLER_PATH,
             requireHttps=True,
             maxBytes=MAX_UPDATE_BYTES,
-            checksumUrl=updateChecksumUrl(version, architecture),
         )
         self._downloadWorker.progressChanged.connect(
             self._queueUpdateDownloadProgress

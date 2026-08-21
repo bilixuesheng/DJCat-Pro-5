@@ -20,20 +20,6 @@ def normalizeReleaseVersion(version):
     return version
 
 
-def updateDownloadUrl(version, architecture):
-    version = normalizeReleaseVersion(version)
-    if architecture not in {"x86_64", "arm64"}:
-        raise ValueError("更新架构无效")
-    filename = f"DJCat-Pro-v{version}-Windows-{architecture}-Setup.exe"
-    return (
-        "https://github.com/bilixuesheng/DJCat-Pro-5/releases/download/"
-        f"v{version}/{filename}"
-    )
-
-
-def updateChecksumUrl(version, architecture):
-    return f"{updateDownloadUrl(version, architecture)}.sha256"
-
 __all__ = [
     "AI_MARKDOWN_API",
     "APP_NAME",
@@ -44,6 +30,4 @@ __all__ = [
     "VERSION",
     "YEAR",
     "normalizeReleaseVersion",
-    "updateDownloadUrl",
-    "updateChecksumUrl",
 ]
