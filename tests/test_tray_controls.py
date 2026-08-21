@@ -154,7 +154,7 @@ class HomeCardTrayInterfaceTest(TestCase):
         self.assertFalse(self.page.activateHomeCard("missing"))
         self.assertEqual(clicks, ["全屏投送"])
 
-    def testTrayControlPageDropsMissingCardSelections(self):
+    def testTrayControlPagePreservesSelectionsOutsideCurrentSnapshot(self):
         from app.view.pages.tray_control_page import TrayControlPage
 
         cfg.set(cfg.trayHomeCardKeys, ["missing", "全屏投送"])
@@ -162,10 +162,16 @@ class HomeCardTrayInterfaceTest(TestCase):
         try:
             trayPage.setHomeCards(self.page.homeCardEntries())
 
-            self.assertEqual(cfg.trayHomeCardKeys.value, ["全屏投送"])
+            self.assertEqual(
+                cfg.trayHomeCardKeys.value,
+                ["missing", "全屏投送"],
+            )
             self.assertEqual(
                 list(trayPage.homeCardSwitches),
                 ["考试倒计时", "全屏投送", "定时播报", "定时关机"],
+            )
+            self.assertTrue(
+                trayPage.homeCardSwitches["全屏投送"].isChecked()
             )
         finally:
             trayPage.deleteLater()
@@ -253,6 +259,68 @@ class TrayControlNavigationTest(TestCase):
             list(self.window.trayControlPage.homeCardSwitches),
             ["全屏投送", "考试倒计时", "全屏时钟", "定时关机", "定时播报"],
         )
+
+    def testAuthoritativeHomeCardRefreshDropsMissingSelections(self):
+        cfg.set(cfg.trayHomeCardKeys, ["missing", "全屏投送"])
+
+        self.window._onHomeCardsChanged(self.window.homePage.homeCardEntries())
+
+        self.assertEqual(cfg.trayHomeCardKeys.value, ["全屏投送"])
+
+    def testRestartRestoresDefaultAndApplicationCardSelections(self):
+        tempDir = tempfile.TemporaryDirectory()
+        configFile = cfg.file
+        values = [
+            (item, item.value)
+            for item in (
+                cfg.pinnedHomeCards,
+                cfg.trayHomeCardKeys,
+            )
+        ]
+        restoredWindow = None
+        cfg.file = Path(tempDir.name) / "config.json"
+        applicationCard = {
+            "app_id": 7,
+            "preset_id": 0,
+            "title": "应用入口",
+            "description": "打开应用",
+            "action": {"type": "url", "url": "https://example.test"},
+        }
+        try:
+            cfg.set(cfg.pinnedHomeCards, [applicationCard])
+            cfg.set(
+                cfg.trayHomeCardKeys,
+                ["全屏投送", "app:7:0"],
+            )
+            cfg.set(cfg.pinnedHomeCards, [], save=False)
+            cfg.set(cfg.trayHomeCardKeys, [], save=False)
+            cfg.load()
+
+            with (
+                patch.object(MainWindow, "_startMachineRegistration"),
+                patch.object(MainWindow, "checkForUpdates"),
+                patch("app.view.windows.main_window.SystemTrayIcon"),
+            ):
+                restoredWindow = MainWindow(isSilent=True)
+
+            self.assertEqual(
+                cfg.trayHomeCardKeys.value,
+                ["全屏投送", "app:7:0"],
+            )
+            switches = restoredWindow.trayControlPage.homeCardSwitches
+            self.assertTrue(switches["全屏投送"].isChecked())
+            self.assertTrue(switches["app:7:0"].isChecked())
+        finally:
+            if restoredWindow is not None:
+                restoredWindow.tray = None
+                restoredWindow._shutdownResources()
+                restoredWindow.deleteLater()
+                QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+                self.app.processEvents()
+            for item, value in values:
+                cfg.set(item, value, save=False)
+            cfg.file = configFile
+            tempDir.cleanup()
 
     def testCreditsNavigationCanBeHiddenWithoutLoadingPage(self):
         item = self.window._creditsNavigationItem

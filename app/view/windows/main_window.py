@@ -794,11 +794,11 @@ class MainWindow(MSFluentWindow):
             self._onAppStoreCacheCleared
         )
         cfg.showCreditsPage.valueChanged.connect(self._setCreditsPageVisible)
-        self.homePage.homeCardsChanged.connect(self._onHomeCardsChanged)
-        self._onHomeCardsChanged(self.homePage.homeCardEntries())
         self.homePage.applicationCardClicked.connect(self._onPinnedHomeCardClicked)
         self.homePage.applicationCardRemoved.connect(self._onPinnedHomeCardRemoved)
         self._setPinnedHomeCards(cfg.pinnedHomeCards.value)
+        self.homePage.homeCardsChanged.connect(self._onHomeCardsChanged)
+        self._onHomeCardsChanged(self.homePage.homeCardEntries())
         self._updateSearchEdit()
 
     def _setCreditsPageVisible(self, visible):
@@ -807,6 +807,17 @@ class MainWindow(MSFluentWindow):
             self._navToHome()
 
     def _onHomeCardsChanged(self, entries):
+        selected = cfg.trayHomeCardKeys.value
+        selectedKeys = {
+            key for key in selected if isinstance(key, str)
+        } if isinstance(selected, list) else set()
+        normalized = [
+            entry["key"]
+            for entry in entries
+            if entry["key"] in selectedKeys
+        ]
+        if normalized != cfg.trayHomeCardKeys.value:
+            cfg.set(cfg.trayHomeCardKeys, normalized)
         self.trayControlPage.setHomeCards(entries)
         tray = getattr(self, "tray", None)
         if tray is not None:

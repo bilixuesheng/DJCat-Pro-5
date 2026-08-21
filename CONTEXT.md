@@ -249,6 +249,8 @@ _Not_: quit（结束 DJCat 进程）
 
 **Tray Menu 不拥有 Home Card。** 它只根据 HomePage 提供的入口快照重建菜单，并把稳定 key 交回 MainWindow/HomePage 执行。
 
+TrayControlPage 只渲染 Tray Card Shortcut 开关，不得在刷新控件时清理 `cfg.trayHomeCardKeys`。MainWindow 必须先恢复 Application Home Card，再用完整的 HomePage 快照移除已经失效的引用，避免启动阶段的临时不完整快照覆盖已保存选择。
+
 ### 主窗口与页面
 
 **MainWindow** 是桌面端组合根和长生命周期运行时所有者。它负责：
@@ -355,6 +357,8 @@ set working directory
   → MainWindow(isSilent)
       → HomePage eagerly
       → register Lazy Pages without constructing their real pages
+      → restore Application Home Card from cfg.pinnedHomeCards
+      → publish the complete Home Card snapshot to Tray Control and Tray Menu
       → create tray and long-lived timers/workers
   → bind activation request and aboutToQuit
   → Qt event loop

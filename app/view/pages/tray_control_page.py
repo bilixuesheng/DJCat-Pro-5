@@ -81,15 +81,6 @@ class TrayControlPage(ScrollArea):
             keys.add(key)
             self._homeCards.append(entry)
 
-        selected = {
-            key
-            for key in cfg.trayHomeCardKeys.value
-            if isinstance(key, str) and key in keys
-        } if isinstance(cfg.trayHomeCardKeys.value, list) else set()
-        normalized = [entry["key"] for entry in self._homeCards if entry["key"] in selected]
-        if normalized != cfg.trayHomeCardKeys.value:
-            cfg.set(cfg.trayHomeCardKeys, normalized)
-
         oldGroup = self.homeCardGroup
         self.homeCardGroup = self._createHomeCardGroup()
         self.vBoxLayout.replaceWidget(oldGroup, self.homeCardGroup)
