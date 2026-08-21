@@ -74,6 +74,7 @@ DEFAULT_CARD_INFO = {
     "考试倒计时": (FIF.CALENDAR, "设定考试时长并全屏显示倒计时"),
     "全屏时钟": (FIF.STOP_WATCH, "全屏显示当前系统时间"),
     "定时播报": (FIF.MEGAPHONE, "设置每日定点语音播报时间或播放音频"),
+    "定时任务": (FIF.HISTORY, "按时执行已有主页卡片或自定义动作"),
     "定时关机": (FIF.POWER_BUTTON, "设置指定时间提示或自动关闭计算机"),
 }
 
@@ -566,6 +567,12 @@ class HomePage(ScrollArea):
                 "设置每日定点语音播报时间或播放音频",
                 self.cardsWidget,
             ),
+            "定时任务": ActionCard(
+                FIF.HISTORY,
+                "定时任务",
+                "按时执行已有主页卡片或自定义动作",
+                self.cardsWidget,
+            ),
             "定时关机": ActionCard(
                 FIF.POWER_BUTTON,
                 "定时关机",
@@ -636,6 +643,20 @@ class HomePage(ScrollArea):
             return False
         card.clicked.emit()
         return True
+
+    def homeCardEntry(self, key: str) -> dict | None:
+        return next(
+            (entry for entry in self.homeCardEntries() if entry["key"] == key),
+            None,
+        )
+
+    def runCustomCard(self, key: str, confirmDuplicate=True) -> bool:
+        if not key.startswith("custom:") or key not in self._card_order:
+            return False
+        return self._runCustomCard(
+            key.removeprefix("custom:"),
+            confirmDuplicate,
+        )
 
     def setApplicationCards(self, cards) -> list[dict]:
         cards = normalize_pinned_cards(cards)
@@ -869,9 +890,14 @@ class HomePage(ScrollArea):
             data = self._customCardData.get(card_id)
             return deepcopy(data["actions"]) if data else None
 
-    def _runCustomCard(self, card_id):
+    def _runCustomCard(self, card_id, confirmDuplicate=True):
+        with self._cardsLock:
+            if card_id not in self._customCardData:
+                return False
         workers = self._customWorkers.setdefault(card_id, [])
         if workers:
+            if not confirmDuplicate:
+                return False
             box = MessageBox(
                 "卡片正在运行",
                 "是否再运行一遍该卡片的动作？",
@@ -882,11 +908,12 @@ class HomePage(ScrollArea):
             finally:
                 box.deleteLater()
             if not accepted:
-                return
+                return False
         worker = ActionSequenceWorker(card_id, self._getCustomActions)
         worker.finished.connect(self._customSequenceFinished)
         workers.append(worker)
         worker.start()
+        return True
 
     def _customSequenceFinished(self, card_id, errors):
         worker = self.sender()

@@ -139,6 +139,7 @@ class FullscreenClockMigrationTest(TestCase):
                     "全屏时钟",
                     "定时关机",
                     "定时播报",
+                    "定时任务",
                 ]
                 self.assertEqual(cfg.homeCardOrder.value, expected)
                 self.assertEqual(cfg.visibleDefaultHomeCards.value, expected)
@@ -154,6 +155,52 @@ class FullscreenClockMigrationTest(TestCase):
                 )
                 migrateConfig()
                 self.assertNotIn("全屏时钟", cfg.visibleDefaultHomeCards.value)
+            finally:
+                for item, value in values:
+                    cfg.set(item, value, save=False)
+                cfg.file = configFile
+
+    def testVersionOneHomeCardsGainScheduledTaskAfterBroadcast(self):
+        items = (
+            cfg.homeCardOrder,
+            cfg.visibleDefaultHomeCards,
+            cfg.homeCardSchemaVersion,
+        )
+        values = [(item, item.value) for item in items]
+        configFile = cfg.file
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                cfg.file = Path(directory) / "config.json"
+                legacy = [
+                    "考试倒计时",
+                    "定时播报",
+                    "全屏投送",
+                    "全屏时钟",
+                    "定时关机",
+                ]
+                cfg.set(cfg.homeCardOrder, legacy, save=False)
+                cfg.set(cfg.visibleDefaultHomeCards, legacy, save=False)
+                cfg.set(cfg.homeCardSchemaVersion, 1, save=False)
+
+                migrateConfig()
+
+                expected = [
+                    "考试倒计时",
+                    "定时播报",
+                    "定时任务",
+                    "全屏投送",
+                    "全屏时钟",
+                    "定时关机",
+                ]
+                self.assertEqual(cfg.homeCardOrder.value, expected)
+                self.assertEqual(cfg.visibleDefaultHomeCards.value, expected)
+                self.assertEqual(
+                    cfg.homeCardSchemaVersion.value,
+                    HOME_CARD_SCHEMA_VERSION,
+                )
+
+                migrateConfig()
+                self.assertEqual(cfg.homeCardOrder.value, expected)
             finally:
                 for item, value in values:
                     cfg.set(item, value, save=False)

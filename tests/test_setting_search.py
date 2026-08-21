@@ -218,6 +218,7 @@ class SettingSearchTest(TestCase):
             ("全屏投送", "broadcastEditPage"),
             ("考试倒计时", "countdownPage"),
             ("定时播报", "schedulePage"),
+            ("定时任务", "homeCardTaskPage"),
             ("定时关机", "shutdownPage"),
         )
         self.assertTrue(

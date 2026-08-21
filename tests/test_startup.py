@@ -51,7 +51,7 @@ class StartupTest(TestCase):
                 "import sys; "
                 "import app.view.windows.main_window; "
                 "pages = ('broadcast_page', 'countdown_page', "
-                "'schedule_page', 'shutdown_page'); "
+                "'schedule_page', 'home_card_task_page', 'shutdown_page'); "
                 "print([f'app.view.pages.{page}' in sys.modules "
                 "for page in pages])",
             ],
@@ -63,7 +63,7 @@ class StartupTest(TestCase):
 
         self.assertEqual(
             result.stdout.strip().splitlines()[-1],
-            "[False, False, False, False]",
+            "[False, False, False, False, False]",
         )
 
     def testMainWindowImportDefersNavigationPagesExceptHome(self):

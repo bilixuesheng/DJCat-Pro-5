@@ -1,6 +1,6 @@
 # DJCat Pro 5
 
-面向 Windows 教室场景的桌面助手，提供全屏信息投送、考试倒计时、定时音频播报、定时关机和可编排的主页入口。配套服务为桌面端提供 AI Markdown 转换和应用市场目录。
+面向 Windows 教室场景的桌面助手，提供全屏信息投送、考试倒计时、定时音频播报、定时主页卡片、定时关机和可编排的主页入口。配套服务为桌面端提供 AI Markdown 转换和应用市场目录。
 
 ## Language
 
@@ -11,7 +11,7 @@
 _Avoid_: shortcut、tile；不加限定地称 card
 
 **Default Home Card**:
-DJCat 自带的 Home Card，目前固定为“全屏投送”“考试倒计时”“全屏时钟”“定时播报”和“定时关机”。用户可以移除、恢复和排序，但不能改写它代表的功能。
+DJCat 自带的 Home Card，目前固定为“全屏投送”“考试倒计时”“全屏时钟”“定时播报”“定时任务”和“定时关机”。用户可以移除、恢复和排序，但不能改写它代表的功能。
 _Avoid_: built-in app、system card
 
 **Custom Home Card**:
@@ -57,7 +57,7 @@ _Avoid_: Exam Countdown、timer、Scheduled Task
 ### 定时任务
 
 **Scheduled Task**:
-按启用状态、星期和精确时间反复匹配的本地规则。当前只有 Broadcast Task 和 Shutdown Task 两种；提到 Task 时应始终写明种类。
+按启用状态、星期和精确时间反复匹配的本地规则。当前有 Broadcast Task、Home Card Task 和 Shutdown Task 三种；提到 Task 时应始终写明种类。
 _Avoid_: alarm、job；不加限定地称 task
 
 **Broadcast Task**:
@@ -67,6 +67,10 @@ _Avoid_: Projection、全屏投送、Broadcast Window
 **Audio Source**:
 Broadcast Task 要播放的内容来源，分为内置报时或铃声、系统 TTS、在线 Edge TTS 和本地音频。TTS 使用文本，Edge TTS 还选择中文音色，本地音频使用文件。
 _Avoid_: Broadcast Type、media type
+
+**Home Card Task**:
+“定时任务”中的 Scheduled Task。它可以按稳定 key 引用一个现存 Home Card，到点复用该卡片的执行行为；也可以直接拥有一个没有标题、说明和图标的 Action Sequence。Home Card Task 不能引用“定时任务”自身；目标被删除时保留原引用并显示为失效，不自动改选其他卡片。同一自定义 Home Card Task 尚未结束时，后续触发会跳过，避免动作并发重入。
+_Avoid_: Broadcast Task、Custom Home Card、复制卡片
 
 **Shutdown Task**:
 “定时关机”中的 Scheduled Task，在匹配时直接关闭计算机或先进入 Shutdown Prompt。它的“本次不关机”只跳过当前触发，不会禁用或删除任务。
@@ -237,7 +241,9 @@ _Not_: quit（结束 DJCat 进程）
 - **Installed Mode** 与 **Portable Mode** 共享相同的目录结构，Storage Migration 移动的是整个 App Data Directory，不是单独的设置文件。
 - **Tray Card Shortcut**、主页固定项和 Application Store 共享 `cfg.pinnedHomeCards` 中的稳定引用；图片缓存路径只是可更新的派生元数据。
 - **Custom Home Card** 包含一个 Action Sequence；`ActionSequenceWorker` 每次执行前读取最新动作列表，同一动作 ID 在一次运行中至多执行一次。
-- Broadcast Task 与 Shutdown Task 持久化在 `cfg`；对应设置页只编辑规则，MainWindow 的调度循环负责匹配时间并触发执行。
+- Custom Home Card 与 Custom 模式的 **Home Card Task** 共享 `ActionSequenceEditor` 和 Home Action 校验规则；两者只共享编辑与执行能力，不共享标题、图标或持久化对象。
+- Broadcast Task、Home Card Task 与 Shutdown Task 持久化在 `cfg`；对应设置页只编辑规则，MainWindow 的调度循环负责匹配时间并触发执行。
+- Existing-card 模式的 **Home Card Task** 只保存稳定 Home Card key 和用于失效提示的标题快照；Custom 模式直接拥有 Action Sequence，但不会创建 Custom Home Card。
 - AI Markdown Conversion 使用 Machine Identity 领取和结算 Daily Quota；Machine Code 只是定位该身份的可见别名。
 - Animation Tick 推进动画属性；Qt/Windows 的绘制与合成链路再决定 Presented Frame。两者不能互换描述。
 
@@ -256,11 +262,11 @@ TrayControlPage 只渲染 Tray Card Shortcut 开关，不得在刷新控件时�
 **MainWindow** 是桌面端组合根和长生命周期运行时所有者。它负责：
 
 - 导航、搜索框和系统托盘的页面级绑定；
-- Scheduled Task 的定时匹配、音频播放和 Client Update 流程；
+- Scheduled Task 的定时匹配、音频播放、Home Card/Action Sequence 执行和 Client Update 流程；
 - Projection、Exam Countdown 与 Shutdown Prompt 的窗口创建和回收；
 - 应用退出时停止页面工作线程、音频、下载和待保存编辑。
 
-**HomePage** 是唯一随 MainWindow 立即创建的导航页面。Application Store、Credits、Tray Control 和 Setting 使用 Lazy Page；Projection 编辑、Exam Countdown、Broadcast Task 和 Shutdown Task 页面通过 `_getTaskPage()` 系列方法首次打开时创建。
+**HomePage** 是唯一随 MainWindow 立即创建的导航页面。Application Store、Credits、Tray Control 和 Setting 使用 Lazy Page；Projection 编辑、Exam Countdown、Broadcast Task、Home Card Task 和 Shutdown Task 页面通过 `_getTaskPage()` 系列方法首次打开时创建。
 
 Lazy Page 必须保留外部调用需要的最小接口：
 
@@ -272,6 +278,12 @@ Lazy Page 必须保留外部调用需要的最小接口：
 | `LazyCreditsPage` | 无业务状态 |
 
 调用方不得直接依赖 `lazyPage.page` 的存在；需要真实页面时调用 `ensureLoaded()`，只做关闭或缓存失效时应保持未加载状态。
+
+### Scheduled Task 调度
+
+MainWindow 的单一调度循环在对应管理页面从未打开时也必须执行 Scheduled Task。Broadcast Task 和 Home Card Task 最多补偿最近 60 秒内被模态窗口或主线程阻塞错过的触发；Shutdown Task 只补偿最近 5 秒，避免恢复运行后执行过期关机。一次触发由任务种类、计划时刻和稳定任务 ID 去重。
+
+Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence；任务被删除或切换模式后，尚未开始的动作停止。同一任务仍在运行时跳过新触发，不弹出并发确认框。Existing-card 模式在触发时解析当前 Home Card 快照，不复制源卡片数据。
 
 ### 应用市场
 
@@ -328,8 +340,10 @@ AI Markdown 输入框的忙碌边框使用 2 px 渐变 QSS 边框。Qt 样式表
 | `app/platform/` | Windows 单实例/IPC、唤起窗口、开机启动及 Qt 运行时适配 |
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
+| `app/common/home_card_tasks.py` | Home Card Task schema 归一化、稳定 ID 和模式常量；不负责计时或 QWidget |
 | `app/view/windows/main_window.py` | 桌面组合根、导航、长期运行任务和 Client Update UI |
 | `app/view/pages/` | 页面、临时展示窗口和页面级 worker 编排 |
+| `app/view/pages/home_card_task_page.py` | Home Card Task 的懒加载编辑页面；不拥有调度计时器 |
 | `app/view/components/` | 多页面复用的 Markdown、背景、滚动和设置卡片组件 |
 | `pyqt_github_markdown/` | 项目内置 Markdown 渲染器；不承载 DJCat 业务规则 |
 
@@ -388,6 +402,7 @@ MainWindow._shutdownResources()
   → cancel Edge TTS and stop audio players
   → flush loaded Setting / Scheduled Task editors
   → shutdown HomePage and loaded Application Store page
+  → cancel running custom Home Card Task workers
   → cancel Client Update download and close InfoBars
   → optional Storage Migration connected after normal shutdown
   → QApplication exits and releases the single-instance lock
@@ -448,6 +463,7 @@ def __init__(self, parent=None):
 ## Flagged ambiguities
 
 - “全屏投送”过去容易被称为 Broadcast，但项目中的 Broadcast Task 是音频定时播报。已统一用 **Projection** 表示文字展示。
+- UI 名称“定时任务”容易与所有 Scheduled Task 混淆。领域语义中用 **Home Card Task** 专指定时执行已有主页卡片或自定义 Action Sequence 的任务。
 - “更新”可能指 DJCat 自身或市场 Application。已拆为 **Client Update** 与 **Application Update**。
 - “安装版”可能被误解为 Installed Application。已定义 **Installed Mode** 专指 DJCat 的 App Data Directory 位置。
 - “下载次数”并不证明 Package 已完整下载或安装。它是服务端去重后的下载重定向请求累计值。
@@ -462,6 +478,9 @@ def __init__(self, parent=None):
 
 > **Dev:** “定时播报是不是把全屏投送安排到某个时间？”
 > **Domain expert:** “不是。Projection 显示文字；Broadcast Task 到点播放 Audio Source。”
+
+> **Dev:** “Home Card Task 选择自定义后，会不会在主页新增一张 Custom Home Card？”
+> **Domain expert:** “不会。它只在该 Scheduled Task 内拥有 Action Sequence，没有独立的标题、说明和图标，也不会成为主页入口。”
 
 > **Dev:** “应用预设卡片和用户自定义卡片都可以执行动作，是同一种卡片吗？”
 > **Domain expert:** “不是。Application Home Card 执行 Application Catalog 提供的受限 Application Action；Custom Home Card 执行用户在本机编排的 Action Sequence。”

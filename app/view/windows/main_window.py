@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
+from loguru import logger
 from PySide6.QtCore import (
     QObject,
     QPropertyAnimation,
@@ -47,7 +48,13 @@ from app.common.edge_tts import (
     EdgeSpeechWorker,
     cleanup_edge_speech_files,
 )
-from app.common.home_cards import normalize_pinned_cards
+from app.common.home_card_tasks import (
+    CUSTOM_HOME_CARD_TASK,
+    EXISTING_HOME_CARD_TASK,
+    HOME_CARD_TASK_KEY,
+    normalize_home_card_tasks,
+)
+from app.common.home_cards import ActionSequenceWorker, normalize_pinned_cards
 from app.common.update_download import (
     MAX_UPDATE_BYTES,
     UpdateDownloadWorker,
@@ -297,6 +304,9 @@ class MainWindow(MSFluentWindow):
         self._toggleTheme(cfg.customThemeMode.value)
         cfg.customThemeMode.valueChanged.connect(self._toggleTheme)
         cfg.windowTitle.valueChanged.connect(self._updateWindowTitle)
+        homeCardTasks = normalize_home_card_tasks(cfg.homeCardTasks.value)
+        if homeCardTasks != cfg.homeCardTasks.value:
+            cfg.set(cfg.homeCardTasks, homeCardTasks)
 
         self.initWindow()
         if not isSilent:
@@ -356,6 +366,7 @@ class MainWindow(MSFluentWindow):
         self._audioTaskQueue = deque()
         self._audioTaskActive = False
         self._activeAudioKind = ""
+        self._homeCardTaskWorkers = {}
 
         self.tts = QTextToSpeech(self)
         self.tts.stateChanged.connect(self._onTtsStateChanged)
@@ -583,6 +594,7 @@ class MainWindow(MSFluentWindow):
         now,
         broadcastTasks=None,
         shutdownTasks=None,
+        homeCardTasks=None,
     ):
         previous = self._lastScheduleCheck
         self._lastScheduleCheck = now
@@ -601,6 +613,13 @@ class MainWindow(MSFluentWindow):
             previous,
             now,
             self._playAudioTask,
+        )
+        self._runDueScheduledTasks(
+            "home-card",
+            cfg.homeCardTasks.value if homeCardTasks is None else homeCardTasks,
+            previous,
+            now,
+            self._handleHomeCardTask,
         )
         self._runDueScheduledTasks(
             "shutdown",
@@ -735,6 +754,78 @@ class MainWindow(MSFluentWindow):
     def _shutdownNow():
         QProcess.startDetached("shutdown.exe", ["/s", "/t", "0"])
 
+    def _handleHomeCardTask(self, rawTask):
+        tasks = normalize_home_card_tasks([rawTask])
+        if self._resourcesShutdown or not tasks:
+            return
+        task = tasks[0]
+        if task["mode"] == EXISTING_HOME_CARD_TASK:
+            if task["targetKey"] == HOME_CARD_TASK_KEY:
+                self._showHomeCardTaskError(
+                    task,
+                    "不能把定时任务自身设为目标卡片。",
+                )
+                return
+            if not self._executeHomeCard(task["targetKey"], interactive=False):
+                self._showHomeCardTaskError(
+                    task,
+                    "目标主页卡片不存在，或同一自定义卡片仍在运行。",
+                )
+            return
+
+        if not task["actions"]:
+            self._showHomeCardTaskError(task, "自定义任务没有可执行动作。")
+            return
+        taskId = task["id"]
+        if taskId in self._homeCardTaskWorkers:
+            logger.warning("定时任务仍在运行，跳过本次触发: {}", task["name"])
+            return
+        worker = ActionSequenceWorker(taskId, self._getHomeCardTaskActions)
+        worker.finished.connect(self._onHomeCardTaskFinished)
+        self._homeCardTaskWorkers[taskId] = worker
+        worker.start()
+
+    def _getHomeCardTaskActions(self, taskId):
+        for task in normalize_home_card_tasks(cfg.homeCardTasks.value):
+            if task["id"] == taskId and task["mode"] == CUSTOM_HOME_CARD_TASK:
+                return task["actions"]
+        return None
+
+    def _onHomeCardTaskFinished(self, taskId, errors):
+        worker = self._homeCardTaskWorkers.pop(taskId, None)
+        if errors and not self._resourcesShutdown:
+            task = next(
+                (
+                    item
+                    for item in normalize_home_card_tasks(cfg.homeCardTasks.value)
+                    if item["id"] == taskId
+                ),
+                {"name": "定时任务"},
+            )
+            self._showHomeCardTaskError(task, "；".join(errors))
+        if worker is not None:
+            worker.deleteLater()
+
+    def _executeHomeCard(self, key, interactive=True):
+        entry = self.homePage.homeCardEntry(key)
+        if entry is None:
+            return False
+        if entry["source"] == "default":
+            self._showMainWindow()
+        if entry["source"] == "custom" and not interactive:
+            return self.homePage.runCustomCard(key, confirmDuplicate=False)
+        return self.homePage.activateHomeCard(key)
+
+    def _showHomeCardTaskError(self, task, message):
+        self._showMainWindow()
+        InfoBar.error(
+            "定时任务执行失败",
+            f"{task.get('name') or '未命名任务'}：{message}",
+            duration=5000,
+            position=InfoBarPosition.BOTTOM_RIGHT,
+            parent=self,
+        )
+
     def initNavigation(self):
         self.homePage = HomePage(self)
         self.appStorePage = LazyAppStorePage(self)
@@ -745,6 +836,7 @@ class MainWindow(MSFluentWindow):
         self.countdownPage = None
         self.fullscreenClockWindow = None
         self.schedulePage = None
+        self.homeCardTaskPage = None
         self.shutdownPage = None
         self.searchEdit = SearchLineEdit(self.titleBar)
         self.searchEdit.setClearButtonEnabled(True)
@@ -786,6 +878,10 @@ class MainWindow(MSFluentWindow):
             )
         if "定时播报" in self.homePage.all_cards:
             self.homePage.all_cards["定时播报"].clicked.connect(self._navToSchedule)
+        if "定时任务" in self.homePage.all_cards:
+            self.homePage.all_cards["定时任务"].clicked.connect(
+                self._navToHomeCardTasks
+            )
         if "定时关机" in self.homePage.all_cards:
             self.homePage.all_cards["定时关机"].clicked.connect(self._navToShutdown)
 
@@ -819,6 +915,8 @@ class MainWindow(MSFluentWindow):
         if normalized != cfg.trayHomeCardKeys.value:
             cfg.set(cfg.trayHomeCardKeys, normalized)
         self.trayControlPage.setHomeCards(entries)
+        if self.homeCardTaskPage is not None:
+            self.homeCardTaskPage.setHomeCards(entries)
         tray = getattr(self, "tray", None)
         if tray is not None:
             tray.setHomeCards(entries)
@@ -933,6 +1031,16 @@ class MainWindow(MSFluentWindow):
             "shutdownPage",
             ShutdownPage,
             "ShutdownPage",
+        )
+        return page
+
+    def _getHomeCardTaskPage(self):
+        from app.view.pages.home_card_task_page import HomeCardTaskPage
+
+        page, _ = self._getTaskPage(
+            "homeCardTaskPage",
+            lambda parent: HomeCardTaskPage(self.homePage.homeCardEntries(), parent),
+            "HomeCardTaskPage",
         )
         return page
 
@@ -1053,6 +1161,10 @@ class MainWindow(MSFluentWindow):
 
     def _navToSchedule(self):
         self.switchTo(self._getSchedulePage())
+        self.navigationInterface.setCurrentItem(None)
+
+    def _navToHomeCardTasks(self):
+        self.switchTo(self._getHomeCardTaskPage())
         self.navigationInterface.setCurrentItem(None)
 
     def _navToShutdown(self):
@@ -1504,6 +1616,7 @@ class MainWindow(MSFluentWindow):
             self.settingPage.flushPendingSave()
         for page in (
             getattr(self, "schedulePage", None),
+            getattr(self, "homeCardTaskPage", None),
             getattr(self, "shutdownPage", None),
         ):
             if page is not None:
@@ -1514,6 +1627,14 @@ class MainWindow(MSFluentWindow):
         ):
             if page is not None:
                 page.shutdown()
+        workers = list(self._homeCardTaskWorkers.values())
+        for worker in workers:
+            worker.cancel()
+        deadline = time.monotonic() + 1
+        for worker in workers:
+            worker.wait(max(0, deadline - time.monotonic()))
+            worker.deleteLater()
+        self._homeCardTaskWorkers.clear()
         if self._downloadWorker is not None:
             self._downloadWorker.cancel()
 

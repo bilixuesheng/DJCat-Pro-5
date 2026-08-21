@@ -424,6 +424,40 @@ class ActionListWidget(QWidget):
         super().hideEvent(event)
 
 
+class ActionSequenceEditor(QWidget):
+    changed = Signal()
+
+    def __init__(self, actions=None, parent=None):
+        super().__init__(parent)
+        self.actionList = ActionListWidget(actions, self)
+        self.addActionButton = PushButton(FIF.ADD, "添加动作", self)
+        self.addActionButton.clicked.connect(self.addAction)
+        self.actionList.orderChanged.connect(self.changed.emit)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(self.actionList)
+        layout.addWidget(self.addActionButton)
+
+    def setScrollArea(self, scrollArea):
+        self.actionList.setScrollArea(scrollArea)
+
+    def actions(self) -> list[dict]:
+        return self.actionList.actions()
+
+    def addAction(self):
+        dialog = ActionEditorDialog(parent=_dialog_host(self))
+        try:
+            if not dialog.exec():
+                return
+            action = dialog.getData()
+        finally:
+            _dispose_dialog(dialog)
+        self.actionList.addAction(action)
+        self.changed.emit()
+
+
 class ActionEditorDialog(_ResponsiveMessageBox):
     def __init__(self, action=None, parent=None):
         super().__init__(parent)
@@ -821,9 +855,9 @@ class CustomCardDialog(_ResponsiveMessageBox):
         initial_actions = data.get("actions") if data else None
         if not initial_actions:
             initial_actions = [{"id": new_id(), "type": "program", "target": "", "arguments": "", "working_dir": "", "wait": False}]
-        self.actionList = ActionListWidget(initial_actions, self)
-        self.addActionButton = PushButton(FIF.ADD, "添加动作", self)
-        self.addActionButton.clicked.connect(self._addAction)
+        self.actionEditor = ActionSequenceEditor(initial_actions, self)
+        self.actionList = self.actionEditor.actionList
+        self.addActionButton = self.actionEditor.addActionButton
         self.scrollArea = ScrollArea(self.widget)
         self.scrollArea.setWidgetResizable(True)
         self.scrollArea.enableTransparentBackground()
@@ -848,8 +882,7 @@ class CustomCardDialog(_ResponsiveMessageBox):
                 self.form,
             )
         )
-        form_layout.addWidget(self.actionList)
-        form_layout.addWidget(self.addActionButton)
+        form_layout.addWidget(self.actionEditor)
         self.scrollArea.setWidget(self.form)
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(self.descriptionLabel)
@@ -859,7 +892,7 @@ class CustomCardDialog(_ResponsiveMessageBox):
         self.descriptionEdit.setText(str(data.get("description", "")))
         self.yesButton.setText("保存")
         self.cancelButton.setText("取消")
-        self.actionList.setScrollArea(self.scrollArea)
+        self.actionEditor.setScrollArea(self.scrollArea)
 
     def _chooseIcon(self):
         dialog = IconPickerDialog(_dialog_host(self))
@@ -879,14 +912,7 @@ class CustomCardDialog(_ResponsiveMessageBox):
             self.iconPreview.setIcon(QIcon(QPixmap.fromImage(image)))
 
     def _addAction(self):
-        dialog = ActionEditorDialog(parent=_dialog_host(self))
-        try:
-            if not dialog.exec():
-                return
-            action = dialog.getData()
-        finally:
-            _dispose_dialog(dialog)
-        self.actionList.addAction(action)
+        self.actionEditor.addAction()
 
     def validate(self) -> bool:
         title = self.titleEdit.text().strip()
@@ -929,4 +955,4 @@ class CustomCardDialog(_ResponsiveMessageBox):
         }
 
 
-__all__ = ["CustomCardDialog"]
+__all__ = ["ActionSequenceEditor", "CustomCardDialog"]

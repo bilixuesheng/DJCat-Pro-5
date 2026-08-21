@@ -38,10 +38,11 @@ DEFAULT_HOME_CARDS = (
     "全屏投送",
     "考试倒计时",
     "全屏时钟",
-    "定时关机",
     "定时播报",
+    "定时任务",
+    "定时关机",
 )
-HOME_CARD_SCHEMA_VERSION = 1
+HOME_CARD_SCHEMA_VERSION = 2
 
 
 class GeometryValidator(ConfigValidator):
@@ -276,6 +277,7 @@ class Config(QConfig):
     pinnedHomeCards = ConfigItem("HomePage", "PinnedApplicationCards", [])
 
     broadcastTasks = ConfigItem("Schedule", "Tasks", [])
+    homeCardTasks = ConfigItem("Schedule", "HomeCardTasks", [])
     shutdownTasks = ConfigItem("Schedule", "ShutdownTasks", [])
 
     expandedSettingGroups = ConfigItem("UI", "ExpandedSettingGroups", [])
@@ -293,17 +295,25 @@ def migrateConfig() -> None:
     if version >= HOME_CARD_SCHEMA_VERSION:
         return
 
-    for item in (cfg.homeCardOrder, cfg.visibleDefaultHomeCards):
-        cards = (
-            list(item.value)
-            if isinstance(item.value, list)
-            else list(DEFAULT_HOME_CARDS)
-        )
-        if "全屏时钟" not in cards:
+    migrations = (
+        (1, "全屏时钟", "考试倒计时"),
+        (2, "定时任务", "定时播报"),
+    )
+    for targetVersion, cardName, previousCard in migrations:
+        if version >= targetVersion:
+            continue
+        for item in (cfg.homeCardOrder, cfg.visibleDefaultHomeCards):
+            cards = (
+                list(item.value)
+                if isinstance(item.value, list)
+                else list(DEFAULT_HOME_CARDS)
+            )
+            if cardName in cards:
+                continue
             try:
-                index = cards.index("考试倒计时") + 1
+                index = cards.index(previousCard) + 1
             except ValueError:
                 index = len(cards)
-            cards.insert(index, "全屏时钟")
+            cards.insert(index, cardName)
             cfg.set(item, cards, save=False)
     cfg.set(cfg.homeCardSchemaVersion, HOME_CARD_SCHEMA_VERSION)
