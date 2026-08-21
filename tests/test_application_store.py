@@ -386,6 +386,17 @@ class ApplicationStoreTest(TestCase):
         self.store.cache.sweepIfDue()
         self.assertFalse(old.exists())
 
+    def testCacheDownloadsIcoWithNativeSuffix(self):
+        url = "https://example.test/icon.ICO?revision=2"
+        ico = Path(__file__).parents[1] / "app" / "assets" / "installer_logo.ico"
+        session = _Session()
+        session.get = lambda *args, **kwargs: _Response((ico.read_bytes(),), url)
+
+        path = self.store.imagePath(url, session)
+
+        self.assertEqual(path.suffix, ".ico")
+        self.assertTrue(self.store.cache._isValidImage(path, b"ico"))
+
     def testCacheReleasesUnusedPathLocks(self):
         self.store.imagePath("https://example.test/icon.png", _Session())
 

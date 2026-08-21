@@ -472,7 +472,7 @@ class ImageCache:
 
     def pathFor(self, url: str) -> Path:
         suffix = Path(urlparse(url).path).suffix.lower()
-        if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg"}:
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg", ".ico"}:
             suffix = ".img"
         return self.directory / f"{hashlib.sha256(url.encode()).hexdigest()}{suffix}"
 
@@ -526,7 +526,8 @@ class ImageCache:
                         if size > MAX_IMAGE_BYTES:
                             raise ApplicationStoreError("图片超过 20MB，未写入缓存")
                         output.write(chunk)
-                if not self._isValidImage(temporary):
+                formatHint = b"ico" if path.suffix == ".ico" else b""
+                if not self._isValidImage(temporary, formatHint):
                     raise ApplicationStoreError("下载内容不是有效图片")
                 with self._pathLocksLock:
                     if generation != self._generation:
@@ -540,8 +541,8 @@ class ImageCache:
             response.close()
 
     @staticmethod
-    def _isValidImage(path: Path) -> bool:
-        reader = QImageReader(str(path))
+    def _isValidImage(path: Path, formatHint: bytes = b"") -> bool:
+        reader = QImageReader(str(path), formatHint)
         size = reader.size()
         if (
             not reader.canRead()
