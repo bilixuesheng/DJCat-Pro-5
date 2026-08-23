@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -19,6 +20,7 @@ from app.view.pages.broadcast_page import (
     VerticalButton,
 )
 from app.view.pages.countdown_page import CountdownEditPage
+from app.view.windows.main_window import MainWindow
 
 
 class FullscreenTaskCloseTest(TestCase):
@@ -36,6 +38,8 @@ class FullscreenTaskCloseTest(TestCase):
                 cfg.showMainWindowAfterBroadcast,
                 cfg.confirmBeforeCloseBroadcast,
                 cfg.broadcastMarkdownEnabled,
+                cfg.restoreBroadcastAtStartup,
+                cfg.lastBroadcast,
                 cfg.countdownActionButtonPosition,
                 cfg.showMainWindowAfterCountdown,
                 cfg.confirmBeforeCloseCountdown,
@@ -59,6 +63,8 @@ class FullscreenTaskCloseTest(TestCase):
         self.assertTrue(cfg.confirmBeforeCloseBroadcast.defaultValue)
         self.assertTrue(cfg.confirmBeforeCloseCountdown.defaultValue)
         self.assertFalse(cfg.broadcastMarkdownEnabled.defaultValue)
+        self.assertFalse(cfg.restoreBroadcastAtStartup.defaultValue)
+        self.assertEqual(cfg.lastBroadcast.defaultValue, {})
         self.assertTrue(cfg.confirmBeforeResetCountdown.defaultValue)
 
     def testFullscreenActionButtonShowsPressedStateAndCancelsOutsideRelease(self):
@@ -205,13 +211,212 @@ class FullscreenTaskCloseTest(TestCase):
 
         container.close()
 
+    def testBroadcastCloseKeepsLastContentAvailableForImport(self):
+        page = BroadcastEditPage()
+        page.titleInput.setText("上次投送的标题")
+        page.contentInput.setPlainText("**上次投送的正文**")
+        page.markdownCheckBox.setChecked(True)
+
+        page._onBroadcast()
+
+        self.assertEqual(
+            cfg.lastBroadcast.value,
+            {
+                "title": "上次投送的标题",
+                "content": "**上次投送的正文**",
+                "isMarkdown": True,
+                "active": True,
+            },
+        )
+        savedConfig = json.loads(cfg.file.read_text(encoding="utf-8"))
+        self.assertEqual(
+            savedConfig["Broadcast"]["LastBroadcast"],
+            cfg.lastBroadcast.value,
+        )
+
+        page.broadcastWin.close()
+        self.app.processEvents()
+
+        self.assertFalse(cfg.lastBroadcast.value["active"])
+        self.assertEqual(page.titleInput.text(), "")
+        self.assertEqual(page.contentInput.toPlainText(), "")
+
+        page.markdownCheckBox.setChecked(False)
+        self.assertTrue(page._useLastBroadcast())
+
+        self.assertEqual(page.titleInput.text(), "上次投送的标题")
+        self.assertEqual(page.contentInput.toPlainText(), "**上次投送的正文**")
+        self.assertTrue(page.markdownCheckBox.isChecked())
+        self.assertTrue(cfg.broadcastMarkdownEnabled.value)
+        page.close()
+
+    def testReturningToEditorEndsAutomaticStartupRecovery(self):
+        page = BroadcastEditPage()
+        page.titleInput.setText("正在编辑")
+        page.contentInput.setPlainText("暂不继续投送")
+        page._onBroadcast()
+
+        page.broadcastWin.btn_edit.click()
+        self.app.processEvents()
+
+        self.assertFalse(cfg.lastBroadcast.value["active"])
+        self.assertEqual(cfg.lastBroadcast.value["title"], "正在编辑")
+        page.close()
+
+    def testImportMenuIncludesLastBroadcastAfterBothTemplates(self):
+        cfg.set(cfg.lastBroadcast, {})
+        page = BroadcastEditPage()
+        self.assertEqual(page.templateBtn.text(), "导入")
+
+        with patch(
+            "app.view.pages.broadcast_page.RoundMenu.exec",
+            autospec=True,
+        ) as showMenu:
+            page._showTemplateMenu()
+
+        menu = showMenu.call_args.args[0]
+        self.assertEqual(
+            [action.text() for action in menu.actions()],
+            ["中午作业模板", "晚辅导作业模板", "上次投送内容"],
+        )
+        self.assertFalse(menu.actions()[-1].isEnabled())
+        menu.deleteLater()
+
+        cfg.set(
+            cfg.lastBroadcast,
+            {
+                "title": "上次投送",
+                "content": "投送内容",
+                "isMarkdown": False,
+                "active": False,
+            },
+        )
+        with patch(
+            "app.view.pages.broadcast_page.RoundMenu.exec",
+            autospec=True,
+        ) as showMenu:
+            page._showTemplateMenu()
+
+        menu = showMenu.call_args.args[0]
+        self.assertTrue(menu.actions()[-1].isEnabled())
+        menu.deleteLater()
+        page.close()
+
+    def testClosingProjectionDuringProgramShutdownKeepsRecoveryState(self):
+        container = QWidget()
+        page = BroadcastEditPage(container)
+        page.titleInput.setText("退出时仍在投送")
+        page.contentInput.setPlainText("需要在下次启动恢复")
+        page._onBroadcast()
+        container._resourcesShutdown = True
+
+        page.broadcastWin.close()
+        self.app.processEvents()
+
+        self.assertTrue(cfg.lastBroadcast.value["active"])
+        container.close()
+
+    def testActiveProjectionRestoresOnNormalAndSilentStartup(self):
+        broadcast = {
+            "title": "启动恢复标题",
+            "content": "**启动恢复正文**",
+            "isMarkdown": True,
+            "active": True,
+        }
+        cfg.set(cfg.restoreBroadcastAtStartup, True)
+
+        for isSilent in (False, True):
+            with self.subTest(isSilent=isSilent):
+                cfg.set(cfg.lastBroadcast, dict(broadcast))
+                with (
+                    patch.object(MainWindow, "initSplashScreen"),
+                    patch.object(MainWindow, "_startMachineRegistration"),
+                    patch.object(MainWindow, "checkForUpdates"),
+                    patch("app.view.windows.main_window.SystemTrayIcon"),
+                ):
+                    window = MainWindow(isSilent=isSilent)
+
+                try:
+                    page = window.broadcastEditPage
+                    self.assertIsNotNone(page)
+                    self.assertTrue(page.broadcastWin.isVisible())
+                    self.assertFalse(window.isVisible())
+                    self.assertEqual(page.broadcastWin.titleLabel.text(), broadcast["title"])
+                    self.assertFalse(page.broadcastWin.markdownView.isHidden())
+                    self.assertTrue(page.markdownCheckBox.isChecked())
+                    self.assertTrue(cfg.lastBroadcast.value["active"])
+                finally:
+                    window._shutdownResources()
+                    page.broadcastWin.close()
+                    window.tray = None
+                    window.deleteLater()
+                    self.app.processEvents()
+
+    def testDisabledStartupRecoveryKeepsProjectionPageLazy(self):
+        cfg.set(cfg.restoreBroadcastAtStartup, False)
+        cfg.set(
+            cfg.lastBroadcast,
+            {
+                "title": "上次投送",
+                "content": "只保留手动导入",
+                "isMarkdown": False,
+                "active": True,
+            },
+        )
+
+        with (
+            patch.object(MainWindow, "_startMachineRegistration"),
+            patch.object(MainWindow, "checkForUpdates"),
+            patch("app.view.windows.main_window.SystemTrayIcon"),
+        ):
+            window = MainWindow(isSilent=True)
+
+        try:
+            self.assertIsNone(window.broadcastEditPage)
+            self.assertFalse(cfg.lastBroadcast.value["active"])
+            self.assertEqual(cfg.lastBroadcast.value["title"], "上次投送")
+        finally:
+            window._shutdownResources()
+            window.tray = None
+            window.deleteLater()
+            self.app.processEvents()
+
+    def testInvalidActiveProjectionDoesNotLoadEditorAtStartup(self):
+        cfg.set(cfg.restoreBroadcastAtStartup, True)
+        cfg.set(
+            cfg.lastBroadcast,
+            {
+                "title": "损坏的投送内容",
+                "content": None,
+                "isMarkdown": True,
+                "active": True,
+            },
+        )
+
+        with (
+            patch.object(MainWindow, "_startMachineRegistration"),
+            patch.object(MainWindow, "checkForUpdates"),
+            patch("app.view.windows.main_window.SystemTrayIcon"),
+        ):
+            window = MainWindow(isSilent=True)
+
+        try:
+            self.assertIsNone(window.broadcastEditPage)
+            self.assertFalse(cfg.lastBroadcast.value["active"])
+            self.assertEqual(cfg.lastBroadcast.value["title"], "损坏的投送内容")
+        finally:
+            window._shutdownResources()
+            window.tray = None
+            window.deleteLater()
+            self.app.processEvents()
+
     def testCloseButtonsConfirmBeforeDiscardingTask(self):
         for pageType, windowName, setting, warning in (
             (
                 BroadcastEditPage,
                 "broadcastWin",
                 cfg.confirmBeforeCloseBroadcast,
-                "关闭后不会保存投送文字。",
+                "关闭后可通过“导入”恢复上次投送内容。",
             ),
             (
                 CountdownEditPage,

@@ -328,6 +328,18 @@ class MainWindow(MSFluentWindow):
         if cfg.checkUpdateAtStartUp.value:
             self.checkForUpdates(manual=False)
 
+        broadcast = cfg.lastBroadcast.value
+        if isinstance(broadcast, dict) and broadcast.get("active") is True:
+            if (
+                cfg.restoreBroadcastAtStartup.value
+                and isinstance(broadcast.get("title"), str)
+                and isinstance(broadcast.get("content"), str)
+                and isinstance(broadcast.get("isMarkdown"), bool)
+            ):
+                self._getBroadcastEditPage().restoreLastBroadcast()
+            else:
+                cfg.set(cfg.lastBroadcast, {**broadcast, "active": False})
+
     def _startMachineRegistration(self):
         if cfg.aiMarkdownMachineCode.value:
             return

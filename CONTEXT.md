@@ -43,8 +43,12 @@ _Avoid_: Tray Home Card、复制卡片、独立托盘动作
 ### 课堂展示
 
 **Projection**:
-“全屏投送”产生的一次临时文字展示，由标题和正文组成，正文可使用纯文本或 Markdown。Projection 可全屏或窗口化显示，也可收起为恢复入口；关闭后不保存内容。
+“全屏投送”产生的一次文字展示，由标题和正文组成，正文可使用纯文本或 Markdown。Projection 可全屏或窗口化显示，也可收起为恢复入口；最近一次投送的标题、正文和模式保存在本地，可再次导入。启用启动恢复后，程序退出时仍未关闭的 Projection 会在下一次普通或静默启动时自动恢复。
 _Avoid_: Broadcast、投屏（不传输屏幕或视频）、presentation
+
+**Projection Snapshot**:
+最近一次已经开始的 Projection 的本地快照，保存标题、正文、Markdown 模式和是否仍在投送。它不是尚未投送的编辑草稿；关闭投送后保留内容用于手动导入，但不再参与下次启动恢复。
+_Avoid_: Projection、editor draft、template
 
 **Exam Countdown**:
 “考试倒计时”产生的一次临时计时，具有初始时长、剩余时长、标题和语音提醒开关。它可运行、暂停、调整、重置或结束；关闭后不保存进度，从更长时间跨过 15 分钟及归零时可播放提醒音。
@@ -258,6 +262,7 @@ _Not_: quit（结束 DJCat 进程）
 - **Application Update** 与首次安装使用同一 Package 下载和安装链路；差别只在目标目录已有受 DJCat 管理的 Installed Application。
 - **Application Launch** 执行 Installed Application 的 Open Action；Application Store 的卡片和详情页共享同一后台运行状态，不创建第二个并发启动。
 - **Projection** 的纯文本正文由 `QTextEdit` 渲染，Markdown 正文由 `MarkdownView(largeText=True)` 渲染；两者是同一 Projection 的互斥显示方式。
+- **Projection Snapshot** 保存在 `cfg.lastBroadcast`；开始 Projection 时立即写入，关闭或返回编辑只清除活动状态，不删除可再次导入的内容。
 - **Installed Mode** 与 **Portable Mode** 共享相同的目录结构，Storage Migration 移动的是整个 App Data Directory，不是单独的设置文件。
 - **Tray Card Shortcut**、主页固定项和 Application Store 共享 `cfg.pinnedHomeCards` 中的稳定引用；图片缓存路径只是可更新的派生元数据。
 - **Custom Home Card** 包含一个 Action Sequence；`ActionSequenceWorker` 每次执行前读取最新动作列表，同一动作 ID 在一次运行中至多执行一次。
@@ -292,6 +297,8 @@ TrayControlPage 只渲染 Tray Card Shortcut 开关，不得在刷新控件时�
 - 应用退出时停止页面工作线程、音频、下载和待保存编辑。
 
 **HomePage** 是唯一随 MainWindow 立即创建的导航页面。Application Store、Credits、Tray Control 和 Setting 使用 Lazy Page；Projection 编辑、Exam Countdown、Broadcast Task、Home Card Task 和 Shutdown Task 页面通过 `_getTaskPage()` 系列方法首次打开时创建。
+
+只有启用了启动恢复且最近一次 Projection 仍处于活动状态时，MainWindow 才在启动阶段创建 Projection 编辑页面并恢复投送；其他启动路径保持该页面懒加载。
 
 Lazy Page 必须保留外部调用需要的最小接口：
 
@@ -367,6 +374,8 @@ Application 图标允许使用 PNG、JPEG、WebP、GIF、BMP、SVG 和 ICO。`Im
 
 ### Projection 渲染
 
+Projection Snapshot 的内容和活动状态必须作为同一份配置立即落盘，不能等到程序退出时保存，否则无法恢复意外退出。只有 `cfg.restoreBroadcastAtStartup` 已启用且快照内容合法、仍处于活动状态时才自动恢复；恢复关闭或快照损坏时只清除活动标记，不创建 Projection 编辑页面。没有合法快照时，手动导入入口保持禁用。
+
 Projection 的两种正文渲染器必须保持这些共同约束：
 
 - 左侧和顶部正文起点一致。大字号 `MarkdownView` 的内容边距固定为 4 px，与 `QTextDocument.documentMargin()` 默认值一致；普通更新日志的 MarkdownView 保留渲染器默认边距。
@@ -426,6 +435,7 @@ set working directory
       → restore Application Home Card from cfg.pinnedHomeCards
       → publish the complete Home Card snapshot to Tray Control and Tray Menu
       → create tray and long-lived timers/workers
+      → restore valid active Projection Snapshot only when recovery is enabled
   → bind activation request and aboutToQuit
   → Qt event loop
 ```
@@ -462,7 +472,7 @@ MainWindow._shutdownResources()
   → QApplication exits and releases the single-instance lock
 ```
 
-`_shutdownResources()` 必须幂等。Lazy Page 未加载时，关闭流程不能为了清理而创建它。
+`_shutdownResources()` 必须幂等。Lazy Page 未加载时，关闭流程不能为了清理而创建它。程序退出期间关闭 Projection 窗口时，必须保留 Projection Snapshot 的活动状态；只有用户主动关闭投送或返回编辑才结束下次启动恢复。
 
 ## Animation scheduling
 

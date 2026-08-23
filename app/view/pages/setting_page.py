@@ -559,6 +559,12 @@ class SettingPage(ScrollArea):
                     "关闭全屏投送前询问是否退出",
                     cfg.confirmBeforeCloseBroadcast,
                 ),
+                SwitchSettingCard(
+                    FluentIcon.HISTORY,
+                    "启动时恢复上次投送",
+                    "程序退出时投送未关闭，下次启动时自动恢复标题、内容和模式",
+                    cfg.restoreBroadcastAtStartup,
+                ),
             ]
         )
 

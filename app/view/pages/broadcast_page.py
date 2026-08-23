@@ -516,7 +516,7 @@ class BroadcastWindow(FramelessWindow):
         self._closeFlyout = showCloseConfirmation(
             self,
             self.btn_close,
-            "关闭后不会保存投送文字。",
+            "关闭后可通过“导入”恢复上次投送内容。",
         )
 
     def closeEvent(self, event):
@@ -992,7 +992,7 @@ class BroadcastEditPage(QWidget):
         btnLayout = QHBoxLayout()
         self.templateBtn = PushButton(self)
         self.templateBtn.setIcon(FIF.DOCUMENT)
-        self.templateBtn.setText("导入模板")
+        self.templateBtn.setText("导入")
         self.templateBtn.clicked.connect(self._showTemplateMenu)
 
         self.aiBtn = PushButton(self)
@@ -1049,6 +1049,13 @@ class BroadcastEditPage(QWidget):
         menu.closedSignal.connect(menu.deleteLater)
         menu.addAction(Action(FIF.DOCUMENT, "中午作业模板", triggered=self._useNoonTemplate))
         menu.addAction(Action(FIF.DOCUMENT, "晚辅导作业模板", triggered=self._useNightTemplate))
+        lastBroadcastAction = Action(
+            FIF.HISTORY,
+            "上次投送内容",
+            triggered=self._useLastBroadcast,
+        )
+        lastBroadcastAction.setEnabled(self._lastBroadcast() is not None)
+        menu.addAction(lastBroadcastAction)
         menu.exec(
             self.templateBtn.mapToGlobal(
                 QPoint(0, self.templateBtn.height())
@@ -1069,6 +1076,36 @@ class BroadcastEditPage(QWidget):
         else:
             self.contentInput.setText("【语文】\n  -\n\n【英语】\n  -\n\n【物理】\n  -")
 
+    def _lastBroadcast(self):
+        broadcast = cfg.lastBroadcast.value
+        if not isinstance(broadcast, dict):
+            return None
+        if (
+            not isinstance(broadcast.get("title"), str)
+            or not isinstance(broadcast.get("content"), str)
+            or not isinstance(broadcast.get("isMarkdown"), bool)
+        ):
+            return None
+        return broadcast
+
+    def _useLastBroadcast(self):
+        broadcast = self._lastBroadcast()
+        if broadcast is None:
+            return False
+        self.titleInput.setText(broadcast["title"])
+        self.contentInput.setPlainText(broadcast["content"])
+        self.markdownCheckBox.setChecked(broadcast["isMarkdown"])
+        return True
+
+    def restoreLastBroadcast(self):
+        if self._useLastBroadcast():
+            self._onBroadcast()
+
+    def _setBroadcastInactive(self):
+        broadcast = cfg.lastBroadcast.value
+        if isinstance(broadcast, dict) and broadcast.get("active") is True:
+            cfg.set(cfg.lastBroadcast, {**broadcast, "active": False})
+
     def _onBroadcast(self):
         QApplication.instance().setQuitOnLastWindowClosed(False)
         self._activeBroadcast = {
@@ -1076,6 +1113,7 @@ class BroadcastEditPage(QWidget):
             "content": self.contentInput.toPlainText(),
             "isMarkdown": self.markdownCheckBox.isChecked(),
         }
+        cfg.set(cfg.lastBroadcast, {**self._activeBroadcast, "active": True})
         self.broadcastWin.setContent(
             self._activeBroadcast["title"],
             self._activeBroadcast["content"],
@@ -1086,6 +1124,7 @@ class BroadcastEditPage(QWidget):
 
     def _onReturnToEdit(self):
         QApplication.instance().setQuitOnLastWindowClosed(True)
+        self._setBroadcastInactive()
         if self._activeBroadcast is not None:
             self.titleInput.setText(self._activeBroadcast["title"])
             self.contentInput.setPlainText(self._activeBroadcast["content"])
@@ -1096,6 +1135,9 @@ class BroadcastEditPage(QWidget):
         self.window().show(); self.window().raise_(); self.window().activateWindow()
 
     def _onReturnToHome(self):
+        if getattr(self.window(), "_resourcesShutdown", False):
+            return
+        self._setBroadcastInactive()
         showMainWindow = cfg.showMainWindowAfterBroadcast.value
         QApplication.instance().setQuitOnLastWindowClosed(showMainWindow)
         self.titleInput.clear(); self.contentInput.clear()

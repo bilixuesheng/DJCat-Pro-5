@@ -145,9 +145,13 @@ class Config(QConfig):
     confirmBeforeCloseBroadcast = ConfigItem(
         "Broadcast", "ConfirmBeforeClose", True, BoolValidator()
     )
+    restoreBroadcastAtStartup = ConfigItem(
+        "Broadcast", "RestoreAtStartup", False, BoolValidator()
+    )
     broadcastMarkdownEnabled = ConfigItem(
         "Broadcast", "MarkdownEnabled", False, BoolValidator()
     )
+    lastBroadcast = ConfigItem("Broadcast", "LastBroadcast", {})
     broadcastBackgroundMode = OptionsConfigItem(
         "Broadcast",
         "BackgroundMode",
