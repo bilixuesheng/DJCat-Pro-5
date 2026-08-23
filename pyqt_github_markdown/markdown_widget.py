@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pyqt_github_markdown.blocks import ImagePlaceholder
 from pyqt_github_markdown.markdown_service import markdownService
 from pyqt_github_markdown.renderer import markdownRenderer
 from pyqt_github_markdown.theme import LIGHT, Theme
@@ -50,7 +51,14 @@ class MarkdownWidget(QWidget):
         self._tree = markdownService.toTree(text)
         self._rebuild()
 
+    def clear(self) -> None:
+        if self._tree is not None:
+            self._tree = None
+            self._rebuild()
+
     def setTheme(self, theme: Theme) -> None:
+        if theme == self._theme:
+            return
         self._theme = theme
         self.setStyleSheet(theme.qss)
         self._rebuild()  # re-highlight code with the new Pygments style
@@ -66,8 +74,13 @@ class MarkdownWidget(QWidget):
             item = self._contentLayout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                for image in widget.findChildren(ImagePlaceholder):
+                    image.close()
+                widget.close()
+                widget.setParent(None)
                 widget.deleteLater()
         if self._tree is None:
+            self._contentLayout.addStretch(1)
             return
         for widget in markdownRenderer.buildDocument(self._tree, self._theme):
             self._contentLayout.addWidget(widget)

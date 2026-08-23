@@ -113,6 +113,56 @@ class MarkdownRendererTest(TestCase):
         self.assertGreater(scrollBar.value(), 0)
         view.deleteLater()
 
+    def testRepeatedMarkdownRendersDetachReplacedWidgetsImmediately(self):
+        view = MarkdownView()
+        self.addCleanup(view.deleteLater)
+        view.setMarkdown("[旧链接](https://old.example)")
+        previous = view._content.findChild(QLabel)
+
+        view.setMarkdown("[新链接](https://new.example)")
+
+        labels = view._content.findChildren(QLabel)
+        self.assertIsNone(previous.parent())
+        self.assertEqual(len(labels), 1)
+        self.assertIn("new.example", labels[0].text())
+
+    def testUnchangedMarkdownThemeDoesNotRebuildTheDocument(self):
+        view = MarkdownView()
+        self.addCleanup(view.deleteLater)
+        view.setMarkdown("# 标题")
+
+        with patch.object(view, "_rebuild") as rebuild:
+            view.syncTheme()
+
+        rebuild.assert_not_called()
+
+    def testReplacingMarkdownCancelsRemoteImageImmediately(self):
+        for prefix in ("", "> "):
+            with self.subTest(nested=bool(prefix)):
+                started = threading.Event()
+
+                def fetch(_url, cancelEvent, _setConnection):
+                    started.set()
+                    cancelEvent.wait(1)
+                    return None
+
+                view = MarkdownView()
+                self.addCleanup(view.deleteLater)
+                with patch.object(
+                    imageBlockModule,
+                    "_fetchRemoteImage",
+                    side_effect=fetch,
+                ):
+                    view.setMarkdown(
+                        f"{prefix}![图片](https://images.example.test/image.png)"
+                    )
+                    image = view._content.findChild(ImagePlaceholder)
+                    self.assertTrue(started.wait(1))
+
+                    view.setMarkdown("替换后的正文")
+
+                    self.assertTrue(image._remoteCancelEvent.is_set())
+
     def testMarkdownDisablesSelectionAndUsesBroadcastTypography(self):
         window = BroadcastWindow()
         window.setContent("title", "普通正文", is_markdown=False)
@@ -404,7 +454,18 @@ class MarkdownRendererTest(TestCase):
         window.setContent("title", "plain", is_markdown=False)
         self.assertTrue(window.markdownView.isHidden())
         self.assertFalse(window.contentEdit.isHidden())
+        self.assertEqual(window.markdownView._content.findChildren(QLabel), [])
         window.close()
+
+    def testClosingBroadcastReleasesItsRenderedDocument(self):
+        window = BroadcastWindow()
+        window.setContent("title", "# 标题\n\n正文", is_markdown=True)
+        self.assertTrue(window.markdownView._content.findChildren(QLabel))
+
+        window.close()
+
+        self.assertEqual(window.contentEdit.toPlainText(), "")
+        self.assertEqual(window.markdownView._content.findChildren(QLabel), [])
 
     def testBroadcastTouchScrollDoesNotDragWindow(self):
         window = BroadcastWindow()

@@ -64,7 +64,6 @@ from app.config.cfg import (
     cfg,
 )
 from app.config.paths import ASSET_DIR
-from app.view.components.home_card_dialog import CustomCardDialog
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import LabelElideFilter
 from app.view.components.tool_tip import setFluentToolTip
@@ -660,17 +659,32 @@ class HomePage(ScrollArea):
 
     def setApplicationCards(self, cards) -> list[dict]:
         cards = normalize_pinned_cards(cards)
-        for key in tuple(self._applicationCardKeys):
+        updatedCards = {
+            f"app:{item['app_id']}:{item['preset_id']}": item
+            for item in cards
+        }
+        if list(updatedCards.items()) == list(self._applicationCardData.items()):
+            return cards
+
+        for key in self._applicationCardKeys - updatedCards.keys():
             card = self.all_cards.pop(key, None)
             if card is not None:
+                card.hide()
                 card.deleteLater()
-        self._applicationCardKeys.clear()
-        self._applicationCardData.clear()
-        for item in cards or []:
-            key = f"app:{item['app_id']}:{item['preset_id']}"
+        for key, item in updatedCards.items():
+            previous = self._applicationCardData.get(key)
+            if previous == item:
+                continue
             icon = QIcon(item["icon_path"]) if item.get("icon_path") else QIcon()
             if icon.isNull():
                 icon = FIF.APPLICATION
+            if key in self.all_cards:
+                self.all_cards[key].setCardData(
+                    icon,
+                    item.get("title", "应用预设"),
+                    item.get("description", ""),
+                )
+                continue
             card = ActionCard(
                 icon,
                 item.get("title", "应用预设"),
@@ -682,15 +696,19 @@ class HomePage(ScrollArea):
                 lambda _checked=False, cardKey=key: self._removeApplicationCard(cardKey)
             )
             card.clicked.connect(
-                lambda cardData=item: self.applicationCardClicked.emit(cardData)
+                lambda cardKey=key: self.applicationCardClicked.emit(
+                    self._applicationCardData[cardKey]
+                )
             )
             card.dragStarted.connect(self._startCardDrag)
             card.dragMoved.connect(self._moveCard)
             card.dragFinished.connect(self._finishCardDrag)
             card.setEditing(self._editing_cards)
             self.all_cards[key] = card
-            self._applicationCardKeys.add(key)
-            self._applicationCardData[key] = dict(item)
+        self._applicationCardKeys = set(updatedCards)
+        self._applicationCardData = {
+            key: dict(item) for key, item in updatedCards.items()
+        }
         self._renderCards()
         return cards
 
@@ -817,6 +835,8 @@ class HomePage(ScrollArea):
         self._renderCards()
 
     def _createCustomCard(self):
+        from app.view.components.home_card_dialog import CustomCardDialog
+
         dialog = CustomCardDialog(parent=self.window())
         try:
             if not dialog.exec():
@@ -831,6 +851,8 @@ class HomePage(ScrollArea):
             self._saveCardOrder()
 
     def _editCustomCard(self, card_id):
+        from app.view.components.home_card_dialog import CustomCardDialog
+
         with self._cardsLock:
             data = deepcopy(self._customCardData.get(card_id))
         if data is None:

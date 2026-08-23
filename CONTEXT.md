@@ -255,6 +255,8 @@ _Not_: quit（结束 DJCat 进程）
 
 **Tray Menu 不拥有 Home Card。** 它只根据 HomePage 提供的入口快照重建菜单，并把稳定 key 交回 MainWindow/HomePage 执行。
 
+**HomePage 按稳定 key 复用 Application Home Card。** 不变快照不得重建卡片或重复发布主页变化；标题、图标和动作更新原有卡片，移除时才释放对应 QWidget。
+
 TrayControlPage 只渲染 Tray Card Shortcut 开关，不得在刷新控件时清理 `cfg.trayHomeCardKeys`。MainWindow 必须先恢复 Application Home Card，再用完整的 HomePage 快照移除已经失效的引用，避免启动阶段的临时不完整快照覆盖已保存选择。
 
 ### 主窗口与页面
@@ -304,6 +306,8 @@ Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence�
 
 下载阶段显示确定进度线；打开、安装和卸载无法可靠计算百分比，显示不确定进度线。卡片和详情页必须从同一组状态读取，不能各自维护进度。首次启动 Application 不等待或检查可见窗口；只有重新打开仍在运行的进程时才尝试唤起已有窗口，无窗口的进程不能因此被判定为启动失败。
 
+广告触控的 QApplication 全局事件过滤器只在 Application Store 可见时安装；页面隐藏或关闭时移除，避免其他页面的全部输入事件继续经过广告层。
+
 `ApplicationStore.installZip()` 是安装与更新的共同提交点：先校验并解压到 `.staging-*`，已有版本先改名为 `.backup-*`，再原子替换目标；失败时恢复备份。启动扫描会恢复未完成替换留下的备份并清理残留操作目录。
 
 ### 配置和文件
@@ -328,6 +332,7 @@ Projection 的两种正文渲染器必须保持这些共同约束：
 - 左侧和顶部正文起点一致。大字号 `MarkdownView` 的内容边距固定为 4 px，与 `QTextDocument.documentMargin()` 默认值一致；普通更新日志的 MarkdownView 保留渲染器默认边距。
 - 纯文本和 Markdown 都使用 QFluentWidgets `SmoothScrollDelegate`，并在 viewport 上注册 `QScroller.TouchGesture`，支持鼠标滚轮和平滑单指触控。
 - Projection 关闭文本选择，手指拖动用于滚动而不是选择文字。
+- Projection 切换正文类型或关闭时释放旧正文控件，并立即取消其远程 Markdown 图片下载；返回编辑时仍从独立的 Projection 内容快照恢复。
 
 AI Markdown 输入框的忙碌边框使用 2 px 渐变 QSS 边框。Qt 样式表会分别绘制边框各边，粗渐变边框在圆角处会出现斜向拼接；除非改为一次性自定义绘制完整圆角路径，否则不要再次只靠增加 QSS `border-width` 加粗。
 
@@ -348,7 +353,7 @@ AI Markdown 输入框的忙碌边框使用 2 px 渐变 QSS 边框。Qt 样式表
 | `app/view/components/` | 多页面复用的 Markdown、背景、滚动和设置卡片组件 |
 | `pyqt_github_markdown/` | 项目内置 Markdown 渲染器；不承载 DJCat 业务规则 |
 
-`app/common/application_version.py` 只包含架构和版本比较等纯函数，允许 MainWindow 在启动阶段导入。重量较大的 `app/common/application_store.py` 由 Setting 或 Application Store 页面首次加载时导入，避免图片缓存扫描破坏页面懒加载的启动收益。
+`app/common/application_version.py` 只包含架构和版本比较等纯函数，允许 MainWindow 在启动阶段导入。重量较大的 `app/common/application_store.py`、Custom Home Card 编辑器和 Markdown 渲染器分别在对应页面、编辑操作或更新日志首次需要时导入；`edge_tts` 依赖只在实际查询音色或合成语音时导入。
 
 ### Server
 

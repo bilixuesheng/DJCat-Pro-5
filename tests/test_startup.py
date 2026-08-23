@@ -88,3 +88,26 @@ class StartupTest(TestCase):
             result.stdout.strip().splitlines()[-1],
             "[False, False, False, False, False]",
         )
+
+    def testMainWindowImportDefersOptionalEditorsAndRenderingDependencies(self):
+        repo = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; import app.view.windows.main_window; "
+                "modules = ('app.view.components.home_card_dialog', "
+                "'app.view.components.markdown_view', "
+                "'pyqt_github_markdown', 'edge_tts'); "
+                "print([module in sys.modules for module in modules])",
+            ],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(
+            result.stdout.strip().splitlines()[-1],
+            "[False, False, False, False]",
+        )

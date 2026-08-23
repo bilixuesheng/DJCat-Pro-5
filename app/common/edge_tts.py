@@ -1,10 +1,8 @@
-import asyncio
 import os
 import tempfile
 import threading
 from pathlib import Path
 
-import edge_tts
 from PySide6.QtCore import QObject, Signal
 
 
@@ -55,11 +53,17 @@ def filter_chinese_voices(voices):
 
 def load_chinese_voices():
     """Load the current Chinese-only Edge TTS voice catalog from the network."""
+    import asyncio
+    import edge_tts
+
     return filter_chinese_voices(asyncio.run(edge_tts.list_voices()))
 
 
 def synthesize_edge_speech(text, voice, output_path):
     """Synthesize text to an MP3 file with Edge TTS."""
+    import asyncio
+    import edge_tts
+
     communicate = edge_tts.Communicate(text=text, voice=voice)
     asyncio.run(communicate.save(str(output_path)))
 

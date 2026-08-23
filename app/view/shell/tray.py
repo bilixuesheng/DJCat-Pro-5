@@ -126,7 +126,7 @@ class AcrylicMenu(RoundMenu):
         super()._onItemClicked(item)
 
 class SystemTrayIcon(QSystemTrayIcon):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, homeCards=None):
         super().__init__(parent=parent)
         self.setIcon(QIcon(str(ASSET_DIR / "logo.png")))
 
@@ -135,6 +135,7 @@ class SystemTrayIcon(QSystemTrayIcon):
         cfg.trayTooltip.valueChanged.connect(self._updateTrayTooltip)
 
         self._homeCards = []
+        self.setHomeCards(homeCards)
         cfg.broadcastTasks.valueChanged.connect(self._refreshBroadcastAction)
         cfg.shutdownTasks.valueChanged.connect(self._refreshShutdownAction)
         cfg.showBroadcastTrayAction.valueChanged.connect(self._rebuildMenu)

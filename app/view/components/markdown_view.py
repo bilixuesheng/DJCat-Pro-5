@@ -49,6 +49,8 @@ class MarkdownView(MarkdownWidget):
         self._applyStyleOverrides()
 
     def setTheme(self, theme: Theme) -> None:
+        if theme == self._theme:
+            return
         super().setTheme(theme)
         self._applyStyleOverrides()
 

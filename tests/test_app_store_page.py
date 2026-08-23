@@ -288,6 +288,43 @@ class AppStorePageTest(TestCase):
         self.assertEqual(card.appId, 9)
         self.assertEqual(card.titleLabel.text(), "Updated")
 
+    def testRemovedApplicationCardsLeaveTheWidgetTreeImmediately(self):
+        self.page._renderGrid(self.page.allGrid, _apps(2))
+        removed = self.page.allGrid.itemAt(1).widget()
+
+        self.page._renderGrid(self.page.allGrid, _apps(1))
+
+        self.assertIsNone(removed.parent())
+        self.assertNotIn(removed, self.page.container.findChildren(ApplicationCard))
+
+    def testUnchangedGridWidthDoesNotMoveExistingCardsAgain(self):
+        self.page._renderGrid(self.page.allGrid, _apps(3))
+
+        with patch.object(self.page.allGrid, "takeAt") as takeAt:
+            self.page._reflowGrid(self.page.allGrid)
+
+        takeAt.assert_not_called()
+
+    def testAdvertisementGlobalFilterOnlyRunsWhilePageIsVisible(self):
+        self.assertFalse(self.page._globalAdFilterInstalled)
+
+        self.page.show()
+        self.assertTrue(self.page._globalAdFilterInstalled)
+
+        self.page.hide()
+        self.assertFalse(self.page._globalAdFilterInstalled)
+
+    def testShutdownStopsAllPendingLayoutTimersAndGlobalFilter(self):
+        self.page.show()
+        self.page._layoutTimer.start()
+        self.page._adSyncTimer.start()
+
+        self.page.shutdown()
+
+        self.assertFalse(self.page._globalAdFilterInstalled)
+        self.assertFalse(self.page._layoutTimer.isActive())
+        self.assertFalse(self.page._adSyncTimer.isActive())
+
     def testResponsiveGridUsesThreeColumnsAtDesktopWidth(self):
         apps = _apps(3)
         self.page.resize(1000, 600)

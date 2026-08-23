@@ -465,6 +465,25 @@ class TrayMenuTest(TestCase):
         )
         return tray
 
+    def testInitialHomeCardsBuildTrayMenuOnlyOnce(self):
+        from app.view.shell.tray import SystemTrayIcon
+
+        cards = [
+            {
+                "key": "custom:one",
+                "source": "custom",
+                "title": "自定义入口",
+                "description": "执行自定义动作",
+                "icon": FIF.APPLICATION,
+            }
+        ]
+        with patch.object(SystemTrayIcon, "_rebuildMenu") as rebuildMenu:
+            tray = SystemTrayIcon(self.parent, cards)
+
+        self.addCleanup(tray.deleteLater)
+        self.assertEqual(tray._homeCards, cards)
+        rebuildMenu.assert_called_once_with()
+
     def testBlankTrayTooltipUsesApplicationNameAndEditingUpdatesIt(self):
         from app.view.shell.tray import SystemTrayIcon
 

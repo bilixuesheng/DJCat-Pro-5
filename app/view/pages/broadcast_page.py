@@ -389,12 +389,14 @@ class BroadcastWindow(FramelessWindow):
         self.titleLabel.setStyleSheet(f"color: {qconfig.themeColor.value.name()};")
 
         if is_markdown:
+            self.contentEdit.clear()
             self.contentEdit.hide()
             self.markdownView.show()
             self.markdownView.syncTheme()
             self.markdownView.setMarkdown(text)
         else:
             self.markdownView.hide()
+            self.markdownView.clear()
             self.contentEdit.show()
             self.contentEdit.setPlainText(text)
             font = QFont(); font.setPointSize(26)
@@ -521,6 +523,8 @@ class BroadcastWindow(FramelessWindow):
             self._closeFlyout.hide()
             self._closeFlyout.deleteLater()
             self._closeFlyout = None
+        self.contentEdit.clear()
+        self.markdownView.clear()
         self.miniWindow.hide()
         if self._is_editing: self.editClicked.emit()
         else: self.closeClicked.emit()

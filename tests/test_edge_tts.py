@@ -133,7 +133,7 @@ class EdgeTtsVoiceTest(TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             output_path = Path(directory) / "speech.mp3"
-            with patch("app.common.edge_tts.edge_tts.Communicate", CommunicateStub):
+            with patch("edge_tts.Communicate", CommunicateStub):
                 synthesize_edge_speech(
                     "测试播报",
                     "zh-TW-HsiaoChenNeural",

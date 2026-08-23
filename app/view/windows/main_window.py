@@ -71,7 +71,6 @@ from app.config.constants import (
 )
 from app.config.paths import ASSET_DIR, UPDATE_INSTALLER_PATH
 from app.signal_bus import signalBus
-from app.view.components.markdown_view import MarkdownView
 from app.view.pages.home_page import HomePage
 from app.view.shell.tray import SystemTrayIcon
 
@@ -251,6 +250,8 @@ class LazyAppStorePage(LazyPage):
 
 class UpdateDialog(MessageBoxBase):
     def __init__(self, version, note, parent=None):
+        from app.view.components.markdown_view import MarkdownView
+
         super().__init__(parent)
         self.titleLabel = SubtitleLabel(f"发现新版本: v{version}", self)
         self.markdownView = MarkdownView(self, transparentBackground=True)
@@ -315,8 +316,7 @@ class MainWindow(MSFluentWindow):
 
         self.initNavigation()
         self._startMachineRegistration()
-        self.tray = SystemTrayIcon(self)
-        self.tray.setHomeCards(self.homePage.homeCardEntries())
+        self.tray = SystemTrayIcon(self, self.homePage.homeCardEntries())
         self.tray.show()
 
         signalBus.catchException.connect(self._onExceptionCaught)

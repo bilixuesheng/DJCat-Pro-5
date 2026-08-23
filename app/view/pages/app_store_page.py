@@ -719,6 +719,7 @@ class AppStorePage(ScrollArea):
         self._catalogWorker = None
         self._imageJobs = {}
         self._shuttingDown = False
+        self._globalAdFilterInstalled = False
         self._downloadJobs = {}
         self._downloadStates = {}
         self._downloadProgress = {}
@@ -866,7 +867,6 @@ class AppStorePage(ScrollArea):
             self.adFlipView.viewport(),
         ):
             touchTarget.installEventFilter(self.adOverlay)
-        QApplication.instance().installEventFilter(self.adOverlay)
         self.adOverlay.setObjectName("AdvertisementOverlay")
         self.adOverlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.adOverlay.setStyleSheet(
@@ -1129,10 +1129,16 @@ class AppStorePage(ScrollArea):
         self._layoutTimer.stop()
         self._applyLayoutUpdate()
         super().showEvent(event)
+        if not self._globalAdFilterInstalled:
+            QApplication.instance().installEventFilter(self.adOverlay)
+            self._globalAdFilterInstalled = True
         if not self._catalogLoaded:
             self._loadCatalog()
 
     def hideEvent(self, event):
+        if self._globalAdFilterInstalled:
+            QApplication.instance().removeEventFilter(self.adOverlay)
+            self._globalAdFilterInstalled = False
         self._pauseAds()
         super().hideEvent(event)
 
@@ -1141,7 +1147,12 @@ class AppStorePage(ScrollArea):
             return
         self._shuttingDown = True
         self._pauseAds()
+        if self._globalAdFilterInstalled:
+            QApplication.instance().removeEventFilter(self.adOverlay)
+            self._globalAdFilterInstalled = False
         self.store.shutdown()
+        self._layoutTimer.stop()
+        self._adSyncTimer.stop()
         self._viewportUpdateTimer.stop()
         self._progressTimer.stop()
         self._pendingProgress.clear()
@@ -1549,23 +1560,28 @@ class AppStorePage(ScrollArea):
                 card.show()
             for card in cards[len(apps) :]:
                 card.hide()
+                card.setParent(None)
                 card.deleteLater()
             self._setGridColumns(layout, columns)
+            layout.setProperty("djcatColumns", columns)
         finally:
             gridWidget.setUpdatesEnabled(True)
             gridWidget.update()
 
     def _reflowGrid(self, layout):
+        columns = self._columnCount()
+        if layout.property("djcatColumns") == columns:
+            return
         widgets = []
         while layout.count():
             item = layout.takeAt(0)
             if item.widget():
                 widgets.append(item.widget())
-        columns = self._columnCount()
         for index, widget in enumerate(widgets):
             row, column = divmod(index, columns)
             layout.addWidget(widget, row, column)
         self._setGridColumns(layout, columns)
+        layout.setProperty("djcatColumns", columns)
 
     def _reflowGrids(self):
         if not hasattr(self, "installedGrid") or not hasattr(self, "allGrid"):
@@ -2261,8 +2277,10 @@ class AppStorePage(ScrollArea):
         while self.presetCards.count():
             item = self.presetCards.takeAt(0)
             if item.widget():
-                item.widget().hide()
-                item.widget().deleteLater()
+                widget = item.widget()
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
         announcement = str(app.get("announcement", "")).strip()
         self.announcementLabel.setText(announcement)
         self.announcementLabel.setVisible(bool(announcement))

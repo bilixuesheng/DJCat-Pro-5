@@ -626,6 +626,40 @@ class HomeCustomCardTest(TestCase):
         self.page.setApplicationCards(cards)
         self.assertIn("app:7:0", self.page.all_cards)
 
+    def testApplicationCardRefreshReusesWidgetsAndExecutesLatestAction(self):
+        cards = [
+            {
+                "app_id": 7,
+                "preset_id": 0,
+                "title": "打开应用",
+                "action": {"type": "url", "url": "https://old.example"},
+            }
+        ]
+        self.page.setApplicationCards(cards)
+        card = self.page.all_cards["app:7:0"]
+        changes = []
+        actions = []
+        self.page.homeCardsChanged.connect(changes.append)
+        self.page.applicationCardClicked.connect(actions.append)
+
+        self.page.setApplicationCards(cards)
+
+        self.assertIs(self.page.all_cards["app:7:0"], card)
+        self.assertEqual(changes, [])
+
+        cards[0]["title"] = "更新后的应用"
+        cards[0]["action"] = {
+            "type": "url",
+            "url": "https://new.example",
+        }
+        self.page.setApplicationCards(cards)
+        self.page.activateHomeCard("app:7:0")
+
+        self.assertIs(self.page.all_cards["app:7:0"], card)
+        self.assertEqual(card.titleLabel.text(), "更新后的应用")
+        self.assertEqual(actions[-1]["action"]["url"], "https://new.example")
+        self.assertEqual(len(changes), 1)
+
     def testApplicationCardFallsBackWhenCachedIconWasDeleted(self):
         missingIcon = Path(self.temp_dir.name) / "deleted-cache.png"
         cards = [
