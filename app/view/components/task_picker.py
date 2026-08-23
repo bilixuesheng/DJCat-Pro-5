@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     ExpandSettingCard,
+    MessageBoxBase,
     SettingCard,
     TimePicker,
     isDarkTheme,
@@ -85,6 +86,10 @@ class TouchTimePicker(TimePicker):
 class TaskFormSettingCard(SettingCard):
     def __init__(self, icon, title, content, widget, parent=None):
         super().__init__(icon, title, content, parent)
+        self._hasCardMaterial = parent is not None and isinstance(
+            parent.parentWidget(),
+            MessageBoxBase,
+        )
         for label in (self.titleLabel, self.contentLabel):
             label.setWordWrap(False)
             label.setSizePolicy(
@@ -96,6 +101,10 @@ class TaskFormSettingCard(SettingCard):
         self.hBoxLayout.addSpacing(16)
 
     def paintEvent(self, event):
+        if self._hasCardMaterial:
+            super().paintEvent(event)
+            return
+
         painter = QPainter(self)
         painter.setPen(
             QColor(0, 0, 0, 50)

@@ -20,7 +20,13 @@ from shiboken6 import delete, isValid
 
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.task_picker import TouchTimePicker
+from app.view.pages.home_card_task_page import (
+    AddHomeCardTaskDialog,
+    HomeCardTaskSettingCard,
+    create_home_card_task_form,
+)
 from app.view.pages.schedule_page import (
+    AddTaskDialog,
     BroadcastSettingCard,
     ChineseVoiceLoader,
     SchedulePage,
@@ -28,6 +34,7 @@ from app.view.pages.schedule_page import (
     create_task_form,
 )
 from app.view.pages.shutdown_page import (
+    AddShutdownTaskDialog,
     ShutdownSettingCard,
     ShutdownPromptDialog,
     ShutdownPage,
@@ -273,6 +280,7 @@ class ScheduleShutdownUiTest(TestCase):
         forms = (
             (*create_task_form(None), BroadcastSettingCard),
             (*create_shutdown_form(None), ShutdownSettingCard),
+            (*create_home_card_task_form(None, []), HomeCardTaskSettingCard),
         )
         for form, _, cardType in forms:
             self.addCleanup(form.deleteLater)
@@ -296,6 +304,43 @@ class ScheduleShutdownUiTest(TestCase):
                         image.pixelColor(x, card.height() - 1),
                         image.pixelColor(x, card.height() - 2),
                     )
+
+    def testNewTaskDialogsPaintSeparateSettingCards(self):
+        parent = QWidget()
+        parent.resize(900, 700)
+        parent.show()
+        self.addCleanup(parent.deleteLater)
+        dialogs = (
+            (AddTaskDialog(parent), BroadcastSettingCard),
+            (AddShutdownTaskDialog(parent), ShutdownSettingCard),
+            (AddHomeCardTaskDialog([], parent), HomeCardTaskSettingCard),
+        )
+
+        for dialog, cardType in dialogs:
+            self.addCleanup(dialog.deleteLater)
+            dialog.show()
+            self.app.processEvents()
+            cards = dialog.formWidget.findChildren(cardType)
+            self.assertGreater(len(cards), 1)
+
+            for card in cards:
+                if card.isHidden():
+                    continue
+                image = QImage(card.size(), QImage.Format.Format_ARGB32)
+                image.fill(Qt.GlobalColor.transparent)
+                card.render(image)
+                y = card.height() // 2
+
+                with self.subTest(
+                    dialog=type(dialog).__name__,
+                    card=card.titleLabel.text(),
+                ):
+                    self.assertNotEqual(
+                        image.pixelColor(5, y),
+                        image.pixelColor(0, y),
+                    )
+
+            dialog.close()
 
     def testTaskFormsStartDirectlyBelowHeader(self):
         cards = (TaskCard(broadcast_task()), ShutdownTaskCard(shutdown_task()))
