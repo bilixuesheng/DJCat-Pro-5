@@ -28,6 +28,8 @@ env:
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.release.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
@@ -43,6 +45,8 @@ jobs:
       - name: Resolve release metadata
         id: release
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           VERSION=$(python - <<'PY'
           import pathlib
@@ -79,8 +83,11 @@ jobs:
 
           git fetch --tags --force
           if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-            echo "Release tag $TAG already exists; release assets are immutable. Bump VERSION before publishing again." >&2
-            exit 1
+            if [[ "$(git log -1 --format=%s)" != "release: republish $TAG" ]]; then
+              echo "Release tag $TAG already exists; use an explicit republish commit or bump VERSION." >&2
+              exit 1
+            fi
+            gh release delete "$TAG" --yes --cleanup-tag --repo "$GITHUB_REPOSITORY"
           fi
           SOURCE_SHA="${GITHUB_SHA}"
 
