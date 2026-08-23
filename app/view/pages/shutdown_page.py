@@ -409,7 +409,7 @@ class ShutdownPage(ScrollArea):
         dialog = AddShutdownTaskDialog(self.window())
         try:
             if dialog.exec():
-                self.current_tasks.append(dialog.get_data())
+                self.current_tasks.insert(0, dialog.get_data())
                 cfg.set(cfg.shutdownTasks, self.current_tasks)
                 self._loadTasks()
         finally:

@@ -583,7 +583,7 @@ class HomeCardTaskPage(ScrollArea):
         try:
             if not dialog.exec():
                 return
-            self.currentTasks.append(dialog.getData())
+            self.currentTasks.insert(0, dialog.getData())
             cfg.set(
                 cfg.homeCardTasks,
                 normalize_home_card_tasks(self.currentTasks),

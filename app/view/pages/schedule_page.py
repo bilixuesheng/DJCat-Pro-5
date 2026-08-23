@@ -515,7 +515,7 @@ class SchedulePage(ScrollArea):
         try:
             if dialog.exec():
                 data = dialog.get_data()
-                self.current_tasks.append(data)
+                self.current_tasks.insert(0, data)
                 cfg.set(cfg.broadcastTasks, self.current_tasks)
                 self._loadTasks()
         finally:
