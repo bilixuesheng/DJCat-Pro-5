@@ -697,6 +697,7 @@ class AdvertisementOverlay(QWidget):
 class AppStorePage(ScrollArea):
     pinnedCardsChanged = Signal(object)
     _launchFailed = Signal(str)
+    _launchFinished = Signal(int, str)
     _downloadProgressSignal = Signal(int, int, int)
     _downloadRetrySignal = Signal(str)
     _downloadFinishedSignal = Signal(object, str, str, bool)
@@ -722,6 +723,7 @@ class AppStorePage(ScrollArea):
         self._downloadStates = {}
         self._downloadProgress = {}
         self._checkingUpdates = False
+        self._launching = set()
         self._installing = set()
         self._installThreads = {}
         self._uninstalling = set()
@@ -751,6 +753,7 @@ class AppStorePage(ScrollArea):
         self._downloadProgressSignal.connect(self._queueDownloadProgress)
         self._downloadRetrySignal.connect(self._showDownloadRetry)
         self._downloadFinishedSignal.connect(self._onDownloadFinished)
+        self._launchFinished.connect(self._onLaunchFinished)
         self._installFinished.connect(self._onInstallFinished)
         self._uninstallFinished.connect(self._onUninstallFinished)
         self.setObjectName("AppStorePage")
@@ -1212,6 +1215,9 @@ class AppStorePage(ScrollArea):
             self._downloadStates.pop(appId, None)
             self._downloadProgress.pop(appId, None)
         self._uninstalling.clear()
+        for appId in self._launching:
+            self._downloadStates.pop(appId, None)
+        self._launching.clear()
 
     def closeEvent(self, event):
         self.shutdown()
@@ -1490,7 +1496,11 @@ class AppStorePage(ScrollArea):
             directKey in self._pinnedKeys(),
             removeEnabled=installedPage and not bool(state),
         )
-        if appId in self._installing or appId in self._uninstalling:
+        if (
+            appId in self._launching
+            or appId in self._installing
+            or appId in self._uninstalling
+        ):
             card.setProgress(indeterminate=True)
         elif appId in self._downloadJobs:
             progress = self._downloadProgress.get(appId, 0)
@@ -1892,11 +1902,16 @@ class AppStorePage(ScrollArea):
             actionEnabled = supported
         self.detailAction.setEnabled(
             appId not in self._downloadJobs
+            and appId not in self._launching
             and appId not in self._installing
             and appId not in self._uninstalling
             and actionEnabled
         )
-        if appId in self._installing or appId in self._uninstalling:
+        if (
+            appId in self._launching
+            or appId in self._installing
+            or appId in self._uninstalling
+        ):
             self.detailAction.setProgress(indeterminate=True)
         elif appId in self._downloadJobs:
             progress = self._downloadProgress.get(appId, 0)
@@ -1905,6 +1920,7 @@ class AppStorePage(ScrollArea):
             self.detailAction.setProgress()
         busy = (
             appId in self._downloadJobs
+            or appId in self._launching
             or appId in self._installing
             or appId in self._uninstalling
         )
@@ -1931,6 +1947,7 @@ class AppStorePage(ScrollArea):
         appId = int(app["id"])
         if (
             appId in self._downloadJobs
+            or appId in self._launching
             or appId in self._installing
             or appId in self._uninstalling
         ):
@@ -1938,11 +1955,26 @@ class AppStorePage(ScrollArea):
         if app.get("installed") and (
             not app.get("update_available") or not allowUpdate
         ):
+            self._launching.add(appId)
+            self._downloadStates[appId] = "打开中"
+            self._updateVisibleCardState(appId)
+            self._updateDetailAction()
             try:
-                local = self.store.installed().get(appId)
-                self.store.executeAction(local or app)
-            except (ApplicationStoreError, OSError, ValueError) as error:
-                InfoBar.error("无法打开应用", str(error), duration=4000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
+                thread = threading.Thread(
+                    target=self._launchInBackground,
+                    args=(app,),
+                    daemon=True,
+                )
+                with self._fileOperationLock:
+                    self._fileOperationThreads.add(thread)
+                try:
+                    thread.start()
+                except Exception:
+                    with self._fileOperationLock:
+                        self._fileOperationThreads.discard(thread)
+                    raise
+            except Exception as error:
+                self._onLaunchFinished(appId, str(error))
             return
         try:
             self.store.downloadSlots.acquire()
@@ -1989,6 +2021,36 @@ class AppStorePage(ScrollArea):
             return
         self._updateVisibleCardState(appId)
         self._updateDetailAction()
+
+    def _launchInBackground(self, app):
+        appId = int(app["id"])
+        errorMessage = ""
+        try:
+            local = self.store.installed().get(appId)
+            self.store.executeAction(local or app)
+        except Exception as error:
+            errorMessage = str(error)
+        finally:
+            with self._fileOperationLock:
+                self._fileOperationThreads.discard(threading.current_thread())
+        if not self._shuttingDown:
+            self._launchFinished.emit(appId, errorMessage)
+
+    def _onLaunchFinished(self, appId, error):
+        if self._shuttingDown or appId not in self._launching:
+            return
+        self._launching.discard(appId)
+        self._downloadStates.pop(appId, None)
+        self._updateVisibleCardState(appId)
+        self._updateDetailAction()
+        if error:
+            InfoBar.error(
+                "无法打开应用",
+                error,
+                duration=4000,
+                position=InfoBarPosition.BOTTOM_RIGHT,
+                parent=self,
+            )
 
     def _queueDownloadProgress(self, appId, done, total):
         if appId not in self._downloadJobs:
@@ -2120,6 +2182,7 @@ class AppStorePage(ScrollArea):
         appId = int(app["id"])
         if (
             appId in self._downloadJobs
+            or appId in self._launching
             or appId in self._installing
             or appId in self._uninstalling
         ):
@@ -2235,6 +2298,7 @@ class AppStorePage(ScrollArea):
             )
             busy = (
                 key[0] in self._downloadJobs
+                or key[0] in self._launching
                 or key[0] in self._installing
                 or key[0] in self._uninstalling
             )
@@ -2326,6 +2390,7 @@ class AppStorePage(ScrollArea):
         appId = int(app["id"])
         if (
             appId in self._downloadJobs
+            or appId in self._launching
             or appId in self._installing
             or appId in self._uninstalling
         ):

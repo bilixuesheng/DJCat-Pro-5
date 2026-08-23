@@ -343,9 +343,7 @@ def _activateProcessWindow(process, stopEvent=None, onFailure=None):
         if stopEvent.is_set() or onFailure is None:
             return
         exitCode = process.poll()
-        if exitCode is None:
-            message = "程序已在后台运行，但未找到可显示窗口，请检查系统托盘"
-        elif exitCode != 0:
+        if exitCode is not None and exitCode != 0:
             message = "程序启动后立即退出，可能已有实例正在运行"
         else:
             return
@@ -1150,7 +1148,6 @@ class ApplicationStore:
                     env=_externalProcessEnvironment(),
                 )
                 processes.append(process)
-            self._activateProcess(process)
             return process
         if actionType == "url":
             return webbrowser.open(_httpsUrl(target))

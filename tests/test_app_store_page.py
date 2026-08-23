@@ -135,6 +135,12 @@ class AppStorePageTest(TestCase):
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.qtApp.processEvents()
 
+    def _waitForLaunch(self):
+        deadline = time.monotonic() + 1
+        while self.page._launching and time.monotonic() < deadline:
+            QTest.qWait(10)
+        self.assertFalse(self.page._launching)
+
     def testPagerClickDoesNotRebuildItems(self):
         apps = _apps(7)
         self.page.categoryPivot.setCurrentItem("all")
@@ -888,8 +894,143 @@ class AppStorePageTest(TestCase):
         }
 
         self.page._onAppAction(app)
+        self._waitForLaunch()
 
         self.page.store.executeAction.assert_called_once_with(installed)
+
+    def testApplicationLaunchRunsOutsideGuiThreadAndRestoresButtons(self):
+        app = _apps(1)[0] | {
+            "installed": True,
+            "open_action": {"type": "program", "target": "demo.exe"},
+        }
+        installed = object()
+        started = threading.Event()
+        release = threading.Event()
+        self.page.store.installed = Mock(return_value={0: installed})
+
+        def execute(value):
+            self.assertIs(value, installed)
+            started.set()
+            release.wait(1)
+
+        self.page.store.executeAction = Mock(side_effect=execute)
+        self.page._renderGrid(self.page.installedGrid, [app], True)
+        self.page._renderGrid(self.page.allGrid, [app])
+        self.page.currentApp = app
+        self.page._updateDetailAction()
+        installedCard = self.page.installedGrid.itemAtPosition(0, 0).widget()
+        allCard = self.page.allGrid.itemAtPosition(0, 0).widget()
+        guiCallback = []
+
+        try:
+            QTimer.singleShot(0, lambda: guiCallback.append(True))
+            before = time.monotonic()
+            self.page._onAppAction(app)
+
+            self.assertLess(time.monotonic() - before, 0.2)
+            self.assertTrue(started.wait(1))
+            QTest.qWait(20)
+            self.assertEqual(guiCallback, [True])
+            for button in (
+                installedCard.actionButton,
+                allCard.actionButton,
+                self.page.detailAction,
+            ):
+                self.assertEqual(button.text(), "打开中")
+                self.assertFalse(button.isEnabled())
+                self.assertTrue(button._indeterminate)
+                self.assertTrue(button._progressTimer.isActive())
+            self.assertFalse(installedCard.removeButton.isEnabled())
+
+            self.page._onAppAction(app)
+            self.page.store.executeAction.assert_called_once_with(installed)
+
+            release.set()
+            self._waitForLaunch()
+
+            for button in (
+                installedCard.actionButton,
+                allCard.actionButton,
+                self.page.detailAction,
+            ):
+                self.assertEqual(button.text(), "打开")
+                self.assertTrue(button.isEnabled())
+                self.assertFalse(button._indeterminate)
+                self.assertFalse(button._progressTimer.isActive())
+            self.assertTrue(installedCard.removeButton.isEnabled())
+            self.assertNotIn(app["id"], self.page._downloadStates)
+        finally:
+            release.set()
+
+    def testApplicationLaunchFailureRestoresButtons(self):
+        app = _apps(1)[0] | {
+            "installed": True,
+            "open_action": {"type": "program", "target": "demo.exe"},
+        }
+        self.page.store.installed = Mock(return_value={0: object()})
+        self.page.store.executeAction = Mock(side_effect=OSError("启动失败"))
+        self.page._renderGrid(self.page.installedGrid, [app], True)
+        self.page.currentApp = app
+        card = self.page.installedGrid.itemAtPosition(0, 0).widget()
+
+        with patch.object(InfoBar, "error") as showError:
+            self.page._onAppAction(app)
+            self._waitForLaunch()
+
+        showError.assert_called_once()
+        self.assertEqual(card.actionButton.text(), "打开")
+        self.assertTrue(card.actionButton.isEnabled())
+        self.assertFalse(card.actionButton._indeterminate)
+        self.assertEqual(self.page.detailAction.text(), "打开")
+        self.assertTrue(self.page.detailAction.isEnabled())
+        self.assertFalse(self.page.detailAction._indeterminate)
+        self.assertNotIn(app["id"], self.page._downloadStates)
+
+    def testApplicationLaunchThreadFailureRestoresButtons(self):
+        app = _apps(1)[0] | {
+            "installed": True,
+            "open_action": {"type": "program", "target": "demo.exe"},
+        }
+        self.page.store.installed = Mock()
+        self.page._renderGrid(self.page.installedGrid, [app], True)
+        self.page.currentApp = app
+        card = self.page.installedGrid.itemAtPosition(0, 0).widget()
+
+        with patch(
+            "app.view.pages.app_store_page.threading.Thread",
+            side_effect=RuntimeError("thread construction failed"),
+        ), patch.object(InfoBar, "error") as showError:
+            self.page._onAppAction(app)
+
+        showError.assert_called_once()
+        self.page.store.installed.assert_not_called()
+        self.assertFalse(self.page._launching)
+        self.assertFalse(self.page._fileOperationThreads)
+        self.assertNotIn(app["id"], self.page._downloadStates)
+        self.assertEqual(card.actionButton.text(), "打开")
+        self.assertTrue(card.actionButton.isEnabled())
+        self.assertFalse(card.actionButton._indeterminate)
+        self.assertTrue(self.page.detailAction.isEnabled())
+        self.assertFalse(self.page.detailAction._indeterminate)
+
+    def testApplicationLaunchThreadStartFailureRestoresButtons(self):
+        app = _apps(1)[0] | {
+            "installed": True,
+            "open_action": {"type": "program", "target": "demo.exe"},
+        }
+        thread = Mock()
+        thread.start.side_effect = RuntimeError("thread start failed")
+
+        with patch(
+            "app.view.pages.app_store_page.threading.Thread",
+            return_value=thread,
+        ), patch.object(InfoBar, "error") as showError:
+            self.page._onAppAction(app)
+
+        showError.assert_called_once()
+        self.assertFalse(self.page._launching)
+        self.assertFalse(self.page._fileOperationThreads)
+        self.assertNotIn(app["id"], self.page._downloadStates)
 
     def testUpdateButtonRulesFollowInstalledAllAndDetailContexts(self):
         installed = object()
@@ -911,6 +1052,7 @@ class AppStorePageTest(TestCase):
         allCard = self.page.allGrid.itemAtPosition(0, 0).widget()
         self.assertEqual(allCard.actionButton.text(), "打开")
         self.page._onAppAction(app, allowUpdate=False)
+        self._waitForLaunch()
         self.page.store.executeAction.assert_called_once_with(installed)
 
         self.page.currentApp = app

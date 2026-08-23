@@ -297,11 +297,12 @@ Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence�
 |---|---|
 | `_downloadJobs` | 正在传输 Package 的 worker 与线程 |
 | `_downloadProgress` | 0–100 的确定下载百分比 |
+| `_launching` | 正在后台执行 Open Action 的 Application ID |
 | `_installing` | 正在解压并原子替换的 Application ID |
 | `_uninstalling` | 正在移除的 Application ID |
 | `_downloadStates` | 卡片和详情按钮共享的用户可见状态文字 |
 
-下载阶段显示确定进度线；安装和卸载无法可靠计算百分比，显示不确定进度线。卡片和详情页必须从同一组状态读取，不能各自维护进度。
+下载阶段显示确定进度线；打开、安装和卸载无法可靠计算百分比，显示不确定进度线。卡片和详情页必须从同一组状态读取，不能各自维护进度。首次启动 Application 不等待或检查可见窗口；只有重新打开仍在运行的进程时才尝试唤起已有窗口，无窗口的进程不能因此被判定为启动失败。
 
 `ApplicationStore.installZip()` 是安装与更新的共同提交点：先校验并解压到 `.staging-*`，已有版本先改名为 `.backup-*`，再原子替换目标；失败时恢复备份。启动扫描会恢复未完成替换留下的备份并清理残留操作目录。
 

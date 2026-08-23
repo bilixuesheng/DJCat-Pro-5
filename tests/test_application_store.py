@@ -602,6 +602,21 @@ class ApplicationStoreTest(TestCase):
 
     @patch("app.common.application_store._activateProcessWindow")
     @patch("app.common.application_store.subprocess.Popen")
+    def testNewlyLaunchedApplicationDoesNotLookForWindow(self, popen, activate):
+        app = self._app()
+        app["open_action"] = {"type": "program", "target": "app.exe"}
+        installed = self.store.installZip(app, self._zip())
+        process = Mock(pid=42)
+        process.poll.return_value = None
+        popen.return_value = process
+
+        self.assertIs(self.store.executeAction(installed), process)
+
+        popen.assert_called_once()
+        activate.assert_not_called()
+
+    @patch("app.common.application_store._activateProcessWindow")
+    @patch("app.common.application_store.subprocess.Popen")
     def testOpeningRunningApplicationFocusesItWithoutLaunchingAgain(
         self, popen, activate
     ):
@@ -670,6 +685,7 @@ class ApplicationStoreTest(TestCase):
         worker.is_alive.return_value = True
         activate.return_value = worker
 
+        self.store.executeAction(installed)
         self.store.executeAction(installed)
         self.store.shutdown()
 
