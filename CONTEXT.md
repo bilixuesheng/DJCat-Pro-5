@@ -106,6 +106,10 @@ _Avoid_: downloaded application、Package
 由 Application Catalog 提供、在 Application 边界内执行的受限动作，类型为启动安装目录内的程序、打开 HTTPS 网页或调用允许的系统 URI。启动程序时以该 Application 的安装目录为工作目录，并清理 DJCat 自身的运行时路径，以兼容 Python/Nuitka 打包的 Application。作为应用默认入口时称 Open Action；由 Application Preset 引用时称 Preset Action。
 _Avoid_: Home Action、Shell action
 
+**Application Launch**:
+从 Application Store 打开一个 Installed Application 时，对其 Open Action 的一次后台执行。启动新程序只确认进程已创建，不要求出现可见窗口；再次打开仍在运行的同一程序时才尝试唤起已有窗口。
+_Avoid_: Application Update、install、等待程序窗口
+
 **Application Preset**:
 归属于一个 Application 的命名 Preset Action，由服务端维护标题、说明和顺序。Application Preset 本身不是 Home Card；用户将它固定到主页后才产生 Application Home Card。
 _Avoid_: Custom Home Card、template、default setting
@@ -206,6 +210,10 @@ _Avoid_: Render Frame、刷新率、渲染线程 sleep
 Windows 合成器和显示设备最终呈现的一帧。它会受绘制耗时、DWM、VSync、显示器刷新率和机器负载约束，DJCat 的 Animation Tick 间隔不能解除这些约束。
 _Avoid_: Animation Tick；用 1 ms 调度间隔推断 1000 FPS
 
+**Menu Reveal**:
+QFluentWidgets 下拉或上拉菜单展开时的原生位移和遮罩动画。下拉框与输入框右键菜单复用它；DJCat 只合并动画期间重复的 viewport 刷新，保留原始时长、缓动曲线、位移、遮罩和阴影。
+_Avoid_: Animation Tick、淡入动画、弹窗生命周期
+
 ### 动词词汇
 
 这些动词在项目内有固定含义；新的名称优先沿用它们，不用近义词制造第二套概念。
@@ -248,6 +256,7 @@ _Not_: quit（结束 DJCat 进程）
 - **Application Catalog** 与本机安装清单按稳定 Application ID 合并，形成界面使用的 `installed`、`update_available`、`installed_version` 和架构支持状态。
 - **Admin Console** 维护四种互不替代的 Catalog Order；Application Preset 还按所属 Application 分组，任何服务端顺序都不直接覆盖本机 Home Card 排序。
 - **Application Update** 与首次安装使用同一 Package 下载和安装链路；差别只在目标目录已有受 DJCat 管理的 Installed Application。
+- **Application Launch** 执行 Installed Application 的 Open Action；Application Store 的卡片和详情页共享同一后台运行状态，不创建第二个并发启动。
 - **Projection** 的纯文本正文由 `QTextEdit` 渲染，Markdown 正文由 `MarkdownView(largeText=True)` 渲染；两者是同一 Projection 的互斥显示方式。
 - **Installed Mode** 与 **Portable Mode** 共享相同的目录结构，Storage Migration 移动的是整个 App Data Directory，不是单独的设置文件。
 - **Tray Card Shortcut**、主页固定项和 Application Store 共享 `cfg.pinnedHomeCards` 中的稳定引用；图片缓存路径只是可更新的派生元数据。
@@ -257,12 +266,15 @@ _Not_: quit（结束 DJCat 进程）
 - Existing-card 模式的 **Home Card Task** 只保存稳定 Home Card key 和用于失效提示的标题快照；Custom 模式直接拥有 Action Sequence，但不会创建 Custom Home Card。
 - AI Markdown Conversion 使用 Machine Identity 领取和结算 Daily Quota；Machine Code 只是定位该身份的可见别名。
 - Animation Tick 推进动画属性；Qt/Windows 的绘制与合成链路再决定 Presented Frame。两者不能互换描述。
+- Menu Reveal 由 Animation Tick 推进，但菜单 viewport 刷新次数不是动画帧数；合并冗余刷新不能改变用户看到的展开效果。
 
 ## Ownership rules
 
 **`cfg` 是客户端持久化设置的唯一来源。** 设置页、主页和托盘通过 `cfg.set(...)` 修改值；运行时对象不另建一份需要双向同步的配置副本。
 
 **`app/platform/animation_timer.py` 独占 Qt 全局 Animation Tick 间隔。** View 和业务模块不直接调用 Qt 私有动画 API；私有符号不可用时保留 Qt 默认行为。
+
+**`app/platform/menu_animation.py` 独占 QFluentWidgets 的 Menu Reveal 适配。** 它只替换 `DROP_DOWN` 和 `PULL_UP` 两种动画管理器；其他动画类型及页面组件不再分别接管菜单动画。
 
 **Tray Menu 不拥有 Home Card。** 它只根据 HomePage 提供的入口快照重建菜单，并把稳定 key 交回 MainWindow/HomePage 执行。
 
@@ -321,6 +333,10 @@ Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence�
 
 下载刚建立或尚未得到有效传输进度时，即使按钮文字为“下载中 0%”，仍显示不确定进度线；出现有效百分比后切换为确定进度线。打开、安装和卸载无法可靠计算百分比，始终显示不确定进度线。进度线贴住按钮底边并横向铺满，按钮禁用时仍使用当前主题色。卡片和详情页必须从同一组状态读取，不能各自维护进度。首次启动 Application 不等待或检查可见窗口；只有重新打开仍在运行的进程时才尝试唤起已有窗口，无窗口的进程不能因此被判定为启动失败。
 
+Application Launch 在后台线程读取本机安装状态并执行 Open Action，完成或失败后通过 Qt Signal 在 GUI 线程恢复卡片和详情按钮；线程创建、启动失败和页面关闭也必须清理 `_launching`，不得留下永久禁用的按钮。
+
+Application Store 首次显示前同步计算“已安装”和“全部应用”两个网格的最终列数，避免先按旧宽度单列绘制再重新排列。后续尺寸变化仍由现有布局定时器合并，不为修复首帧闪动持续同步重排。
+
 Client Update 与 Application Store 的 Package 下载共用 `app/common/update_download.py` 中的 `UpdateDownloadWorker`。支持分段的下载默认以 8 个工作线程开始；后续智能扩容和全局并发限制仍由共享下载器统一控制，不能按界面各自复制线程配置。
 
 广告触控的 QApplication 全局事件过滤器只在 Application Store 可见时安装；页面隐藏或关闭时移除，避免其他页面的全部输入事件继续经过广告层。
@@ -343,6 +359,7 @@ Storage Migration 的安全约束：
 - Installed → Portable 先写入 `.migrating`，成功后再提交为 Portable 目录；失败时清理临时目录，原数据和当前模式不变。
 - Portable → Installed 复制并改写目标配置成功后，才把 Portable 源目录改名为唯一 `.bak` 目录；源目录仍存在时下一次启动仍保持 Portable Mode。
 - 只改写配置值中位于旧 App Data Directory 下的绝对路径，不改写普通文案或外部路径。
+- 每次启动只读取当前 App Data Directory 的 `UserConfig.json`；迁移后的 Installed Application 连同清单和安装目录继续支持打开、更新及卸载，不回退读取旧模式目录。
 
 **ImageCache** 拥有应用图片和临时 Package 所在缓存根目录的清理互斥。存在下载或安装操作时拒绝清缓存；设置页只发出用户意图并显示 `ImageCache.size()`。
 
@@ -368,6 +385,8 @@ AI Markdown 输入框的忙碌边框使用 2 px 渐变 QSS 边框。Qt 样式表
 |---|---|
 | `djcat.py` | 进程入口、工作目录、单实例应用、日志、配置加载和 MainWindow 创建 |
 | `app/platform/` | Windows 单实例/IPC、唤起窗口、开机启动及 Qt 运行时适配 |
+| `app/platform/animation_timer.py` | Qt 全局 Animation Tick 间隔的私有 API 适配和安全回退 |
+| `app/platform/menu_animation.py` | QFluentWidgets 全局 Menu Reveal 管理器适配，不改变原版展开视觉 |
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
 | `app/common/home_card_tasks.py` | Home Card Task schema 归一化、稳定 ID 和模式常量；不负责计时或 QWidget |
@@ -398,6 +417,7 @@ AI Markdown 输入框的忙碌边框使用 2 px 渐变 QSS 边框。Qt 样式表
 set working directory
   → SingletonApplication (Windows single instance + IPC)
   → unlockQtAnimations (before any QWidget animation is created)
+  → optimizeFluentMenus (before MainWindow or its menus are created)
   → configure logging and clear stale Client Update files
   → qconfig.load(CONFIG_PATH, cfg)
   → MainWindow(isSilent)
@@ -413,6 +433,8 @@ set working directory
 App Data Directory 必须在导入 `cfg` 和调用 `qconfig.load` 前由 `app/config/paths.py` 确定。第二个 Windows 实例只通知现有实例显示窗口，然后退出；它不创建 MainWindow。
 
 `unlockQtAnimations()` 必须在 QApplication 创建之后、任何动画启动之前、GUI 主线程上调用。它只针对项目锁定的 Qt 运行时查找私有符号；找不到符号或动态库时记录警告并保留 Qt 默认 16 ms 间隔，不允许加载系统中另一份 Qt 来凑合。
+
+`optimizeFluentMenus()` 在 MainWindow 创建之前注册 Menu Reveal 管理器，重复调用保持幂等。它覆盖所有使用 QFluentWidgets 下拉或上拉管理器的菜单，包括对话框内部的下拉框和输入框右键菜单；不把其他 Popup、Flyout 或对话框动画误认为已经自动优化。
 
 ### Navigation loading
 
@@ -433,7 +455,7 @@ MainWindow._shutdownResources()
   → stop navigation animation and timers
   → cancel Edge TTS and stop audio players
   → flush loaded Setting / Scheduled Task editors
-  → shutdown HomePage and loaded Application Store page
+  → shutdown HomePage and loaded Application Store page, including Application Launch workers
   → cancel running custom Home Card Task workers
   → cancel Client Update download and close InfoBars
   → optional Storage Migration connected after normal shutdown
@@ -452,6 +474,8 @@ PySide6 6.10 没有绑定 `QAnimationDriver`，DJCat 因此把 Qt 私有 `QUnifi
 - 不读取显示器刷新率，也不按 60/120/160 Hz 切换间隔；机器负载决定实际可处理的 tick 数。
 - 不承诺 Presented Frame 数；DWM、VSync 和绘制耗时仍可限制屏幕实际帧率。
 - Qt 版本或打包布局变化导致私有符号不可用时必须安全退回默认动画驱动；升级 PySide6 时需要在 Windows x64 与 ARM64 重新验证导出符号和端到端动画时长。
+
+Menu Reveal 是另一层独立优化：保留 QFluentWidgets 原始的 250 ms 时长、`OutQuad` 缓动、窗口位移、逐帧遮罩和阴影，只把每次属性变化触发的 viewport 强制刷新合并为动画结束时的一次。不能改成只淡入、删除遮罩或阴影，也不能把 `NONE`、`FADE_IN_DROP_DOWN` 等其他管理器替换成下拉实现。
 
 ## Code shape
 
@@ -482,7 +506,7 @@ def __init__(self, parent=None):
 
 ### Threads and Qt
 
-- 网络、文件复制、ZIP 解压和卸载不得阻塞 Qt 主线程。
+- 网络、文件复制、ZIP 解压、卸载和 Application Launch 不得阻塞 Qt 主线程。
 - worker 在线程中工作，通过 Qt Signal 把结果送回页面；只有主线程更新 QWidget。
 - 页面关闭时先设置 shutdown/cancel 状态，再等待有文件提交风险的线程；超时后也不能让回调访问已销毁控件。
 - 可计算总字节数的下载使用确定进度；无法可靠估计的文件操作使用不确定进度，不伪造百分比。
@@ -503,6 +527,8 @@ def __init__(self, parent=None):
 - Application Store 的“全部”与“已安装”是两个操作上下文：即使存在 Application Update，“全部”卡片仍显示“打开”；“已安装”和详情页才显示“更新”。
 - 主窗口右上角关闭曾被理解为退出。已消歧：**close** 只隐藏主窗口；**quit** 才清理资源并结束进程。
 - “解除 Qt 60 帧限制”容易被理解为绕过 VSync 或保证某个 FPS。已消歧：本实现只把 **Animation Tick** 的默认 16 ms 间隔改为 1 ms，不控制 **Presented Frame**。
+- “菜单动画优化”不等于修改动画样式或缩短时长。**Menu Reveal** 保留原版展开轨迹、遮罩和阴影，只消除重复刷新。
+- “应用打开成功”不要求检测到窗口。**Application Launch** 创建进程即可；无窗口或仅托盘运行的 Application 仍属于正常启动。
 - “低配置机器按自身能力运行”不表示创建自适应刷新率策略。已消歧：所有机器使用同一最小非零 tick 间隔；事件循环繁忙时自然只能处理较少更新，不额外补跑积压帧。
 - Application Store 的“全部应用 → 全部”分类固定每页最多展示 6 个 Application；“推荐”分类展示全部推荐项，不参与分页。
 
@@ -543,3 +569,9 @@ def __init__(self, parent=None):
 
 > **Dev:** “动画间隔改成 1 ms，是不是软件就能显示 1000 FPS？”
 > **Domain expert:** “不是。1 ms 只提高 Animation Tick 的调度密度；Presented Frame 仍由绘制耗时、DWM、VSync 和显示器决定。”
+
+> **Dev:** “菜单更流畅，是不是把原来的展开动画改成淡入，或者缩短到一半了？”
+> **Domain expert:** “没有。Menu Reveal 的时长、缓动、位移、遮罩和阴影都与 QFluentWidgets 原版一致，只减少重复的 viewport 刷新。”
+
+> **Dev:** “应用启动后没有窗口，要不要一直等待，最后提示启动失败？”
+> **Domain expert:** “不要。Application Launch 不要求新进程出现可见窗口；只有再次打开已有进程时才尝试唤起窗口。”
