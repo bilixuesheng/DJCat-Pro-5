@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "DJCat-Pro-5"
-version = "5.0.6"
+version = "5.0.9"
 description = "电教猫 Pro 5 - 基于 PySide6 和 Fluent Widgets 重构"
 authors = [
     {name = "电教猫"}
