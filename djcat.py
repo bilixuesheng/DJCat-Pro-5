@@ -75,6 +75,9 @@ def main():
     from app.common.update_download import clearUpdateDirectory
     from app.config.cfg import cfg, migrateConfig
     from app.config.paths import CONFIG_PATH
+    from app.platform.menu_animation import optimizeFluentMenus
+
+    optimizeFluentMenus()
 
     configureLogging()
     failedCleanup = clearUpdateDirectory()
