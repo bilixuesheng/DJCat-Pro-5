@@ -270,23 +270,20 @@
                 ?.closest("tr[data-sort-id]");
             if (!target || target === drag.row || target.parentElement !== body) return;
             const bounds = target.getBoundingClientRect();
-            const positions = new Map(sortableRows(table)
-                .map((row) => [row, row.offsetTop]));
-            body.insertBefore(
-                drag.row,
-                clientY < bounds.top + bounds.height / 2
-                    ? target
-                    : target.nextElementSibling,
-            );
-            sortableRows(table).forEach((row) => {
-                if (row === drag.row) return;
-                const offset = positions.get(row) - row.offsetTop;
-                if (offset) {
-                    row.animate(
-                        [{ transform: `translateY(${offset}px)` }, { transform: "translateY(0)" }],
-                        { duration: 180, easing: "cubic-bezier(.2, .8, .2, 1)" },
-                    );
-                }
+            const reference = clientY < bounds.top + bounds.height / 2
+                ? target
+                : target.nextElementSibling;
+            if (reference === drag.row || reference === drag.row.nextElementSibling) return;
+            const positions = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+                ? null
+                : new Map(sortableRows(table).map((row) => [row, row.offsetTop]));
+            body.insertBefore(drag.row, reference);
+            positions?.forEach((top, row) => {
+                if (row === drag.row || top === row.offsetTop) return;
+                row.animate(
+                    [{ transform: `translateY(${top - row.offsetTop}px)` }, { transform: "translateY(0)" }],
+                    { duration: 180, easing: "cubic-bezier(.2, .8, .2, 1)" },
+                );
             });
             drag.changed = true;
             refreshTableOrder(table);
@@ -329,7 +326,7 @@
             if (!drag || drag.pointerId !== event.pointerId) return;
             drag.clientX = event.clientX;
             drag.clientY = event.clientY;
-            drag.ghost.style.top = `${event.clientY - drag.offsetY}px`;
+            drag.ghost.style.transform = `translate3d(0, ${event.clientY - drag.startY}px, 0)`;
             moveDraggedRow(event.clientX, event.clientY);
             if (scrollFrame === null) {
                 scrollFrame = window.requestAnimationFrame(autoScroll);
@@ -357,6 +354,7 @@
                 const ghost = document.createElement("table");
                 const ghostRow = row.cloneNode(true);
                 ghost.className = "sort-drag-ghost";
+                ghost.setAttribute("aria-hidden", "true");
                 ghost.style.left = `${bounds.left}px`;
                 ghost.style.top = `${bounds.top}px`;
                 ghost.style.width = `${bounds.width}px`;
@@ -371,7 +369,7 @@
                     row,
                     handle,
                     ghost,
-                    offsetY: event.clientY - bounds.top,
+                    startY: event.clientY,
                     order: sortableRows(table).map((item) => item.dataset.sortId),
                     changed: false,
                     clientX: event.clientX,

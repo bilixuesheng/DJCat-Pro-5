@@ -122,6 +122,16 @@ _Avoid_: featured copy、Advertisement
 Application Catalog 中独立排序的推广位，展示标题、说明和图片，并可指向一个 Application、外部 HTTPS 网页或不提供按钮。Advertisement 是否启用只影响目录展示。
 _Avoid_: Recommendation、Application
 
+### 管理后台
+
+**Admin Console**:
+服务端的浏览器管理界面，负责 AI Markdown 配置、Machine Identity 查询和 Application Catalog 维护。它与桌面端 Application Store 共享目录数据，但不管理本机 Installed Application。
+_Avoid_: Application Store、桌面设置页
+
+**Catalog Order**:
+Admin Console 中按稳定 ID 持久化的目录顺序。Application、Recommendation、Advertisement 各有独立顺序；Application Preset 的顺序只在所属 Application 内有效。它不改变用户本机的 Home Card 排序。
+_Avoid_: Home Card order、全局应用排序
+
 ### AI Markdown
 
 **AI Markdown Conversion**:
@@ -236,6 +246,7 @@ _Not_: quit（结束 DJCat 进程）
 - 一个 **Home Card** 只能属于 Default、Custom 或 Application 三种来源之一；排序列表可以混排，但执行规则不合并。
 - **Application Home Card** 引用一个 Installed Application 的 Open Action 或 Application Preset；Application 被卸载或固定关系被移除后，相应主页和托盘入口同步失效。
 - **Application Catalog** 与本机安装清单按稳定 Application ID 合并，形成界面使用的 `installed`、`update_available`、`installed_version` 和架构支持状态。
+- **Admin Console** 维护四种互不替代的 Catalog Order；Application Preset 还按所属 Application 分组，任何服务端顺序都不直接覆盖本机 Home Card 排序。
 - **Application Update** 与首次安装使用同一 Package 下载和安装链路；差别只在目标目录已有受 DJCat 管理的 Installed Application。
 - **Projection** 的纯文本正文由 `QTextEdit` 渲染，Markdown 正文由 `MarkdownView(largeText=True)` 渲染；两者是同一 Projection 的互斥显示方式。
 - **Installed Mode** 与 **Portable Mode** 共享相同的目录结构，Storage Migration 移动的是整个 App Data Directory，不是单独的设置文件。
@@ -312,6 +323,12 @@ Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence�
 
 `ApplicationStore.installZip()` 是安装与更新的共同提交点：先校验并解压到 `.staging-*`，已有版本先改名为 `.backup-*`，再原子替换目标；失败时恢复备份。启动扫描会恢复未完成替换留下的备份并清理残留操作目录。
 
+### 管理后台
+
+`server/templates/admin_base.html` 拥有 Admin Console 的共享导航布局；`server/static/admin.css` 和 `server/static/admin.js` 拥有后台共用的导航、表格拖拽和异步交互，不在各页面模板复制相同逻辑。移动端打开侧边栏时锁定页面滚动，但导航列表本身必须保留独立的纵向触控滚动。
+
+Catalog Order 由 `server/app_store.py` 按稳定 ID 写入数据库。拖拽和键盘排序提交完整新顺序及原始顺序快照；服务端在事务内核对原始顺序，过期快照返回 HTTP 409。保存失败或拖拽取消时，浏览器恢复原顺序；拖拽浮影只是临时视觉状态，不参与命中测试或持久化。Application Preset 排序必须限定在所属 Application 内。
+
 ### 配置和文件
 
 `app/config/paths.py` 是 App Data Directory 及其所有派生目录的唯一来源。其他模块使用 `CONFIG_PATH`、`PROGRAM_DIR`、`APP_STORE_CACHE_DIR` 和 `HOME_CARD_ICON_DIR`，不得自行重新拼接另一套根目录。
@@ -363,6 +380,8 @@ AI Markdown 输入框的忙碌边框使用 2 px 渐变 QSS 边框。Qt 样式表
 |---|---|
 | `server/ai_markdown.py` | Machine Identity、Daily Quota、AI Markdown Conversion 和管理接口 |
 | `server/app_store.py` | Application Catalog、下载重定向/计数和应用市场管理页面 |
+| `server/templates/admin_base.html` | Admin Console 的共享页面结构、侧边栏和导航入口 |
+| `server/static/admin.css`、`server/static/admin.js` | Admin Console 的共享样式、移动端导航、目录排序和异步表单 |
 
 服务端模块不能导入桌面 View；桌面端通过 HTTPS API 消费服务端结果。桌面配置中的 `DJCATAI_API_BASE_URL` 环境变量只改变 API 根地址，不改变业务所有权。
 

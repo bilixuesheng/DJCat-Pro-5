@@ -244,7 +244,7 @@ td code { color: var(--muted); font-family: Consolas, monospace; font-size: 10px
 .drag-handle:active { cursor: grabbing; }
 [data-sortable-table].is-sorting { user-select: none; }
 [data-sortable-table] tr.is-dragging { background: var(--clay-soft); box-shadow: inset 3px 0 var(--clay); opacity: .38; }
-.sort-drag-ghost { position: fixed; z-index: 80; width: auto; pointer-events: none; border-collapse: collapse; background: var(--surface); box-shadow: 0 12px 32px #14141329; opacity: .94; }
+.sort-drag-ghost { position: fixed; z-index: 80; width: auto; pointer-events: none; border-collapse: collapse; background: var(--surface); box-shadow: 0 12px 32px #14141329; opacity: .94; will-change: transform; }
 .sort-drag-ghost td { background: var(--surface); }
 .form-action-buttons { display: inline-flex; align-items: center; gap: 8px; }
 td strong { color: var(--ink); font-weight: 600; }
