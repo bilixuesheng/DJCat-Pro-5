@@ -356,6 +356,7 @@ Projection 的两种正文渲染器必须保持这些共同约束：
 - 纯文本和 Markdown 都使用 QFluentWidgets `SmoothScrollDelegate`，并在 viewport 上注册 `QScroller.TouchGesture`，支持鼠标滚轮和平滑单指触控。
 - Projection 关闭文本选择，手指拖动用于滚动而不是选择文字。
 - Projection 切换正文类型或关闭时释放旧正文控件，并立即取消其远程 Markdown 图片下载；返回编辑时仍从独立的 Projection 内容快照恢复。
+- Markdown 正文未处理的鼠标按压和拖动必须在 `MarkdownView` 边界停止，不能冒泡到外层无边框 Projection 窗口；链接、触控滚动、窗口化和关闭按钮仍需保持可用。
 
 AI Markdown 输入框的忙碌边框使用 2 px 渐变 QSS 边框。Qt 样式表会分别绘制边框各边，粗渐变边框在圆角处会出现斜向拼接；除非改为一次性自定义绘制完整圆角路径，否则不要再次只靠增加 QSS `border-width` 加粗。
 

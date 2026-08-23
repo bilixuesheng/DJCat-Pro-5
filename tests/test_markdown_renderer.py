@@ -467,6 +467,67 @@ class MarkdownRendererTest(TestCase):
         self.assertEqual(window.contentEdit.toPlainText(), "")
         self.assertEqual(window.markdownView._content.findChildren(QLabel), [])
 
+    def testDraggingMarkdownTextDoesNotReachTheFullscreenWindow(self):
+        window = BroadcastWindow()
+        self.addCleanup(window.close)
+        window.setContent(
+            "title",
+            "**【数学】**\n- 尝试拖动这段已经禁用文字选择的正文\n\n"
+            "[查看作业](https://example.com)",
+            is_markdown=True,
+        )
+        window.startBroadcast()
+        self.app.processEvents()
+
+        paragraph = next(
+            label
+            for label in window.markdownView.findChildren(QLabel)
+            if label.objectName() == "paragraph"
+        )
+        start = paragraph.rect().center()
+
+        with (
+            patch.object(
+                window, "mousePressEvent", wraps=window.mousePressEvent
+            ) as mousePress,
+            patch.object(
+                window, "mouseReleaseEvent", wraps=window.mouseReleaseEvent
+            ) as mouseRelease,
+        ):
+            QTest.mousePress(paragraph, Qt.MouseButton.LeftButton, pos=start)
+            QTest.mouseMove(paragraph, start + QPoint(80, 0))
+            QTest.mouseRelease(
+                paragraph,
+                Qt.MouseButton.LeftButton,
+                pos=start + QPoint(80, 0),
+            )
+            self.app.processEvents()
+
+        mousePress.assert_not_called()
+        mouseRelease.assert_not_called()
+        self.assertIsNone(QWidget.mouseGrabber())
+
+        link = next(
+            label
+            for label in window.markdownView.findChildren(QLabel)
+            if 'href="https://example.com"' in label.text()
+        )
+        with patch(
+            "app.view.components.markdown_view.QDesktopServices.openUrl"
+        ) as openUrl:
+            QTest.mouseClick(
+                link,
+                Qt.MouseButton.LeftButton,
+                pos=QPoint(
+                    link.fontMetrics().horizontalAdvance("查看作业") // 2,
+                    link.height() // 2,
+                ),
+            )
+        openUrl.assert_called_once()
+
+        window.btn_win.click()
+        self.assertTrue(window.is_windowed)
+
     def testBroadcastTouchScrollDoesNotDragWindow(self):
         window = BroadcastWindow()
         window.contentEdit.setPlainText(

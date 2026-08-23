@@ -338,6 +338,7 @@ class BroadcastWindow(FramelessWindow):
             largeText=True,
             transparentBackground=True,
         )
+        self.markdownView.setAttribute(Qt.WidgetAttribute.WA_NoMousePropagation)
         self.markdownView.hide()
 
         self.vBoxLayout.addWidget(self.titleLabel, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
