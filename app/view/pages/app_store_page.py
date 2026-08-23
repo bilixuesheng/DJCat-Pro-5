@@ -1123,6 +1123,8 @@ class AppStorePage(ScrollArea):
             self._renderAll()
 
     def showEvent(self, event):
+        self._layoutTimer.stop()
+        self._applyLayoutUpdate()
         super().showEvent(event)
         if not self._catalogLoaded:
             self._loadCatalog()

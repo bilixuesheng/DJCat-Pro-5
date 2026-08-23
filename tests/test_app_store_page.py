@@ -291,6 +291,21 @@ class AppStorePageTest(TestCase):
 
         self.assertIsInstance(self.page.allGrid.itemAtPosition(0, 2).widget(), ApplicationCard)
 
+    def testCatalogGridsUseFinalColumnCountBeforeFirstPaint(self):
+        apps = _apps(3)
+        self.page.resize(600, 600)
+        self.page._renderGrid(self.page.installedGrid, apps, True)
+        self.page._renderGrid(self.page.allGrid, apps)
+
+        self.page.resize(1000, 600)
+        self.page.show()
+
+        for layout in (self.page.installedGrid, self.page.allGrid):
+            with self.subTest(layout=layout):
+                item = layout.itemAtPosition(0, 2)
+                self.assertIsNotNone(item)
+                self.assertIsInstance(item.widget(), ApplicationCard)
+
     def testLongDescriptionDoesNotExpandItsGridColumn(self):
         apps = _apps(2)
         apps[1]["description"] = "Ghost Downloader " * 80
