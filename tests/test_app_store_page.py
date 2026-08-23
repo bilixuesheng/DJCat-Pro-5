@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QImage, QInputDevice
+from PySide6.QtGui import QColor, QImage, QInputDevice
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QLabel, QScroller, QWidget
 from qfluentwidgets import (
@@ -247,6 +247,27 @@ class AppStorePageTest(TestCase):
         self.assertEqual(
             image.pixelColor(button.width() - 1, button.height() - 1), color
         )
+
+    def testIndeterminateProgressUsesUpdatedThemeColor(self):
+        button = ActionProgressButton("下载中 0%")
+        self.addCleanup(button.deleteLater)
+        button.resize(120, 32)
+        button.setEnabled(False)
+        button.setProgress(indeterminate=True)
+        button._progressOffset = 0.5
+        image = QImage(button.size(), QImage.Format.Format_ARGB32)
+        originalColor = QColor(qconfig.themeColor.value)
+        updatedColor = QColor("#b74291")
+
+        try:
+            qconfig.set(qconfig.themeColor, updatedColor, save=False)
+            button.render(image)
+            self.assertEqual(
+                image.pixelColor(button.width() // 2, button.height() - 1),
+                updatedColor,
+            )
+        finally:
+            qconfig.set(qconfig.themeColor, originalColor, save=False)
 
     def testZeroDownloadProgressIsIndeterminateOnCardsAndDetails(self):
         app = _apps(1)[0]
