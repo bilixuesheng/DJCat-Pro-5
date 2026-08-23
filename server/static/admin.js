@@ -270,12 +270,24 @@
                 ?.closest("tr[data-sort-id]");
             if (!target || target === drag.row || target.parentElement !== body) return;
             const bounds = target.getBoundingClientRect();
+            const positions = new Map(sortableRows(table)
+                .map((row) => [row, row.offsetTop]));
             body.insertBefore(
                 drag.row,
                 clientY < bounds.top + bounds.height / 2
                     ? target
                     : target.nextElementSibling,
             );
+            sortableRows(table).forEach((row) => {
+                if (row === drag.row) return;
+                const offset = positions.get(row) - row.offsetTop;
+                if (offset) {
+                    row.animate(
+                        [{ transform: `translateY(${offset}px)` }, { transform: "translateY(0)" }],
+                        { duration: 180, easing: "cubic-bezier(.2, .8, .2, 1)" },
+                    );
+                }
+            });
             drag.changed = true;
             refreshTableOrder(table);
         };
@@ -303,6 +315,7 @@
                 window.cancelAnimationFrame(scrollFrame);
                 scrollFrame = null;
             }
+            current.ghost.remove();
             current.row.classList.remove("is-dragging");
             table.classList.remove("is-sorting");
             if (current.handle.hasPointerCapture?.(pointerId)) {
@@ -316,6 +329,7 @@
             if (!drag || drag.pointerId !== event.pointerId) return;
             drag.clientX = event.clientX;
             drag.clientY = event.clientY;
+            drag.ghost.style.top = `${event.clientY - drag.offsetY}px`;
             moveDraggedRow(event.clientX, event.clientY);
             if (scrollFrame === null) {
                 scrollFrame = window.requestAnimationFrame(autoScroll);
@@ -339,10 +353,25 @@
             handle.addEventListener("pointerdown", (event) => {
                 if (event.button !== 0 || table.dataset.sortSaving === "true") return;
                 const row = handle.closest("tr[data-sort-id]");
+                const bounds = row.getBoundingClientRect();
+                const ghost = document.createElement("table");
+                const ghostRow = row.cloneNode(true);
+                ghost.className = "sort-drag-ghost";
+                ghost.style.left = `${bounds.left}px`;
+                ghost.style.top = `${bounds.top}px`;
+                ghost.style.width = `${bounds.width}px`;
+                [...row.cells].forEach((cell, index) => {
+                    ghostRow.cells[index].style.width = `${cell.getBoundingClientRect().width}px`;
+                });
+                ghost.append(document.createElement("tbody"));
+                ghost.tBodies[0].append(ghostRow);
+                document.body.append(ghost);
                 drag = {
                     pointerId: event.pointerId,
                     row,
                     handle,
+                    ghost,
+                    offsetY: event.clientY - bounds.top,
                     order: sortableRows(table).map((item) => item.dataset.sortId),
                     changed: false,
                     clientX: event.clientX,
