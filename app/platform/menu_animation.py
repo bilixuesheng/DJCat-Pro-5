@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint
 from qfluentwidgets.components.widgets.menu import (
     DropDownMenuAnimationManager,
     MenuAnimationManager,
@@ -9,26 +8,10 @@ from qfluentwidgets.components.widgets.menu import (
 )
 
 
-MENU_ANIMATION_DURATION_MS = 160
-MENU_ANIMATION_OFFSET = 8
-
-
 class _SmoothMenuAnimation:
-    _offset = 0
-
     def __init__(self, menu):
         super().__init__(menu)
-        self.ani.setDuration(MENU_ANIMATION_DURATION_MS)
         self.ani.finished.connect(self._finishAnimation)
-
-    def exec(self, pos):
-        endPosition = self._endPosition(pos)
-        self.ani.setStartValue(endPosition + QPoint(0, self._offset))
-        self.ani.setEndValue(endPosition)
-        self.ani.start()
-
-    def _onValueChanged(self):
-        pass
 
     def _updateMenuViewport(self):
         pass
@@ -41,14 +24,14 @@ class _SmoothDropDownMenuAnimation(
     _SmoothMenuAnimation,
     DropDownMenuAnimationManager,
 ):
-    _offset = -MENU_ANIMATION_OFFSET
+    pass
 
 
 class _SmoothPullUpMenuAnimation(
     _SmoothMenuAnimation,
     PullUpMenuAnimationManager,
 ):
-    _offset = MENU_ANIMATION_OFFSET
+    pass
 
 
 def optimizeFluentMenus() -> None:
