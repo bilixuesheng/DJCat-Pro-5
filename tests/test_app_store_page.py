@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QInputDevice
+from PySide6.QtGui import QImage, QInputDevice
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QLabel, QScroller, QWidget
 from qfluentwidgets import (
@@ -21,11 +21,13 @@ from qfluentwidgets import (
     PrimaryPushButton,
     PushButton,
     ToggleToolButton,
+    qconfig,
 )
 
 from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
 from app.view.pages.app_store_page import (
+    ActionProgressButton,
     ApplicationCard,
     AppStorePage,
     CatalogImageWorker,
@@ -222,6 +224,48 @@ class AppStorePageTest(TestCase):
         self.assertFalse(card.actionButton.isEnabled())
         self.assertFalse(card.removeButton.isEnabled())
         self.assertEqual(card.actionButton._progress, 50)
+
+    def testDisabledProgressTouchesButtonEdgesAndUsesThemeColor(self):
+        button = ActionProgressButton("下载中")
+        self.addCleanup(button.deleteLater)
+        button.resize(120, 32)
+        button.setEnabled(False)
+        button.setProgress(100)
+        image = QImage(button.size(), QImage.Format.Format_ARGB32)
+        image.fill(Qt.GlobalColor.transparent)
+
+        button.render(image)
+
+        color = qconfig.themeColor.value
+        self.assertEqual(image.pixelColor(0, button.height() - 1), color)
+        self.assertEqual(
+            image.pixelColor(button.width() - 1, button.height() - 1), color
+        )
+
+    def testZeroDownloadProgressIsIndeterminateOnCardsAndDetails(self):
+        app = _apps(1)[0]
+        appId = app["id"]
+        card = ApplicationCard()
+        self.addCleanup(card.deleteLater)
+        self.page._downloadJobs[appId] = object()
+        self.page._downloadStates[appId] = "下载中 0%"
+        self.page._downloadProgress[appId] = 0
+        self.page.currentApp = app
+
+        self.page._setCardState(card, app)
+        self.page._updateDetailAction()
+
+        self.assertTrue(card.actionButton._indeterminate)
+        self.assertTrue(self.page.detailAction._indeterminate)
+
+        self.page._onDownloadProgress(appId, 1, 100)
+        self.page._setCardState(card, app)
+        self.page._downloadJobs.pop(appId)
+
+        self.assertFalse(card.actionButton._indeterminate)
+        self.assertEqual(card.actionButton._progress, 1)
+        self.assertFalse(self.page.detailAction._indeterminate)
+        self.assertEqual(self.page.detailAction._progress, 1)
 
     def testRerenderReusesVisibleCardsWithoutABlankFrame(self):
         first = _apps(1)

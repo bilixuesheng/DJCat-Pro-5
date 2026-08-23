@@ -16,7 +16,7 @@ from PySide6.QtCore import QObject, Signal
 from app.config.paths import UPDATE_DIR
 
 
-INITIAL_THREAD_COUNT = 32
+INITIAL_THREAD_COUNT = 8
 MAX_THREAD_COUNT = 256
 MAX_GLOBAL_THREAD_COUNT = 64
 SMART_THREAD_STEP = 4

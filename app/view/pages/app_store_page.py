@@ -49,6 +49,7 @@ from qfluentwidgets import (
     ToggleToolButton,
     ToolButton,
     TransitionStackedWidget,
+    qconfig,
 )
 from qfluentwidgets import FluentIcon as FIF
 
@@ -332,17 +333,16 @@ class ActionProgressButton(PrimaryPushButton):
         super().paintEvent(event)
         if self._progress is None and not self._indeterminate:
             return
-        width = max(0.0, self.width() - 8.0)
+        width = float(self.width())
         if width <= 0:
             return
-        track = QRectF(4.0, self.height() - 4.0, width, 2.0)
+        track = QRectF(0.0, self.height() - 2.0, width, 2.0)
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(255, 255, 255, 75))
-        painter.drawRoundedRect(track, 1.0, 1.0)
+        color = QColor(qconfig.themeColor.value)
+        trackColor = QColor(color)
+        trackColor.setAlpha(75)
+        painter.fillRect(track, trackColor)
         painter.setClipRect(track)
-        painter.setBrush(QColor(255, 255, 255, 230))
         if self._indeterminate:
             segment = max(24.0, width * 0.28)
             x = track.left() - segment + (width + segment) * self._progressOffset
@@ -354,7 +354,7 @@ class ActionProgressButton(PrimaryPushButton):
                 width * self._progress / 100.0,
                 track.height(),
             )
-        painter.drawRoundedRect(fill, 1.0, 1.0)
+        painter.fillRect(fill, color)
 
 
 class ApplicationCard(CardWidget):
@@ -1491,7 +1491,8 @@ class AppStorePage(ScrollArea):
         if appId in self._installing or appId in self._uninstalling:
             card.setProgress(indeterminate=True)
         elif appId in self._downloadJobs:
-            card.setProgress(self._downloadProgress.get(appId, 0))
+            progress = self._downloadProgress.get(appId, 0)
+            card.setProgress(progress, indeterminate=not progress)
         else:
             card.setProgress()
 
@@ -1896,7 +1897,8 @@ class AppStorePage(ScrollArea):
         if appId in self._installing or appId in self._uninstalling:
             self.detailAction.setProgress(indeterminate=True)
         elif appId in self._downloadJobs:
-            self.detailAction.setProgress(self._downloadProgress.get(appId, 0))
+            progress = self._downloadProgress.get(appId, 0)
+            self.detailAction.setProgress(progress, indeterminate=not progress)
         else:
             self.detailAction.setProgress()
         busy = (

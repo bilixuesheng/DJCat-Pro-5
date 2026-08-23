@@ -432,7 +432,7 @@ class UpdateDownloadTest(TestCase):
             self.assertEqual(results, [(('', '', True), False, False)])
             self.assertTrue(response.closed)
 
-    def testDefaultRangeDownloadUsesThirtyTwoWorkers(self):
+    def testDefaultRangeDownloadUsesEightWorkers(self):
         content = b"MZ" + bytes((index % 251 for index in range(2 * 1024 * 1024)))
         state = {"active": 0, "maxActive": 0, "ranges": []}
         stateLock = threading.Lock()
@@ -500,7 +500,7 @@ class UpdateDownloadTest(TestCase):
             serverThread.join(timeout=2)
 
         dataRanges = [item for item in state["ranges"] if item != (1, 1)]
-        self.assertEqual(INITIAL_THREAD_COUNT, 32)
+        self.assertEqual(INITIAL_THREAD_COUNT, 8)
         self.assertGreaterEqual(len(dataRanges), INITIAL_THREAD_COUNT)
         self.assertGreater(state["maxActive"], 1)
 
