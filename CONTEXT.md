@@ -281,6 +281,8 @@ _Not_: quit（结束 DJCat 进程）
 
 **`app/platform/menu_animation.py` 独占 QFluentWidgets 的 Menu Reveal 适配。** 它只替换 `DROP_DOWN` 和 `PULL_UP` 两种动画管理器；其他动画类型及页面组件不再分别接管菜单动画。
 
+**`app/platform/dialog_animation.py` 独占 QFluentWidgets 蒙层弹窗的公共动画适配。** 弹窗中的下拉框仍属于 Menu Reveal；页面不得重复修补组件库、改变原有动画曲线，或通过整窗图形特效逐帧重绘所有内部控件。
+
 **Tray Menu 不拥有 Home Card。** 它只根据 HomePage 提供的入口快照重建菜单，并把稳定 key 交回 MainWindow/HomePage 执行。
 
 **HomePage 按稳定 key 复用 Application Home Card。** 不变快照不得重建卡片或重复发布主页变化；标题、图标和动作更新原有卡片，移除时才释放对应 QWidget。
@@ -395,6 +397,7 @@ AI Markdown 输入框的忙碌边框使用 2 px 渐变 QSS 边框。Qt 样式表
 | `djcat.py` | 进程入口、工作目录、单实例应用、日志、配置加载和 MainWindow 创建 |
 | `app/platform/` | Windows 单实例/IPC、唤起窗口、开机启动及 Qt 运行时适配 |
 | `app/platform/animation_timer.py` | Qt 全局 Animation Tick 间隔的私有 API 适配和安全回退 |
+| `app/platform/dialog_animation.py` | QFluentWidgets 蒙层弹窗的原生透明度动画与阴影复用 |
 | `app/platform/menu_animation.py` | QFluentWidgets 全局 Menu Reveal 管理器适配，不改变原版展开视觉 |
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
@@ -426,7 +429,7 @@ AI Markdown 输入框的忙碌边框使用 2 px 渐变 QSS 边框。Qt 样式表
 set working directory
   → SingletonApplication (Windows single instance + IPC)
   → unlockQtAnimations (before any QWidget animation is created)
-  → optimizeFluentMenus (before MainWindow or its menus are created)
+  → optimizeFluentDialogs + optimizeFluentMenus (before MainWindow or its popups are created)
   → configure logging and clear stale Client Update files
   → qconfig.load(CONFIG_PATH, cfg)
   → MainWindow(isSilent)
@@ -444,7 +447,7 @@ App Data Directory 必须在导入 `cfg` 和调用 `qconfig.load` 前由 `app/co
 
 `unlockQtAnimations()` 必须在 QApplication 创建之后、任何动画启动之前、GUI 主线程上调用。它只针对项目锁定的 Qt 运行时查找私有符号；找不到符号或动态库时记录警告并保留 Qt 默认 16 ms 间隔，不允许加载系统中另一份 Qt 来凑合。
 
-`optimizeFluentMenus()` 在 MainWindow 创建之前注册 Menu Reveal 管理器，重复调用保持幂等。它覆盖所有使用 QFluentWidgets 下拉或上拉管理器的菜单，包括对话框内部的下拉框和输入框右键菜单；不把其他 Popup、Flyout 或对话框动画误认为已经自动优化。
+`optimizeFluentDialogs()` 和 `optimizeFluentMenus()` 在 MainWindow 创建之前分别注册蒙层弹窗动画和 Menu Reveal 管理器，重复调用保持幂等。菜单适配覆盖所有使用 QFluentWidgets 下拉或上拉管理器的菜单，包括对话框内部的下拉框和输入框右键菜单；其他 Popup 和 Flyout 不会自动继承蒙层弹窗优化。
 
 ### Navigation loading
 
@@ -486,6 +489,8 @@ PySide6 6.10 没有绑定 `QAnimationDriver`，DJCat 因此把 Qt 私有 `QUnifi
 - Qt 版本或打包布局变化导致私有符号不可用时必须安全退回默认动画驱动；升级 PySide6 时需要在 Windows x64 与 ARM64 重新验证导出符号和端到端动画时长。
 
 Menu Reveal 是另一层独立优化：保留 QFluentWidgets 原始的 250 ms 时长、`OutQuad` 缓动、窗口位移、逐帧遮罩和阴影，只把每次属性变化触发的 viewport 强制刷新合并为动画结束时的一次。不能改成只淡入、删除遮罩或阴影，也不能把 `NONE`、`FADE_IN_DROP_DOWN` 等其他管理器替换成下拉实现。
+
+带蒙层的 `MaskDialogBase` 使用窗口原生透明度完成原有 200 ms 淡入和 100 ms 淡出，避免 `QGraphicsOpacityEffect` 对蒙层、阴影及全部内部控件进行逐帧离屏绘制；重复设置同一弹窗阴影时复用现有效果。不能通过缩短动画、改变蒙层透明度或删除阴影换取性能。
 
 ## Code shape
 
