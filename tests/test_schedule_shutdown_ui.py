@@ -106,7 +106,7 @@ class ScheduleShutdownUiTest(TestCase):
         self.addCleanup(dialog.deleteLater)
 
         self.assertIn(
-            "rgba(0, 0, 0, 128)",
+            "rgba(0, 0, 0, 180)",
             dialog.windowMask.styleSheet(),
         )
 
