@@ -1,6 +1,6 @@
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QLabel, QWidget
 from qfluentwidgets import SmoothScrollDelegate, isDarkTheme
 
 from pyqt_github_markdown import DARK, LIGHT, MarkdownWidget, Theme
@@ -29,6 +29,8 @@ _TRANSPARENT_QSS = """
 
 
 class MarkdownView(MarkdownWidget):
+    LARGE_TEXT_LINE_HEIGHT = 96
+
     def __init__(
         self,
         parent: QWidget | None = None,
@@ -40,6 +42,7 @@ class MarkdownView(MarkdownWidget):
         self._transparentBackground = transparentBackground
         if largeText:
             self._contentLayout.setContentsMargins(4, 4, 4, 4)
+            self._contentLayout.setSpacing(0)
         self._scrollDelegate = SmoothScrollDelegate(self._scroll, True)
         if transparentBackground:
             for widget in (self._scroll, self._scroll.viewport(), self._content):
@@ -56,6 +59,16 @@ class MarkdownView(MarkdownWidget):
 
     def syncTheme(self) -> None:
         self.setTheme(DARK if isDarkTheme() else LIGHT)
+
+    def _rebuild(self) -> None:
+        super()._rebuild()
+        if self._largeText:
+            for label in self._content.findChildren(QLabel):
+                if label.textFormat() == Qt.TextFormat.RichText:
+                    label.setText(
+                        f'<p style="line-height: {self.LARGE_TEXT_LINE_HEIGHT}%; '
+                        f'margin: 0">{label.text()}</p>'
+                    )
 
     def _applyStyleOverrides(self) -> None:
         overrides = []

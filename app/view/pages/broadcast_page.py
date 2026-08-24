@@ -3,7 +3,7 @@ import threading
 
 import requests
 from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QTextCursor
+from PySide6.QtGui import QColor, QFont, QIcon, QTextBlockFormat, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -402,6 +402,14 @@ class BroadcastWindow(FramelessWindow):
             self.contentEdit.setPlainText(text)
             font = QFont(); font.setPointSize(26)
             self.contentEdit.setFont(font)
+            cursor = self.contentEdit.textCursor()
+            blockFormat = cursor.blockFormat()
+            blockFormat.setLineHeight(
+                MarkdownView.LARGE_TEXT_LINE_HEIGHT,
+                QTextBlockFormat.LineHeightTypes.ProportionalHeight.value,
+            )
+            cursor.select(QTextCursor.SelectionType.Document)
+            cursor.mergeBlockFormat(blockFormat)
 
     def setupLayout(self):
         while self.btnLayout.count():

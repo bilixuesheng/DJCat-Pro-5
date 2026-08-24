@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QBuffer, QIODevice, QPoint, Qt
-from PySide6.QtGui import QImage, QInputDevice
+from PySide6.QtGui import QImage, QInputDevice, QTextBlockFormat
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QScroller, QTextEdit, QWidget
 
@@ -171,6 +171,13 @@ class MarkdownRendererTest(TestCase):
         documentMargin = round(window.contentEdit.document().documentMargin())
         self.assertEqual(markdownMargins.left(), documentMargin)
         self.assertEqual(markdownMargins.top(), documentMargin)
+        self.assertEqual(window.markdownView._contentLayout.spacing(), 0)
+        blockFormat = window.contentEdit.document().firstBlock().blockFormat()
+        self.assertEqual(blockFormat.lineHeight(), MarkdownView.LARGE_TEXT_LINE_HEIGHT)
+        self.assertEqual(
+            blockFormat.lineHeightType(),
+            QTextBlockFormat.LineHeightTypes.ProportionalHeight.value,
+        )
 
         window.setContent(
             "title",
@@ -195,6 +202,10 @@ class MarkdownRendererTest(TestCase):
         self.assertEqual(paragraph.font().pointSizeF(), 26.0)
         self.assertEqual(heading.font().pointSizeF(), 49.0)
         self.assertIn("Microsoft YaHei", paragraph.font().families())
+        self.assertIn(
+            f"line-height: {MarkdownView.LARGE_TEXT_LINE_HEIGHT}%", paragraph.text()
+        )
+        self.assertEqual(MarkdownView()._contentLayout.spacing(), 12)
 
         labels = window.markdownView.findChildren(QLabel)
         self.assertTrue(
