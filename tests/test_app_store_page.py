@@ -231,7 +231,7 @@ class AppStorePageTest(TestCase):
         self.assertFalse(card.removeButton.isEnabled())
         self.assertEqual(card.actionButton._progress, 50)
 
-    def testDisabledProgressTouchesButtonEdgesAndUsesThemeColor(self):
+    def testDisabledProgressTouchesButtonEdgesWithRoundedCapsAndThemeColor(self):
         button = ActionProgressButton("下载中")
         self.addCleanup(button.deleteLater)
         button.resize(120, 32)
@@ -243,10 +243,28 @@ class AppStorePageTest(TestCase):
         button.render(image)
 
         color = qconfig.themeColor.value
-        self.assertEqual(image.pixelColor(0, button.height() - 1), color)
-        self.assertEqual(
-            image.pixelColor(button.width() - 1, button.height() - 1), color
-        )
+        y = button.height() - 1
+        background = image.pixelColor(0, y - 2)
+        self.assertEqual(image.pixelColor(1, y), color)
+        self.assertEqual(image.pixelColor(button.width() - 2, y), color)
+        for x in (0, button.width() - 1):
+            self.assertNotEqual(image.pixelColor(x, y), color)
+            self.assertNotEqual(image.pixelColor(x, y), background)
+
+    def testPartialProgressEndsWithRoundedCap(self):
+        button = ActionProgressButton("下载中 50%")
+        self.addCleanup(button.deleteLater)
+        button.resize(120, 32)
+        button.setEnabled(False)
+        button.setProgress(50)
+        image = QImage(button.size(), QImage.Format.Format_ARGB32)
+
+        button.render(image)
+
+        y = button.height() - 1
+        color = qconfig.themeColor.value
+        self.assertEqual(image.pixelColor(button.width() // 2 - 2, y), color)
+        self.assertNotEqual(image.pixelColor(button.width() // 2 - 1, y), color)
 
     def testIndeterminateProgressUsesUpdatedThemeColor(self):
         button = ActionProgressButton("下载中 0%")

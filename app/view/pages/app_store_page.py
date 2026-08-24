@@ -338,10 +338,13 @@ class ActionProgressButton(PrimaryPushButton):
             return
         track = QRectF(0.0, self.height() - 2.0, width, 2.0)
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
         color = QColor(qconfig.themeColor.value)
         trackColor = QColor(color)
         trackColor.setAlpha(75)
-        painter.fillRect(track, trackColor)
+        painter.setBrush(trackColor)
+        painter.drawRoundedRect(track, 1.0, 1.0)
         painter.setClipRect(track)
         if self._indeterminate:
             segment = max(24.0, width * 0.28)
@@ -354,7 +357,8 @@ class ActionProgressButton(PrimaryPushButton):
                 width * self._progress / 100.0,
                 track.height(),
             )
-        painter.fillRect(fill, color)
+        painter.setBrush(color)
+        painter.drawRoundedRect(fill, 1.0, 1.0)
 
 
 class ApplicationCard(CardWidget):
