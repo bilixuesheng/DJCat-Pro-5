@@ -47,6 +47,7 @@ from qfluentwidgets import (
     TitleLabel,
     ToolButton,
     qconfig,
+    setCustomStyleSheet,
 )
 from qfluentwidgets import FluentIcon as FIF
 
@@ -132,20 +133,21 @@ class ActionCard(CardWidget):
         self.editButton.setAccessibleName("编辑主页卡片")
         self.editButton.hide()
         self.deleteButton = ToolButton(FIF.DELETE, self)
-        self.deleteButton.setFixedSize(24, 24)
+        self.deleteButton.setFixedSize(26, 26)
         self.deleteButton.setEnabled(False)
         setFluentToolTip(self.deleteButton, "删除主页卡片")
         self.deleteButton.setAccessibleName(f"删除{title}")
-        self.deleteButton.setStyleSheet("""
+        deleteButtonStyle = """
             ToolButton {
                 border: none;
-                border-radius: 12px;
+                border-radius: 13px;
                 background: #d13438;
             }
             ToolButton:disabled {
                 background: rgba(128, 128, 128, 0.35);
             }
-        """)
+        """
+        setCustomStyleSheet(self.deleteButton, deleteButtonStyle, deleteButtonStyle)
         self.deleteButton.hide()
         top_layout.addWidget(icon_widget)
         top_layout.addWidget(title_label, 1)
