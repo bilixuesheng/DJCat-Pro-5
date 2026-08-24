@@ -167,7 +167,7 @@ class FullscreenClockWindow(FramelessWindow):
         self.titleLabel.setFont(font)
 
         font = self.timeLabel.font()
-        size = max(32, height * 2 // 5 if self.is_windowed else height // 5)
+        size = max(32, height * 9 // 20 if self.is_windowed else height * 9 // 40)
         font.setPixelSize(size)
         font.setBold(True)
         width = QFontMetrics(font).horizontalAdvance(self.timeLabel.text())

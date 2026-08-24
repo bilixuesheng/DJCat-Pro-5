@@ -408,7 +408,7 @@ class CountdownWindow(FramelessWindow):
         font.setBold(True)
         self.titleLabel.setFont(font)
         font = self.timeLabel.font()
-        size = max(32, h * 2 // 5 if self.is_windowed else h // 5)
+        size = max(32, h * 9 // 20 if self.is_windowed else h * 9 // 40)
         font.setPixelSize(size)
         font.setBold(True)
         # 窗口化宽度固定，超宽时按比例缩小字号到刚好放得下
