@@ -7,13 +7,14 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QInputDevice
+from PySide6.QtGui import QColor, QIcon, QImage, QInputDevice
 from PySide6.QtWidgets import QApplication, QScroller, QWidget
 from PySide6.QtTest import QTest
 from qfluentwidgets import FluentIcon as FIF, RoundMenu
 
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
+from app.config.paths import ASSET_DIR
 from app.view.pages.home_page import HomePage
 from app.view.pages.setting_page import SettingPage
 from app.view.windows.main_window import MainWindow
@@ -21,6 +22,8 @@ from app.view.windows.main_window import MainWindow
 
 class TrayConfigTest(TestCase):
     def testDefaultsPreserveExistingTrayBehavior(self):
+        self.assertEqual(cfg.applicationIconSource.defaultValue, "默认")
+        self.assertEqual(cfg.applicationIconPath.defaultValue, "")
         self.assertEqual(cfg.trayLeftClickAction.defaultValue, "ShowWindow")
         self.assertEqual(cfg.trayTooltip.defaultValue, "")
         self.assertTrue(cfg.showBroadcastTrayAction.defaultValue)
@@ -416,6 +419,8 @@ class TrayMenuTest(TestCase):
         self.values = [
             (item, item.value)
             for item in (
+                cfg.applicationIconSource,
+                cfg.applicationIconPath,
                 cfg.broadcastTasks,
                 cfg.shutdownTasks,
                 cfg.showBroadcastTrayAction,
@@ -426,6 +431,8 @@ class TrayMenuTest(TestCase):
             )
         ]
         cfg.file = Path(self.tempDir.name) / "config.json"
+        cfg.set(cfg.applicationIconSource, "默认")
+        cfg.set(cfg.applicationIconPath, "")
         cfg.set(
             cfg.broadcastTasks,
             [{"enabled": True}],
@@ -509,6 +516,61 @@ class TrayMenuTest(TestCase):
             self.assertEqual(tray.toolTip(), APP_NAME)
         finally:
             page.deleteLater()
+            tray.deleteLater()
+
+    def testCustomApplicationIconUpdatesTrayAndExistingHomeAction(self):
+        tray = self._createTray()
+        path = Path(self.tempDir.name) / "custom-icon.png"
+        image = QImage(24, 24, QImage.Format.Format_ARGB32)
+        image.fill(QColor("#ce352c"))
+        self.assertTrue(image.save(str(path)))
+        defaultHomeIcon = QIcon(str(ASSET_DIR / "logo_cat.png"))
+        try:
+            self.assertEqual(
+                tray.showAction.icon().pixmap(24, 24).toImage(),
+                defaultHomeIcon.pixmap(24, 24).toImage(),
+            )
+            homeAction = tray.showAction
+
+            cfg.set(cfg.applicationIconPath, str(path))
+            cfg.set(cfg.applicationIconSource, "自定义")
+
+            self.assertIs(tray.showAction, homeAction)
+            for icon in (tray.icon(), tray.showAction.icon()):
+                self.assertEqual(
+                    icon.pixmap(24, 24).toImage().pixelColor(12, 12).name(),
+                    "#ce352c",
+                )
+
+            cfg.set(cfg.applicationIconSource, "默认")
+            self.assertIs(tray.showAction, homeAction)
+            self.assertEqual(
+                tray.showAction.icon().pixmap(24, 24).toImage(),
+                defaultHomeIcon.pixmap(24, 24).toImage(),
+            )
+        finally:
+            tray.deleteLater()
+
+    def testCustomApplicationIconSurvivesTrayMenuRebuild(self):
+        tray = self._createTray()
+        path = Path(self.tempDir.name) / "custom-icon.png"
+        image = QImage(24, 24, QImage.Format.Format_ARGB32)
+        image.fill(QColor("#ce352c"))
+        self.assertTrue(image.save(str(path)))
+        try:
+            cfg.set(cfg.applicationIconPath, str(path))
+            cfg.set(cfg.applicationIconSource, "自定义")
+            cfg.set(cfg.showBroadcastTrayAction, False)
+
+            self.assertEqual(
+                tray.showAction.icon()
+                .pixmap(24, 24)
+                .toImage()
+                .pixelColor(12, 12)
+                .name(),
+                "#ce352c",
+            )
+        finally:
             tray.deleteLater()
 
     def testMenuKeepsFixedEntriesAndPlacesCardsAfterTaskActions(self):

@@ -28,6 +28,10 @@ _Avoid_: workflow、macro
 
 ### 系统托盘
 
+**Application Icon**:
+DJCat 主窗口、启动页和系统托盘共享的软件图标。默认模式保留原有主 Logo，Tray Menu 的“主页”入口继续使用独立的猫图标；自定义模式使用同一张本地图片替换这些位置。图片不可读取时回退到各自的默认图标。
+_Avoid_: Home Card 图标、Application Store 中 Application 的图标
+
 **Tray Menu**:
 DJCat 系统托盘图标提供的快捷操作集合。右键始终打开它；左键可配置为打开 Tray Menu 或显示主窗口。打开主窗口和退出程序始终可用，Broadcast Task 与 Shutdown Task 的总开关可分别隐藏；选中的 Tray Card Shortcut 位于任务总开关之后，按主页顺序显示或统一放入“主页卡片”二级菜单。菜单使用原生行高，不提供滚动；“主页卡片”二级菜单既可由鼠标悬停，也可由触控点击展开。
 _Avoid_: context menu、右键菜单（它不只可由右键打开）
@@ -264,6 +268,7 @@ _Not_: quit（结束 DJCat 进程）
 - **Projection** 的纯文本正文由 `QTextEdit` 渲染，Markdown 正文由 `MarkdownView(largeText=True)` 渲染；两者是同一 Projection 的互斥显示方式。
 - **Projection Snapshot** 保存在 `cfg.lastBroadcast`；开始 Projection 时立即写入，关闭或返回编辑只清除活动状态，不删除可再次导入的内容。
 - **Installed Mode** 与 **Portable Mode** 共享相同的目录结构，Storage Migration 移动的是整个 App Data Directory，不是单独的设置文件。
+- **Application Icon** 由个性化设置统一控制；主窗口、启动页、系统托盘和 Tray Menu 的“主页”入口共享自定义图片，但默认模式保留各位置原有资源。
 - **Tray Card Shortcut**、主页固定项和 Application Store 共享 `cfg.pinnedHomeCards` 中的稳定引用；图片缓存路径只是可更新的派生元数据。
 - **Custom Home Card** 包含一个 Action Sequence；`ActionSequenceWorker` 每次执行前读取最新动作列表，同一动作 ID 在一次运行中至多执行一次。
 - Custom Home Card 与 Custom 模式的 **Home Card Task** 共享 `ActionSequenceEditor` 和 Home Action 校验规则；两者只共享编辑与执行能力，不共享标题、图标或持久化对象。
@@ -276,6 +281,8 @@ _Not_: quit（结束 DJCat 进程）
 ## Ownership rules
 
 **`cfg` 是客户端持久化设置的唯一来源。** 设置页、主页和托盘通过 `cfg.set(...)` 修改值；运行时对象不另建一份需要双向同步的配置副本。
+
+Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cfg.applicationIconPath` 持久化。MainWindow 同步更新 QApplication 和主窗口图标，启动页直接复用主窗口图标；SystemTrayIcon 同步更新系统托盘及已存在的“主页”菜单项，不重建菜单，也不要求重新启动。
 
 **`app/platform/animation_timer.py` 独占 Qt 全局 Animation Tick 间隔。** View 和业务模块不直接调用 Qt 私有动画 API；私有符号不可用时保留 Qt 默认行为。
 

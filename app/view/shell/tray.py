@@ -128,10 +128,12 @@ class AcrylicMenu(RoundMenu):
 class SystemTrayIcon(QSystemTrayIcon):
     def __init__(self, parent=None, homeCards=None):
         super().__init__(parent=parent)
-        self.setIcon(QIcon(str(ASSET_DIR / "logo.png")))
+        self._updateApplicationIcon()
 
         self._updateTrayTooltip(cfg.trayTooltip.value)
 
+        cfg.applicationIconSource.valueChanged.connect(self._updateApplicationIcon)
+        cfg.applicationIconPath.valueChanged.connect(self._updateApplicationIcon)
         cfg.trayTooltip.valueChanged.connect(self._updateTrayTooltip)
 
         self._homeCards = []
@@ -147,6 +149,25 @@ class SystemTrayIcon(QSystemTrayIcon):
 
     def _updateTrayTooltip(self, text):
         self.setToolTip(text.strip() or APP_NAME)
+
+    def _updateApplicationIcon(self, _value=None):
+        customIcon = (
+            QIcon(cfg.applicationIconPath.value)
+            if cfg.applicationIconSource.value == "自定义"
+            else QIcon()
+        )
+        self.setIcon(
+            customIcon
+            if not customIcon.isNull()
+            else QIcon(str(ASSET_DIR / "logo.png"))
+        )
+        self._homeIcon = (
+            customIcon
+            if not customIcon.isNull()
+            else QIcon(str(ASSET_DIR / "logo_cat.png"))
+        )
+        if hasattr(self, "showAction"):
+            self.showAction.setIcon(self._homeIcon)
 
     def setHomeCards(self, entries) -> None:
         self._homeCards = []
@@ -165,7 +186,7 @@ class SystemTrayIcon(QSystemTrayIcon):
         menu = AcrylicMenu(parent=self.parent())
 
         self.showAction = Action(
-            QIcon(str(ASSET_DIR / "logo_cat.png")),
+            self._homeIcon,
             "主页",
             menu,
         )

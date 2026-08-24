@@ -307,6 +307,8 @@ class MainWindow(MSFluentWindow):
         self._toggleTheme(cfg.customThemeMode.value)
         cfg.customThemeMode.valueChanged.connect(self._toggleTheme)
         cfg.windowTitle.valueChanged.connect(self._updateWindowTitle)
+        cfg.applicationIconSource.valueChanged.connect(self._updateApplicationIcon)
+        cfg.applicationIconPath.valueChanged.connect(self._updateApplicationIcon)
         homeCardTasks = normalize_home_card_tasks(cfg.homeCardTasks.value)
         if homeCardTasks != cfg.homeCardTasks.value:
             cfg.set(cfg.homeCardTasks, homeCardTasks)
@@ -365,7 +367,7 @@ class MainWindow(MSFluentWindow):
     def initWindow(self):
         cleanup_edge_speech_files()
         self._updateWindowTitle(cfg.windowTitle.value)
-        self.setWindowIcon(QIcon(str(ASSET_DIR / "logo.png")))
+        self._updateApplicationIcon()
         self.setMinimumSize(700, 400)
 
         self.player = QMediaPlayer(self)
@@ -400,6 +402,17 @@ class MainWindow(MSFluentWindow):
 
     def _updateWindowTitle(self, title):
         self.setWindowTitle(title.strip() or APP_NAME)
+
+    def _updateApplicationIcon(self, _value=None):
+        icon = QIcon(
+            cfg.applicationIconPath.value
+            if cfg.applicationIconSource.value == "自定义"
+            else str(ASSET_DIR / "logo.png")
+        )
+        if icon.isNull():
+            icon = QIcon(str(ASSET_DIR / "logo.png"))
+        QApplication.instance().setWindowIcon(icon)
+        self.setWindowIcon(icon)
 
     def initSplashScreen(self):
         self.splashScreen = CustomSplashScreen(

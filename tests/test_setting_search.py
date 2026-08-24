@@ -8,6 +8,7 @@ from unittest.mock import call, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent
+from PySide6.QtGui import QColor, QImage
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -33,7 +34,14 @@ class SettingSearchTest(TestCase):
         self.tempDir = tempfile.TemporaryDirectory()
         self.configFile = cfg.file
         self.windowTitle = cfg.windowTitle.value
+        self.applicationIcon = self.app.windowIcon()
+        self.iconValues = [
+            (item, item.value)
+            for item in (cfg.applicationIconSource, cfg.applicationIconPath)
+        ]
         cfg.file = Path(self.tempDir.name) / "config.json"
+        cfg.set(cfg.applicationIconSource, "默认")
+        cfg.set(cfg.applicationIconPath, "")
         self.quotaPatcher = patch.object(SettingPage, "_refreshAIQuota")
         self.quotaPatcher.start()
         with (
@@ -51,6 +59,9 @@ class SettingSearchTest(TestCase):
         self.app.processEvents()
         self.quotaPatcher.stop()
         cfg.set(cfg.windowTitle, self.windowTitle)
+        for item, value in self.iconValues:
+            cfg.set(item, value)
+        self.app.setWindowIcon(self.applicationIcon)
         cfg.file = self.configFile
         self.tempDir.cleanup()
 
@@ -101,6 +112,82 @@ class SettingSearchTest(TestCase):
         titleEdit.editingFinished.emit()
         self.assertEqual(self.window.windowTitle(), APP_NAME)
 
+    def testCustomApplicationIconCardOnlyAppearsForCustomSource(self):
+        page = self.window.settingPage.ensureLoaded()
+
+        self.assertTrue(page.applicationIconCard.isHidden())
+
+        cfg.set(cfg.applicationIconSource, "自定义")
+        self.assertFalse(page.applicationIconCard.isHidden())
+
+        cfg.set(cfg.applicationIconSource, "默认")
+        self.assertTrue(page.applicationIconCard.isHidden())
+
+    def testCustomApplicationIconUpdatesWindowsAndRestoresDefault(self):
+        path = Path(self.tempDir.name) / "custom-icon.png"
+        image = QImage(24, 24, QImage.Format.Format_ARGB32)
+        image.fill(QColor("#ce352c"))
+        self.assertTrue(image.save(str(path)))
+        defaultIcon = self.window.windowIcon().pixmap(24, 24).toImage()
+
+        cfg.set(cfg.applicationIconSource, "自定义")
+        cfg.set(cfg.applicationIconPath, str(path))
+
+        for icon in (self.window.windowIcon(), self.app.windowIcon()):
+            self.assertEqual(
+                icon.pixmap(24, 24).toImage().pixelColor(12, 12).name(),
+                "#ce352c",
+            )
+
+        cfg.set(cfg.applicationIconSource, "默认")
+        self.assertEqual(
+            self.window.windowIcon().pixmap(24, 24).toImage(),
+            defaultIcon,
+        )
+
+    def testSplashScreenUsesCustomApplicationIcon(self):
+        path = Path(self.tempDir.name) / "custom-icon.png"
+        image = QImage(24, 24, QImage.Format.Format_ARGB32)
+        image.fill(QColor("#ce352c"))
+        self.assertTrue(image.save(str(path)))
+        cfg.set(cfg.applicationIconPath, str(path))
+        cfg.set(cfg.applicationIconSource, "自定义")
+
+        with patch("app.view.windows.main_window.CustomSplashScreen") as splash:
+            self.window.initSplashScreen()
+
+        icon = splash.call_args.args[0]
+        self.assertEqual(
+            icon.pixmap(24, 24).toImage().pixelColor(12, 12).name(),
+            "#ce352c",
+        )
+        self.window.splashScreen = None
+
+    def testMissingCustomApplicationIconFallsBackToDefault(self):
+        defaultIcon = self.window.windowIcon().pixmap(24, 24).toImage()
+
+        cfg.set(cfg.applicationIconPath, str(Path(self.tempDir.name) / "missing.ico"))
+        cfg.set(cfg.applicationIconSource, "自定义")
+
+        self.assertEqual(
+            self.window.windowIcon().pixmap(24, 24).toImage(),
+            defaultIcon,
+        )
+
+    def testApplicationIconPickerAcceptsIcoAndStoresSelectedPath(self):
+        page = self.window.settingPage.ensureLoaded()
+        path = str(Path(self.tempDir.name) / "custom.ico")
+
+        with patch(
+            "app.view.pages.setting_page.QFileDialog.getOpenFileName",
+            return_value=(path, ""),
+        ) as picker:
+            page._onChooseApplicationIconClicked()
+
+        self.assertEqual(cfg.applicationIconPath.value, path)
+        self.assertEqual(cfg.applicationIconSource.value, "自定义")
+        self.assertIn("*.ico", picker.call_args.args[3])
+
     def testClearingStoreCacheDropsPinnedIconPathsAndKeepsFallback(self):
         item = cfg.pinnedHomeCards
         oldValue = item.value
@@ -148,6 +235,7 @@ class SettingSearchTest(TestCase):
             self.assertTrue((ASSET_DIR / filename).is_file())
 
     def testBannerPresetsUseExpectedScaleModes(self):
+        self.window.settingPage.ensureLoaded()
         source = cfg.bannerImageSource.value
         scaleMode = cfg.bannerScaleMode.value
         try:

@@ -406,6 +406,12 @@ class SettingPage(ScrollArea):
         self.setProperty("isStackedTransparent", False)
 
     def _initCards(self) -> None:
+        self.applicationIconCard = PushSettingCard(
+            "选择图片",
+            FluentIcon.FOLDER,
+            "自定义软件图标",
+            "选择窗口、启动页和系统托盘使用的本地图标",
+        )
         self.windowTitleCard = LineEditSettingCard(
             FluentIcon.APPLICATION,
             "自定义窗口标题",
@@ -423,6 +429,14 @@ class SettingPage(ScrollArea):
                     "更改应用程序的外观",
                     texts=["浅色", "深色", "跟随系统设置"],
                 ),
+                ComboBoxSettingCard(
+                    cfg.applicationIconSource,
+                    FluentIcon.APPLICATION,
+                    "软件图标",
+                    "选择默认图标或自定义软件图标",
+                    texts=["默认", "自定义"],
+                ),
+                self.applicationIconCard,
                 self.windowTitleCard,
                 LineEditSettingCard(
                     FluentIcon.INFO,
@@ -806,6 +820,7 @@ class SettingPage(ScrollArea):
         self.addSettingGroup(self.aboutGroup)
 
     def _bind(self) -> None:
+        self.applicationIconCard.clicked.connect(self._onChooseApplicationIconClicked)
         self.chooseImageCard.clicked.connect(self._onChooseImageClicked)
         self.broadcastBackgroundImageCard.clicked.connect(
             lambda: self._onChooseBackgroundImageClicked(
@@ -831,6 +846,9 @@ class SettingPage(ScrollArea):
         self.storageModeCard.clicked.connect(self._onStorageModeClicked)
         self.errorLogCard.clicked.connect(self._onOpenErrorLogClicked)
         self.aiQuotaReceived.connect(self._onAIQuotaReceived)
+        cfg.applicationIconSource.valueChanged.connect(
+            self._refreshConditionalCards
+        )
         cfg.bannerImageSource.valueChanged.connect(
             self._onBannerImageSourceChanged
         )
@@ -858,6 +876,7 @@ class SettingPage(ScrollArea):
 
     def _conditionalCardVisibility(self) -> dict[QWidget, bool]:
         return {
+            self.applicationIconCard: cfg.applicationIconSource.value == "自定义",
             self.chooseImageCard: cfg.bannerImageSource.value == "自定义",
             self.broadcastBackgroundColorCard: cfg.broadcastBackgroundMode.value
             == "纯色",
@@ -881,6 +900,18 @@ class SettingPage(ScrollArea):
 
     def _refreshConditionalCards(self, _value=None) -> None:
         self.setSearchText(self._searchText)
+
+    def _onChooseApplicationIconClicked(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择软件图标",
+            "",
+            "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp *.svg *.ico)",
+        )
+        if not path:
+            return
+        cfg.set(cfg.applicationIconPath, path)
+        cfg.set(cfg.applicationIconSource, "自定义")
 
     def _onChooseBackgroundImageClicked(self, pathItem, modeItem) -> None:
         path, _ = QFileDialog.getOpenFileName(

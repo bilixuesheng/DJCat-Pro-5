@@ -83,6 +83,13 @@ class Config(QConfig):
         "CustomThemeColor",
         QColor(*THEME_COLOR_PRESETS[0][1]),
     )
+    applicationIconSource = OptionsConfigItem(
+        "Personalization",
+        "ApplicationIconSource",
+        "默认",
+        OptionsValidator(["默认", "自定义"]),
+    )
+    applicationIconPath = ConfigItem("Personalization", "ApplicationIconPath", "")
     windowTitle = ConfigItem("Personalization", "WindowTitle", "")
     trayTooltip = ConfigItem("Personalization", "TrayTooltip", "")
     showCreditsPage = ConfigItem(
