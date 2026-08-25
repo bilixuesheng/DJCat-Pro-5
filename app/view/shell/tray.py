@@ -1,7 +1,8 @@
 from copy import deepcopy
+import sys
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QCursor, QIcon, QPainter
+from PySide6.QtCore import QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QCursor, QIcon, QPainter, QPainterPath, QRegion
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -48,6 +49,10 @@ class _TrayMenuActionListWidget(MenuActionListWidget):
 class AcrylicMenu(RoundMenu):
     def __init__(self, title="", parent=None):
         QMenu.__init__(self, parent)
+        self._roundWindowCorners = (
+            sys.platform == "win32" and sys.getwindowsversion().build < 22000
+        )
+        self._roundedWindowMask = QRegion()
         self.setTitle(title)
         self._icon = QIcon()
         self._actions = []
@@ -99,6 +104,8 @@ class AcrylicMenu(RoundMenu):
         self.move(x, y)
 
     def showEvent(self, event):
+        if self._roundWindowCorners and self.mask().isEmpty():
+            self.setMask(QRegion(self.rect()))
         self.windowEffect.addMenuShadowEffect(self.winId())
         self.windowEffect.addShadowEffect(self.winId())
         self.windowEffect.enableBlurBehindWindow(self.winId())
@@ -109,6 +116,21 @@ class AcrylicMenu(RoundMenu):
         self.activateWindow()
         self.setFocus()
         return super().showEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if getattr(self, "_roundWindowCorners", False):
+            self._roundedWindowMask = QRegion()
+            self.setMask(QRegion(self.rect()))
+
+    def setMask(self, mask):
+        if self._roundWindowCorners:
+            if self._roundedWindowMask.isEmpty():
+                path = QPainterPath()
+                path.addRoundedRect(QRectF(self.rect()), 9, 9)
+                self._roundedWindowMask = QRegion(path.toFillPolygon().toPolygon())
+            mask = mask.intersected(self._roundedWindowMask)
+        return super().setMask(mask)
 
     def paintEvent(self, e):
         painter = QPainter(self)

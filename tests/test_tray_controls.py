@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QColor, QIcon, QImage, QInputDevice
+from PySide6.QtCore import QEvent, QPoint, Qt
+from PySide6.QtGui import QColor, QIcon, QImage, QInputDevice, QRegion
 from PySide6.QtWidgets import QApplication, QScroller, QWidget
 from PySide6.QtTest import QTest
 from qfluentwidgets import FluentIcon as FIF, RoundMenu
@@ -698,6 +698,48 @@ class TrayMenuTest(TestCase):
             submenu = tray.menu.findChildren(RoundMenu)[0]
             self.assertEqual(submenu.itemHeight, 28)
             self.assertFalse(QScroller.hasScroller(submenu.view.viewport()))
+        finally:
+            tray.deleteLater()
+
+    def testWindows10TrayMenusPreserveRoundedCornersDuringReveal(self):
+        cfg.set(cfg.trayHomeCardsInSubmenu, True)
+        with patch("app.view.shell.tray.sys") as windows:
+            windows.platform = "win32"
+            windows.getwindowsversion.return_value.build = 19045
+            tray = self._createTray()
+        try:
+            menus = [tray.menu, tray.menu.findChildren(RoundMenu)[0]]
+            for menu in menus:
+                self.assertTrue(menu._roundWindowCorners)
+                menu.setMask(QRegion(menu.rect()))
+
+                corners = (
+                    QPoint(0, 0),
+                    QPoint(menu.width() - 1, 0),
+                    QPoint(0, menu.height() - 1),
+                    QPoint(menu.width() - 1, menu.height() - 1),
+                )
+                self.assertFalse(any(menu.mask().contains(point) for point in corners))
+                self.assertTrue(menu.mask().contains(menu.rect().center()))
+
+                menu.setMask(QRegion(0, 12, menu.width() + 120, menu.height() + 20))
+                self.assertFalse(menu.mask().contains(QPoint(menu.width() // 2, 0)))
+                self.assertFalse(menu.mask().contains(corners[-1]))
+                self.assertTrue(menu.mask().contains(menu.rect().center()))
+        finally:
+            tray.deleteLater()
+
+    def testWindows11TrayMenusKeepTheOriginalAnimationMask(self):
+        with patch("app.view.shell.tray.sys") as windows:
+            windows.platform = "win32"
+            windows.getwindowsversion.return_value.build = 22631
+            tray = self._createTray()
+        try:
+            self.assertFalse(tray.menu._roundWindowCorners)
+            revealMask = QRegion(0, 12, tray.menu.width(), tray.menu.height())
+            tray.menu.setMask(revealMask)
+
+            self.assertEqual(tray.menu.mask(), revealMask)
         finally:
             tray.deleteLater()
 
