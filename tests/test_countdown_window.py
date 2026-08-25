@@ -52,6 +52,35 @@ class CountdownWindowTest(TestCase):
         self.assertIsInstance(page.timePicker, TouchTimePicker)
         page.close()
 
+    def testEditPagePassesCustomEndTitle(self):
+        page = CountdownEditPage()
+        page.titleInput.setText("数学考试")
+        page.endTitleInput.setText("请停止答题")
+        quitOnLastWindowClosed = self.app.quitOnLastWindowClosed()
+
+        try:
+            with patch.object(page.countdownWin, "startCountdown") as startCountdown:
+                page._onStart()
+
+            startCountdown.assert_called_once_with("数学考试", 3600, True, "请停止答题")
+        finally:
+            self.app.setQuitOnLastWindowClosed(quitOnLastWindowClosed)
+            page.close()
+
+    def testEditPageFallsBackToDefaultEndTitle(self):
+        page = CountdownEditPage()
+        page.endTitleInput.setText("  ")
+        quitOnLastWindowClosed = self.app.quitOnLastWindowClosed()
+
+        try:
+            with patch.object(page.countdownWin, "startCountdown") as startCountdown:
+                page._onStart()
+
+            self.assertEqual(startCountdown.call_args.args[3], "考试结束")
+        finally:
+            self.app.setQuitOnLastWindowClosed(quitOnLastWindowClosed)
+            page.close()
+
     def testWindowedBlankClickDoesNotRevealInlineControls(self):
         self.window.is_windowed = True
         self.window._applyWindowState()
@@ -161,6 +190,20 @@ class CountdownWindowTest(TestCase):
             self.window._tickCountdown()
 
         self.assertEqual(self.window.remaining, 55)
+
+    def testCountdownShowsCustomEndTitle(self):
+        self.window.startCountdown("数学考试", 60, False, "请停止答题")
+
+        self.window._setRemaining(0)
+
+        self.assertEqual(self.window.titleLabel.text(), "请停止答题")
+
+    def testCountdownKeepsDefaultEndTitle(self):
+        self.window.startCountdown("数学考试", 60, False)
+
+        self.window._setRemaining(0)
+
+        self.assertEqual(self.window.titleLabel.text(), "考试结束")
 
     def testPauseAndAdjustRebuildMonotonicDeadline(self):
         with patch("app.view.pages.countdown_page.time.monotonic") as monotonic:

@@ -39,6 +39,7 @@ from app.view.pages.broadcast_page import (
 )
 
 DEFAULT_TITLE = "距离考试结束还剩"
+DEFAULT_END_TITLE = "考试结束"
 VOICE_REMIND_SECONDS = 15 * 60
 
 
@@ -89,6 +90,7 @@ class CountdownWindow(FramelessWindow):
         self.remaining = 0
         self.ended = False
         self.title_text = DEFAULT_TITLE
+        self.end_title_text = DEFAULT_END_TITLE
         self._played15 = False
         self._moved = False
         self._controls_visible = False
@@ -183,8 +185,9 @@ class CountdownWindow(FramelessWindow):
 
         self.sound = QSoundEffect(self)
 
-    def startCountdown(self, title, seconds, voice_enabled):
+    def startCountdown(self, title, seconds, voice_enabled, end_title=DEFAULT_END_TITLE):
         self.title_text = title
+        self.end_title_text = end_title
         self.voice_enabled = voice_enabled
         self.initial_seconds = seconds
         self.remaining = seconds
@@ -280,7 +283,7 @@ class CountdownWindow(FramelessWindow):
             self.ended = True
             self.timer.stop()
             self._deadline = None
-            self.titleLabel.setText("考试结束")
+            self.titleLabel.setText(self.end_title_text)
             if self.voice_enabled:
                 self._playSound("end.wav")
 
@@ -497,7 +500,14 @@ class CountdownEditPage(QWidget):
         self.titleInput.setText(DEFAULT_TITLE)
         self.titleInput.setPlaceholderText(DEFAULT_TITLE)
         self.vBoxLayout.addWidget(
-            FormCard(FIF.FONT, "倒计时标题", "显示在倒计时上方，结束时变为“考试结束”", self.titleInput, self)
+            FormCard(FIF.FONT, "倒计时标题", "显示在倒计时上方", self.titleInput, self)
+        )
+
+        self.endTitleInput = LineEdit(self)
+        self.endTitleInput.setText(DEFAULT_END_TITLE)
+        self.endTitleInput.setPlaceholderText(DEFAULT_END_TITLE)
+        self.vBoxLayout.addWidget(
+            FormCard(FIF.FONT, "结束时标题", "倒计时结束后显示在上方", self.endTitleInput, self)
         )
 
         self.timePicker = TouchTimePicker(self, showSeconds=True)
@@ -549,6 +559,7 @@ class CountdownEditPage(QWidget):
             self.titleInput.text().strip() or DEFAULT_TITLE,
             seconds,
             self.voiceSwitch.isChecked(),
+            self.endTitleInput.text().strip() or DEFAULT_END_TITLE,
         )
         self.window().hide()
 

@@ -55,7 +55,7 @@ _Avoid_: Broadcast、投屏（不传输屏幕或视频）、presentation
 _Avoid_: Projection、editor draft、template
 
 **Exam Countdown**:
-“考试倒计时”产生的一次临时计时，具有初始时长、剩余时长、标题和语音提醒开关。它可运行、暂停、调整、重置或结束；关闭后不保存进度，从更长时间跨过 15 分钟及归零时可播放提醒音。
+“考试倒计时”产生的一次临时计时，具有初始时长、剩余时长、倒计时标题、结束时标题和语音提醒开关。它可运行、暂停、调整、重置或结束；关闭后不保存进度，从更长时间跨过 15 分钟及归零时可播放提醒音。
 _Avoid_: timer、Scheduled Task
 
 **Fullscreen Clock**:
