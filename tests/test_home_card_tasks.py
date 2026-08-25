@@ -8,15 +8,23 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from app.common.home_card_tasks import (
+    APPLICATION_HOME_CARD_TRIGGER,
+    APPLICATION_QUIT_EVENT,
+    APPLICATION_STARTUP_EVENT,
+    CLOSE_HOME_CARD_ACTION,
     CUSTOM_HOME_CARD_TASK,
     EXISTING_HOME_CARD_TASK,
     HOME_CARD_TASK_KEY,
+    OPEN_HOME_CARD_ACTION,
+    SCHEDULED_HOME_CARD_TRIGGER,
+    SILENT_STARTUP_EVENT,
     normalize_home_card_tasks,
 )
-from app.config.cfg import cfg
+from app.config.cfg import HOME_CARD_SCHEMA_VERSION, cfg, migrateConfig
 from app.view.components.task_picker import TouchTimePicker
 from app.view.pages.home_card_task_page import (
     HomeCardTaskPage,
@@ -47,7 +55,7 @@ def home_cards():
         {
             "key": HOME_CARD_TASK_KEY,
             "source": "default",
-            "title": "定时任务",
+            "title": "自动任务",
         },
     ]
 
@@ -129,8 +137,27 @@ class HomeCardTaskDataTest(TestCase):
         self.assertEqual(tasks[0]["time"], "00:00:00")
         self.assertEqual(tasks[0]["weeks"], [])
         self.assertEqual(tasks[0]["mode"], EXISTING_HOME_CARD_TASK)
+        self.assertEqual(tasks[0]["trigger"], SCHEDULED_HOME_CARD_TRIGGER)
+        self.assertEqual(tasks[0]["event"], APPLICATION_STARTUP_EVENT)
+        self.assertEqual(tasks[0]["operation"], OPEN_HOME_CARD_ACTION)
         self.assertEqual(tasks[0]["actions"], [])
         self.assertFalse(tasks[0]["enabled"])
+
+    def testApplicationTriggersAndCloseActionsArePreserved(self):
+        task = existing_task()
+        task.update(
+            {
+                "trigger": APPLICATION_HOME_CARD_TRIGGER,
+                "event": SILENT_STARTUP_EVENT,
+                "operation": CLOSE_HOME_CARD_ACTION,
+            }
+        )
+
+        normalized = normalize_home_card_tasks([task])[0]
+
+        self.assertEqual(normalized["trigger"], APPLICATION_HOME_CARD_TRIGGER)
+        self.assertEqual(normalized["event"], SILENT_STARTUP_EVENT)
+        self.assertEqual(normalized["operation"], CLOSE_HOME_CARD_ACTION)
 
 
 class HomeCardTaskUiTest(TestCase):
@@ -160,11 +187,46 @@ class HomeCardTaskUiTest(TestCase):
             {"全屏投送", "custom:one", "app:7:0"},
         )
         self.assertNotIn(HOME_CARD_TASK_KEY, widgets["homeCards"])
+        self.assertEqual(widgets["homeCardCombo"].currentText(), "全屏投送")
+        self.assertFalse(widgets["operationCard"].isHidden())
         self.assertEqual(home_card_task_data(widgets)["actions"], [])
         widgets["modeCombo"].setCurrentIndex(
             widgets["modeCombo"].findData(CUSTOM_HOME_CARD_TASK)
         )
         self.assertEqual(home_card_task_data(widgets)["actions"], [])
+
+    def testApplicationTriggerReplacesTimeAndWeekControls(self):
+        form, widgets = create_home_card_task_form(None, home_cards())
+        self.addCleanup(form.deleteLater)
+
+        widgets["triggerCombo"].setCurrentIndex(
+            widgets["triggerCombo"].findData(APPLICATION_HOME_CARD_TRIGGER)
+        )
+        widgets["eventCombo"].setCurrentIndex(
+            widgets["eventCombo"].findData(APPLICATION_QUIT_EVENT)
+        )
+
+        self.assertTrue(widgets["timeCard"].isHidden())
+        self.assertTrue(widgets["weekCard"].isHidden())
+        self.assertFalse(widgets["eventCard"].isHidden())
+        self.assertEqual(widgets["eventCombo"].currentText(), "电教猫关闭时")
+        data = home_card_task_data(widgets)
+        self.assertEqual(data["trigger"], APPLICATION_HOME_CARD_TRIGGER)
+        self.assertEqual(data["event"], APPLICATION_QUIT_EVENT)
+
+    def testCloseActionIsOnlyAvailableForDefaultHomeCards(self):
+        form, widgets = create_home_card_task_form(None, home_cards())
+        self.addCleanup(form.deleteLater)
+        widgets["operationCombo"].setCurrentIndex(
+            widgets["operationCombo"].findData(CLOSE_HOME_CARD_ACTION)
+        )
+
+        self.assertEqual(home_card_task_data(widgets)["operation"], CLOSE_HOME_CARD_ACTION)
+        widgets["homeCardCombo"].setCurrentIndex(
+            widgets["homeCardCombo"].findData("custom:one")
+        )
+        self.assertTrue(widgets["operationCard"].isHidden())
+        self.assertEqual(home_card_task_data(widgets)["operation"], OPEN_HOME_CARD_ACTION)
 
     def testSwitchingModesKeepsExistingTargetAndCustomActions(self):
         data = custom_task()
@@ -243,6 +305,7 @@ class HomeCardTaskRuntimeTest(TestCase):
         self.tempDir = tempfile.TemporaryDirectory()
         self.configFile = cfg.file
         self.tasks = cfg.homeCardTasks.value
+        self.lastBroadcast = cfg.lastBroadcast.value
         cfg.file = Path(self.tempDir.name) / "config.json"
         cfg.set(cfg.homeCardTasks, [])
         self.quotaPatcher = patch.object(SettingPage, "_refreshAIQuota")
@@ -262,6 +325,7 @@ class HomeCardTaskRuntimeTest(TestCase):
         self.app.processEvents()
         self.quotaPatcher.stop()
         cfg.set(cfg.homeCardTasks, self.tasks)
+        cfg.set(cfg.lastBroadcast, self.lastBroadcast)
         cfg.file = self.configFile
         self.tempDir.cleanup()
 
@@ -308,6 +372,154 @@ class HomeCardTaskRuntimeTest(TestCase):
 
         execute.assert_called_once_with(task)
 
+    def testApplicationTriggeredTaskIsIgnoredByTimeScheduler(self):
+        task = existing_task()
+        task.update(
+            {
+                "trigger": APPLICATION_HOME_CARD_TRIGGER,
+                "event": APPLICATION_STARTUP_EVENT,
+            }
+        )
+        timezone = datetime.now().astimezone().tzinfo
+        with patch.object(self.window, "_handleHomeCardTask") as execute:
+            self.window._checkScheduleAt(
+                datetime(2026, 8, 17, 8, 0, 0, tzinfo=timezone),
+                [],
+                [],
+                [task],
+            )
+
+        execute.assert_not_called()
+
+    def testApplicationEventOnlyRunsMatchingEnabledTasks(self):
+        startup = existing_task()
+        startup.update(
+            {
+                "trigger": APPLICATION_HOME_CARD_TRIGGER,
+                "event": APPLICATION_STARTUP_EVENT,
+            }
+        )
+        silent = {**startup, "id": "silent", "event": SILENT_STARTUP_EVENT}
+        disabled = {
+            **startup,
+            "id": "disabled",
+            "enabled": False,
+        }
+        cfg.set(cfg.homeCardTasks, [startup, silent, disabled])
+
+        with patch.object(self.window, "_handleHomeCardTask") as execute:
+            self.window._runApplicationHomeCardTasks(APPLICATION_STARTUP_EVENT)
+
+        self.assertEqual(execute.call_count, 1)
+        self.assertEqual(execute.call_args.args[0]["id"], startup["id"])
+
+    def testNormalAndSilentStartupDispatchExpectedApplicationEvents(self):
+        for isSilent, expected in (
+            (False, [APPLICATION_STARTUP_EVENT]),
+            (True, [APPLICATION_STARTUP_EVENT, SILENT_STARTUP_EVENT]),
+        ):
+            with (
+                self.subTest(isSilent=isSilent),
+                patch.object(MainWindow, "_startMachineRegistration"),
+                patch.object(MainWindow, "checkForUpdates"),
+                patch.object(MainWindow, "_runApplicationHomeCardTasks") as runTasks,
+                patch("app.view.windows.main_window.SystemTrayIcon"),
+            ):
+                window = MainWindow(isSilent=isSilent)
+                try:
+                    self.assertEqual(
+                        [call.args[0] for call in runTasks.call_args_list],
+                        expected,
+                    )
+                finally:
+                    window.tray = None
+                    window._shutdownResources()
+                    window.deleteLater()
+
+    def testCloseTaskSkipsUnopenedFeatureWithoutLoadingItsPage(self):
+        task = existing_task()
+        task["operation"] = CLOSE_HOME_CARD_ACTION
+        with (
+            patch.object(self.window, "_executeHomeCard") as execute,
+            patch.object(self.window, "_showHomeCardTaskError") as showError,
+        ):
+            self.window._handleHomeCardTask(task)
+
+        self.assertIsNone(self.window.broadcastEditPage)
+        execute.assert_not_called()
+        showError.assert_not_called()
+
+    def testCloseTaskClosesActiveCountdownWithoutConfirmation(self):
+        page = self.window._getCountdownPage()
+        page.countdownWin.show()
+        task = existing_task()
+        task.update(
+            {
+                "targetKey": "考试倒计时",
+                "targetTitle": "考试倒计时",
+                "operation": CLOSE_HOME_CARD_ACTION,
+            }
+        )
+
+        self.window._handleHomeCardTask(task)
+
+        self.assertFalse(page.countdownWin.isVisible())
+
+    def testCloseTaskAlsoClosesMinimizedProjection(self):
+        page = self.window._getBroadcastEditPage()
+        page.titleInput.setText("正在投送")
+        page.contentInput.setPlainText("正文")
+        page._onBroadcast()
+        page.broadcastWin.minimizeToMini()
+        task = existing_task()
+        task["operation"] = CLOSE_HOME_CARD_ACTION
+
+        self.window._handleHomeCardTask(task)
+
+        self.assertFalse(page.broadcastWin.isVisible())
+        self.assertFalse(page.broadcastWin.miniWindow.isVisible())
+        self.assertFalse(cfg.lastBroadcast.value["active"])
+
+    def testTrayQuitRunsCloseTaskBeforeShuttingDownResources(self):
+        task = existing_task()
+        task.update(
+            {
+                "trigger": APPLICATION_HOME_CARD_TRIGGER,
+                "event": APPLICATION_QUIT_EVENT,
+                "operation": CLOSE_HOME_CARD_ACTION,
+            }
+        )
+        cfg.set(cfg.homeCardTasks, [task])
+        with (
+            patch.object(self.window, "_closeHomeCard") as closeCard,
+            patch("app.view.windows.main_window.QApplication.quit"),
+        ):
+            self.window.requestQuit()
+
+        closeCard.assert_called_once_with("全屏投送")
+        self.assertTrue(self.window._resourcesShutdown)
+
+    def testTrayQuitWaitsForCustomTaskWithoutBlockingTheUi(self):
+        task = custom_task()
+        task.update(
+            {
+                "trigger": APPLICATION_HOME_CARD_TRIGGER,
+                "event": APPLICATION_QUIT_EVENT,
+            }
+        )
+        cfg.set(cfg.homeCardTasks, [task])
+        with (
+            patch("app.common.home_cards.execute_action", return_value=None) as execute,
+            patch("app.view.windows.main_window.QApplication.quit") as quitApp,
+        ):
+            self.window.requestQuit()
+            self.assertFalse(self.window._resourcesShutdown)
+            QTest.qWait(50)
+
+        execute.assert_called_once()
+        quitApp.assert_called_once_with()
+        self.assertTrue(self.window._resourcesShutdown)
+
     def testCustomTaskReadsLatestActionsByStableId(self):
         task = custom_task()
         cfg.set(cfg.homeCardTasks, [task])
@@ -327,3 +539,50 @@ class HomeCardTaskRuntimeTest(TestCase):
 
         worker.assert_not_called()
         self.window._homeCardTaskWorkers.clear()
+
+
+class HomeCardTaskMigrationTest(TestCase):
+    def testRenameKeepsOrderVisibilityAndTraySelection(self):
+        items = (
+            cfg.homeCardOrder,
+            cfg.visibleDefaultHomeCards,
+            cfg.trayHomeCardKeys,
+            cfg.homeCardSchemaVersion,
+        )
+        values = [(item, item.value) for item in items]
+        configFile = cfg.file
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                cfg.file = Path(directory) / "config.json"
+                cfg.set(
+                    cfg.homeCardOrder,
+                    ["全屏投送", "定时任务", "定时播报"],
+                    save=False,
+                )
+                cfg.set(
+                    cfg.visibleDefaultHomeCards,
+                    ["全屏投送", "定时播报"],
+                    save=False,
+                )
+                cfg.set(cfg.trayHomeCardKeys, ["定时任务"], save=False)
+                cfg.set(cfg.homeCardSchemaVersion, 2, save=False)
+
+                migrateConfig()
+
+                self.assertEqual(
+                    cfg.homeCardOrder.value,
+                    ["全屏投送", "自动任务", "定时播报"],
+                )
+                self.assertEqual(
+                    cfg.visibleDefaultHomeCards.value,
+                    ["全屏投送", "定时播报"],
+                )
+                self.assertEqual(cfg.trayHomeCardKeys.value, ["自动任务"])
+                self.assertEqual(
+                    cfg.homeCardSchemaVersion.value,
+                    HOME_CARD_SCHEMA_VERSION,
+                )
+            finally:
+                for item, value in values:
+                    cfg.set(item, value, save=False)
+                cfg.file = configFile

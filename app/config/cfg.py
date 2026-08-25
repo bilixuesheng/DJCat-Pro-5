@@ -39,10 +39,10 @@ DEFAULT_HOME_CARDS = (
     "考试倒计时",
     "全屏时钟",
     "定时播报",
-    "定时任务",
+    "自动任务",
     "定时关机",
 )
-HOME_CARD_SCHEMA_VERSION = 2
+HOME_CARD_SCHEMA_VERSION = 3
 
 
 class GeometryValidator(ConfigValidator):
@@ -319,7 +319,9 @@ def migrateConfig() -> None:
                 if isinstance(item.value, list)
                 else list(DEFAULT_HOME_CARDS)
             )
-            if cardName in cards:
+            if cardName in cards or (
+                cardName == "定时任务" and "自动任务" in cards
+            ):
                 continue
             try:
                 index = cards.index(previousCard) + 1
@@ -327,4 +329,18 @@ def migrateConfig() -> None:
                 index = len(cards)
             cards.insert(index, cardName)
             cfg.set(item, cards, save=False)
+    if version < 3:
+        for item in (
+            cfg.homeCardOrder,
+            cfg.visibleDefaultHomeCards,
+            cfg.trayHomeCardKeys,
+        ):
+            if not isinstance(item.value, list):
+                continue
+            cards = [
+                "自动任务" if card == "定时任务" else card
+                for card in item.value
+            ]
+            if cards != item.value:
+                cfg.set(item, cards, save=False)
     cfg.set(cfg.homeCardSchemaVersion, HOME_CARD_SCHEMA_VERSION)

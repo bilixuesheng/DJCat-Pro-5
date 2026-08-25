@@ -265,7 +265,7 @@ class TrayControlNavigationTest(TestCase):
                 "考试倒计时",
                 "全屏时钟",
                 "定时播报",
-                "定时任务",
+                "自动任务",
                 "定时关机",
             ],
         )

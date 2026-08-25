@@ -24,9 +24,16 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from app.common.home_card_tasks import (
+    APPLICATION_HOME_CARD_TRIGGER,
+    APPLICATION_QUIT_EVENT,
+    APPLICATION_STARTUP_EVENT,
+    CLOSE_HOME_CARD_ACTION,
     CUSTOM_HOME_CARD_TASK,
     EXISTING_HOME_CARD_TASK,
     HOME_CARD_TASK_KEY,
+    OPEN_HOME_CARD_ACTION,
+    SCHEDULED_HOME_CARD_TRIGGER,
+    SILENT_STARTUP_EVENT,
     normalize_home_card_tasks,
 )
 from app.common.home_cards import new_id, validate_action
@@ -42,9 +49,13 @@ from app.view.components.task_picker import (
 )
 
 SOURCE_LABELS = {
-    "default": "默认",
     "custom": "自定义",
     "application": "应用",
+}
+APPLICATION_EVENT_LABELS = {
+    APPLICATION_STARTUP_EVENT: "电教猫启动时",
+    SILENT_STARTUP_EVENT: "电教猫开机静默启动时",
+    APPLICATION_QUIT_EVENT: "电教猫关闭时",
 }
 
 
@@ -96,10 +107,10 @@ def _available_home_cards(entries) -> list[dict]:
 
 def _home_card_text(entry, occurrence=None):
     title = str(entry.get("title", "")).strip() or str(entry.get("key", ""))
-    source = SOURCE_LABELS.get(entry.get("source"), "主页")
+    source = SOURCE_LABELS.get(entry.get("source"), "")
     if occurrence is not None:
-        source = f"{source} {occurrence}"
-    return f"{title}（{source}）"
+        source = f"{source} {occurrence}".strip()
+    return f"{title}（{source}）" if source else title
 
 
 def update_home_card_options(widgets, entries):
@@ -114,14 +125,14 @@ def update_home_card_options(widgets, entries):
     for entry in cards:
         label = (
             str(entry.get("title", "")).strip() or entry["key"],
-            SOURCE_LABELS.get(entry.get("source"), "主页"),
+            SOURCE_LABELS.get(entry.get("source"), ""),
         )
         labelCounts[label] = labelCounts.get(label, 0) + 1
     labelOccurrences = {}
     for entry in cards:
         label = (
             str(entry.get("title", "")).strip() or entry["key"],
-            SOURCE_LABELS.get(entry.get("source"), "主页"),
+            SOURCE_LABELS.get(entry.get("source"), ""),
         )
         labelOccurrences[label] = labelOccurrences.get(label, 0) + 1
         occurrence = labelOccurrences[label] if labelCounts[label] > 1 else None
@@ -154,7 +165,10 @@ def create_home_card_task_form(
         "name": "",
         "time": now.toString("HH:mm:ss"),
         "weeks": list(range(7)),
+        "trigger": SCHEDULED_HOME_CARD_TRIGGER,
+        "event": APPLICATION_STARTUP_EVENT,
         "mode": EXISTING_HOME_CARD_TASK,
+        "operation": OPEN_HOME_CARD_ACTION,
         "targetKey": "",
         "targetTitle": "",
         "actions": [],
@@ -176,26 +190,60 @@ def create_home_card_task_form(
         HomeCardTaskSettingCard(
             FIF.EDIT,
             "任务名称",
-            "设置该定时任务的标题",
+            "设置该自动任务的标题",
             nameInput,
             form,
         )
     )
     widgets["nameInput"] = nameInput
 
-    timePicker = TouchTimePicker(form, showSeconds=True)
-    taskTime = QTime.fromString(data.get("time", ""), "HH:mm:ss")
-    timePicker.setTime(taskTime if taskTime.isValid() else now)
+    triggerCombo = ComboBox(form)
+    triggerCombo.addItem("固定时间", userData=SCHEDULED_HOME_CARD_TRIGGER)
+    triggerCombo.addItem("软件行为", userData=APPLICATION_HOME_CARD_TRIGGER)
+    triggerIndex = triggerCombo.findData(data.get("trigger"))
+    triggerCombo.setCurrentIndex(triggerIndex if triggerIndex >= 0 else 0)
+    triggerCombo.setFixedWidth(180)
     layout.addWidget(
         HomeCardTaskSettingCard(
-            FIF.ALBUM,
-            "执行时间",
-            "设置触发任务的具体时间",
-            timePicker,
+            FIF.HISTORY,
+            "触发时机",
+            "选择固定时间或软件行为触发",
+            triggerCombo,
             form,
         )
     )
+    widgets["triggerCombo"] = triggerCombo
+
+    eventCombo = ComboBox(form)
+    for event, label in APPLICATION_EVENT_LABELS.items():
+        eventCombo.addItem(label, userData=event)
+    eventIndex = eventCombo.findData(data.get("event"))
+    eventCombo.setCurrentIndex(eventIndex if eventIndex >= 0 else 0)
+    eventCombo.setFixedWidth(220)
+    eventCard = HomeCardTaskSettingCard(
+        FIF.APPLICATION,
+        "软件行为",
+        "选择触发任务的软件行为",
+        eventCombo,
+        form,
+    )
+    layout.addWidget(eventCard)
+    widgets["eventCombo"] = eventCombo
+    widgets["eventCard"] = eventCard
+
+    timePicker = TouchTimePicker(form, showSeconds=True)
+    taskTime = QTime.fromString(data.get("time", ""), "HH:mm:ss")
+    timePicker.setTime(taskTime if taskTime.isValid() else now)
+    timeCard = HomeCardTaskSettingCard(
+        FIF.ALBUM,
+        "执行时间",
+        "设置触发任务的具体时间",
+        timePicker,
+        form,
+    )
+    layout.addWidget(timeCard)
     widgets["timePicker"] = timePicker
+    widgets["timeCard"] = timeCard
 
     weekWidget = QWidget(form)
     weekLayout = QHBoxLayout(weekWidget)
@@ -207,16 +255,16 @@ def create_home_card_task_form(
         button.setChecked(index in data.get("weeks", []))
         weekButtons.append(button)
         weekLayout.addWidget(button)
-    layout.addWidget(
-        HomeCardTaskSettingCard(
-            FIF.CALENDAR,
-            "重复频率",
-            "选择在一周中的哪几天执行",
-            weekWidget,
-            form,
-        )
+    weekCard = HomeCardTaskSettingCard(
+        FIF.CALENDAR,
+        "重复频率",
+        "选择在一周中的哪几天执行",
+        weekWidget,
+        form,
     )
+    layout.addWidget(weekCard)
     widgets["weekButtons"] = weekButtons
+    widgets["weekCard"] = weekCard
 
     modeCombo = ComboBox(form)
     modeCombo.addItem("已有卡片", userData=EXISTING_HOME_CARD_TASK)
@@ -242,12 +290,29 @@ def create_home_card_task_form(
     homeCardCard = HomeCardTaskSettingCard(
         FIF.HOME,
         "已有卡片",
-        "到点后执行所选主页卡片",
+        "触发后执行所选主页卡片",
         homeCardCombo,
         form,
     )
     layout.addWidget(homeCardCard)
     widgets["homeCardCard"] = homeCardCard
+
+    operationCombo = ComboBox(form)
+    operationCombo.addItem("打开", userData=OPEN_HOME_CARD_ACTION)
+    operationCombo.addItem("关闭", userData=CLOSE_HOME_CARD_ACTION)
+    operationIndex = operationCombo.findData(data.get("operation"))
+    operationCombo.setCurrentIndex(operationIndex if operationIndex >= 0 else 0)
+    operationCombo.setFixedWidth(180)
+    operationCard = HomeCardTaskSettingCard(
+        FIF.POWER_BUTTON,
+        "执行动作",
+        "选择打开或关闭所选默认功能",
+        operationCombo,
+        form,
+    )
+    layout.addWidget(operationCard)
+    widgets["operationCombo"] = operationCombo
+    widgets["operationCard"] = operationCard
 
     actions = data.get("actions") if isinstance(data.get("actions"), list) else []
     if not actions:
@@ -278,10 +343,19 @@ def create_home_card_task_form(
 
     def updateVisibility(*args):
         isExisting = modeCombo.currentData() == EXISTING_HOME_CARD_TASK
+        isScheduled = triggerCombo.currentData() == SCHEDULED_HOME_CARD_TRIGGER
+        selected = widgets.get("homeCards", {}).get(homeCardCombo.currentData())
+        isDefault = selected is not None and selected.get("source") == "default"
+        eventCard.setVisible(not isScheduled)
+        timeCard.setVisible(isScheduled)
+        weekCard.setVisible(isScheduled)
         homeCardCard.setVisible(isExisting)
+        operationCard.setVisible(isExisting and isDefault)
         actionCard.setVisible(not isExisting)
 
+    triggerCombo.currentIndexChanged.connect(updateVisibility)
     modeCombo.currentIndexChanged.connect(updateVisibility)
+    homeCardCombo.currentIndexChanged.connect(updateVisibility)
     updateVisibility()
     return form, widgets
 
@@ -306,7 +380,16 @@ def home_card_task_data(widgets):
             for index, button in enumerate(widgets["weekButtons"])
             if button.isChecked()
         ],
+        "trigger": (
+            widgets["triggerCombo"].currentData() or SCHEDULED_HOME_CARD_TRIGGER
+        ),
+        "event": widgets["eventCombo"].currentData() or APPLICATION_STARTUP_EVENT,
         "mode": mode,
+        "operation": (
+            widgets["operationCombo"].currentData() or OPEN_HOME_CARD_ACTION
+            if entry is not None and entry.get("source") == "default"
+            else OPEN_HOME_CARD_ACTION
+        ),
         "targetKey": targetKey,
         "targetTitle": (
             str(entry.get("title", "")).strip()
@@ -320,7 +403,7 @@ def home_card_task_data(widgets):
 class AddHomeCardTaskDialog(MessageBoxBase):
     def __init__(self, homeCards, parent=None):
         super().__init__(parent)
-        self.titleLabel = SubtitleLabel("添加定时任务", self)
+        self.titleLabel = SubtitleLabel("添加自动任务", self)
         self.scrollArea = ScrollArea(self.widget)
         self.scrollArea.setWidgetResizable(True)
         self.scrollArea.enableTransparentBackground()
@@ -452,9 +535,14 @@ class HomeCardTaskCard(SettingMaterialCard):
         widgets["timePicker"].timeChanged.connect(self._saveData)
         for button in widgets["weekButtons"]:
             button.clicked.connect(self._saveData)
+        widgets["triggerCombo"].currentIndexChanged.connect(self._saveData)
+        widgets["triggerCombo"].currentIndexChanged.connect(self._refreshFormHeight)
+        widgets["eventCombo"].currentIndexChanged.connect(self._saveData)
         widgets["modeCombo"].currentIndexChanged.connect(self._saveData)
         widgets["modeCombo"].currentIndexChanged.connect(self._refreshFormHeight)
         widgets["homeCardCombo"].currentIndexChanged.connect(self._saveData)
+        widgets["homeCardCombo"].currentIndexChanged.connect(self._refreshFormHeight)
+        widgets["operationCombo"].currentIndexChanged.connect(self._saveData)
         widgets["actionEditor"].changed.connect(self._saveData)
 
     def _summary(self):
@@ -465,7 +553,16 @@ class HomeCardTaskCard(SettingMaterialCard):
             target = self.data.get("targetTitle") or targetKey or "目标卡片"
             if targetKey not in self._homeCardKeys:
                 target = f"{target}（已失效）"
-        return f"触发时间：{self.data['time']} · {target}"
+            if self.data.get("operation") == CLOSE_HOME_CARD_ACTION:
+                target = f"关闭{target}"
+        if self.data.get("trigger") == APPLICATION_HOME_CARD_TRIGGER:
+            trigger = APPLICATION_EVENT_LABELS.get(
+                self.data.get("event"),
+                APPLICATION_EVENT_LABELS[APPLICATION_STARTUP_EVENT],
+            )
+        else:
+            trigger = f"触发时间：{self.data['time']}"
+        return f"{trigger} · {target}"
 
     def _onEnabledChanged(self, checked):
         if self.data.get("enabled", True) == checked:
@@ -513,7 +610,7 @@ class HomeCardTaskPage(ScrollArea):
         header = QHBoxLayout()
         self.backButton = ToolButton(FIF.RETURN, self)
         self.backButton.clicked.connect(self.backSignal.emit)
-        self.titleLabel = TitleLabel("定时任务", self)
+        self.titleLabel = TitleLabel("自动任务", self)
         self.addButton = ToolButton(FIF.ADD, self)
         self.addButton.clicked.connect(self._addTask)
         header.addWidget(self.backButton)
@@ -525,7 +622,7 @@ class HomeCardTaskPage(ScrollArea):
         self.cardLayout = QVBoxLayout()
         self.cardLayout.setSpacing(10)
         self.layout.addLayout(self.cardLayout)
-        self.emptyLabel = SubtitleLabel("还没有设置定时任务哦 ~", self.view)
+        self.emptyLabel = SubtitleLabel("还没有设置自动任务哦 ~", self.view)
         self.emptyLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.emptyLabel.setStyleSheet("color: gray;")
         self.layout.addWidget(self.emptyLabel, 1, Qt.AlignmentFlag.AlignCenter)

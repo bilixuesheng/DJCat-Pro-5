@@ -74,7 +74,7 @@ DEFAULT_CARD_INFO = {
     "考试倒计时": (FIF.CALENDAR, "设定考试时长并全屏显示倒计时"),
     "全屏时钟": (FIF.STOP_WATCH, "全屏显示当前系统时间"),
     "定时播报": (FIF.MEGAPHONE, "设置每日定点语音播报时间或播放音频"),
-    "定时任务": (FIF.HISTORY, "按时执行已有主页卡片或自定义动作"),
+    "自动任务": (FIF.HISTORY, "按时间或软件行为执行主页卡片和自定义动作"),
     "定时关机": (FIF.POWER_BUTTON, "设置指定时间提示或自动关闭计算机"),
 }
 
@@ -568,10 +568,10 @@ class HomePage(ScrollArea):
                 "设置每日定点语音播报时间或播放音频",
                 self.cardsWidget,
             ),
-            "定时任务": ActionCard(
+            "自动任务": ActionCard(
                 FIF.HISTORY,
-                "定时任务",
-                "按时执行已有主页卡片或自定义动作",
+                "自动任务",
+                "按时间或软件行为执行主页卡片和自定义动作",
                 self.cardsWidget,
             ),
             "定时关机": ActionCard(

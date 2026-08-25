@@ -6,8 +6,25 @@ from app.common.home_cards import new_id, normalize_action
 
 EXISTING_HOME_CARD_TASK = "existing"
 CUSTOM_HOME_CARD_TASK = "custom"
-HOME_CARD_TASK_KEY = "定时任务"
+HOME_CARD_TASK_KEY = "自动任务"
 HOME_CARD_TASK_MODES = (EXISTING_HOME_CARD_TASK, CUSTOM_HOME_CARD_TASK)
+SCHEDULED_HOME_CARD_TRIGGER = "time"
+APPLICATION_HOME_CARD_TRIGGER = "application"
+HOME_CARD_TASK_TRIGGERS = (
+    SCHEDULED_HOME_CARD_TRIGGER,
+    APPLICATION_HOME_CARD_TRIGGER,
+)
+APPLICATION_STARTUP_EVENT = "startup"
+SILENT_STARTUP_EVENT = "silent-startup"
+APPLICATION_QUIT_EVENT = "quit"
+HOME_CARD_TASK_EVENTS = (
+    APPLICATION_STARTUP_EVENT,
+    SILENT_STARTUP_EVENT,
+    APPLICATION_QUIT_EVENT,
+)
+OPEN_HOME_CARD_ACTION = "open"
+CLOSE_HOME_CARD_ACTION = "close"
+HOME_CARD_TASK_ACTIONS = (OPEN_HOME_CARD_ACTION, CLOSE_HOME_CARD_ACTION)
 
 
 def _text(value, default="") -> str:
@@ -79,13 +96,25 @@ def normalize_home_card_tasks(value) -> list[dict]:
         mode = _text(raw.get("mode")).lower()
         if mode not in HOME_CARD_TASK_MODES:
             mode = EXISTING_HOME_CARD_TASK
+        trigger = _text(raw.get("trigger")).lower()
+        if trigger not in HOME_CARD_TASK_TRIGGERS:
+            trigger = SCHEDULED_HOME_CARD_TRIGGER
+        event = _text(raw.get("event")).lower()
+        if event not in HOME_CARD_TASK_EVENTS:
+            event = APPLICATION_STARTUP_EVENT
+        operation = _text(raw.get("operation")).lower()
+        if operation not in HOME_CARD_TASK_ACTIONS:
+            operation = OPEN_HOME_CARD_ACTION
         tasks.append(
             {
                 "id": taskId,
                 "name": (_text(raw.get("name")) or "未命名任务")[:40],
                 "time": _time(raw.get("time")),
                 "weeks": _weeks(raw.get("weeks")),
+                "trigger": trigger,
+                "event": event,
                 "mode": mode,
+                "operation": operation,
                 "targetKey": _text(raw.get("targetKey")),
                 "targetTitle": _text(raw.get("targetTitle"))[:40],
                 "actions": _actions(raw.get("actions", [])),
@@ -96,9 +125,19 @@ def normalize_home_card_tasks(value) -> list[dict]:
 
 
 __all__ = [
+    "APPLICATION_HOME_CARD_TRIGGER",
+    "APPLICATION_QUIT_EVENT",
+    "APPLICATION_STARTUP_EVENT",
+    "CLOSE_HOME_CARD_ACTION",
     "CUSTOM_HOME_CARD_TASK",
     "EXISTING_HOME_CARD_TASK",
+    "HOME_CARD_TASK_ACTIONS",
+    "HOME_CARD_TASK_EVENTS",
     "HOME_CARD_TASK_KEY",
     "HOME_CARD_TASK_MODES",
+    "HOME_CARD_TASK_TRIGGERS",
+    "OPEN_HOME_CARD_ACTION",
+    "SCHEDULED_HOME_CARD_TRIGGER",
+    "SILENT_STARTUP_EVENT",
     "normalize_home_card_tasks",
 ]

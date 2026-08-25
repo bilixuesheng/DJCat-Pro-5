@@ -49,9 +49,15 @@ from app.common.edge_tts import (
     cleanup_edge_speech_files,
 )
 from app.common.home_card_tasks import (
+    APPLICATION_HOME_CARD_TRIGGER,
+    APPLICATION_QUIT_EVENT,
+    APPLICATION_STARTUP_EVENT,
+    CLOSE_HOME_CARD_ACTION,
     CUSTOM_HOME_CARD_TASK,
     EXISTING_HOME_CARD_TASK,
     HOME_CARD_TASK_KEY,
+    SCHEDULED_HOME_CARD_TRIGGER,
+    SILENT_STARTUP_EVENT,
     normalize_home_card_tasks,
 )
 from app.common.home_cards import ActionSequenceWorker, normalize_pinned_cards
@@ -292,6 +298,8 @@ class MainWindow(MSFluentWindow):
         self._updateRequestId = 0
         self._updateJobs = {}
         self._resourcesShutdown = False
+        self._quitRequested = False
+        self._quitTaskIds = set()
         self.machineRegistrationWorker = None
         self.machineRegistrationThread = None
 
@@ -343,6 +351,10 @@ class MainWindow(MSFluentWindow):
                 self._getBroadcastEditPage().restoreLastBroadcast()
             else:
                 cfg.set(cfg.lastBroadcast, {**broadcast, "active": False})
+
+        self._runApplicationHomeCardTasks(APPLICATION_STARTUP_EVENT)
+        if isSilent:
+            self._runApplicationHomeCardTasks(SILENT_STARTUP_EVENT)
 
     def _startMachineRegistration(self):
         if cfg.aiMarkdownMachineCode.value:
@@ -673,6 +685,10 @@ class MainWindow(MSFluentWindow):
             for task in tasks:
                 if not isinstance(task, dict):
                     continue
+                if kind == "home-card" and task.get(
+                    "trigger", SCHEDULED_HOME_CARD_TRIGGER
+                ) != SCHEDULED_HOME_CARD_TRIGGER:
+                    continue
                 weeks = task.get("weeks", [])
                 if not isinstance(weeks, (list, tuple, set)):
                     continue
@@ -790,8 +806,11 @@ class MainWindow(MSFluentWindow):
             if task["targetKey"] == HOME_CARD_TASK_KEY:
                 self._showHomeCardTaskError(
                     task,
-                    "不能把定时任务自身设为目标卡片。",
+                    "不能把自动任务自身设为目标卡片。",
                 )
+                return
+            if task["operation"] == CLOSE_HOME_CARD_ACTION:
+                self._closeHomeCard(task["targetKey"])
                 return
             if not self._executeHomeCard(task["targetKey"], interactive=False):
                 self._showHomeCardTaskError(
@@ -805,12 +824,51 @@ class MainWindow(MSFluentWindow):
             return
         taskId = task["id"]
         if taskId in self._homeCardTaskWorkers:
-            logger.warning("定时任务仍在运行，跳过本次触发: {}", task["name"])
+            logger.warning("自动任务仍在运行，跳过本次触发: {}", task["name"])
             return
         worker = ActionSequenceWorker(taskId, self._getHomeCardTaskActions)
         worker.finished.connect(self._onHomeCardTaskFinished)
+        if self._quitRequested:
+            self._quitTaskIds.add(taskId)
+            worker.finished.connect(self._onQuitHomeCardTaskFinished)
         self._homeCardTaskWorkers[taskId] = worker
         worker.start()
+
+    def _runApplicationHomeCardTasks(self, event):
+        for task in normalize_home_card_tasks(cfg.homeCardTasks.value):
+            if (
+                task["enabled"]
+                and task["trigger"] == APPLICATION_HOME_CARD_TRIGGER
+                and task["event"] == event
+            ):
+                self._handleHomeCardTask(task)
+
+    def _closeHomeCard(self, key):
+        if key == "全屏投送":
+            page = self.broadcastEditPage
+            if page is None:
+                return
+            window = page.broadcastWin
+            if window.isVisible() or window.miniWindow.isVisible():
+                window.close()
+            return
+        if key == "考试倒计时":
+            page = self.countdownPage
+            if page is not None and page.countdownWin.isVisible():
+                page.countdownWin.close()
+            return
+        if key == "全屏时钟":
+            window = self.fullscreenClockWindow
+            if window is not None and window.isVisible():
+                window.close()
+            return
+        pages = {
+            "定时播报": self.schedulePage,
+            "定时关机": self.shutdownPage,
+        }
+        page = pages.get(key)
+        if page is not None and self.stackedWidget.currentWidget() is page:
+            self._navToHome()
 
     def _getHomeCardTaskActions(self, taskId):
         for task in normalize_home_card_tasks(cfg.homeCardTasks.value):
@@ -827,7 +885,7 @@ class MainWindow(MSFluentWindow):
                     for item in normalize_home_card_tasks(cfg.homeCardTasks.value)
                     if item["id"] == taskId
                 ),
-                {"name": "定时任务"},
+                {"name": "自动任务"},
             )
             self._showHomeCardTaskError(task, "；".join(errors))
         if worker is not None:
@@ -846,7 +904,7 @@ class MainWindow(MSFluentWindow):
     def _showHomeCardTaskError(self, task, message):
         self._showMainWindow()
         InfoBar.error(
-            "定时任务执行失败",
+            "自动任务执行失败",
             f"{task.get('name') or '未命名任务'}：{message}",
             duration=5000,
             position=InfoBarPosition.BOTTOM_RIGHT,
@@ -905,8 +963,8 @@ class MainWindow(MSFluentWindow):
             )
         if "定时播报" in self.homePage.all_cards:
             self.homePage.all_cards["定时播报"].clicked.connect(self._navToSchedule)
-        if "定时任务" in self.homePage.all_cards:
-            self.homePage.all_cards["定时任务"].clicked.connect(
+        if HOME_CARD_TASK_KEY in self.homePage.all_cards:
+            self.homePage.all_cards[HOME_CARD_TASK_KEY].clicked.connect(
                 self._navToHomeCardTasks
             )
         if "定时关机" in self.homePage.all_cards:
@@ -1613,7 +1671,21 @@ class MainWindow(MSFluentWindow):
         QApplication.quit()
 
     def requestQuit(self):
+        if self._quitRequested:
+            return
+        self._quitRequested = True
         self._saveGeometry()
+        self._runApplicationHomeCardTasks(APPLICATION_QUIT_EVENT)
+        if self._quitTaskIds:
+            return
+        self._finishRequestedQuit()
+
+    def _onQuitHomeCardTaskFinished(self, taskId, _errors):
+        self._quitTaskIds.discard(taskId)
+        if not self._quitTaskIds:
+            self._finishRequestedQuit()
+
+    def _finishRequestedQuit(self):
         self._shutdownResources()
         if self._downloadWorker is not None:
             self._quitAfterDownload = True

@@ -1,6 +1,6 @@
 # DJCat Pro 5
 
-面向 Windows 教室场景的桌面助手，提供全屏信息投送、考试倒计时、定时音频播报、定时主页卡片、定时关机和可编排的主页入口。配套服务为桌面端提供 AI Markdown 转换和应用市场目录。
+面向 Windows 教室场景的桌面助手，提供全屏信息投送、考试倒计时、定时音频播报、按时间或软件行为触发的自动任务、定时关机和可编排的主页入口。配套服务为桌面端提供 AI Markdown 转换和应用市场目录。
 
 ## Language
 
@@ -11,7 +11,7 @@
 _Avoid_: shortcut、tile；不加限定地称 card
 
 **Default Home Card**:
-DJCat 自带的 Home Card，目前固定为“全屏投送”“考试倒计时”“全屏时钟”“定时播报”“定时任务”和“定时关机”。用户可以移除、恢复和排序，但不能改写它代表的功能。
+DJCat 自带的 Home Card，目前固定为“全屏投送”“考试倒计时”“全屏时钟”“定时播报”“自动任务”和“定时关机”。用户可以移除、恢复和排序，但不能改写它代表的功能。
 _Avoid_: built-in app、system card
 
 **Custom Home Card**:
@@ -62,10 +62,10 @@ _Avoid_: timer、Scheduled Task
 “全屏时钟”显示当前系统时间，进入后直接全屏展示，也可切换为固定大小的窗口。它没有计时控制或编辑页面，关闭后不保存状态。
 _Avoid_: Exam Countdown、timer、Scheduled Task
 
-### 定时任务
+### 定时与自动任务
 
 **Scheduled Task**:
-按启用状态、星期和精确时间反复匹配的本地规则。当前有 Broadcast Task、Home Card Task 和 Shutdown Task 三种；提到 Task 时应始终写明种类。
+按启用状态、星期和精确时间反复匹配的本地规则。Broadcast Task、使用固定时间的 Home Card Task 和 Shutdown Task 属于 Scheduled Task；软件行为触发的 Home Card Task 不参与定时匹配。提到 Task 时应始终写明种类。
 _Avoid_: alarm、job；不加限定地称 task
 
 **Broadcast Task**:
@@ -77,8 +77,12 @@ Broadcast Task 要播放的内容来源，分为内置报时或铃声、系统 T
 _Avoid_: Broadcast Type、media type
 
 **Home Card Task**:
-“定时任务”中的 Scheduled Task。它可以按稳定 key 引用一个现存 Home Card，到点复用该卡片的执行行为；也可以直接拥有一个没有标题、说明和图标的 Action Sequence。Home Card Task 不能引用“定时任务”自身；目标被删除时保留原引用并显示为失效，不自动改选其他卡片。同一自定义 Home Card Task 尚未结束时，后续触发会跳过，避免动作并发重入。
+“自动任务”中的本地自动化规则，可按固定时间或 Application Lifecycle Event 触发。它可以按稳定 key 引用一个现存 Home Card 并复用其执行行为，也可关闭正在运行的 Default Home Card，或直接拥有一个没有标题、说明和图标的 Action Sequence。Home Card Task 不能引用“自动任务”自身；目标被删除时保留原引用并显示为失效，不自动改选其他卡片。关闭未运行的功能时静默跳过；同一自定义 Home Card Task 尚未结束时，后续触发也会跳过，避免动作并发重入。
 _Avoid_: Broadcast Task、Custom Home Card、复制卡片
+
+**Application Lifecycle Event**:
+Home Card Task 可选择的软件行为，当前包括每次启动、开机静默启动和从 Tray Menu 退出。普通启动只触发启动事件；静默启动同时触发启动和静默启动事件。关闭主窗口、更新安装退出、Storage Migration 或其他非 Tray Menu 退出不触发退出事件。
+_Avoid_: Scheduled Task、操作系统关机、主窗口关闭
 
 **Shutdown Task**:
 “定时关机”中的 Scheduled Task，在匹配时直接关闭计算机或先进入 Shutdown Prompt。它的“本次不关机”只跳过当前触发，不会禁用或删除任务。
@@ -272,8 +276,8 @@ _Not_: quit（结束 DJCat 进程）
 - **Tray Card Shortcut**、主页固定项和 Application Store 共享 `cfg.pinnedHomeCards` 中的稳定引用；图片缓存路径只是可更新的派生元数据。
 - **Custom Home Card** 包含一个 Action Sequence；`ActionSequenceWorker` 每次执行前读取最新动作列表，同一动作 ID 在一次运行中至多执行一次。
 - Custom Home Card 与 Custom 模式的 **Home Card Task** 共享 `ActionSequenceEditor` 和 Home Action 校验规则；两者只共享编辑与执行能力，不共享标题、图标或持久化对象。
-- Broadcast Task、Home Card Task 与 Shutdown Task 持久化在 `cfg`；对应设置页只编辑规则，MainWindow 的调度循环负责匹配时间并触发执行。
-- Existing-card 模式的 **Home Card Task** 只保存稳定 Home Card key 和用于失效提示的标题快照；Custom 模式直接拥有 Action Sequence，但不会创建 Custom Home Card。
+- Broadcast Task、Home Card Task 与 Shutdown Task 持久化在 `cfg`；对应设置页只编辑规则，MainWindow 负责按时间匹配或分发 Application Lifecycle Event。
+- Existing-card 模式的 **Home Card Task** 只保存稳定 Home Card key、用于失效提示的标题快照和打开／关闭动作；关闭只适用于 Default Home Card。Custom 模式直接拥有 Action Sequence，但不会创建 Custom Home Card。
 - AI Markdown Conversion 使用 Machine Identity 领取和结算 Daily Quota；Machine Code 只是定位该身份的可见别名。
 - Animation Tick 推进动画属性；Qt/Windows 的绘制与合成链路再决定 Presented Frame。两者不能互换描述。
 - Menu Reveal 由 Animation Tick 推进，但菜单 viewport 刷新次数不是动画帧数；合并冗余刷新不能改变用户看到的展开效果。
@@ -301,13 +305,13 @@ TrayControlPage 只渲染 Tray Card Shortcut 开关，不得在刷新控件时�
 **MainWindow** 是桌面端组合根和长生命周期运行时所有者。它负责：
 
 - 导航、搜索框和系统托盘的页面级绑定；
-- Scheduled Task 的定时匹配、音频播放、Home Card/Action Sequence 执行和 Client Update 流程；
+- Scheduled Task 的定时匹配、Application Lifecycle Event 分发、音频播放、Home Card/Action Sequence 执行和 Client Update 流程；
 - Projection、Exam Countdown 与 Shutdown Prompt 的窗口创建和回收；
 - 应用退出时停止页面工作线程、音频、下载和待保存编辑。
 
 **HomePage** 是唯一随 MainWindow 立即创建的导航页面。Application Store、Credits、Tray Control 和 Setting 使用 Lazy Page；Projection 编辑、Exam Countdown、Broadcast Task、Home Card Task 和 Shutdown Task 页面通过 `_getTaskPage()` 系列方法首次打开时创建。
 
-只有启用了启动恢复且最近一次 Projection 仍处于活动状态时，MainWindow 才在启动阶段创建 Projection 编辑页面并恢复投送；其他启动路径保持该页面懒加载。
+只有启用了启动恢复且最近一次 Projection 仍处于活动状态，或启动时触发的 Home Card Task 明确打开 Projection 时，MainWindow 才在启动阶段创建 Projection 编辑页面；仅关闭尚未打开的 Projection 不会破坏懒加载。
 
 Lazy Page 必须保留外部调用需要的最小接口：
 
@@ -326,9 +330,9 @@ Broadcast Task、Home Card Task 和 Shutdown Task 都按各自 `cfg` 列表的�
 
 三类 Scheduled Task 共用表单和 `TaskFormSettingCard`，但展示材质取决于表单宿主：新建对话框中的每个配置项保留独立圆角卡片；已有任务的展开区域只绘制分割线并透出外层材质，避免卡片嵌套。表单交给 ScrollArea 后会被 Qt 重新设置父对象，因此材质模式必须在构造时依据原始宿主确定，不能在绘制阶段沿当前父链判断。修改共享表单时应同时验证三类任务的新建和已有任务两种场景。
 
-MainWindow 的单一调度循环在对应管理页面从未打开时也必须执行 Scheduled Task。Broadcast Task 和 Home Card Task 最多补偿最近 60 秒内被模态窗口或主线程阻塞错过的触发；Shutdown Task 只补偿最近 5 秒，避免恢复运行后执行过期关机。一次触发由任务种类、计划时刻和稳定任务 ID 去重。
+MainWindow 的单一调度循环在对应管理页面从未打开时也必须执行 Scheduled Task。Broadcast Task 和固定时间 Home Card Task 最多补偿最近 60 秒内被模态窗口或主线程阻塞错过的触发；Shutdown Task 只补偿最近 5 秒，避免恢复运行后执行过期关机。软件行为 Home Card Task 完全不参与时间匹配。一次定时触发由任务种类、计划时刻和稳定任务 ID 去重。
 
-Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence；任务被删除或切换模式后，尚未开始的动作停止。同一任务仍在运行时跳过新触发，不弹出并发确认框。Existing-card 模式在触发时解析当前 Home Card 快照，不复制源卡片数据。
+Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence；任务被删除或切换模式后，尚未开始的动作停止。同一任务仍在运行时跳过新触发，不弹出并发确认框。Existing-card 模式在触发时解析当前 Home Card 快照，不复制源卡片数据；关闭 Projection 时同时识别正常窗口和悬浮恢复入口，关闭未打开的功能不创建页面、不报错。
 
 ### 应用市场
 
@@ -409,7 +413,7 @@ AI Markdown 输入框的忙碌边框使用 2 px 渐变 QSS 边框。Qt 样式表
 | `app/platform/menu_animation.py` | QFluentWidgets 全局 Menu Reveal 管理器适配，不改变原版展开视觉 |
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
-| `app/common/home_card_tasks.py` | Home Card Task schema 归一化、稳定 ID 和模式常量；不负责计时或 QWidget |
+| `app/common/home_card_tasks.py` | Home Card Task schema 归一化、稳定 ID、触发事件和动作常量；不负责计时或 QWidget |
 | `app/view/windows/main_window.py` | 桌面组合根、导航、长期运行任务和 Client Update UI |
 | `app/view/pages/` | 页面、临时展示窗口和页面级 worker 编排 |
 | `app/view/pages/home_card_task_page.py` | Home Card Task 的懒加载编辑页面；不拥有调度计时器 |
@@ -447,6 +451,7 @@ set working directory
       → publish the complete Home Card snapshot to Tray Control and Tray Menu
       → create tray and long-lived timers/workers
       → restore valid active Projection Snapshot only when recovery is enabled
+      → dispatch startup event and, when applicable, silent-startup event
   → bind activation request and aboutToQuit
   → Qt event loop
 ```
@@ -472,7 +477,10 @@ switchTo(target)
 ### Shutdown
 
 ```text
-MainWindow._shutdownResources()
+Tray Menu quit → MainWindow.requestQuit()
+  → dispatch application-quit Home Card Tasks
+  → wait asynchronously for newly started custom Action Sequences
+  → MainWindow._shutdownResources()
   → stop navigation animation and timers
   → cancel Edge TTS and stop audio players
   → flush loaded Setting / Scheduled Task editors
@@ -483,7 +491,7 @@ MainWindow._shutdownResources()
   → QApplication exits and releases the single-instance lock
 ```
 
-`_shutdownResources()` 必须幂等。Lazy Page 未加载时，关闭流程不能为了清理而创建它。程序退出期间关闭 Projection 窗口时，必须保留 Projection Snapshot 的活动状态；只有用户主动关闭投送或返回编辑才结束下次启动恢复。
+`_shutdownResources()` 必须幂等。Application Lifecycle Event 的退出触发只归属于 Tray Menu 请求，不应接到 `aboutToQuit` 或其他关闭路径；自定义退出动作完成前不能提前取消对应 worker。Lazy Page 未加载时，关闭流程不能为了清理而创建它。正常退出期间未被主动关闭的 Projection 必须保留 Projection Snapshot 的活动状态；用户主动关闭、自动任务明确关闭投送或返回编辑才结束下次启动恢复。
 
 ## Animation scheduling
 
@@ -542,7 +550,8 @@ def __init__(self, parent=None):
 ## Flagged ambiguities
 
 - “全屏投送”过去容易被称为 Broadcast，但项目中的 Broadcast Task 是音频定时播报。已统一用 **Projection** 表示文字展示。
-- UI 名称“定时任务”容易与所有 Scheduled Task 混淆。领域语义中用 **Home Card Task** 专指定时执行已有主页卡片或自定义 Action Sequence 的任务。
+- UI 名称“自动任务”不等同于所有 Scheduled Task。领域语义中用 **Home Card Task** 专指按固定时间或 Application Lifecycle Event 执行 Home Card、自定义 Action Sequence，或关闭 Default Home Card 的规则。
+- “电教猫关闭时”指 Tray Menu 的退出程序，不是关闭主窗口、系统关机、更新重启或任意 `aboutToQuit` 信号。
 - “更新”可能指 DJCat 自身或市场 Application。已拆为 **Client Update** 与 **Application Update**。
 - “安装版”可能被误解为 Installed Application。已定义 **Installed Mode** 专指 DJCat 的 App Data Directory 位置。
 - “下载次数”并不证明 Package 已完整下载或安装。它是服务端去重后的下载重定向请求累计值。
@@ -561,7 +570,10 @@ def __init__(self, parent=None):
 > **Domain expert:** “不是。Projection 显示文字；Broadcast Task 到点播放 Audio Source。”
 
 > **Dev:** “Home Card Task 选择自定义后，会不会在主页新增一张 Custom Home Card？”
-> **Domain expert:** “不会。它只在该 Scheduled Task 内拥有 Action Sequence，没有独立的标题、说明和图标，也不会成为主页入口。”
+> **Domain expert:** “不会。它只在该 Home Card Task 内拥有 Action Sequence，没有独立的标题、说明和图标，也不会成为主页入口。”
+
+> **Dev:** “关闭主窗口时，会不会触发‘电教猫关闭时’的自动任务？”
+> **Domain expert:** “不会。关闭主窗口只是隐藏；该 Application Lifecycle Event 只由 Tray Menu 的退出程序触发。”
 
 > **Dev:** “应用预设卡片和用户自定义卡片都可以执行动作，是同一种卡片吗？”
 > **Domain expert:** “不是。Application Home Card 执行 Application Catalog 提供的受限 Application Action；Custom Home Card 执行用户在本机编排的 Action Sequence。”

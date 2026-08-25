@@ -139,7 +139,7 @@ class FullscreenClockMigrationTest(TestCase):
                     "全屏时钟",
                     "定时关机",
                     "定时播报",
-                    "定时任务",
+                    "自动任务",
                 ]
                 self.assertEqual(cfg.homeCardOrder.value, expected)
                 self.assertEqual(cfg.visibleDefaultHomeCards.value, expected)
@@ -187,7 +187,7 @@ class FullscreenClockMigrationTest(TestCase):
                 expected = [
                     "考试倒计时",
                     "定时播报",
-                    "定时任务",
+                    "自动任务",
                     "全屏投送",
                     "全屏时钟",
                     "定时关机",
