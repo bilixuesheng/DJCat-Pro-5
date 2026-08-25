@@ -810,12 +810,12 @@ class SettingPage(ScrollArea):
         )
 
     def _initLayout(self) -> None:
-        self.addSettingGroup(self.personalGroup)
         self.addSettingGroup(self.bannerGroup)
         self.addSettingGroup(self.broadcastGroup)
         self.addSettingGroup(self.aiMarkdownGroup)
         self.addSettingGroup(self.countdownGroup)
         self.addSettingGroup(self.fullscreenClockGroup)
+        self.addSettingGroup(self.personalGroup)
         self.addSettingGroup(self.softwareGroup)
         self.addSettingGroup(self.aboutGroup)
 

@@ -377,6 +377,8 @@ class SettingSearchTest(TestCase):
             page.aiMarkdownGroup,
             page.countdownGroup,
             page.fullscreenClockGroup,
+            page.personalGroup,
+            page.softwareGroup,
         ]
 
         self.assertEqual(
