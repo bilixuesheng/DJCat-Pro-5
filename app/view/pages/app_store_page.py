@@ -333,10 +333,11 @@ class ActionProgressButton(PrimaryPushButton):
         super().paintEvent(event)
         if self._progress is None and not self._indeterminate:
             return
-        width = float(self.width())
+        inset = 5.0
+        width = max(0.0, self.width() - inset * 2.0)
         if width <= 0:
             return
-        track = QRectF(0.0, self.height() - 2.0, width, 2.0)
+        track = QRectF(inset, self.height() - 2.0, width, 2.0)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
