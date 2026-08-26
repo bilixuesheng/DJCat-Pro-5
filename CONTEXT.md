@@ -296,7 +296,7 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 **Tray Menu 不拥有 Home Card。** 它只根据 HomePage 提供的入口快照重建菜单，并把稳定 key 交回 MainWindow/HomePage 执行。
 
-Tray Menu 在 Windows 10 上用与菜单样式一致的窗口区域裁出圆角；原生展开动画设置的遮罩必须与圆角区域相交，不能覆盖它。Windows 11 继续使用系统圆角，一级菜单和主页卡片二级菜单保持相同规则。
+Tray Menu 的自定义 AcrylicMenu 在 Windows 10 上统一使用方角窗口和方角边框，一级菜单和主页卡片二级菜单保持一致；Windows 11 继续使用系统圆角。该平台差异只属于 Tray Menu，不修改下拉框、输入框右键等 QFluentWidgets 菜单。
 
 **HomePage 按稳定 key 复用 Application Home Card。** 不变快照不得重建卡片或重复发布主页变化；标题、图标和动作更新原有卡片，移除时才释放对应 QWidget。
 
