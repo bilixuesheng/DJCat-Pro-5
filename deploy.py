@@ -51,6 +51,7 @@ def build_args() -> list[str]:
         "--include-package=linkify_it",
         "--include-package=pygments",
         "--include-package=emoji",
+        "--include-package=PIL",
         "--include-data-dir=app/assets=app/assets",
         "--windows-icon-from-ico=app/assets/logo.png",
         f'--company-name="{AUTHOR}"',

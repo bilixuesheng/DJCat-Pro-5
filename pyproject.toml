@@ -21,6 +21,7 @@ dependencies = [
     "emoji~=2.14",
     "nuitka",
     "imageio",
+    "Pillow==12.3.0",
     "edge-tts==7.2.8"
 ]
 

@@ -1,4 +1,5 @@
 import base64
+from io import BytesIO
 import json
 import os
 import shutil
@@ -12,6 +13,8 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlparse
+
+from PIL import Image
 
 from app.common import application_store as applicationStoreModule
 from app.common.application_store import (
@@ -386,16 +389,26 @@ class ApplicationStoreTest(TestCase):
         self.store.cache.sweepIfDue()
         self.assertFalse(old.exists())
 
-    def testCacheDownloadsIcoWithNativeSuffix(self):
+    def testCacheNormalizesBmpBasedIcoToPng(self):
         url = "https://example.test/icon.ICO?revision=2"
-        ico = Path(__file__).parents[1] / "app" / "assets" / "installer_logo.ico"
+        icon = Image.new("RGBA", (48, 48), (30, 100, 220, 180))
+        ico = BytesIO()
+        icon.save(
+            ico,
+            format="ICO",
+            sizes=[(16, 16), (32, 32), (48, 48)],
+            bitmap_format="bmp",
+        )
         session = _Session()
-        session.get = lambda *args, **kwargs: _Response((ico.read_bytes(),), url)
+        session.get = lambda *args, **kwargs: _Response((ico.getvalue(),), url)
 
         path = self.store.imagePath(url, session)
 
-        self.assertEqual(path.suffix, ".ico")
-        self.assertTrue(self.store.cache._isValidImage(path, b"ico"))
+        self.assertEqual(path.suffix, ".png")
+        self.assertEqual(path.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertTrue(self.store.cache._isValidImage(path))
+        with Image.open(path) as normalized:
+            self.assertEqual(normalized.size, (48, 48))
 
     def testCacheReleasesUnusedPathLocks(self):
         self.store.imagePath("https://example.test/icon.png", _Session())

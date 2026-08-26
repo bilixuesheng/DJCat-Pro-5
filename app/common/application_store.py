@@ -18,6 +18,7 @@ from urllib.parse import urljoin, urlparse
 from weakref import WeakValueDictionary
 
 import requests
+from PIL import Image
 from PySide6.QtGui import QImageReader
 
 from app.common.application_version import (
@@ -472,6 +473,8 @@ class ImageCache:
         suffix = Path(urlparse(url).path).suffix.lower()
         if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg", ".ico"}:
             suffix = ".img"
+        elif suffix == ".ico":
+            suffix = ".png"
         return self.directory / f"{hashlib.sha256(url.encode()).hexdigest()}{suffix}"
 
     def get(self, url: str, session=requests) -> Path:
@@ -524,8 +527,9 @@ class ImageCache:
                         if size > MAX_IMAGE_BYTES:
                             raise ApplicationStoreError("图片超过 20MB，未写入缓存")
                         output.write(chunk)
-                formatHint = b"ico" if path.suffix == ".ico" else b""
-                if not self._isValidImage(temporary, formatHint):
+                if Path(urlparse(url).path).suffix.lower() == ".ico":
+                    self._normalizeIco(temporary)
+                if not self._isValidImage(temporary):
                     raise ApplicationStoreError("下载内容不是有效图片")
                 with self._pathLocksLock:
                     if generation != self._generation:
@@ -539,8 +543,31 @@ class ImageCache:
             response.close()
 
     @staticmethod
-    def _isValidImage(path: Path, formatHint: bytes = b"") -> bool:
-        reader = QImageReader(str(path), formatHint)
+    def _normalizeIco(path: Path) -> None:
+        try:
+            with Image.open(path) as source:
+                if source.format != "ICO":
+                    raise ValueError("not an ICO image")
+                sizes = source.ico.sizes()
+                if not sizes:
+                    raise ValueError("ICO image has no frames")
+                width, height = max(sizes, key=lambda size: size[0] * size[1])
+                if (
+                    width > MAX_IMAGE_DIMENSION
+                    or height > MAX_IMAGE_DIMENSION
+                    or width * height > MAX_IMAGE_PIXELS
+                ):
+                    raise ApplicationStoreError("图片尺寸过大，未写入缓存")
+                image = source.ico.getimage((width, height)).convert("RGBA")
+            image.save(path, format="PNG")
+        except ApplicationStoreError:
+            raise
+        except (OSError, ValueError) as error:
+            raise ApplicationStoreError("下载内容不是有效图片") from error
+
+    @staticmethod
+    def _isValidImage(path: Path) -> bool:
+        reader = QImageReader(str(path))
         size = reader.size()
         if (
             not reader.canRead()

@@ -385,7 +385,7 @@ Storage Migration 的安全约束：
 
 **ImageCache** 拥有应用图片和临时 Package 所在缓存根目录的清理互斥。存在下载或安装操作时拒绝清缓存；设置页只发出用户意图并显示 `ImageCache.size()`。
 
-Application 图标允许使用 PNG、JPEG、WebP、GIF、BMP、SVG 和 ICO。`ImageCache` 必须保留这些已识别的 URL 文件后缀；下载临时文件以 `.part` 结尾，校验 ICO 时显式指定 `ico` 格式，再原子替换到最终缓存路径。不得把 ICO 退化为通用 `.img`，因为 Application Store、主页和 Tray Menu 都直接复用该缓存路径加载图标。
+Application 图标允许使用 PNG、JPEG、WebP、GIF、BMP、SVG 和 ICO。`ImageCache` 保留普通图片已识别的 URL 文件后缀；ICO 在临时文件中由 Pillow 读取最大尺寸帧并规范化为 PNG，再原子替换到 `.png` 缓存路径。Application Store、主页和 Tray Menu 只复用规范化后的路径，不应各自承担 ICO 解码兼容。
 
 ### Projection 渲染
 

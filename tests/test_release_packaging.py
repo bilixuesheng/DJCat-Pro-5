@@ -103,6 +103,10 @@ def test_pre_release_number_is_preserved_in_windows_file_version(monkeypatch):
     assert "--product-version=5.0.0.22" in args
 
 
+def test_windows_build_includes_ico_normalizer():
+    assert "--include-package=PIL" in deploy.build_args()
+
+
 def test_release_uses_the_committed_lock_for_tests_and_builds():
     workflow = (REPO / ".github" / "workflows" / "main.yml").read_text(
         encoding="utf-8"

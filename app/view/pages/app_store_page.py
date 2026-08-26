@@ -3,6 +3,7 @@ import time
 from queue import Empty, PriorityQueue, Queue
 from pathlib import Path
 
+from loguru import logger
 from PySide6.QtCore import (
     QAbstractAnimation,
     QEasingCurve,
@@ -258,8 +259,12 @@ class CatalogImageWorker(QObject):
                 if not cancelEvent.is_set():
                     try:
                         result = url, str(store.imagePath(url))
-                    except Exception:
-                        pass
+                    except Exception as error:
+                        logger.warning(
+                            "应用市场图片加载失败（{}）：{}",
+                            QUrl(url).fileName(),
+                            error,
+                        )
                 if not cancelEvent.is_set():
                     results.put(result)
             finally:
