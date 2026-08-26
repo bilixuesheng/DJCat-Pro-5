@@ -10,7 +10,15 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QEvent,
+    QObject,
+    QPoint,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import QColor, QImage, QInputDevice
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QLabel, QScroller, QWidget
@@ -242,6 +250,9 @@ class AppStorePageTest(TestCase):
         background = QImage(image)
 
         button.setProgress(100)
+        button._progressAnimation.setCurrentTime(
+            button._progressAnimation.duration()
+        )
         button.render(image)
 
         color = qconfig.themeColor.value
@@ -260,6 +271,9 @@ class AppStorePageTest(TestCase):
         button.resize(120, 32)
         button.setEnabled(False)
         button.setProgress(50)
+        button._progressAnimation.setCurrentTime(
+            button._progressAnimation.duration()
+        )
         image = QImage(button.size(), QImage.Format.Format_ARGB32)
 
         button.render(image)
@@ -268,6 +282,40 @@ class AppStorePageTest(TestCase):
         color = qconfig.themeColor.value
         self.assertEqual(image.pixelColor(button.width() // 2 - 2, y), color)
         self.assertNotEqual(image.pixelColor(button.width() // 2 - 1, y), color)
+
+    def testDeterminateProgressAnimatesFromTheCurrentDisplayedValue(self):
+        button = ActionProgressButton("下载中")
+        self.addCleanup(button.deleteLater)
+
+        button.setProgress(40)
+        self.assertEqual(button._progressAnimation.duration(), 150)
+        self.assertEqual(button._displayProgress, 0)
+        button._progressAnimation.setCurrentTime(75)
+        halfway = button._displayProgress
+        self.assertGreater(halfway, 0)
+        self.assertLess(halfway, 40)
+
+        button.setProgress(80)
+        self.assertEqual(button._displayProgress, halfway)
+        button._progressAnimation.setCurrentTime(75)
+        self.assertGreater(button._displayProgress, halfway)
+        self.assertLess(button._displayProgress, 80)
+        button._progressAnimation.setCurrentTime(150)
+        self.assertEqual(button._displayProgress, 80)
+
+    def testIndeterminateProgressHandsOffToAnimatedProgressAtZero(self):
+        button = ActionProgressButton("下载中 0%")
+        self.addCleanup(button.deleteLater)
+        button.setProgress(indeterminate=True)
+
+        button.setProgress(25)
+
+        self.assertFalse(button._progressTimer.isActive())
+        self.assertEqual(button._displayProgress, 0)
+        self.assertEqual(
+            button._progressAnimation.state(),
+            QAbstractAnimation.State.Running,
+        )
 
     def testIndeterminateProgressUsesUpdatedThemeColor(self):
         button = ActionProgressButton("下载中 0%")

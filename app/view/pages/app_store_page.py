@@ -9,6 +9,7 @@ from PySide6.QtCore import (
     QEvent,
     QObject,
     QPoint,
+    Property,
     QPropertyAnimation,
     QRectF,
     QSize,
@@ -305,24 +306,54 @@ class ActionProgressButton(PrimaryPushButton):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._progress = None
+        self._displayProgress = 0.0
         self._indeterminate = False
         self._progressOffset = 0.0
+        self._progressAnimation = QPropertyAnimation(
+            self, b"displayProgress", self
+        )
+        self._progressAnimation.setDuration(150)
         self._progressTimer = QTimer(self)
         self._progressTimer.setInterval(30)
         self._progressTimer.timeout.connect(self._advanceProgress)
 
     def setProgress(self, progress=None, indeterminate=False):
         self._indeterminate = bool(indeterminate)
-        self._progress = (
-            max(0, min(100, int(progress)))
-            if progress is not None and not self._indeterminate
-            else None
-        )
         if self._indeterminate:
+            self._progressAnimation.stop()
+            self._progress = None
+            self._displayProgress = 0.0
             self._progressTimer.start()
         else:
             self._progressTimer.stop()
             self._progressOffset = 0.0
+            if progress is None:
+                self._progressAnimation.stop()
+                self._progress = None
+                self._displayProgress = 0.0
+            else:
+                target = max(0, min(100, int(progress)))
+                if (
+                    self._progress == target
+                    and self._progressAnimation.state()
+                    == QAbstractAnimation.State.Running
+                ):
+                    return
+                self._progress = target
+                self._progressAnimation.stop()
+                if self._displayProgress == target:
+                    self.update()
+                    return
+                self._progressAnimation.setStartValue(self._displayProgress)
+                self._progressAnimation.setEndValue(float(target))
+                self._progressAnimation.start()
+        self.update()
+
+    def _getDisplayProgress(self):
+        return self._displayProgress
+
+    def _setDisplayProgress(self, progress):
+        self._displayProgress = float(progress)
         self.update()
 
     def _advanceProgress(self):
@@ -355,11 +386,13 @@ class ActionProgressButton(PrimaryPushButton):
             fill = QRectF(
                 track.left(),
                 track.top(),
-                width * self._progress / 100.0,
+                width * self._displayProgress / 100.0,
                 track.height(),
             )
         painter.setBrush(color)
         painter.drawRoundedRect(fill, 1.0, 1.0)
+
+    displayProgress = Property(float, _getDisplayProgress, _setDisplayProgress)
 
 
 class ApplicationCard(CardWidget):
