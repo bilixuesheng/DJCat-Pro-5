@@ -277,7 +277,7 @@ class UpdateDialog(MessageBoxBase):
 
 
 class MainWindow(MSFluentWindow):
-    BORDER_WIDTH = 12
+    BORDER_WIDTH = 24
 
     def __init__(self, isSilent: bool = False):
         self.searchEdit = None
