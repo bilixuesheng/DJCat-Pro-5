@@ -311,6 +311,8 @@ TrayControlPage 只渲染 Tray Card Shortcut 开关，不得在刷新控件时�
 - Projection、Exam Countdown 与 Shutdown Prompt 的窗口创建和回收；
 - 应用退出时停止页面工作线程、音频、下载和待保存编辑。
 
+MainWindow 的缩放命中宽度以逻辑像素定义，并按当前 `QScreen.devicePixelRatio()` 换算为无边框库使用的 Win32 物理客户区像素；窗口切换屏幕时重新计算。不得把触控命中宽度直接写成固定物理像素，否则高缩放显示器会按比例缩窄。
+
 **HomePage** 是唯一随 MainWindow 立即创建的导航页面。Application Store、Credits、Tray Control 和 Setting 使用 Lazy Page；Projection 编辑、Exam Countdown、Broadcast Task、Home Card Task 和 Shutdown Task 页面通过 `_getTaskPage()` 系列方法首次打开时创建。
 
 只有启用了启动恢复且最近一次 Projection 仍处于活动状态，或启动时触发的 Home Card Task 明确打开 Projection 时，MainWindow 才在启动阶段创建 Projection 编辑页面；仅关闭尚未打开的 Projection 不会破坏懒加载。
