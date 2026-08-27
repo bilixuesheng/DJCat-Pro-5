@@ -61,6 +61,7 @@ class HomeCardEditTest(TestCase):
             ],
         )
         touchGesture = QScroller.grabbedGesture(self.page.viewport())
+        self.assertGreater(touchGesture.value, 0)
         QTest.mouseClick(self.page.sortBtn, Qt.MouseButton.LeftButton)
 
         for card in (
@@ -116,9 +117,9 @@ class HomeCardEditTest(TestCase):
         self.assertIsNone(firstCard.graphicsEffect())
 
         QTest.mouseClick(self.page.sortBtn, Qt.MouseButton.LeftButton)
-        self.assertEqual(
-            QScroller.grabbedGesture(self.page.viewport()),
-            touchGesture,
+        self.assertGreater(
+            QScroller.grabbedGesture(self.page.viewport()).value,
+            0,
         )
         self.assertFalse(
             firstCard.testAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents)

@@ -1016,7 +1016,12 @@ class HomePage(ScrollArea):
 
         if self._editing_cards:
             QScroller.scroller(self.viewport()).stop()
+            QScroller.ungrabGesture(self.viewport())
         else:
+            QScroller.grabGesture(
+                self.viewport(),
+                QScroller.ScrollerGestureType.TouchGesture,
+            )
             self._saveCardOrder()
 
     def _startCardDrag(self, card, global_position):

@@ -9,13 +9,15 @@ from PySide6.QtCore import QAbstractAnimation, QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QImage, QInputDevice, QPixmap, QWheelEvent
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import (
-    QApplication,
     QAbstractItemView,
+    QApplication,
+    QPushButton,
     QScroller,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
+from qfluentwidgets import ComboBox
 from shiboken6 import delete, isValid
 
 from app.view.components.scroll_area import ScrollArea
@@ -153,6 +155,66 @@ class ScheduleShutdownUiTest(TestCase):
         QTest.qWait(200)
         self.assertGreater(scroll.verticalScrollBar().value(), 0)
         self.assertFalse(cards[0].expandCard.isExpand)
+
+    def testTouchDragStartingOnButtonDoesNotClickIt(self):
+        scroll = ScrollArea()
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        button = QPushButton("下载")
+        clicks = []
+        button.clicked.connect(lambda: clicks.append(True))
+        layout.addWidget(button)
+        for index in range(20):
+            layout.addWidget(QPushButton(str(index)))
+        scroll.setWidget(content)
+        scroll.setWidgetResizable(True)
+        scroll.resize(320, 240)
+        scroll.show()
+        self.addCleanup(scroll.deleteLater)
+        self.app.processEvents()
+
+        device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
+        start = button.rect().center()
+        end = start + QPoint(0, -100)
+        QTest.touchEvent(button, device).press(0, start, button).commit()
+        self.app.processEvents()
+        QTest.touchEvent(button, device).move(0, end, button).commit()
+        QTest.qWait(100)
+        QTest.touchEvent(button, device).release(0, end, button).commit()
+        QTest.qWait(200)
+
+        self.assertGreater(scroll.verticalScrollBar().value(), 0)
+        self.assertEqual(clicks, [])
+        self.assertFalse(button.isDown())
+
+    def testTouchDragStartingOnComboBoxDoesNotOpenIt(self):
+        scroll = ScrollArea()
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        comboBox = ComboBox()
+        comboBox.addItems(["第一项", "第二项"])
+        layout.addWidget(comboBox)
+        for index in range(20):
+            layout.addWidget(QPushButton(str(index)))
+        scroll.setWidget(content)
+        scroll.setWidgetResizable(True)
+        scroll.resize(320, 240)
+        scroll.show()
+        self.addCleanup(scroll.deleteLater)
+        self.app.processEvents()
+
+        device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
+        start = comboBox.rect().center()
+        end = start + QPoint(0, -100)
+        QTest.touchEvent(comboBox, device).press(0, start, comboBox).commit()
+        self.app.processEvents()
+        QTest.touchEvent(comboBox, device).move(0, end, comboBox).commit()
+        QTest.qWait(100)
+        QTest.touchEvent(comboBox, device).release(0, end, comboBox).commit()
+        QTest.qWait(200)
+
+        self.assertIsNone(comboBox.dropMenu)
+        self.assertFalse(comboBox.isDown())
 
     def testSmoothScrollBarAnimationsFollowTheirOwner(self):
         scroll = ScrollArea()
