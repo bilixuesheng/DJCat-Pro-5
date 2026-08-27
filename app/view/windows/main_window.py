@@ -277,12 +277,14 @@ class UpdateDialog(MessageBoxBase):
 
 
 class MainWindow(MSFluentWindow):
-    BORDER_WIDTH = 24
+    RESIZE_BORDER_WIDTH_DIP = 24
 
     def __init__(self, isSilent: bool = False):
         self.searchEdit = None
         self._geometryApplied = False
         super().__init__(parent=None)
+        self._updateResizeBorderWidth(self.screen())
+        self.windowHandle().screenChanged.connect(self._updateResizeBorderWidth)
         self.splashScreen = None
         self._updateInfoBar = None
         self._updateCheckInfoBar = None
@@ -355,6 +357,10 @@ class MainWindow(MSFluentWindow):
         self._runApplicationHomeCardTasks(APPLICATION_STARTUP_EVENT)
         if isSilent:
             self._runApplicationHomeCardTasks(SILENT_STARTUP_EVENT)
+
+    def _updateResizeBorderWidth(self, screen):
+        # qframelesswindow compares this value with physical Win32 client coordinates.
+        self.BORDER_WIDTH = round(self.RESIZE_BORDER_WIDTH_DIP * screen.devicePixelRatio())
 
     def _startMachineRegistration(self):
         if cfg.aiMarkdownMachineCode.value:
