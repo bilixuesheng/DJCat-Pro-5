@@ -62,18 +62,16 @@ def test_installer_is_single_language_and_architecture_aware():
     assert "DefaultDirName={autopf}\\DJCat Pro 5" not in script
 
 
-def test_release_workflow_uses_native_windows_runners_and_four_packages():
+def test_release_workflow_builds_only_x86_64_packages():
     workflow = (REPO / ".github" / "workflows" / "main.yml").read_text(encoding="utf-8")
 
-    assert "runner: windows-2022" in workflow
-    assert "runner: windows-11-arm" in workflow
-    assert "python_arch: x64" in workflow
-    assert "python_arch: arm64" in workflow
+    assert "runs-on: windows-2022" in workflow
+    assert "architecture: x64" in workflow
+    assert "windows-11-arm" not in workflow
+    assert "arm64" not in workflow
     assert "verify_pe_arch.py" in workflow
     assert "Windows-x86_64.zip" in workflow
-    assert "Windows-arm64.zip" in workflow
     assert "Windows-x86_64-Setup.exe" in workflow
-    assert "Windows-arm64-Setup.exe" in workflow
     assert "gh release create" in workflow
     assert 'release_args=()' in workflow
     assert 'if [[ "$TAG" == *-* ]]; then' in workflow
@@ -85,7 +83,7 @@ def test_release_workflow_uses_native_windows_runners_and_four_packages():
     assert 'gh release create "$TAG" release-files/*' in workflow
 
 
-def test_python_requirement_accepts_native_arm_runner_patch_version():
+def test_python_requirement_accepts_release_runner_patch_version():
     metadata = (REPO / "pyproject.toml").read_text(encoding="utf-8")
 
     assert 'requires-python = ">=3.12.8,<3.13"' in metadata

@@ -22,7 +22,6 @@ concurrency:
 
 env:
   PYTHONUTF8: 1
-  # windows-11-arm ships this native ARM64 patch release in its tool cache.
   PYTHON_VERSION: 3.12.10
 
 jobs:
@@ -128,23 +127,11 @@ jobs:
 
   build-windows:
     needs: [ prepare, test-windows ]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - architecture: x86_64
-            runner: windows-2022
-            python_arch: x64
-            inno_arch: x64compatible
-          - architecture: arm64
-            runner: windows-11-arm
-            python_arch: arm64
-            inno_arch: arm64
-    runs-on: ${{ matrix.runner }}
+    runs-on: windows-2022
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
-      BUILD_ARCH: ${{ matrix.architecture }}
-      INNO_ARCH: ${{ matrix.inno_arch }}
+      BUILD_ARCH: x86_64
+      INNO_ARCH: x64compatible
     steps:
       - name: Checkout release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -155,7 +142,7 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          architecture: ${{ matrix.python_arch }}
+          architecture: x64
 
       - name: Set up uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
@@ -167,27 +154,18 @@ jobs:
         shell: pwsh
         run: |
           $actual = python -c "import platform; print(platform.machine().lower())"
-          $expected = if ($env:BUILD_ARCH -eq "arm64") { "arm64" } else { "amd64" }
-          if ($actual.Trim() -ne $expected) {
-            throw "Runner Python architecture is '$actual'; expected '$expected'."
+          if ($actual.Trim() -ne "amd64") {
+            throw "Runner Python architecture is '$actual'; expected 'amd64'."
           }
 
       - name: Install build dependencies
         run: uv sync --frozen
 
-      - name: Test native ARM64 runtime
-        if: matrix.architecture == 'arm64'
-        shell: pwsh
-        run: |
-          uv run --frozen python -m pytest -q
-          uv run --frozen python -m compileall -q app server tests
-          node --check server/static/admin.js
-
       - name: Build standalone application
         run: uv run --frozen python deploy.py
 
       - name: Verify executable architecture
-        run: uv run --frozen python scripts/verify_pe_arch.py dist/djcat.dist/djcat.exe ${{ matrix.architecture }}
+        run: uv run --frozen python scripts/verify_pe_arch.py dist/djcat.dist/djcat.exe x86_64
 
       - name: Build portable ZIP and installer
         shell: pwsh
@@ -240,14 +218,14 @@ jobs:
           $setupHash = (Get-FileHash $setupFile -Algorithm SHA256).Hash.ToLowerInvariant()
           "$setupHash  $(Split-Path $setupFile -Leaf)" | Set-Content -Encoding ascii "$setupFile.sha256"
 
-      - name: Upload architecture packages
+      - name: Upload x86_64 packages
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: DJCat-Pro-v${{ env.VERSION }}-Windows-${{ matrix.architecture }}
+          name: DJCat-Pro-v${{ env.VERSION }}-Windows-x86_64
           path: |
-            DJCat-Pro-v${{ env.VERSION }}-Windows-${{ matrix.architecture }}.zip
-            dist/DJCat-Pro-v${{ env.VERSION }}-Windows-${{ matrix.architecture }}-Setup.exe
-            dist/DJCat-Pro-v${{ env.VERSION }}-Windows-${{ matrix.architecture }}-Setup.exe.sha256
+            DJCat-Pro-v${{ env.VERSION }}-Windows-x86_64.zip
+            dist/DJCat-Pro-v${{ env.VERSION }}-Windows-x86_64-Setup.exe
+            dist/DJCat-Pro-v${{ env.VERSION }}-Windows-x86_64-Setup.exe.sha256
           if-no-files-found: error
 
   publish-release:
@@ -283,9 +261,6 @@ jobs:
             "DJCat-Pro-${TAG}-Windows-x86_64.zip"
             "DJCat-Pro-${TAG}-Windows-x86_64-Setup.exe"
             "DJCat-Pro-${TAG}-Windows-x86_64-Setup.exe.sha256"
-            "DJCat-Pro-${TAG}-Windows-arm64.zip"
-            "DJCat-Pro-${TAG}-Windows-arm64-Setup.exe"
-            "DJCat-Pro-${TAG}-Windows-arm64-Setup.exe.sha256"
           )
           for file in "${expected[@]}"; do
             mapfile -t matches < <(find release-assets -type f -name "$file")
@@ -299,7 +274,7 @@ jobs:
             }
             cp "${matches[0]}" "release-files/$file"
           done
-          test "$(find release-files -maxdepth 1 -type f | wc -l)" -eq 6
+          test "$(find release-files -maxdepth 1 -type f | wc -l)" -eq 3
           (cd release-files && sha256sum -c -- *-Setup.exe.sha256)
 
       - name: Create release
