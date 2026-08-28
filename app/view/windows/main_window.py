@@ -282,9 +282,10 @@ class MainWindow(MSFluentWindow):
     def __init__(self, isSilent: bool = False):
         self.searchEdit = None
         self._geometryApplied = False
+        self._screenChangeConnected = False
         super().__init__(parent=None)
         self._updateResizeBorderWidth(self.screen())
-        self.windowHandle().screenChanged.connect(self._updateResizeBorderWidth)
+        self._connectScreenChanged()
         self.splashScreen = None
         self._updateInfoBar = None
         self._updateCheckInfoBar = None
@@ -361,6 +362,13 @@ class MainWindow(MSFluentWindow):
     def _updateResizeBorderWidth(self, screen):
         # qframelesswindow compares this value with physical Win32 client coordinates.
         self.BORDER_WIDTH = round(self.RESIZE_BORDER_WIDTH_DIP * screen.devicePixelRatio())
+
+    def _connectScreenChanged(self):
+        windowHandle = self.windowHandle()
+        if self._screenChangeConnected or windowHandle is None:
+            return
+        windowHandle.screenChanged.connect(self._updateResizeBorderWidth)
+        self._screenChangeConnected = True
 
     def _startMachineRegistration(self):
         if cfg.aiMarkdownMachineCode.value:
@@ -1755,6 +1763,7 @@ class MainWindow(MSFluentWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
+        self._connectScreenChanged()
         if not self._geometryApplied:
             self._geometryApplied = True
             geometry = cfg.geometry.value
