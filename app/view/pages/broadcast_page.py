@@ -317,7 +317,7 @@ class BroadcastWindow(FramelessWindow):
         cfg.customThemeMode.valueChanged.connect(self.background.refresh)
 
         self.vBoxLayout = QVBoxLayout(self)
-        self.vBoxLayout.setContentsMargins(40, 20, 40, 20)
+        self.vBoxLayout.setContentsMargins(40, 20, 40, 0)
 
         self.titleLabel = TitleLabel(self)
         font = QFont(); font.setPointSize(48); font.setBold(True)

@@ -468,6 +468,21 @@ class MarkdownRendererTest(TestCase):
         self.assertEqual(window.markdownView._content.findChildren(QLabel), [])
         window.close()
 
+    def testBroadcastTextViewsReachWindowBottom(self):
+        window = BroadcastWindow()
+        self.addCleanup(window.close)
+        window.resize(800, 600)
+        window.show()
+
+        for isMarkdown, view in (
+            (False, window.contentEdit),
+            (True, window.markdownView),
+        ):
+            with self.subTest(isMarkdown=isMarkdown):
+                window.setContent("title", "正文", is_markdown=isMarkdown)
+                self.app.processEvents()
+                self.assertEqual(view.geometry().bottom(), window.rect().bottom())
+
     def testClosingBroadcastReleasesItsRenderedDocument(self):
         window = BroadcastWindow()
         window.setContent("title", "# 标题\n\n正文", is_markdown=True)
