@@ -105,6 +105,9 @@ class Config(QConfig):
     showBroadcastTrayAction = ConfigItem(
         "Tray", "ShowBroadcastAction", True, BoolValidator()
     )
+    showHomeCardTaskTrayAction = ConfigItem(
+        "Tray", "ShowHomeCardTaskAction", True, BoolValidator()
+    )
     showShutdownTrayAction = ConfigItem(
         "Tray", "ShowShutdownAction", True, BoolValidator()
     )

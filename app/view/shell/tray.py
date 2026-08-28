@@ -145,8 +145,10 @@ class SystemTrayIcon(QSystemTrayIcon):
         self._homeCards = []
         self.setHomeCards(homeCards)
         cfg.broadcastTasks.valueChanged.connect(self._refreshBroadcastAction)
+        cfg.homeCardTasks.valueChanged.connect(self._refreshHomeCardTaskAction)
         cfg.shutdownTasks.valueChanged.connect(self._refreshShutdownAction)
         cfg.showBroadcastTrayAction.valueChanged.connect(self._rebuildMenu)
+        cfg.showHomeCardTaskTrayAction.valueChanged.connect(self._rebuildMenu)
         cfg.showShutdownTrayAction.valueChanged.connect(self._rebuildMenu)
         cfg.trayHomeCardKeys.valueChanged.connect(self._rebuildMenu)
         cfg.trayHomeCardsInSubmenu.valueChanged.connect(self._rebuildMenu)
@@ -206,12 +208,26 @@ class SystemTrayIcon(QSystemTrayIcon):
             self._refreshTaskAction(
                 self.broadcastAction,
                 cfg.broadcastTasks.value,
-                "关闭所有播报",
-                "开启所有播报",
+                "关闭全部定时播报",
+                "开启全部定时播报",
                 FIF.PLAY,
             )
         else:
             self.broadcastAction = None
+
+        if cfg.showHomeCardTaskTrayAction.value:
+            self.homeCardTaskAction = Action(FIF.HISTORY, "", menu)
+            self.homeCardTaskAction.triggered.connect(self._toggleHomeCardTasks)
+            menu.addAction(self.homeCardTaskAction)
+            self._refreshTaskAction(
+                self.homeCardTaskAction,
+                cfg.homeCardTasks.value,
+                "关闭全部定时任务",
+                "开启全部定时任务",
+                FIF.HISTORY,
+            )
+        else:
+            self.homeCardTaskAction = None
 
         if cfg.showShutdownTrayAction.value:
             self.shutdownAction = Action(FIF.POWER_BUTTON, "", menu)
@@ -220,8 +236,8 @@ class SystemTrayIcon(QSystemTrayIcon):
             self._refreshTaskAction(
                 self.shutdownAction,
                 cfg.shutdownTasks.value,
-                "关闭所有关机",
-                "开启所有关机",
+                "关闭全部定时关机",
+                "开启全部定时关机",
                 FIF.POWER_BUTTON,
             )
         else:
@@ -283,26 +299,42 @@ class SystemTrayIcon(QSystemTrayIcon):
     def _toggleBroadcastTasks(self):
         self._toggleTasks(cfg.broadcastTasks)
 
+    def _toggleHomeCardTasks(self):
+        self._toggleTasks(cfg.homeCardTasks)
+
     def _toggleShutdownTasks(self):
         self._toggleTasks(cfg.shutdownTasks)
 
     def _refreshBroadcastAction(self, tasks):
-        if self.broadcastAction is not None:
+        action = getattr(self, "broadcastAction", None)
+        if action is not None:
             self._refreshTaskAction(
-                self.broadcastAction,
+                action,
                 tasks,
-                "关闭所有播报",
-                "开启所有播报",
+                "关闭全部定时播报",
+                "开启全部定时播报",
                 FIF.PLAY,
             )
 
-    def _refreshShutdownAction(self, tasks):
-        if self.shutdownAction is not None:
+    def _refreshHomeCardTaskAction(self, tasks):
+        action = getattr(self, "homeCardTaskAction", None)
+        if action is not None:
             self._refreshTaskAction(
-                self.shutdownAction,
+                action,
                 tasks,
-                "关闭所有关机",
-                "开启所有关机",
+                "关闭全部定时任务",
+                "开启全部定时任务",
+                FIF.HISTORY,
+            )
+
+    def _refreshShutdownAction(self, tasks):
+        action = getattr(self, "shutdownAction", None)
+        if action is not None:
+            self._refreshTaskAction(
+                action,
+                tasks,
+                "关闭全部定时关机",
+                "开启全部定时关机",
                 FIF.POWER_BUTTON,
             )
 
