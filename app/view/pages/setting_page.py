@@ -717,6 +717,12 @@ class SettingPage(ScrollArea):
                     cfg.showTaskbarInFullscreenClock,
                 ),
                 SwitchSettingCard(
+                    FluentIcon.COPY,
+                    "开启时默认窗口化",
+                    "打开全屏时钟时直接使用窗口化模式",
+                    cfg.fullscreenClockStartWindowed,
+                ),
+                SwitchSettingCard(
                     FluentIcon.PIN,
                     "全屏时置顶",
                     "全屏时钟窗口始终显示在最顶层",

@@ -73,7 +73,7 @@ class FullscreenClockWindow(FramelessWindow):
 
     def startClock(self):
         self.timer.stop()
-        self.is_windowed = False
+        self.is_windowed = cfg.fullscreenClockStartWindowed.value
         self._updateTime()
         self._setupCornerButtons()
         self._applyWindowState()

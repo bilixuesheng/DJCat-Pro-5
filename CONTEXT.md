@@ -59,7 +59,7 @@ _Avoid_: Projection、editor draft、template
 _Avoid_: timer、Scheduled Task
 
 **Fullscreen Clock**:
-“全屏时钟”显示当前系统时间，进入后直接全屏展示，也可切换为固定大小的窗口。它没有计时控制或编辑页面，关闭后不保存状态。
+“全屏时钟”显示当前系统时间，默认全屏展示，也可配置为开启时直接使用固定大小的窗口；展示期间可在全屏和窗口化之间切换。它没有计时控制或编辑页面，关闭后不保存状态。
 _Avoid_: Exam Countdown、timer、Scheduled Task
 
 ### 定时与自动任务

@@ -229,6 +229,9 @@ class Config(QConfig):
     showTaskbarInFullscreenClock = ConfigItem(
         "FullscreenClock", "ShowTaskbar", True, BoolValidator()
     )
+    fullscreenClockStartWindowed = ConfigItem(
+        "FullscreenClock", "StartWindowed", False, BoolValidator()
+    )
     fullscreenClockTopmostInFullscreen = ConfigItem(
         "FullscreenClock", "TopmostInFullscreen", False, BoolValidator()
     )

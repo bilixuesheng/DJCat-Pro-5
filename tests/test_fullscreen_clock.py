@@ -55,10 +55,32 @@ class FullscreenClockTest(TestCase):
         )
         self.assertTrue(cfg.showMainWindowAfterFullscreenClock.defaultValue)
         self.assertTrue(cfg.confirmBeforeCloseFullscreenClock.defaultValue)
+        self.assertFalse(cfg.fullscreenClockStartWindowed.defaultValue)
         self.assertIsNot(
             cfg.fullscreenClockBackgroundMode,
             cfg.countdownBackgroundMode,
         )
+
+    def testStartClockUsesConfiguredWindowMode(self):
+        value = cfg.fullscreenClockStartWindowed.value
+        try:
+            for startWindowed in (False, True):
+                with self.subTest(startWindowed=startWindowed):
+                    cfg.set(
+                        cfg.fullscreenClockStartWindowed,
+                        startWindowed,
+                        save=False,
+                    )
+                    self.window.startClock()
+                    self.app.processEvents()
+
+                    self.assertEqual(self.window.is_windowed, startWindowed)
+                    self.assertEqual(
+                        self.window.titleLabel.isHidden(),
+                        startWindowed,
+                    )
+        finally:
+            cfg.set(cfg.fullscreenClockStartWindowed, value, save=False)
 
     def testWindowedModeKeepsOnlyTimeAndCornerButtons(self):
         self.window.is_windowed = False
