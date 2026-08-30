@@ -132,14 +132,15 @@ _databaseInitLock = threading.Lock()
 _initializedDatabases = {}
 
 
-def _databaseIdentity(path):
+def _databaseIdentity(path, database):
     try:
         info = os.stat(path)
     except OSError:
         return None
-    # ctime and size change during ordinary request writes; only the file
-    # identity belongs in the schema-initialization cache key.
-    return (info.st_dev, info.st_ino)
+    schemaVersion = database.execute("PRAGMA schema_version").fetchone()[0]
+    # Inodes can be reused when a database is replaced at the same path. The
+    # schema version distinguishes an empty replacement without tracking writes.
+    return (info.st_dev, info.st_ino, schemaVersion)
 
 
 def _systemPrompt(customStyle):
@@ -187,10 +188,10 @@ def _connect():
     database.row_factory = sqlite3.Row
     database.execute("PRAGMA foreign_keys = ON")
     databaseKey = str(DATABASE_PATH.resolve())
-    identity = _databaseIdentity(databaseKey)
+    identity = _databaseIdentity(databaseKey, database)
     if _initializedDatabases.get(databaseKey) != identity:
         with _databaseInitLock:
-            identity = _databaseIdentity(databaseKey)
+            identity = _databaseIdentity(databaseKey, database)
             if _initializedDatabases.get(databaseKey) != identity:
                 database.executescript(
                     """
@@ -244,7 +245,9 @@ def _connect():
         GROUP BY machine_id;
                     """
                 )
-                _initializedDatabases[databaseKey] = _databaseIdentity(databaseKey)
+                _initializedDatabases[databaseKey] = _databaseIdentity(
+                    databaseKey, database
+                )
     return database
 
 

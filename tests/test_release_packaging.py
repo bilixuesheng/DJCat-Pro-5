@@ -121,11 +121,12 @@ def test_release_uses_the_committed_lock_for_tests_and_builds():
     assert '"Flask>=3.0"' in metadata
 
 
-def test_release_assets_are_not_overwritten_for_an_existing_tag():
+def test_release_requires_an_explicit_republish_commit_for_an_existing_tag():
     workflow = (REPO / ".github" / "workflows" / "main.yml").read_text(
         encoding="utf-8"
     )
 
-    assert "release assets are immutable" in workflow
+    assert '"$(git log -1 --format=%s)" != "release: republish $TAG"' in workflow
+    assert 'gh release delete "$TAG" --yes --cleanup-tag' in workflow
     assert "--clobber" not in workflow
     assert "gh release upload" not in workflow

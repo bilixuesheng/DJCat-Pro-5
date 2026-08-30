@@ -54,12 +54,12 @@ class SettingGroupHeaderTest(TestCase):
         self.assertEqual(
             [group.objectName() for group in page._settingGroups()],
             [
-                "personalization",
                 "banner",
                 "broadcast",
                 "aiMarkdown",
                 "countdown",
                 "fullscreenClock",
+                "personalization",
                 "software",
                 "about",
             ],
