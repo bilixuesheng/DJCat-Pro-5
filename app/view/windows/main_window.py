@@ -1,5 +1,6 @@
 import json
 import re
+import sys
 import threading
 import time
 from collections import deque
@@ -40,6 +41,9 @@ from qfluentwidgets import (
     setTheme,
     setThemeColor,
 )
+
+if sys.platform == "win32":
+    from qframelesswindow.utils.win32_utils import getResizeBorderThickness
 
 from app.common.ai_markdown import registerMachine
 from app.common.application_version import isUpdateAvailable
@@ -277,14 +281,12 @@ class UpdateDialog(MessageBoxBase):
 
 
 class MainWindow(MSFluentWindow):
-    RESIZE_BORDER_WIDTH_DIP = 24
-
     def __init__(self, isSilent: bool = False):
         self.searchEdit = None
         self._geometryApplied = False
         self._screenChangeConnected = False
         super().__init__(parent=None)
-        self._updateResizeBorderWidth(self.screen())
+        self._updateResizeBorderWidth()
         self._connectScreenChanged()
         self.splashScreen = None
         self._updateInfoBar = None
@@ -359,9 +361,13 @@ class MainWindow(MSFluentWindow):
         if isSilent:
             self._runApplicationHomeCardTasks(SILENT_STARTUP_EVENT)
 
-    def _updateResizeBorderWidth(self, screen):
-        # qframelesswindow compares this value with physical Win32 client coordinates.
-        self.BORDER_WIDTH = round(self.RESIZE_BORDER_WIDTH_DIP * screen.devicePixelRatio())
+    def _updateResizeBorderWidth(self, screen=None):
+        if sys.platform == "win32":
+            self.BORDER_WIDTH = getResizeBorderThickness(self.winId())
+            return
+
+        screen = screen or self.screen()
+        self.BORDER_WIDTH = round(8 * screen.devicePixelRatio())
 
     def _connectScreenChanged(self):
         windowHandle = self.windowHandle()
