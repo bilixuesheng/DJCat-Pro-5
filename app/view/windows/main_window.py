@@ -363,8 +363,10 @@ class MainWindow(MSFluentWindow):
 
     def _updateResizeBorderWidth(self, screen=None):
         if sys.platform == "win32":
-            self.BORDER_WIDTH = getResizeBorderThickness(self.winId())
-            return
+            borderWidth = getResizeBorderThickness(self.winId())
+            if borderWidth > 0:
+                self.BORDER_WIDTH = borderWidth
+                return
 
         screen = screen or self.screen()
         self.BORDER_WIDTH = round(8 * screen.devicePixelRatio())
