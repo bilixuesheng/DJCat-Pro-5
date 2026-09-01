@@ -319,6 +319,8 @@ MainWindow 的缩放命中宽度读取 Windows 的 DPI 感知系统指标 `SM_CX
 
 只有启用了启动恢复且最近一次 Projection 仍处于活动状态，或启动时触发的 Home Card Task 明确打开 Projection 时，MainWindow 才在启动阶段创建 Projection 编辑页面；仅关闭尚未打开的 Projection 不会破坏懒加载。
 
+Exam Countdown 编辑页的返回栏和“开始倒计时”按钮固定在页面两端，四张配置卡片统一放在中间的 `ScrollArea`；窗口高度不足时只滚动配置区，不得压缩卡片造成内容重叠。
+
 Lazy Page 必须保留外部调用需要的最小接口：
 
 | Lazy Page | 加载前可暂存或转发的状态 |

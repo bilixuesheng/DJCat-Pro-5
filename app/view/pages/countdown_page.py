@@ -29,6 +29,7 @@ from qframelesswindow import FramelessWindow
 
 from app.config.cfg import cfg
 from app.config.paths import ASSET_DIR
+from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import QWIDGETSIZE_MAX
 from app.view.components.task_picker import TouchTimePicker
 from app.view.components.window_background import WindowBackground
@@ -495,35 +496,68 @@ class CountdownEditPage(QWidget):
         topLayout.addStretch(1)
         self.vBoxLayout.addLayout(topLayout)
 
-        self.titleInput = LineEdit(self)
+        self.scrollArea = ScrollArea(self)
+        self.scrollArea.setWidgetResizable(True)
+        self.scrollArea.enableTransparentBackground()
+        self.scrollWidget = QWidget(self.scrollArea)
+        self.scrollLayout = QVBoxLayout(self.scrollWidget)
+        self.scrollLayout.setContentsMargins(0, 0, 0, 0)
+        self.scrollLayout.setSpacing(10)
+
+        self.titleInput = LineEdit(self.scrollWidget)
         self.titleInput.setText(DEFAULT_TITLE)
         self.titleInput.setPlaceholderText(DEFAULT_TITLE)
-        self.vBoxLayout.addWidget(
-            FormCard(FIF.FONT, "倒计时标题", "显示在倒计时上方", self.titleInput, self)
+        self.scrollLayout.addWidget(
+            FormCard(
+                FIF.FONT,
+                "倒计时标题",
+                "显示在倒计时上方",
+                self.titleInput,
+                self.scrollWidget,
+            )
         )
 
-        self.endTitleInput = LineEdit(self)
+        self.endTitleInput = LineEdit(self.scrollWidget)
         self.endTitleInput.setText(DEFAULT_END_TITLE)
         self.endTitleInput.setPlaceholderText(DEFAULT_END_TITLE)
-        self.vBoxLayout.addWidget(
-            FormCard(FIF.FONT, "结束时标题", "倒计时结束后显示在上方", self.endTitleInput, self)
+        self.scrollLayout.addWidget(
+            FormCard(
+                FIF.FONT,
+                "结束时标题",
+                "倒计时结束后显示在上方",
+                self.endTitleInput,
+                self.scrollWidget,
+            )
         )
 
-        self.timePicker = TouchTimePicker(self, showSeconds=True)
+        self.timePicker = TouchTimePicker(self.scrollWidget, showSeconds=True)
         for column, unit in enumerate(("时", "分", "秒")):
             self.timePicker.setColumnFormatter(column, UnitFormatter(unit))
         self.timePicker.setTime(QTime(1, 0, 0))
-        self.vBoxLayout.addWidget(
-            FormCard(FIF.STOP_WATCH, "倒计时时长", "设置倒计时的时、分、秒", self.timePicker, self)
+        self.scrollLayout.addWidget(
+            FormCard(
+                FIF.STOP_WATCH,
+                "倒计时时长",
+                "设置倒计时的时、分、秒",
+                self.timePicker,
+                self.scrollWidget,
+            )
         )
 
-        self.voiceSwitch = SwitchButton(self)
+        self.voiceSwitch = SwitchButton(self.scrollWidget)
         self.voiceSwitch.setChecked(True)
-        self.vBoxLayout.addWidget(
-            FormCard(FIF.VOLUME, "语音播报", "剩余 15 分钟与倒计时结束时播放提示音", self.voiceSwitch, self)
+        self.scrollLayout.addWidget(
+            FormCard(
+                FIF.VOLUME,
+                "语音播报",
+                "剩余 15 分钟与倒计时结束时播放提示音",
+                self.voiceSwitch,
+                self.scrollWidget,
+            )
         )
-
-        self.vBoxLayout.addStretch(1)
+        self.scrollLayout.addStretch(1)
+        self.scrollArea.setWidget(self.scrollWidget)
+        self.vBoxLayout.addWidget(self.scrollArea, 1)
 
         btnLayout = QHBoxLayout()
         self.startBtn = PrimaryPushButton(self)

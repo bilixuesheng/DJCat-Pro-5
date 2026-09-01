@@ -8,10 +8,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QScroller, QWidget
 from qfluentwidgets import Flyout, PrimaryPushButton, PushButton
 
 from app.config.cfg import cfg
+from app.view.components.scroll_area import ScrollArea
 from app.view.components.task_picker import TouchTimePicker
 from app.view.pages.countdown_page import CountdownEditPage, CountdownWindow
 
@@ -50,6 +51,31 @@ class CountdownWindowTest(TestCase):
         page = CountdownEditPage()
 
         self.assertIsInstance(page.timePicker, TouchTimePicker)
+        page.close()
+
+    def testEditPageScrollsCardsAtSmallWindowHeight(self):
+        page = CountdownEditPage()
+        page.resize(720, 300)
+        page.show()
+        self.app.processEvents()
+
+        cards = page.scrollWidget.findChildren(
+            QWidget,
+            options=Qt.FindChildOption.FindDirectChildrenOnly,
+        )
+        self.assertIsInstance(page.scrollArea, ScrollArea)
+        self.assertEqual(len(cards), 4)
+        self.assertTrue(
+            all(
+                first.geometry().bottom() < second.geometry().top()
+                for first, second in zip(cards, cards[1:])
+            )
+        )
+        self.assertGreater(page.scrollArea.verticalScrollBar().maximum(), 0)
+        self.assertGreater(
+            QScroller.grabbedGesture(page.scrollArea.viewport()).value,
+            0,
+        )
         page.close()
 
     def testEditPagePassesCustomEndTitle(self):
