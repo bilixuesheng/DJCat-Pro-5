@@ -299,7 +299,6 @@ class BroadcastWindow(FramelessWindow):
         super().__init__()
         self.setObjectName("BroadcastWindow")
         self.titleBar.hide()
-        # 顶层窗口的 QSS 边框需要该属性才会绘制
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self._is_editing = False
         self._isTracking = False
@@ -375,8 +374,8 @@ class BroadcastWindow(FramelessWindow):
     def _applyStyle(self):
         is_dark = isDarkTheme() if cfg.customThemeMode.value == "System" else cfg.customThemeMode.value == "Dark"
         text_color = "white" if is_dark else "black"
-        border = "border: 1px solid #808080;" if self.is_windowed else ""
-        self.setStyleSheet(f"BroadcastWindow {{ background-color: transparent; {border} }} QTextEdit {{ color: {text_color}; background: transparent; }}")
+        self.background.setBorderVisible(self.is_windowed)
+        self.setStyleSheet(f"BroadcastWindow {{ background-color: transparent; }} QTextEdit {{ color: {text_color}; background: transparent; }}")
 
     def setContent(self, title, text, is_markdown=False):
         self._applyStyle()
