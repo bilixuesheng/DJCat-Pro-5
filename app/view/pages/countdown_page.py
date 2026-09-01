@@ -69,7 +69,6 @@ class CountdownWindow(FramelessWindow):
         super().__init__()
         self.setObjectName("CountdownWindow")
         self.titleBar.hide()
-        # 顶层窗口的 QSS 边框需要该属性才会绘制
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.background = WindowBackground(
             cfg.countdownBackgroundMode,
@@ -374,8 +373,8 @@ class CountdownWindow(FramelessWindow):
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
 
-        border = "border: 1px solid #808080;" if self.is_windowed else ""
-        self.setStyleSheet(f"CountdownWindow {{ background-color: transparent; {border} }}")
+        self.background.setBorderVisible(self.is_windowed)
+        self.setStyleSheet("CountdownWindow { background-color: transparent; }")
         self.titleLabel.setVisible(not self.is_windowed)
 
         if self.is_windowed:
