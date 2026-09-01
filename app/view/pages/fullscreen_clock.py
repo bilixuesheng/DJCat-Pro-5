@@ -131,11 +131,9 @@ class FullscreenClockWindow(FramelessWindow):
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
 
-        border = "border: 1px solid #808080;" if self.is_windowed else ""
+        self.background.setBorderVisible(self.is_windowed)
         self.setStyleSheet(
-            "FullscreenClockWindow { "
-            f"background-color: transparent; {border} "
-            "}"
+            "FullscreenClockWindow { background-color: transparent; }"
         )
         self.titleLabel.setVisible(not self.is_windowed)
 
