@@ -94,6 +94,37 @@ class WindowBackgroundTest(TestCase):
                 self.app.processEvents()
                 self.assertEqual(background._image().size(), background.size())
 
+    def testWindowedBorderIsPaintedAboveDarkBackground(self):
+        parent = QWidget()
+        background = WindowBackground(
+            cfg.broadcastBackgroundMode,
+            cfg.broadcastBackgroundColor,
+            cfg.broadcastBackgroundImagePath,
+            cfg.broadcastBackgroundScaleMode,
+            lambda: QColor("#000000"),
+            parent,
+        )
+        background.setGeometry(0, 0, 100, 60)
+        parent.resize(100, 60)
+        parent.show()
+        self.addCleanup(parent.close)
+
+        cfg.set(cfg.broadcastBackgroundMode, "纯色", save=False)
+        cfg.set(cfg.broadcastBackgroundColor, QColor("#000000"), save=False)
+        background.setBorderVisible(True)
+        self.app.processEvents()
+
+        image = background.grab().toImage()
+        self.assertEqual(image.pixelColor(0, 30), QColor("#808080"))
+        self.assertEqual(image.pixelColor(50, 30), QColor("#000000"))
+
+        background.setBorderVisible(False)
+        self.app.processEvents()
+        self.assertEqual(
+            background.grab().toImage().pixelColor(0, 30),
+            QColor("#000000"),
+        )
+
     def testWindowsKeepContentTransparentOverBackground(self):
         broadcast = BroadcastWindow()
         countdown = CountdownWindow()
@@ -117,6 +148,21 @@ class WindowBackgroundTest(TestCase):
         self.assertEqual(broadcast.background.size(), broadcast.size())
         self.assertEqual(countdown.background.size(), countdown.size())
         self.assertEqual(clock.background.size(), clock.size())
+        self.assertFalse(broadcast.background._borderVisible)
+        self.assertFalse(countdown.background._borderVisible)
+        self.assertFalse(clock.background._borderVisible)
+
+        broadcast.is_windowed = True
+        countdown.is_windowed = True
+        clock.is_windowed = True
+        broadcast._applyStyle()
+        countdown._applyWindowState()
+        clock._applyWindowState()
+        self.app.processEvents()
+
+        self.assertTrue(broadcast.background._borderVisible)
+        self.assertTrue(countdown.background._borderVisible)
+        self.assertTrue(clock.background._borderVisible)
 
     @patch("app.view.pages.setting_page.QFileDialog.getOpenFileName")
     def testSettingPageSelectsImageAndEnablesImageMode(self, getOpenFileName):
