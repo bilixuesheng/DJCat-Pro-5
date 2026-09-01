@@ -37,7 +37,11 @@ from app.config.constants import (
 )
 from app.view.pages.setting_page import SettingPage
 from app.view.shell.tray import SystemTrayIcon
-from app.view.windows.main_window import MainWindow, UpdateWorker
+from app.view.windows.main_window import (
+    InstallerLaunchDialog,
+    MainWindow,
+    UpdateWorker,
+)
 
 
 class FakeResponse:
@@ -207,6 +211,18 @@ class ThreadStub:
 
     def start(self):
         self.started = True
+
+
+class InstallerLaunchDialogStub:
+    def __init__(self):
+        self.shown = False
+        self.finished = False
+
+    def show(self):
+        self.shown = True
+
+    def finish(self):
+        self.finished = True
 
 
 class UpdateDownloadTest(TestCase):
@@ -1351,8 +1367,20 @@ class UpdateWindowLifecycleTest(TestCase):
         self.assertIsNone(self.window._navigationTarget)
         self.assertIsNone(self.window._pendingNavigation)
 
-    def testInstallerStartsBeforeApplicationQuits(self):
+    def testInstallerLaunchDialogOnlyContainsIndeterminateProgressRing(self):
+        dialog = InstallerLaunchDialog(self.window)
+
+        self.assertTrue(dialog.isModal())
+        self.assertTrue(dialog.buttonGroup.isHidden())
+        self.assertEqual(dialog.viewLayout.count(), 1)
+        self.assertIs(dialog.viewLayout.itemAt(0).widget(), dialog.progressRing)
+
+        delete(dialog)
+
+    def testInstallerStartsInBackgroundBeforeApplicationQuits(self):
         infoBar = Mock()
+        dialog = InstallerLaunchDialogStub()
+        thread = ThreadStub(lambda: None, True)
         with tempfile.TemporaryDirectory() as tempDir:
             installer = Path(tempDir) / "DJCat-Pro.exe"
             installer.write_bytes(b"MZ")
@@ -1362,11 +1390,73 @@ class UpdateWindowLifecycleTest(TestCase):
                     return_value=(True, 1234),
                 ) as startDetached,
                 patch(
+                    "app.view.windows.main_window.InstallerLaunchDialog",
+                    return_value=dialog,
+                ),
+                patch(
+                    "app.view.windows.main_window.threading.Thread",
+                    return_value=thread,
+                ),
+                patch(
+                    "app.view.windows.main_window.isValid",
+                    return_value=True,
+                ),
+                patch(
                     "app.view.windows.main_window.QApplication.quit"
                 ) as quitApp,
             ):
                 self.window._launchUpdateInstaller(installer, infoBar)
+                worker = self.window._installerLaunchWorker
+
+                self.assertTrue(dialog.shown)
+                self.assertTrue(thread.started)
+                startDetached.assert_not_called()
+                quitApp.assert_not_called()
+
+                worker.run()
 
         startDetached.assert_called_once_with(str(installer), [])
         infoBar.close.assert_called_once_with()
+        self.assertTrue(dialog.finished)
+        self.assertIsNone(self.window._installerLaunchWorker)
+        self.assertIsNone(self.window._installerLaunchThread)
+        self.assertIsNone(self.window._installerLaunchDialog)
         quitApp.assert_called_once_with()
+
+    def testInstallerLaunchFailureClosesDialogAndKeepsApplicationOpen(self):
+        infoBar = Mock()
+        dialog = InstallerLaunchDialogStub()
+        thread = ThreadStub(lambda: None, True)
+        with tempfile.TemporaryDirectory() as tempDir:
+            installer = Path(tempDir) / "DJCat-Pro.exe"
+            installer.write_bytes(b"MZ")
+            with (
+                patch(
+                    "app.view.windows.main_window.QProcess.startDetached",
+                    return_value=(False, 0),
+                ),
+                patch(
+                    "app.view.windows.main_window.InstallerLaunchDialog",
+                    return_value=dialog,
+                ),
+                patch(
+                    "app.view.windows.main_window.threading.Thread",
+                    return_value=thread,
+                ),
+                patch(
+                    "app.view.windows.main_window.isValid",
+                    return_value=True,
+                ),
+                patch(
+                    "app.view.windows.main_window.InfoBar.error",
+                ) as showError,
+                patch(
+                    "app.view.windows.main_window.QApplication.quit"
+                ) as quitApp,
+            ):
+                self.window._launchUpdateInstaller(installer, infoBar)
+                self.window._installerLaunchWorker.run()
+
+        self.assertTrue(dialog.finished)
+        showError.assert_called_once()
+        quitApp.assert_not_called()

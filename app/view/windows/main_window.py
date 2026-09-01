@@ -28,6 +28,7 @@ from qfluentwidgets import (
     DrillInTransitionStackedWidget,
     InfoBar,
     InfoBarPosition,
+    IndeterminateProgressRing,
     MessageBoxBase,
     MSFluentWindow,
     NavigationItemPosition,
@@ -139,6 +140,23 @@ class MachineRegistrationWorker(QObject):
 
     def run(self):
         self.finished.emit(registerMachine() or "")
+
+
+class InstallerLaunchWorker(QObject):
+    finished = Signal(bool)
+
+    def __init__(self, installerPath):
+        super().__init__()
+        self.installerPath = installerPath
+
+    def run(self):
+        try:
+            result = QProcess.startDetached(str(self.installerPath), [])
+            started = result[0] if isinstance(result, tuple) else bool(result)
+        except Exception:
+            logger.exception("启动更新安装程序失败")
+            started = False
+        self.finished.emit(started)
 
 
 class LazyPage(QWidget):
@@ -280,6 +298,23 @@ class UpdateDialog(MessageBoxBase):
         self.widget.setMinimumWidth(contentWidth + 40)
 
 
+class InstallerLaunchDialog(MessageBoxBase):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.progressRing = IndeterminateProgressRing(self.widget)
+        self.progressRing.setFixedSize(64, 64)
+        self.buttonGroup.hide()
+        self.viewLayout.addWidget(self.progressRing, 0, Qt.AlignmentFlag.AlignCenter)
+        self.widget.setFixedSize(120, 120)
+        self.setModal(True)
+
+    def reject(self):
+        pass
+
+    def finish(self):
+        super().accept()
+
+
 class MainWindow(MSFluentWindow):
     def __init__(self, isSilent: bool = False):
         self.searchEdit = None
@@ -298,6 +333,9 @@ class MainWindow(MSFluentWindow):
         self._pendingDownloadProgress = None
         self._downloadVersion = ""
         self._quitAfterDownload = False
+        self._installerLaunchWorker = None
+        self._installerLaunchThread = None
+        self._installerLaunchDialog = None
         self._navigationTarget = None
         self._pendingNavigation = None
         self._updateRequestId = 0
@@ -1666,6 +1704,8 @@ class MainWindow(MSFluentWindow):
         infoBar.show()
 
     def _launchUpdateInstaller(self, installerPath, infoBar):
+        if self._installerLaunchWorker is not None:
+            return
         if not installerPath.is_file():
             InfoBar.error(
                 "无法安装更新",
@@ -1676,8 +1716,33 @@ class MainWindow(MSFluentWindow):
             )
             return
 
-        result = QProcess.startDetached(str(installerPath), [])
-        started = result[0] if isinstance(result, tuple) else bool(result)
+        infoBar.close()
+        dialog = InstallerLaunchDialog(self)
+        worker = InstallerLaunchWorker(installerPath)
+        thread = threading.Thread(target=worker.run, daemon=True)
+        self._installerLaunchDialog = dialog
+        self._installerLaunchWorker = worker
+        self._installerLaunchThread = thread
+        worker.finished.connect(self._onInstallerLaunchFinished)
+        dialog.show()
+        try:
+            thread.start()
+        except RuntimeError:
+            self._onInstallerLaunchFinished(False)
+
+    def _onInstallerLaunchFinished(self, started):
+        worker = self._installerLaunchWorker
+        dialog = self._installerLaunchDialog
+        self._installerLaunchWorker = None
+        self._installerLaunchThread = None
+        self._installerLaunchDialog = None
+        if worker is not None:
+            worker.deleteLater()
+        if dialog is not None and isValid(dialog):
+            dialog.finish()
+
+        if self._resourcesShutdown:
+            return
         if not started:
             InfoBar.error(
                 "无法启动安装程序",
@@ -1688,7 +1753,6 @@ class MainWindow(MSFluentWindow):
             )
             return
 
-        infoBar.close()
         self._shutdownResources()
         QApplication.quit()
 
