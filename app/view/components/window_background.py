@@ -2,7 +2,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPainter, QPixmap
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 from qfluentwidgets import qconfig
 
@@ -27,6 +27,7 @@ class WindowBackground(QWidget):
         self._cachedPixmap = None
         self._sourceKey = None
         self._sourcePixmap = None
+        self._borderVisible = False
         self.setObjectName("window-background")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
@@ -41,6 +42,12 @@ class WindowBackground(QWidget):
 
     def refresh(self, *_args) -> None:
         self._invalidate()
+
+    def setBorderVisible(self, visible: bool) -> None:
+        if self._borderVisible == visible:
+            return
+        self._borderVisible = visible
+        self.update()
 
     def _baseColor(self) -> QColor:
         color = QColor(self._themeColor())
@@ -115,4 +122,8 @@ class WindowBackground(QWidget):
             image = self._image()
             if image is not None:
                 painter.drawPixmap(0, 0, image)
+        if self._borderVisible:
+            painter.setPen(QPen(QColor("#808080"), 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
         painter.end()
