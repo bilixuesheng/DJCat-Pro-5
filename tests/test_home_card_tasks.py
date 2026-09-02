@@ -7,9 +7,9 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent
+from PySide6.QtCore import QEvent, QPoint
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QScroller, QWidget
 
 from app.common.home_card_tasks import (
     APPLICATION_HOME_CARD_TRIGGER,
@@ -323,6 +323,43 @@ class HomeCardTaskUiTest(TestCase):
                 )
             cfg.set(cfg.homeCardTasks, tasks)
             cfg.set(cfg.homeCardTasksEnabled, enabled)
+
+    def testTaskListScrollKeepsPageHeaderFixed(self):
+        with patch.object(
+            HomeCardTaskPage,
+            "_loadTasks",
+            lambda page: setattr(page, "currentTasks", []),
+        ):
+            page = HomeCardTaskPage(home_cards())
+        self.addCleanup(page.deleteLater)
+        page.emptyLabel.hide()
+        rows = []
+        for _ in range(8):
+            row = QWidget(page.view)
+            row.setFixedHeight(80)
+            page.cardLayout.addWidget(row)
+            rows.append(row)
+        page.resize(720, 300)
+        page.show()
+        self.app.processEvents()
+
+        scrollBar = page.scrollArea.verticalScrollBar()
+        self.assertGreater(scrollBar.maximum(), 0)
+        self.assertGreater(
+            QScroller.grabbedGesture(page.scrollArea.viewport()).value,
+            0,
+        )
+        titlePosition = page.titleLabel.mapTo(page, QPoint())
+        firstRowPosition = rows[0].mapTo(page, QPoint())
+
+        scrollBar.setValue(scrollBar.maximum())
+        self.app.processEvents()
+
+        self.assertEqual(page.titleLabel.mapTo(page, QPoint()), titlePosition)
+        self.assertLess(
+            rows[0].mapTo(page, QPoint()).y(),
+            firstRowPosition.y(),
+        )
 
 
 class HomeCardTaskRuntimeTest(TestCase):

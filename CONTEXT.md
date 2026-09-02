@@ -216,6 +216,10 @@ _Avoid_: 只复制 `UserConfig.json`、运行中热切换路径
 已注册导航身份但尚未创建真实页面 QWidget 的占位页。`LazyPage.ensureLoaded()` 在首次导航或确实需要页面能力时创建真实页面，并转发必要的信号和暂存输入。
 _Avoid_: 隐藏页面（隐藏的真实页面已经构造）、后台预加载
 
+**Fixed Page Header**:
+任务列表页的返回按钮、页面标题和新增按钮位于任务列表滚动区外；Exam Countdown 编辑页的返回按钮和页面标题同样位于设置卡片滚动区外；Projection 编辑页只滚动正文输入框。滚动任务、设置卡片或 Projection 正文时，Fixed Page Header 保持原位。
+_Avoid_: task card header、窗口标题栏
+
 ### 动画
 
 **Animation Tick**:

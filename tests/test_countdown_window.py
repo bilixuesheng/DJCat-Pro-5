@@ -76,6 +76,17 @@ class CountdownWindowTest(TestCase):
             QScroller.grabbedGesture(page.scrollArea.viewport()).value,
             0,
         )
+        titlePosition = page.pageTitle.mapTo(page, QPoint())
+        firstCardPosition = cards[0].mapTo(page, QPoint())
+        page.scrollArea.verticalScrollBar().setValue(
+            page.scrollArea.verticalScrollBar().maximum()
+        )
+        self.app.processEvents()
+        self.assertEqual(page.pageTitle.mapTo(page, QPoint()), titlePosition)
+        self.assertLess(
+            cards[0].mapTo(page, QPoint()).y(),
+            firstCardPosition.y(),
+        )
         page.close()
 
     def testEditPagePassesCustomEndTitle(self):

@@ -597,15 +597,14 @@ class HomeCardTaskCard(SettingMaterialCard):
         self._saveData()
 
 
-class HomeCardTaskPage(ScrollArea):
+class HomeCardTaskPage(QWidget):
     backSignal = Signal()
 
     def __init__(self, homeCards=None, parent=None):
         super().__init__(parent)
         self._homeCards = _available_home_cards(homeCards or [])
         self._cards = []
-        self.view = QWidget()
-        self.layout = QVBoxLayout(self.view)
+        self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(30, 30, 30, 30)
 
         header = QHBoxLayout()
@@ -623,18 +622,24 @@ class HomeCardTaskPage(ScrollArea):
         header.addWidget(self.addButton)
         self.layout.addLayout(header)
 
+        self.scrollArea = ScrollArea(self)
+        self.scrollArea.setWidgetResizable(True)
+        self.scrollArea.enableTransparentBackground()
+        self.view = QWidget(self.scrollArea)
+        contentLayout = QVBoxLayout(self.view)
+        contentLayout.setContentsMargins(0, 0, 0, 0)
+
         self.cardLayout = QVBoxLayout()
         self.cardLayout.setSpacing(10)
-        self.layout.addLayout(self.cardLayout)
+        contentLayout.addLayout(self.cardLayout)
         self.emptyLabel = SubtitleLabel("还没有设置自动任务哦 ~", self.view)
         self.emptyLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.emptyLabel.setStyleSheet("color: gray;")
-        self.layout.addWidget(self.emptyLabel, 1, Qt.AlignmentFlag.AlignCenter)
-        self.layout.addStretch(1)
+        contentLayout.addWidget(self.emptyLabel, 1, Qt.AlignmentFlag.AlignCenter)
+        contentLayout.addStretch(1)
 
-        self.setWidget(self.view)
-        self.setWidgetResizable(True)
-        self.enableTransparentBackground()
+        self.scrollArea.setWidget(self.view)
+        self.layout.addWidget(self.scrollArea, 1)
         self.saveTimer = QTimer(self)
         self.saveTimer.setSingleShot(True)
         self.saveTimer.setInterval(300)
@@ -671,7 +676,12 @@ class HomeCardTaskPage(ScrollArea):
         self._cards = []
         self.emptyLabel.setVisible(not self.currentTasks)
         for index, task in enumerate(self.currentTasks):
-            card = HomeCardTaskCard(task, self._homeCards, self, self)
+            card = HomeCardTaskCard(
+                task,
+                self._homeCards,
+                self.scrollArea,
+                self.view,
+            )
             card.deleteClicked.connect(self._removeTask)
             card.dataChanged.connect(
                 lambda taskIndex=index, taskCard=card: self._updateTask(

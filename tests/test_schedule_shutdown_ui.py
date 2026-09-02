@@ -160,6 +160,49 @@ class ScheduleShutdownUiTest(TestCase):
                 cfg.set(tasksItem, values[0])
                 cfg.set(enabledItem, values[1])
 
+    def testTaskListScrollKeepsPageHeaderFixed(self):
+        cases = (
+            (SchedulePage, "title"),
+            (ShutdownPage, "titleLabel"),
+        )
+        for pageType, titleAttribute in cases:
+            with self.subTest(page=pageType.__name__), patch.object(
+                pageType,
+                "_loadTasks",
+                lambda page: setattr(page, "current_tasks", []),
+            ):
+                page = pageType()
+                self.addCleanup(page.deleteLater)
+                page.emptyLabel.hide()
+                rows = []
+                for _ in range(8):
+                    row = QWidget(page.view)
+                    row.setFixedHeight(80)
+                    page.cardLayout.addWidget(row)
+                    rows.append(row)
+                page.resize(720, 300)
+                page.show()
+                self.app.processEvents()
+
+                scrollBar = page.scrollArea.verticalScrollBar()
+                self.assertGreater(scrollBar.maximum(), 0)
+                self.assertGreater(
+                    QScroller.grabbedGesture(page.scrollArea.viewport()).value,
+                    0,
+                )
+                title = getattr(page, titleAttribute)
+                titlePosition = title.mapTo(page, QPoint())
+                firstRowPosition = rows[0].mapTo(page, QPoint())
+
+                scrollBar.setValue(scrollBar.maximum())
+                self.app.processEvents()
+
+                self.assertEqual(title.mapTo(page, QPoint()), titlePosition)
+                self.assertLess(
+                    rows[0].mapTo(page, QPoint()).y(),
+                    firstRowPosition.y(),
+                )
+
     def testTaskHeadersIgnoreReleaseAfterDrag(self):
         cards = (TaskCard(broadcast_task()), ShutdownTaskCard(shutdown_task()))
         for card in cards:

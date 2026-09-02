@@ -336,13 +336,12 @@ class ShutdownTaskCard(SettingMaterialCard):
         self.dataChanged.emit()
 
 
-class ShutdownPage(ScrollArea):
+class ShutdownPage(QWidget):
     backSignal = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.view = QWidget()
-        self.layout = QVBoxLayout(self.view)
+        self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(30, 30, 30, 30)
 
         header = QHBoxLayout()
@@ -360,23 +359,29 @@ class ShutdownPage(ScrollArea):
         header.addWidget(self.addButton)
         self.layout.addLayout(header)
 
+        self.scrollArea = ScrollArea(self)
+        self.scrollArea.setWidgetResizable(True)
+        self.scrollArea.enableTransparentBackground()
+        self.view = QWidget(self.scrollArea)
+        contentLayout = QVBoxLayout(self.view)
+        contentLayout.setContentsMargins(0, 0, 0, 0)
+
         self.cardLayout = QVBoxLayout()
         self.cardLayout.setSpacing(10)
-        self.layout.addLayout(self.cardLayout)
+        contentLayout.addLayout(self.cardLayout)
 
         self.emptyLabel = SubtitleLabel("还没有设置关机任务哦 ~", self.view)
         self.emptyLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.emptyLabel.setStyleSheet("color: gray;")
-        self.layout.addWidget(
+        contentLayout.addWidget(
             self.emptyLabel,
             1,
             Qt.AlignmentFlag.AlignCenter,
         )
-        self.layout.addStretch(1)
+        contentLayout.addStretch(1)
 
-        self.setWidget(self.view)
-        self.setWidgetResizable(True)
-        self.enableTransparentBackground()
+        self.scrollArea.setWidget(self.view)
+        self.layout.addWidget(self.scrollArea, 1)
         self.saveTimer = QTimer(self)
         self.saveTimer.setSingleShot(True)
         self.saveTimer.setInterval(300)
@@ -402,7 +407,7 @@ class ShutdownPage(ScrollArea):
         self.current_tasks = deepcopy(cfg.shutdownTasks.value)
         self.emptyLabel.setVisible(not self.current_tasks)
         for index, task in enumerate(self.current_tasks):
-            card = ShutdownTaskCard(task, self)
+            card = ShutdownTaskCard(task, self.view)
             card.deleteClicked.connect(self._removeTask)
             card.dataChanged.connect(
                 lambda taskIndex=index, taskCard=card: self._updateTask(
