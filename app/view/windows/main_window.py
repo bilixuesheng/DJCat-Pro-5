@@ -316,6 +316,8 @@ class InstallerLaunchDialog(MessageBoxBase):
 
 
 class MainWindow(MSFluentWindow):
+    RESIZE_BORDER_EXTRA_DIP = 2
+
     def __init__(self, isSilent: bool = False):
         self.searchEdit = None
         self._geometryApplied = False
@@ -400,14 +402,19 @@ class MainWindow(MSFluentWindow):
             self._runApplicationHomeCardTasks(SILENT_STARTUP_EVENT)
 
     def _updateResizeBorderWidth(self, screen=None):
+        screen = screen or self.screen()
+        extraWidth = round(
+            self.RESIZE_BORDER_EXTRA_DIP * screen.devicePixelRatio()
+        )
         if sys.platform == "win32":
             borderWidth = getResizeBorderThickness(self.winId())
             if borderWidth > 0:
-                self.BORDER_WIDTH = borderWidth
+                self.BORDER_WIDTH = borderWidth + extraWidth
                 return
 
-        screen = screen or self.screen()
-        self.BORDER_WIDTH = round(8 * screen.devicePixelRatio())
+        self.BORDER_WIDTH = round(
+            (8 + self.RESIZE_BORDER_EXTRA_DIP) * screen.devicePixelRatio()
+        )
 
     def _connectScreenChanged(self):
         windowHandle = self.windowHandle()
