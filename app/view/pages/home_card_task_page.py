@@ -44,6 +44,7 @@ from app.view.components.setting_card_group import SettingMaterialCard
 from app.view.components.task_picker import (
     TaskExpandSettingCard,
     TaskFormSettingCard,
+    TaskMasterSwitch,
     TouchTimePicker,
     configure_task_expand_card,
 )
@@ -611,11 +612,14 @@ class HomeCardTaskPage(ScrollArea):
         self.backButton = ToolButton(FIF.RETURN, self)
         self.backButton.clicked.connect(self.backSignal.emit)
         self.titleLabel = TitleLabel("自动任务", self)
+        self.masterSwitch = TaskMasterSwitch(cfg.homeCardTasksEnabled, self)
         self.addButton = ToolButton(FIF.ADD, self)
         self.addButton.clicked.connect(self._addTask)
         header.addWidget(self.backButton)
         header.addWidget(self.titleLabel)
         header.addStretch(1)
+        header.addWidget(self.masterSwitch)
+        header.addSpacing(8)
         header.addWidget(self.addButton)
         self.layout.addLayout(header)
 
@@ -638,6 +642,10 @@ class HomeCardTaskPage(ScrollArea):
         self._savePending = False
         self._loadTasks()
         cfg.homeCardTasks.valueChanged.connect(self._onTasksChanged)
+        cfg.homeCardTasksEnabled.valueChanged.connect(
+            self._setTaskControlsEnabled
+        )
+        self._setTaskControlsEnabled(cfg.homeCardTasksEnabled.value)
 
     def setHomeCards(self, entries):
         self._homeCards = _available_home_cards(entries or [])
@@ -672,7 +680,13 @@ class HomeCardTaskPage(ScrollArea):
                 )
             )
             self._cards.append(card)
+            card.setEnabled(cfg.homeCardTasksEnabled.value)
             self.cardLayout.addWidget(card)
+
+    def _setTaskControlsEnabled(self, enabled):
+        self.addButton.setEnabled(enabled)
+        for card in self._cards:
+            card.setEnabled(enabled)
 
     def _addTask(self):
         self.flushPendingSave()

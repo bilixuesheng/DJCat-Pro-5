@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import ComboBox
 from shiboken6 import delete, isValid
 
+from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.task_picker import TouchTimePicker
 from app.view.pages.home_card_task_page import (
@@ -111,6 +112,53 @@ class ScheduleShutdownUiTest(TestCase):
             "rgba(0, 0, 0, 180)",
             dialog.windowMask.styleSheet(),
         )
+
+    def testMasterSwitchDisablesTaskCardsWithoutChangingTheirState(self):
+        cases = (
+            (
+                SchedulePage,
+                cfg.broadcastTasks,
+                cfg.broadcastTasksEnabled,
+                broadcast_task(),
+                "addBtn",
+            ),
+            (
+                ShutdownPage,
+                cfg.shutdownTasks,
+                cfg.shutdownTasksEnabled,
+                shutdown_task(),
+                "addButton",
+            ),
+        )
+        for pageType, tasksItem, enabledItem, task, addButtonName in cases:
+            values = (tasksItem.value, enabledItem.value)
+            page = None
+            try:
+                cfg.set(tasksItem, [task])
+                cfg.set(enabledItem, False)
+                page = pageType()
+                card = page.cardLayout.itemAt(0).widget()
+
+                with self.subTest(page=pageType.__name__):
+                    self.assertFalse(page.masterSwitch.switchButton.isChecked())
+                    self.assertFalse(getattr(page, addButtonName).isEnabled())
+                    self.assertFalse(card.isEnabled())
+                    self.assertTrue(tasksItem.value[0]["enabled"])
+
+                    page.masterSwitch.switchButton.setChecked(True)
+                    self.assertTrue(enabledItem.value)
+                    self.assertTrue(getattr(page, addButtonName).isEnabled())
+                    self.assertTrue(card.isEnabled())
+                    self.assertTrue(tasksItem.value[0]["enabled"])
+            finally:
+                if page is not None:
+                    page.deleteLater()
+                    QApplication.sendPostedEvents(
+                        None,
+                        QEvent.Type.DeferredDelete,
+                    )
+                cfg.set(tasksItem, values[0])
+                cfg.set(enabledItem, values[1])
 
     def testTaskHeadersIgnoreReleaseAfterDrag(self):
         cards = (TaskCard(broadcast_task()), ShutdownTaskCard(shutdown_task()))

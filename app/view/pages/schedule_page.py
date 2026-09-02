@@ -37,6 +37,7 @@ from app.view.components.setting_card_group import SettingMaterialCard
 from app.view.components.task_picker import (
     TaskExpandSettingCard,
     TaskFormSettingCard,
+    TaskMasterSwitch,
     TouchTimePicker,
     configure_task_expand_card,
 )
@@ -444,12 +445,15 @@ class SchedulePage(ScrollArea):
         self.backBtn = ToolButton(FIF.RETURN, self)
         self.backBtn.clicked.connect(self.backSignal.emit)
         self.title = TitleLabel("定时播报", self)
+        self.masterSwitch = TaskMasterSwitch(cfg.broadcastTasksEnabled, self)
         self.addBtn = ToolButton(FIF.ADD, self)
         self.addBtn.clicked.connect(self._addTask)
 
         header.addWidget(self.backBtn)
         header.addWidget(self.title)
         header.addStretch(1)
+        header.addWidget(self.masterSwitch)
+        header.addSpacing(8)
         header.addWidget(self.addBtn)
         self.layout.addLayout(header)
 
@@ -475,6 +479,10 @@ class SchedulePage(ScrollArea):
 
         self._loadTasks()
         cfg.broadcastTasks.valueChanged.connect(self._onTasksChanged)
+        cfg.broadcastTasksEnabled.valueChanged.connect(
+            self._setTaskControlsEnabled
+        )
+        self._setTaskControlsEnabled(cfg.broadcastTasksEnabled.value)
 
     def _onTasksChanged(self, tasks):
         if tasks != self.current_tasks:
@@ -494,8 +502,18 @@ class SchedulePage(ScrollArea):
             for i, task in enumerate(self.current_tasks):
                 card = TaskCard(task, self)
                 card.deleteClicked.connect(self._removeTask)
-                card.dataChanged.connect(lambda idx=i, c=card: self._updateTask(idx, c.data))
+                card.dataChanged.connect(
+                    lambda idx=i, c=card: self._updateTask(idx, c.data)
+                )
+                card.setEnabled(cfg.broadcastTasksEnabled.value)
                 self.cardLayout.addWidget(card)
+
+    def _setTaskControlsEnabled(self, enabled):
+        self.addBtn.setEnabled(enabled)
+        for index in range(self.cardLayout.count()):
+            widget = self.cardLayout.itemAt(index).widget()
+            if widget is not None:
+                widget.setEnabled(enabled)
 
     def _updateTask(self, index, updated_data):
         self.current_tasks[index] = updated_data

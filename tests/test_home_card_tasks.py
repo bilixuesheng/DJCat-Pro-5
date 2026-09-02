@@ -295,6 +295,35 @@ class HomeCardTaskUiTest(TestCase):
         self.assertEqual(cfg.homeCardTasks.value[0]["name"], "新的任务名")
         self.assertFalse(page._savePending)
 
+    def testPageMasterSwitchDisablesCardsWithoutChangingTaskState(self):
+        tasks = cfg.homeCardTasks.value
+        enabled = cfg.homeCardTasksEnabled.value
+        page = None
+        try:
+            cfg.set(cfg.homeCardTasks, [existing_task()])
+            cfg.set(cfg.homeCardTasksEnabled, False)
+            page = HomeCardTaskPage(home_cards())
+
+            self.assertFalse(page.masterSwitch.switchButton.isChecked())
+            self.assertFalse(page.addButton.isEnabled())
+            self.assertFalse(page._cards[0].isEnabled())
+            self.assertTrue(cfg.homeCardTasks.value[0]["enabled"])
+
+            page.masterSwitch.switchButton.setChecked(True)
+            self.assertTrue(cfg.homeCardTasksEnabled.value)
+            self.assertTrue(page.addButton.isEnabled())
+            self.assertTrue(page._cards[0].isEnabled())
+            self.assertTrue(cfg.homeCardTasks.value[0]["enabled"])
+        finally:
+            if page is not None:
+                page.deleteLater()
+                QApplication.sendPostedEvents(
+                    None,
+                    QEvent.Type.DeferredDelete,
+                )
+            cfg.set(cfg.homeCardTasks, tasks)
+            cfg.set(cfg.homeCardTasksEnabled, enabled)
+
 
 class HomeCardTaskRuntimeTest(TestCase):
     @classmethod
@@ -305,9 +334,11 @@ class HomeCardTaskRuntimeTest(TestCase):
         self.tempDir = tempfile.TemporaryDirectory()
         self.configFile = cfg.file
         self.tasks = cfg.homeCardTasks.value
+        self.tasksEnabled = cfg.homeCardTasksEnabled.value
         self.lastBroadcast = cfg.lastBroadcast.value
         cfg.file = Path(self.tempDir.name) / "config.json"
         cfg.set(cfg.homeCardTasks, [])
+        cfg.set(cfg.homeCardTasksEnabled, True)
         self.quotaPatcher = patch.object(SettingPage, "_refreshAIQuota")
         self.quotaPatcher.start()
         with (
@@ -325,6 +356,7 @@ class HomeCardTaskRuntimeTest(TestCase):
         self.app.processEvents()
         self.quotaPatcher.stop()
         cfg.set(cfg.homeCardTasks, self.tasks)
+        cfg.set(cfg.homeCardTasksEnabled, self.tasksEnabled)
         cfg.set(cfg.lastBroadcast, self.lastBroadcast)
         cfg.file = self.configFile
         self.tempDir.cleanup()
@@ -412,6 +444,23 @@ class HomeCardTaskRuntimeTest(TestCase):
 
         self.assertEqual(execute.call_count, 1)
         self.assertEqual(execute.call_args.args[0]["id"], startup["id"])
+
+    def testMasterSwitchBlocksApplicationTriggeredTasks(self):
+        task = existing_task()
+        task.update(
+            {
+                "trigger": APPLICATION_HOME_CARD_TRIGGER,
+                "event": APPLICATION_STARTUP_EVENT,
+            }
+        )
+        cfg.set(cfg.homeCardTasks, [task])
+        cfg.set(cfg.homeCardTasksEnabled, False)
+
+        with patch.object(self.window, "_handleHomeCardTask") as execute:
+            self.window._runApplicationHomeCardTasks(APPLICATION_STARTUP_EVENT)
+
+        execute.assert_not_called()
+        self.assertTrue(cfg.homeCardTasks.value[0]["enabled"])
 
     def testNormalAndSilentStartupDispatchExpectedApplicationEvents(self):
         for isSilent, expected in (

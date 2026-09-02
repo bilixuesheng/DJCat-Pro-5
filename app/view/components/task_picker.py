@@ -5,6 +5,7 @@ from PySide6.QtCore import (
     Property,
     QPropertyAnimation,
     QRectF,
+    QSignalBlocker,
     Qt,
 )
 from PySide6.QtGui import QColor, QPainter
@@ -12,17 +13,48 @@ from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
     QGraphicsOpacityEffect,
+    QHBoxLayout,
     QScroller,
     QSizePolicy,
+    QWidget,
 )
 from qfluentwidgets import (
+    BodyLabel,
     ExpandSettingCard,
     MessageBoxBase,
     SettingCard,
+    SwitchButton,
     TimePicker,
     isDarkTheme,
 )
 from qfluentwidgets import FluentIcon as FIF
+
+from app.config.cfg import cfg
+
+
+class TaskMasterSwitch(QWidget):
+    def __init__(self, configItem, parent=None):
+        super().__init__(parent)
+        self.configItem = configItem
+        self.label = BodyLabel("总开关", self)
+        self.switchButton = SwitchButton(self)
+        self.switchButton.setChecked(configItem.value)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(self.label)
+        layout.addWidget(self.switchButton)
+
+        self.switchButton.checkedChanged.connect(self._setChecked)
+        configItem.valueChanged.connect(self._syncChecked)
+
+    def _setChecked(self, checked):
+        cfg.set(self.configItem, checked)
+
+    def _syncChecked(self, checked):
+        with QSignalBlocker(self.switchButton):
+            self.switchButton.setChecked(checked)
 
 
 def _set_reveal_painting(widget, enabled):

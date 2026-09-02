@@ -713,27 +713,42 @@ class MainWindow(MSFluentWindow):
             if now - previous > SCHEDULE_CATCH_UP_LIMIT:
                 previous = now - timedelta(seconds=1)
 
-        self._runDueScheduledTasks(
-            "broadcast",
-            cfg.broadcastTasks.value if broadcastTasks is None else broadcastTasks,
-            previous,
-            now,
-            self._playAudioTask,
-        )
-        self._runDueScheduledTasks(
-            "home-card",
-            cfg.homeCardTasks.value if homeCardTasks is None else homeCardTasks,
-            previous,
-            now,
-            self._handleHomeCardTask,
-        )
-        self._runDueScheduledTasks(
-            "shutdown",
-            cfg.shutdownTasks.value if shutdownTasks is None else shutdownTasks,
-            max(previous, now - SHUTDOWN_CATCH_UP_LIMIT),
-            now,
-            self._handleShutdownTask,
-        )
+        if cfg.broadcastTasksEnabled.value:
+            self._runDueScheduledTasks(
+                "broadcast",
+                (
+                    cfg.broadcastTasks.value
+                    if broadcastTasks is None
+                    else broadcastTasks
+                ),
+                previous,
+                now,
+                self._playAudioTask,
+            )
+        if cfg.homeCardTasksEnabled.value:
+            self._runDueScheduledTasks(
+                "home-card",
+                (
+                    cfg.homeCardTasks.value
+                    if homeCardTasks is None
+                    else homeCardTasks
+                ),
+                previous,
+                now,
+                self._handleHomeCardTask,
+            )
+        if cfg.shutdownTasksEnabled.value:
+            self._runDueScheduledTasks(
+                "shutdown",
+                (
+                    cfg.shutdownTasks.value
+                    if shutdownTasks is None
+                    else shutdownTasks
+                ),
+                max(previous, now - SHUTDOWN_CATCH_UP_LIMIT),
+                now,
+                self._handleShutdownTask,
+            )
 
     def _runDueScheduledTasks(
         self,
@@ -837,7 +852,7 @@ class MainWindow(MSFluentWindow):
         return (identity, occurrence)
 
     def _handleShutdownTask(self, task):
-        if self._resourcesShutdown:
+        if self._resourcesShutdown or not cfg.shutdownTasksEnabled.value:
             return
 
         if not task.get("notify", True):
@@ -902,6 +917,8 @@ class MainWindow(MSFluentWindow):
         worker.start()
 
     def _runApplicationHomeCardTasks(self, event):
+        if not cfg.homeCardTasksEnabled.value:
+            return
         for task in normalize_home_card_tasks(cfg.homeCardTasks.value):
             if (
                 task["enabled"]

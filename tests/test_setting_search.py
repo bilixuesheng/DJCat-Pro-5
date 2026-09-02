@@ -547,6 +547,57 @@ class SettingSearchTest(TestCase):
 
         playAudio.assert_called_once_with(task)
 
+    def testMasterSwitchesBlockAllScheduledTasksWithoutLateReplay(self):
+        task = {
+            "enabled": True,
+            "weeks": [0],
+            "time": "08:00:00",
+        }
+        items = (
+            cfg.broadcastTasksEnabled,
+            cfg.homeCardTasksEnabled,
+            cfg.shutdownTasksEnabled,
+        )
+        values = [item.value for item in items]
+        timezone = datetime.now().astimezone().tzinfo
+        try:
+            for item in items:
+                cfg.set(item, False)
+            self.window._lastScheduleCheck = None
+            with (
+                patch.object(self.window, "_playAudioTask") as playAudio,
+                patch.object(self.window, "_handleHomeCardTask") as runHomeCard,
+                patch.object(self.window, "_handleShutdownTask") as shutdown,
+            ):
+                self.window._checkScheduleAt(
+                    datetime(2026, 8, 17, 7, 59, 59, tzinfo=timezone),
+                    [task],
+                    [task],
+                    [task],
+                )
+                self.window._checkScheduleAt(
+                    datetime(2026, 8, 17, 8, 0, 0, tzinfo=timezone),
+                    [task],
+                    [task],
+                    [task],
+                )
+                for item in items:
+                    cfg.set(item, True)
+                self.window._checkScheduleAt(
+                    datetime(2026, 8, 17, 8, 0, 1, tzinfo=timezone),
+                    [task],
+                    [task],
+                    [task],
+                )
+
+            playAudio.assert_not_called()
+            runHomeCard.assert_not_called()
+            shutdown.assert_not_called()
+            self.assertTrue(task["enabled"])
+        finally:
+            for item, value in zip(items, values):
+                cfg.set(item, value)
+
     def testScheduleCatchesUpAfterLongGuiBlock(self):
         task = {
             "enabled": True,

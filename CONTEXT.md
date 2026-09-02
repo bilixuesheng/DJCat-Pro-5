@@ -65,8 +65,12 @@ _Avoid_: Exam Countdown、timer、Scheduled Task
 ### 定时与自动任务
 
 **Scheduled Task**:
-按启用状态、星期和精确时间反复匹配的本地规则。Broadcast Task、使用固定时间的 Home Card Task 和 Shutdown Task 属于 Scheduled Task；软件行为触发的 Home Card Task 不参与定时匹配。提到 Task 时应始终写明种类。
+按对应 Task Master Switch、独立启用状态、星期和精确时间反复匹配的本地规则。Broadcast Task、使用固定时间的 Home Card Task 和 Shutdown Task 属于 Scheduled Task；软件行为触发的 Home Card Task 不参与定时匹配。提到 Task 时应始终写明种类。
 _Avoid_: alarm、job；不加限定地称 task
+
+**Task Master Switch**:
+Broadcast Task、Home Card Task 和 Shutdown Task 各自独立的持久化总开关，由对应任务页面和 Tray Menu 共同操作。关闭时保留每条任务原有的启用状态，同时禁用页面中的新增和任务操作，并阻止固定时间及 Application Lifecycle Event 触发；重新开启后不补执行关闭期间错过的任务。
+_Avoid_: 批量启用、批量关闭、改写每条任务的 enabled 状态
 
 **Broadcast Task**:
 “定时播报”中的 Scheduled Task，在匹配时播放指定 Audio Source，并带有独立的重复次数和音量。它是音频播放，不是 Projection。

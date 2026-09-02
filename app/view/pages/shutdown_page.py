@@ -30,6 +30,7 @@ from app.view.components.setting_card_group import SettingMaterialCard
 from app.view.components.task_picker import (
     TaskExpandSettingCard,
     TaskFormSettingCard,
+    TaskMasterSwitch,
     TouchTimePicker,
     configure_task_expand_card,
 )
@@ -348,11 +349,14 @@ class ShutdownPage(ScrollArea):
         self.backButton = ToolButton(FIF.RETURN, self)
         self.backButton.clicked.connect(self.backSignal.emit)
         self.titleLabel = TitleLabel("定时关机", self)
+        self.masterSwitch = TaskMasterSwitch(cfg.shutdownTasksEnabled, self)
         self.addButton = ToolButton(FIF.ADD, self)
         self.addButton.clicked.connect(self._addTask)
         header.addWidget(self.backButton)
         header.addWidget(self.titleLabel)
         header.addStretch(1)
+        header.addWidget(self.masterSwitch)
+        header.addSpacing(8)
         header.addWidget(self.addButton)
         self.layout.addLayout(header)
 
@@ -380,6 +384,10 @@ class ShutdownPage(ScrollArea):
         self._savePending = False
         self._loadTasks()
         cfg.shutdownTasks.valueChanged.connect(self._onTasksChanged)
+        cfg.shutdownTasksEnabled.valueChanged.connect(
+            self._setTaskControlsEnabled
+        )
+        self._setTaskControlsEnabled(cfg.shutdownTasksEnabled.value)
 
     def _onTasksChanged(self, tasks):
         if tasks != self.current_tasks:
@@ -402,7 +410,15 @@ class ShutdownPage(ScrollArea):
                     taskCard.data,
                 )
             )
+            card.setEnabled(cfg.shutdownTasksEnabled.value)
             self.cardLayout.addWidget(card)
+
+    def _setTaskControlsEnabled(self, enabled):
+        self.addButton.setEnabled(enabled)
+        for index in range(self.cardLayout.count()):
+            widget = self.cardLayout.itemAt(index).widget()
+            if widget is not None:
+                widget.setEnabled(enabled)
 
     def _addTask(self):
         self.flushPendingSave()

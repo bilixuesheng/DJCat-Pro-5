@@ -29,6 +29,9 @@ class TrayConfigTest(TestCase):
         self.assertTrue(cfg.showBroadcastTrayAction.defaultValue)
         self.assertTrue(cfg.showHomeCardTaskTrayAction.defaultValue)
         self.assertTrue(cfg.showShutdownTrayAction.defaultValue)
+        self.assertTrue(cfg.broadcastTasksEnabled.defaultValue)
+        self.assertTrue(cfg.homeCardTasksEnabled.defaultValue)
+        self.assertTrue(cfg.shutdownTasksEnabled.defaultValue)
         self.assertTrue(cfg.showCreditsPage.defaultValue)
         self.assertEqual(cfg.trayHomeCardKeys.defaultValue, [])
         self.assertFalse(cfg.trayHomeCardsInSubmenu.defaultValue)
@@ -425,6 +428,9 @@ class TrayMenuTest(TestCase):
                 cfg.broadcastTasks,
                 cfg.homeCardTasks,
                 cfg.shutdownTasks,
+                cfg.broadcastTasksEnabled,
+                cfg.homeCardTasksEnabled,
+                cfg.shutdownTasksEnabled,
                 cfg.showBroadcastTrayAction,
                 cfg.showHomeCardTaskTrayAction,
                 cfg.showShutdownTrayAction,
@@ -448,6 +454,9 @@ class TrayMenuTest(TestCase):
             cfg.shutdownTasks,
             [{"enabled": True}],
         )
+        cfg.set(cfg.broadcastTasksEnabled, True)
+        cfg.set(cfg.homeCardTasksEnabled, True)
+        cfg.set(cfg.shutdownTasksEnabled, True)
         cfg.set(cfg.showBroadcastTrayAction, True)
         cfg.set(cfg.showHomeCardTaskTrayAction, True)
         cfg.set(cfg.showShutdownTrayAction, True)
@@ -588,9 +597,9 @@ class TrayMenuTest(TestCase):
                 [action.text() for action in tray.menu.actions()],
                 [
                     "主页",
-                    "关闭全部定时播报",
-                    "关闭全部定时任务",
-                    "关闭全部定时关机",
+                    "关闭定时播报",
+                    "关闭定时任务",
+                    "关闭定时关机",
                     "自定义入口",
                     "退出程序",
                 ],
@@ -603,21 +612,21 @@ class TrayMenuTest(TestCase):
         tray = self._createTray()
         try:
             self.assertNotIn(
-                "关闭全部定时播报",
+                "关闭定时播报",
                 [action.text() for action in tray.menu.actions()],
             )
             self.assertIn(
-                "关闭全部定时任务",
+                "关闭定时任务",
                 [action.text() for action in tray.menu.actions()],
             )
             self.assertIn(
-                "关闭全部定时关机",
+                "关闭定时关机",
                 [action.text() for action in tray.menu.actions()],
             )
         finally:
             tray.deleteLater()
 
-    def testHomeCardTaskActionTogglesEveryTaskAndRefreshesItsText(self):
+    def testHomeCardTaskActionTogglesMasterWithoutChangingTasks(self):
         cfg.set(
             cfg.homeCardTasks,
             [{"enabled": True}, {"enabled": False}],
@@ -626,27 +635,29 @@ class TrayMenuTest(TestCase):
         try:
             self.assertEqual(
                 tray.homeCardTaskAction.text(),
-                "关闭全部定时任务",
+                "关闭定时任务",
             )
 
             tray.homeCardTaskAction.trigger()
             self.assertEqual(
                 [task["enabled"] for task in cfg.homeCardTasks.value],
-                [False, False],
+                [True, False],
             )
+            self.assertFalse(cfg.homeCardTasksEnabled.value)
             self.assertEqual(
                 tray.homeCardTaskAction.text(),
-                "开启全部定时任务",
+                "开启定时任务",
             )
 
             tray.homeCardTaskAction.trigger()
             self.assertEqual(
                 [task["enabled"] for task in cfg.homeCardTasks.value],
-                [True, True],
+                [True, False],
             )
+            self.assertTrue(cfg.homeCardTasksEnabled.value)
             self.assertEqual(
                 tray.homeCardTaskAction.text(),
-                "关闭全部定时任务",
+                "关闭定时任务",
             )
         finally:
             tray.deleteLater()

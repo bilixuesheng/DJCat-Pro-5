@@ -1,4 +1,3 @@
-from copy import deepcopy
 import sys
 
 from PySide6.QtCore import Qt, QTimer
@@ -144,9 +143,15 @@ class SystemTrayIcon(QSystemTrayIcon):
 
         self._homeCards = []
         self.setHomeCards(homeCards)
-        cfg.broadcastTasks.valueChanged.connect(self._refreshBroadcastAction)
-        cfg.homeCardTasks.valueChanged.connect(self._refreshHomeCardTaskAction)
-        cfg.shutdownTasks.valueChanged.connect(self._refreshShutdownAction)
+        cfg.broadcastTasksEnabled.valueChanged.connect(
+            self._refreshBroadcastAction
+        )
+        cfg.homeCardTasksEnabled.valueChanged.connect(
+            self._refreshHomeCardTaskAction
+        )
+        cfg.shutdownTasksEnabled.valueChanged.connect(
+            self._refreshShutdownAction
+        )
         cfg.showBroadcastTrayAction.valueChanged.connect(self._rebuildMenu)
         cfg.showHomeCardTaskTrayAction.valueChanged.connect(self._rebuildMenu)
         cfg.showShutdownTrayAction.valueChanged.connect(self._rebuildMenu)
@@ -207,9 +212,9 @@ class SystemTrayIcon(QSystemTrayIcon):
             menu.addAction(self.broadcastAction)
             self._refreshTaskAction(
                 self.broadcastAction,
-                cfg.broadcastTasks.value,
-                "关闭全部定时播报",
-                "开启全部定时播报",
+                cfg.broadcastTasksEnabled.value,
+                "关闭定时播报",
+                "开启定时播报",
                 FIF.PLAY,
             )
         else:
@@ -221,9 +226,9 @@ class SystemTrayIcon(QSystemTrayIcon):
             menu.addAction(self.homeCardTaskAction)
             self._refreshTaskAction(
                 self.homeCardTaskAction,
-                cfg.homeCardTasks.value,
-                "关闭全部定时任务",
-                "开启全部定时任务",
+                cfg.homeCardTasksEnabled.value,
+                "关闭定时任务",
+                "开启定时任务",
                 FIF.HISTORY,
             )
         else:
@@ -235,9 +240,9 @@ class SystemTrayIcon(QSystemTrayIcon):
             menu.addAction(self.shutdownAction)
             self._refreshTaskAction(
                 self.shutdownAction,
-                cfg.shutdownTasks.value,
-                "关闭全部定时关机",
-                "开启全部定时关机",
+                cfg.shutdownTasksEnabled.value,
+                "关闭定时关机",
+                "开启定时关机",
                 FIF.POWER_BUTTON,
             )
         else:
@@ -297,67 +302,61 @@ class SystemTrayIcon(QSystemTrayIcon):
             parent.activateWindow()
 
     def _toggleBroadcastTasks(self):
-        self._toggleTasks(cfg.broadcastTasks)
+        self._toggleTasks(cfg.broadcastTasksEnabled)
 
     def _toggleHomeCardTasks(self):
-        self._toggleTasks(cfg.homeCardTasks)
+        self._toggleTasks(cfg.homeCardTasksEnabled)
 
     def _toggleShutdownTasks(self):
-        self._toggleTasks(cfg.shutdownTasks)
+        self._toggleTasks(cfg.shutdownTasksEnabled)
 
-    def _refreshBroadcastAction(self, tasks):
+    def _refreshBroadcastAction(self, _value=None):
         action = getattr(self, "broadcastAction", None)
         if action is not None:
             self._refreshTaskAction(
                 action,
-                tasks,
-                "关闭全部定时播报",
-                "开启全部定时播报",
+                cfg.broadcastTasksEnabled.value,
+                "关闭定时播报",
+                "开启定时播报",
                 FIF.PLAY,
             )
 
-    def _refreshHomeCardTaskAction(self, tasks):
+    def _refreshHomeCardTaskAction(self, _value=None):
         action = getattr(self, "homeCardTaskAction", None)
         if action is not None:
             self._refreshTaskAction(
                 action,
-                tasks,
-                "关闭全部定时任务",
-                "开启全部定时任务",
+                cfg.homeCardTasksEnabled.value,
+                "关闭定时任务",
+                "开启定时任务",
                 FIF.HISTORY,
             )
 
-    def _refreshShutdownAction(self, tasks):
+    def _refreshShutdownAction(self, _value=None):
         action = getattr(self, "shutdownAction", None)
         if action is not None:
             self._refreshTaskAction(
                 action,
-                tasks,
-                "关闭全部定时关机",
-                "开启全部定时关机",
+                cfg.shutdownTasksEnabled.value,
+                "关闭定时关机",
+                "开启定时关机",
                 FIF.POWER_BUTTON,
             )
 
     @staticmethod
     def _refreshTaskAction(
         action,
-        tasks,
+        enabled,
         enabledText,
         disabledText,
         disabledIcon,
     ):
-        hasEnabledTask = any(task.get("enabled", False) for task in tasks)
-        action.setText(enabledText if hasEnabledTask else disabledText)
-        action.setIcon(FIF.PAUSE if hasEnabledTask else disabledIcon)
-        action.setEnabled(bool(tasks))
+        action.setText(enabledText if enabled else disabledText)
+        action.setIcon(FIF.PAUSE if enabled else disabledIcon)
 
     @staticmethod
     def _toggleTasks(configItem):
-        tasks = deepcopy(configItem.value)
-        enabled = not any(task.get("enabled", False) for task in tasks)
-        for task in tasks:
-            task["enabled"] = enabled
-        cfg.set(configItem, tasks)
+        cfg.set(configItem, not configItem.value)
 
     def _onQuitActionTriggered(self):
         if self.parent():

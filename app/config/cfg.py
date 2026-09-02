@@ -296,6 +296,15 @@ class Config(QConfig):
     broadcastTasks = ConfigItem("Schedule", "Tasks", [])
     homeCardTasks = ConfigItem("Schedule", "HomeCardTasks", [])
     shutdownTasks = ConfigItem("Schedule", "ShutdownTasks", [])
+    broadcastTasksEnabled = ConfigItem(
+        "Schedule", "BroadcastTasksEnabled", True, BoolValidator()
+    )
+    homeCardTasksEnabled = ConfigItem(
+        "Schedule", "HomeCardTasksEnabled", True, BoolValidator()
+    )
+    shutdownTasksEnabled = ConfigItem(
+        "Schedule", "ShutdownTasksEnabled", True, BoolValidator()
+    )
 
     expandedSettingGroups = ConfigItem("UI", "ExpandedSettingGroups", [])
 
