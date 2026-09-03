@@ -3,7 +3,7 @@ import os
 import tempfile
 from pathlib import Path
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -38,6 +38,7 @@ class FullscreenTaskCloseTest(TestCase):
                 cfg.showMainWindowAfterBroadcast,
                 cfg.confirmBeforeCloseBroadcast,
                 cfg.broadcastMarkdownEnabled,
+                cfg.organizeMarkdownBeforeBroadcast,
                 cfg.restoreBroadcastAtStartup,
                 cfg.lastBroadcast,
                 cfg.countdownActionButtonPosition,
@@ -63,9 +64,117 @@ class FullscreenTaskCloseTest(TestCase):
         self.assertTrue(cfg.confirmBeforeCloseBroadcast.defaultValue)
         self.assertTrue(cfg.confirmBeforeCloseCountdown.defaultValue)
         self.assertFalse(cfg.broadcastMarkdownEnabled.defaultValue)
+        self.assertFalse(cfg.organizeMarkdownBeforeBroadcast.defaultValue)
         self.assertFalse(cfg.restoreBroadcastAtStartup.defaultValue)
         self.assertEqual(cfg.lastBroadcast.defaultValue, {})
         self.assertTrue(cfg.confirmBeforeResetCountdown.defaultValue)
+
+    def testOrganizeBeforeBroadcastIsRememberedOnlyShownForMarkdown(self):
+        cfg.set(cfg.broadcastMarkdownEnabled, False)
+        cfg.set(cfg.organizeMarkdownBeforeBroadcast, False)
+        page = BroadcastEditPage()
+        self.addCleanup(page.close)
+
+        self.assertTrue(page.organizeCheckBox.isHidden())
+        self.assertEqual(page.broadcastBtn.text(), "投送")
+
+        page.markdownCheckBox.setChecked(True)
+        page.organizeCheckBox.setChecked(True)
+
+        self.assertFalse(page.organizeCheckBox.isHidden())
+        self.assertTrue(cfg.organizeMarkdownBeforeBroadcast.value)
+        self.assertEqual(page.broadcastBtn.text(), "整理并投送")
+
+        restoredPage = BroadcastEditPage()
+        self.addCleanup(restoredPage.close)
+        self.assertTrue(restoredPage.organizeCheckBox.isChecked())
+
+    def testOrganizeBeforeBroadcastStreamsResultAndThenBroadcasts(self):
+        cfg.set(cfg.broadcastMarkdownEnabled, True)
+        cfg.set(cfg.organizeMarkdownBeforeBroadcast, True)
+        page = BroadcastEditPage()
+        self.addCleanup(page.close)
+        page.titleInput.setText("作业")
+        page.contentInput.setPlainText("数学97页")
+
+        with patch(
+            "app.view.pages.broadcast_page._InlineAIMarkdownRequest.start"
+        ):
+            page._onBroadcast()
+
+        request = page._inlineAIRequest
+        self.assertIsNotNone(request)
+        self.assertTrue(page.contentInput.isReadOnly())
+        self.assertEqual(page.broadcastBtn.text(), "取消")
+        self.assertIn("qlineargradient", page.contentInput.styleSheet())
+
+        request._resultChunks.extend(("**数学**", "\n- 97页"))
+        page._appendInlineAIChunk(request, "**数学**")
+        page._appendInlineAIChunk(request, "\n- 97页")
+        with patch.object(page, "_startBroadcast") as startBroadcast:
+            page._onInlineAIFinished(request, 14, 15, 1)
+
+        self.assertEqual(page.contentInput.toPlainText(), "**数学**\n- 97页")
+        self.assertFalse(page.contentInput.isReadOnly())
+        startBroadcast.assert_called_once_with(
+            "作业", "**数学**\n- 97页", True
+        )
+
+    def testCancellingInlineOrganizationBroadcastsOriginalSnapshot(self):
+        cfg.set(cfg.broadcastMarkdownEnabled, True)
+        cfg.set(cfg.organizeMarkdownBeforeBroadcast, True)
+        page = BroadcastEditPage()
+        self.addCleanup(page.close)
+        page.titleInput.setText("原标题")
+        page.contentInput.setPlainText("整理前正文")
+
+        with patch(
+            "app.view.pages.broadcast_page._InlineAIMarkdownRequest.start"
+        ):
+            page._onBroadcast()
+
+        request = page._inlineAIRequest
+        request._resultChunks.append("不完整结果")
+        page._appendInlineAIChunk(request, "不完整结果")
+        request.cancel = MagicMock()
+        with patch.object(page, "_startBroadcast") as startBroadcast:
+            page._onBroadcast()
+
+        request.cancel.assert_called_once_with()
+        self.assertEqual(page.contentInput.toPlainText(), "整理前正文")
+        self.assertIsNone(page._inlineAIRequest)
+        startBroadcast.assert_called_once_with(
+            "原标题", "整理前正文", True
+        )
+
+        page._onInlineAIFinished(request, 14, 15, 1)
+        startBroadcast.assert_called_once()
+
+    def testStartupRestoreDoesNotReorganizeTheSavedProjection(self):
+        cfg.set(cfg.broadcastMarkdownEnabled, True)
+        cfg.set(cfg.organizeMarkdownBeforeBroadcast, True)
+        cfg.set(
+            cfg.lastBroadcast,
+            {
+                "title": "保存的标题",
+                "content": "**保存的正文**",
+                "isMarkdown": True,
+                "active": True,
+            },
+        )
+        page = BroadcastEditPage()
+        self.addCleanup(page.close)
+
+        with (
+            patch.object(page, "_startInlineAI") as startInlineAI,
+            patch.object(page, "_startBroadcast") as startBroadcast,
+        ):
+            page.restoreLastBroadcast()
+
+        startInlineAI.assert_not_called()
+        startBroadcast.assert_called_once_with(
+            "保存的标题", "**保存的正文**", True
+        )
 
     def testFullscreenActionButtonShowsPressedStateAndCancelsOutsideRelease(self):
         for primary in (False, True):

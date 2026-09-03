@@ -161,6 +161,9 @@ class Config(QConfig):
     broadcastMarkdownEnabled = ConfigItem(
         "Broadcast", "MarkdownEnabled", False, BoolValidator()
     )
+    organizeMarkdownBeforeBroadcast = ConfigItem(
+        "Broadcast", "OrganizeMarkdownBeforeBroadcast", False, BoolValidator()
+    )
     lastBroadcast = ConfigItem("Broadcast", "LastBroadcast", {})
     broadcastBackgroundMode = OptionsConfigItem(
         "Broadcast",

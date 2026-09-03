@@ -354,11 +354,11 @@ class SettingPage(ScrollArea):
             content="投送窗口、操作按钮和关闭行为",
         )
         self.aiMarkdownGroup = CollapsibleSettingCardGroup(
-            "AI帮改Markdown设置",
+            "AI整理Markdown设置",
             "aiMarkdown",
             self.container,
             icon=FluentIcon.EDIT,
-            content="AI 帮改功能和 Markdown 风格",
+            content="AI 整理功能和 Markdown 风格",
         )
         self.countdownGroup = CollapsibleSettingCardGroup(
             "考试倒计时设置",

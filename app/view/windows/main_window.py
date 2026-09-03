@@ -1833,6 +1833,7 @@ class MainWindow(MSFluentWindow):
         for page in (
             getattr(self, "homePage", None),
             getattr(self, "appStorePage", None),
+            getattr(self, "broadcastEditPage", None),
         ):
             if page is not None:
                 page.shutdown()

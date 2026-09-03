@@ -155,7 +155,7 @@ _Avoid_: Home Card order、全局应用排序
 ### AI Markdown
 
 **AI Markdown Conversion**:
-将作业清单或其他纯文本整理成适合 Projection 展示的 Markdown 的一次请求。转换结果只有在用户确认采用后才替换原文；取消对话保留原文，它也不等同于 Projection 本身。
+将作业清单或其他纯文本整理成适合 Projection 展示的 Markdown 的一次请求。独立对话框只有在用户确认采用后才替换原文；Projection 编辑器启用“整理并投送”时则在输入框内流式展示结果，完成后立即开始 Projection，取消整理会丢弃未完成结果并投送整理前快照。它不等同于 Projection 本身。
 _Avoid_: chat、generation、Projection
 
 **Machine Identity**:
@@ -287,6 +287,7 @@ _Not_: quit（结束 DJCat 进程）
 - Broadcast Task、Home Card Task 与 Shutdown Task 持久化在 `cfg`；对应设置页只编辑规则，MainWindow 负责按时间匹配或分发 Application Lifecycle Event。
 - Existing-card 模式的 **Home Card Task** 只保存稳定 Home Card key、用于失效提示的标题快照和打开／关闭动作；关闭只适用于 Default Home Card。Custom 模式直接拥有 Action Sequence，但不会创建 Custom Home Card。
 - AI Markdown Conversion 使用 Machine Identity 领取和结算 Daily Quota；Machine Code 只是定位该身份的可见别名。
+- Projection 编辑器中的“整理并投送”只在 Markdown 模式显示并独立记忆；它复用 AI Markdown Conversion，但启动恢复必须绕过整理流程并原样恢复 Projection Snapshot。
 - Animation Tick 推进动画属性；Qt/Windows 的绘制与合成链路再决定 Presented Frame。两者不能互换描述。
 - Menu Reveal 由 Animation Tick 推进，但菜单 viewport 刷新次数不是动画帧数；合并冗余刷新不能改变用户看到的展开效果。
 
@@ -421,7 +422,7 @@ Projection 的两种正文渲染器必须保持这些共同约束：
 
 Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` 会覆盖整个窗口背景。窗口化时的 `1 px #808080` 边界线必须由该组件在主题色、纯色或图片绘制完成后最后绘制；全屏时不绘制。不得恢复为父窗口 QSS 边框，否则背景子控件会再次把它盖住。
 
-AI Markdown 输入框的忙碌边框使用 2 px 渐变 QSS 边框。Qt 样式表会分别绘制边框各边，粗渐变边框在圆角处会出现斜向拼接；除非改为一次性自定义绘制完整圆角路径，否则不要再次只靠增加 QSS `border-width` 加粗。
+AI Markdown 对话框和 Projection 编辑器内联整理的输入框都使用 2 px 渐变 QSS 忙碌边框。Qt 样式表会分别绘制边框各边，粗渐变边框在圆角处会出现斜向拼接；除非改为一次性自定义绘制完整圆角路径，否则不要再次只靠增加 QSS `border-width` 加粗。内联整理必须保存开始时的标题和正文快照；完成后投送完整结果，用户取消时先停止接收迟到信号，再立即投送快照正文。
 
 ## Module topology
 
@@ -507,7 +508,7 @@ Tray Menu quit → MainWindow.requestQuit()
   → stop navigation animation and timers
   → cancel Edge TTS and stop audio players
   → flush loaded Setting / Scheduled Task editors
-  → shutdown HomePage and loaded Application Store page, including Application Launch workers
+  → shutdown HomePage, loaded Application Store page and loaded Projection editor workers
   → cancel running custom Home Card Task workers
   → cancel Client Update download and close InfoBars
   → optional Storage Migration connected after normal shutdown

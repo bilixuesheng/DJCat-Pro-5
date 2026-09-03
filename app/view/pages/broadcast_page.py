@@ -2,7 +2,7 @@ import json
 import threading
 
 import requests
-from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QTextBlockFormat, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
@@ -586,13 +586,157 @@ def _iterSseContent(lines):
             if finishReason == "length":
                 raise RuntimeError("AI 输出过长，请缩短输入后重试。")
             if finishReason not in (None, "stop"):
-                raise RuntimeError("AI 转换未正常完成，请重试。")
+                raise RuntimeError("AI 整理未正常完成，请重试。")
             finished = finishReason == "stop" or finished
             content = choice.get("delta", {}).get("content")
             if content:
                 yield content
 
     raise RuntimeError("AI 服务流式响应未正常结束，请重试。")
+
+
+def _emitSignal(signal, *args):
+    try:
+        signal.emit(*args)
+    except RuntimeError:
+        pass
+
+
+def _busyTextEditStyle(borderIndex):
+    hue = borderIndex % 360
+    colors = [
+        QColor.fromHsv((hue + offset) % 360, 190, 255).name()
+        for offset in (0, 90, 180, 270, 360)
+    ]
+    stops = ", ".join(
+        f"stop:{index / 4:g} {color}"
+        for index, color in enumerate(colors)
+    )
+    background = "#343434" if isDarkTheme() else "#E8E8E8"
+    style = (
+        f"QTextEdit {{ background: {background}; border: 2px solid; "
+        f"border-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, {stops}); "
+        "border-radius: 8px; }"
+    )
+    return style, (hue + 6) % 360
+
+
+def _streamAIMarkdown(request, emitChunk):
+    remaining = request._remaining if request._remaining is not None else -1
+    limit = request._limit
+    cost = request._cost
+    payload = {"content": request._source, "machine_id": machineId()}
+    if cfg.aiMarkdownCustomStyleEnabled.value:
+        customStyle = cfg.aiMarkdownCustomStyle.value.strip()
+        if customStyle:
+            payload["custom_style"] = customStyle
+    response = None
+    try:
+        response = requests.post(
+            AI_MARKDOWN_API,
+            json=payload,
+            stream=True,
+            timeout=(10, 120),
+        )
+        if not isHttpsResponseChain(response, AI_MARKDOWN_API):
+            raise RuntimeError("AI 服务连接未保持 HTTPS")
+        with request._responseLock:
+            if request._cancelEvent.is_set():
+                response.close()
+                return
+            request._activeResponse = response
+        with response:
+            remaining = int(
+                response.headers.get("X-RateLimit-Remaining", remaining)
+            )
+            limit = int(response.headers.get("X-RateLimit-Limit", limit))
+            cost = int(response.headers.get("X-RateLimit-Cost", cost))
+            if not response.ok:
+                try:
+                    message = response.json().get("message")
+                except (AttributeError, ValueError):
+                    message = None
+                raise RuntimeError(
+                    message or f"AI 服务暂时不可用（{response.status_code}）"
+                )
+
+            response.encoding = "utf-8"
+            for chunk in _iterSseContent(
+                response.iter_lines(chunk_size=1, decode_unicode=True)
+            ):
+                if request._cancelEvent.is_set():
+                    return
+                emitChunk(chunk)
+        if request._cancelEvent.is_set():
+            return
+        _emitSignal(request.conversionFinished, remaining, limit, cost)
+    except requests.RequestException:
+        if request._cancelEvent.is_set():
+            return
+        _emitSignal(
+            request.conversionFailed,
+            "无法连接 AI 服务，请检查网络后重试。",
+            remaining,
+            limit,
+            cost,
+        )
+    except (RuntimeError, TypeError, ValueError) as error:
+        if request._cancelEvent.is_set():
+            return
+        _emitSignal(
+            request.conversionFailed,
+            str(error),
+            remaining,
+            limit,
+            cost,
+        )
+    finally:
+        with request._responseLock:
+            if request._activeResponse is response:
+                request._activeResponse = None
+        if response is not None:
+            response.close()
+
+
+class _InlineAIMarkdownRequest(QObject):
+    chunkReceived = Signal(str)
+    conversionFinished = Signal(int, int, int)
+    conversionFailed = Signal(str, int, int, int)
+    stopped = Signal()
+
+    def __init__(self, source, parent=None):
+        super().__init__(parent)
+        self._source = source
+        self._remaining = None
+        self._limit = 15
+        self._cost = 1
+        self._cancelEvent = threading.Event()
+        self._responseLock = threading.Lock()
+        self._activeResponse = None
+        self._resultChunks = []
+
+    def start(self):
+        threading.Thread(target=self._stream, daemon=True).start()
+
+    def cancel(self):
+        self._cancelEvent.set()
+        with self._responseLock:
+            response = self._activeResponse
+        if response is not None:
+            threading.Thread(target=response.close, daemon=True).start()
+
+    def resultText(self):
+        return "".join(self._resultChunks)
+
+    def _stream(self):
+        def emitChunk(chunk):
+            self._resultChunks.append(chunk)
+            _emitSignal(self.chunkReceived, chunk)
+
+        try:
+            _streamAIMarkdown(self, emitChunk)
+        finally:
+            _emitSignal(self.stopped)
 
 
 class AIMarkdownDialog(MessageBoxBase):
@@ -619,15 +763,15 @@ class AIMarkdownDialog(MessageBoxBase):
         self._resultChunks = []
         self._pendingChunks = []
 
-        self.titleLabel = SubtitleLabel("AI帮改Markdown", self)
+        self.titleLabel = SubtitleLabel("AI整理Markdown", self)
         self.descriptionLabel = BodyLabel(
-            "将要转换的作业清单或任务填入下面的输入框，即可转换为标准markdown格式。",
+            "将作业清单或任务填入下面的输入框，即可整理为标准 Markdown 格式。",
             self,
         )
         self.descriptionLabel.setWordWrap(True)
         self.inputEdit = TextEdit(self)
         self.inputEdit.setPlainText(text)
-        self.inputEdit.setPlaceholderText("在此输入要转换的内容")
+        self.inputEdit.setPlaceholderText("在此输入要整理的内容")
         self.inputEdit.setMinimumHeight(120)
         QScroller.grabGesture(
             self.inputEdit.viewport(),
@@ -643,7 +787,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self.viewLayout.addWidget(self.quotaLabel)
         self.widget.setFixedWidth(min(680, max(0, self.width() - 80)))
 
-        self.yesButton.setText("开始转换")
+        self.yesButton.setText("开始整理")
         self.cancelButton.setText("取消")
         self.inputEdit.textChanged.connect(self._refreshStartButton)
         self.quotaReceived.connect(self._onQuotaReceived)
@@ -722,91 +866,13 @@ class AIMarkdownDialog(MessageBoxBase):
         self.inputEdit.setReadOnly(True)
         self.yesButton.setEnabled(False)
         self.cancelButton.setEnabled(True)
-        self.cancelButton.setText("取消转换")
+        self.cancelButton.setText("取消整理")
         self._busyTimer.start()
         self._updateBusyStyle()
         threading.Thread(target=self._streamConversion, daemon=True).start()
 
     def _streamConversion(self):
-        remaining = self._remaining if self._remaining is not None else -1
-        limit = self._limit
-        cost = self._cost
-        payload = {"content": self._source, "machine_id": machineId()}
-        if cfg.aiMarkdownCustomStyleEnabled.value:
-            customStyle = cfg.aiMarkdownCustomStyle.value.strip()
-            if customStyle:
-                payload["custom_style"] = customStyle
-        response = None
-        try:
-            response = requests.post(
-                AI_MARKDOWN_API,
-                json=payload,
-                stream=True,
-                timeout=(10, 120),
-            )
-            if not isHttpsResponseChain(response, AI_MARKDOWN_API):
-                raise RuntimeError("AI 服务连接未保持 HTTPS")
-            with self._responseLock:
-                if self._cancelEvent.is_set():
-                    response.close()
-                    return
-                self._activeResponse = response
-            with response:
-                remaining = int(
-                    response.headers.get("X-RateLimit-Remaining", remaining)
-                )
-                limit = int(response.headers.get("X-RateLimit-Limit", limit))
-                cost = int(response.headers.get("X-RateLimit-Cost", cost))
-                if not response.ok:
-                    try:
-                        message = response.json().get("message")
-                    except (AttributeError, ValueError):
-                        message = None
-                    raise RuntimeError(
-                        message or f"AI 服务暂时不可用（{response.status_code}）"
-                    )
-
-                response.encoding = "utf-8"
-                for chunk in _iterSseContent(
-                    response.iter_lines(chunk_size=1, decode_unicode=True)
-                ):
-                    if self._cancelEvent.is_set():
-                        return
-                    try:
-                        self.chunkReceived.emit(chunk)
-                    except RuntimeError:
-                        return
-            if self._cancelEvent.is_set():
-                return
-            try:
-                self.conversionFinished.emit(remaining, limit, cost)
-            except RuntimeError:
-                pass
-        except requests.RequestException:
-            if self._cancelEvent.is_set():
-                return
-            try:
-                self.conversionFailed.emit(
-                    "无法连接 AI 服务，请检查网络后重试。",
-                    remaining,
-                    limit,
-                    cost,
-                )
-            except RuntimeError:
-                pass
-        except (RuntimeError, TypeError, ValueError) as error:
-            if self._cancelEvent.is_set():
-                return
-            try:
-                self.conversionFailed.emit(str(error), remaining, limit, cost)
-            except RuntimeError:
-                pass
-        finally:
-            with self._responseLock:
-                if self._activeResponse is response:
-                    self._activeResponse = None
-            if response is not None:
-                response.close()
+        _streamAIMarkdown(self, self.chunkReceived.emit)
 
     def _appendChunk(self, chunk):
         self._resultChunks.append(chunk)
@@ -888,7 +954,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self._updateQuotaLabel()
         self._refreshStartButton()
         self._refreshQuota()
-        dialog = MessageBox("转换失败", message, self)
+        dialog = MessageBox("整理失败", message, self)
         try:
             dialog.exec()
         finally:
@@ -919,21 +985,10 @@ class AIMarkdownDialog(MessageBoxBase):
             )
 
     def _updateBusyStyle(self):
-        hue = self._borderIndex % 360
-        colors = [
-            QColor.fromHsv((hue + offset) % 360, 190, 255).name()
-            for offset in (0, 90, 180, 270, 360)
-        ]
-        stops = ", ".join(
-            f"stop:{index / 4:g} {color}" for index, color in enumerate(colors)
+        style, self._borderIndex = _busyTextEditStyle(
+            self._borderIndex
         )
-        self._borderIndex = (hue + 6) % 360
-        background = "#343434" if isDarkTheme() else "#E8E8E8"
-        self.inputEdit.setStyleSheet(
-            f"QTextEdit {{ background: {background}; border: 2px solid; "
-            f"border-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, {stops}); "
-            "border-radius: 8px; }"
-        )
+        self.inputEdit.setStyleSheet(style)
 
     def _stopBusyStyle(self):
         self._busyTimer.stop()
@@ -963,6 +1018,10 @@ class BroadcastEditPage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._inlineAIRequest = None
+        self._inlineAISnapshot = None
+        self._inlineAIPendingChunks = []
+        self._inlineAIBorderIndex = 0
         self.vBoxLayout = QVBoxLayout(self)
         self.vBoxLayout.setContentsMargins(30, 30, 30, 30)
 
@@ -975,9 +1034,18 @@ class BroadcastEditPage(QWidget):
         self.markdownCheckBox.setChecked(cfg.broadcastMarkdownEnabled.value)
         self.markdownCheckBox.stateChanged.connect(self._onMarkdownStateChanged)
 
+        self.organizeCheckBox = CheckBox("整理并投送", self)
+        self.organizeCheckBox.setChecked(
+            cfg.organizeMarkdownBeforeBroadcast.value
+        )
+        self.organizeCheckBox.stateChanged.connect(
+            self._onOrganizeStateChanged
+        )
+
         topLayout.addWidget(self.backBtn)
         topLayout.addWidget(self.pageTitle)
         topLayout.addStretch(1)
+        topLayout.addWidget(self.organizeCheckBox)
         topLayout.addWidget(self.markdownCheckBox)
         self.vBoxLayout.addLayout(topLayout)
 
@@ -994,6 +1062,7 @@ class BroadcastEditPage(QWidget):
             self.contentInput.viewport(),
             QScroller.ScrollerGestureType.TouchGesture,
         )
+        self._contentInputStyle = self.contentInput.styleSheet()
         self.vBoxLayout.addWidget(self.contentInput)
 
         btnLayout = QHBoxLayout()
@@ -1004,7 +1073,7 @@ class BroadcastEditPage(QWidget):
 
         self.aiBtn = PushButton(self)
         self.aiBtn.setIcon(QIcon(str(ASSET_DIR / "deepseek.png")))
-        self.aiBtn.setText("AI帮改Markdown")
+        self.aiBtn.setText("AI整理Markdown")
         self.aiBtn.setEnabled(False)
         self.aiBtn.clicked.connect(self._showAIMarkdownDialog)
 
@@ -1019,6 +1088,14 @@ class BroadcastEditPage(QWidget):
         btnLayout.addStretch(1)
         btnLayout.addWidget(self.broadcastBtn)
         self.vBoxLayout.addLayout(btnLayout)
+
+        self._inlineAIBusyTimer = QTimer(self)
+        self._inlineAIBusyTimer.setInterval(60)
+        self._inlineAIBusyTimer.timeout.connect(self._updateInlineAIBusyStyle)
+        self._inlineAIFlushTimer = QTimer(self)
+        self._inlineAIFlushTimer.setSingleShot(True)
+        self._inlineAIFlushTimer.setInterval(50)
+        self._inlineAIFlushTimer.timeout.connect(self._flushInlineAIChunks)
         self._updateMarkdownUi()
 
         self.broadcastWin = BroadcastWindow()
@@ -1033,12 +1110,24 @@ class BroadcastEditPage(QWidget):
         )
         self._updateMarkdownUi()
 
+    def _onOrganizeStateChanged(self, state):
+        cfg.set(
+            cfg.organizeMarkdownBeforeBroadcast,
+            self.organizeCheckBox.isChecked(),
+        )
+        self._updateMarkdownUi()
+
     def _updateMarkdownUi(self):
-        if self.markdownCheckBox.isChecked():
+        markdownEnabled = self.markdownCheckBox.isChecked()
+        if markdownEnabled:
             self.contentInput.setPlaceholderText("支持Markdown语法（注意，在该模式下换行要换两次）")
         else:
             self.contentInput.setPlaceholderText("在此输入要投送的正文")
-        self.aiBtn.setEnabled(self.markdownCheckBox.isChecked())
+        self.organizeCheckBox.setVisible(markdownEnabled)
+        self.aiBtn.setEnabled(markdownEnabled and self._inlineAIRequest is None)
+        if self._inlineAIRequest is None:
+            organize = markdownEnabled and self.organizeCheckBox.isChecked()
+            self.broadcastBtn.setText("整理并投送" if organize else "投送")
 
     def _showAIMarkdownDialog(self):
         dialog = AIMarkdownDialog(
@@ -1105,8 +1194,13 @@ class BroadcastEditPage(QWidget):
         return True
 
     def restoreLastBroadcast(self):
-        if self._useLastBroadcast():
-            self._onBroadcast()
+        if not self._useLastBroadcast():
+            return
+        self._startBroadcast(
+            self.titleInput.text(),
+            self.contentInput.toPlainText(),
+            self.markdownCheckBox.isChecked(),
+        )
 
     def _setBroadcastInactive(self):
         broadcast = cfg.lastBroadcast.value
@@ -1114,11 +1208,30 @@ class BroadcastEditPage(QWidget):
             cfg.set(cfg.lastBroadcast, {**broadcast, "active": False})
 
     def _onBroadcast(self):
+        if self._inlineAIRequest is not None:
+            self._cancelInlineAIAndBroadcast()
+            return
+
+        if (
+            self.markdownCheckBox.isChecked()
+            and self.organizeCheckBox.isChecked()
+            and self.contentInput.toPlainText().strip()
+        ):
+            self._startInlineAI()
+            return
+
+        self._startBroadcast(
+            self.titleInput.text(),
+            self.contentInput.toPlainText(),
+            self.markdownCheckBox.isChecked(),
+        )
+
+    def _startBroadcast(self, title, content, isMarkdown):
         QApplication.instance().setQuitOnLastWindowClosed(False)
         self._activeBroadcast = {
-            "title": self.titleInput.text(),
-            "content": self.contentInput.toPlainText(),
-            "isMarkdown": self.markdownCheckBox.isChecked(),
+            "title": title,
+            "content": content,
+            "isMarkdown": isMarkdown,
         }
         cfg.set(cfg.lastBroadcast, {**self._activeBroadcast, "active": True})
         self.broadcastWin.setContent(
@@ -1128,6 +1241,143 @@ class BroadcastEditPage(QWidget):
         )
         self.broadcastWin.startBroadcast()
         self.window().hide()
+
+    def _startInlineAI(self):
+        snapshot = {
+            "title": self.titleInput.text(),
+            "content": self.contentInput.toPlainText(),
+            "isMarkdown": True,
+        }
+        request = _InlineAIMarkdownRequest(snapshot["content"], self)
+        request.chunkReceived.connect(
+            lambda chunk, current=request: self._appendInlineAIChunk(
+                current, chunk
+            )
+        )
+        request.conversionFinished.connect(
+            lambda remaining, limit, cost, current=request: (
+                self._onInlineAIFinished(current, remaining, limit, cost)
+            )
+        )
+        request.conversionFailed.connect(
+            lambda message, remaining, limit, cost, current=request: (
+                self._onInlineAIFailed(
+                    current, message, remaining, limit, cost
+                )
+            )
+        )
+        request.stopped.connect(request.deleteLater)
+
+        self._inlineAIRequest = request
+        self._inlineAISnapshot = snapshot
+        self._inlineAIPendingChunks.clear()
+        self.contentInput.clear()
+        self.contentInput.setReadOnly(True)
+        for widget in (
+            self.backBtn,
+            self.titleInput,
+            self.templateBtn,
+            self.aiBtn,
+            self.organizeCheckBox,
+            self.markdownCheckBox,
+        ):
+            widget.setEnabled(False)
+        self.broadcastBtn.setText("取消")
+        self._inlineAIBusyTimer.start()
+        self._updateInlineAIBusyStyle()
+        request.start()
+
+    def _appendInlineAIChunk(self, request, chunk):
+        if request is not self._inlineAIRequest:
+            return
+        self._inlineAIPendingChunks.append(chunk)
+        if not self._inlineAIFlushTimer.isActive():
+            self._inlineAIFlushTimer.start()
+
+    def _flushInlineAIChunks(self):
+        if not self._inlineAIPendingChunks:
+            return
+        chunk = "".join(self._inlineAIPendingChunks)
+        self._inlineAIPendingChunks.clear()
+        self.contentInput.moveCursor(QTextCursor.MoveOperation.End)
+        self.contentInput.insertPlainText(chunk)
+        self.contentInput.ensureCursorVisible()
+
+    def _onInlineAIFinished(self, request, remaining, limit, cost):
+        if request is not self._inlineAIRequest:
+            return
+        result = request.resultText()
+        if not result.strip():
+            self._onInlineAIFailed(
+                request,
+                "AI 没有返回内容，请重试。",
+                remaining,
+                limit,
+                cost,
+            )
+            return
+
+        snapshot = self._inlineAISnapshot
+        self._finishInlineAI()
+        self.contentInput.setPlainText(result)
+        self._startBroadcast(snapshot["title"], result, snapshot["isMarkdown"])
+
+    def _onInlineAIFailed(self, request, message, remaining, limit, cost):
+        if request is not self._inlineAIRequest:
+            return
+        snapshot = self._inlineAISnapshot
+        self._finishInlineAI()
+        self.contentInput.setPlainText(snapshot["content"])
+        dialog = MessageBox("整理失败", message, self.window())
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
+
+    def _cancelInlineAIAndBroadcast(self):
+        request = self._inlineAIRequest
+        snapshot = self._inlineAISnapshot
+        if request is None or snapshot is None:
+            return
+        self._finishInlineAI()
+        request.cancel()
+        self.contentInput.setPlainText(snapshot["content"])
+        self._startBroadcast(
+            snapshot["title"],
+            snapshot["content"],
+            snapshot["isMarkdown"],
+        )
+
+    def _finishInlineAI(self):
+        self._inlineAIRequest = None
+        self._inlineAISnapshot = None
+        self._inlineAIFlushTimer.stop()
+        self._inlineAIPendingChunks.clear()
+        self._inlineAIBusyTimer.stop()
+        self.contentInput.setStyleSheet(self._contentInputStyle)
+        self.contentInput.setReadOnly(False)
+        for widget in (
+            self.backBtn,
+            self.titleInput,
+            self.templateBtn,
+            self.organizeCheckBox,
+            self.markdownCheckBox,
+        ):
+            widget.setEnabled(True)
+        self._updateMarkdownUi()
+
+    def _updateInlineAIBusyStyle(self):
+        style, self._inlineAIBorderIndex = _busyTextEditStyle(
+            self._inlineAIBorderIndex
+        )
+        self.contentInput.setStyleSheet(style)
+
+    def shutdown(self):
+        request = self._inlineAIRequest
+        if request is None:
+            return
+        self._finishInlineAI()
+        request.cancel()
 
     def _onReturnToEdit(self):
         QApplication.instance().setQuitOnLastWindowClosed(True)
