@@ -46,6 +46,8 @@ class CountdownWindowTest(TestCase):
         self.assertTrue(self.window.controlsWidget.isHidden())
         self.assertFalse(self.window.controlsWidget.isEnabled())
         self.assertFalse(self.window._controls_visible)
+        self.assertEqual(self.window.size().toTuple(), (680, 220))
+        self.assertEqual(self.window.timeLabel.font().pixelSize(), 99)
 
     def testEditPageUsesTouchTimePicker(self):
         page = CountdownEditPage()
