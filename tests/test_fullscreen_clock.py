@@ -92,7 +92,7 @@ class FullscreenClockTest(TestCase):
         self.assertTrue(self.window.is_windowed)
         self.assertTrue(self.window.titleLabel.isHidden())
         self.assertFalse(self.window.timeLabel.isHidden())
-        self.assertEqual(self.window.size().toTuple(), (680, 220))
+        self.assertEqual(self.window.contentsRect().size().toTuple(), (680, 220))
         self.assertEqual(self.window.timeLabel.font().pixelSize(), 99)
 
     def testTimeFontFitsNarrowFullscreenWidth(self):

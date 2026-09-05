@@ -164,6 +164,58 @@ class WindowBackgroundTest(TestCase):
         self.assertTrue(countdown.background._borderVisible)
         self.assertTrue(clock.background._borderVisible)
 
+    def testClockAndCountdownPaintRoundedBackgroundAndShadow(self):
+        imagePath = Path(self.tempDir.name) / "background.png"
+        source = QImage(4, 4, QImage.Format.Format_RGB32)
+        source.fill(QColor("#123456"))
+        self.assertTrue(source.save(str(imagePath)))
+
+        for windowType, prefix in (
+            (CountdownWindow, "countdown"),
+            (FullscreenClockWindow, "fullscreenClock"),
+        ):
+            window = windowType()
+            self.addCleanup(window.close)
+            window.is_windowed = True
+            window._setupCornerButtons()
+            window._applyWindowState()
+            for mode in WINDOW_BACKGROUND_MODES:
+                with self.subTest(window=windowType.__name__, mode=mode):
+                    cfg.set(getattr(cfg, prefix + "BackgroundMode"), mode, save=False)
+                    cfg.set(
+                        getattr(cfg, prefix + "BackgroundColor"),
+                        QColor("#123456"), save=False,
+                    )
+                    cfg.set(
+                        getattr(cfg, prefix + "BackgroundImagePath"),
+                        str(imagePath), save=False,
+                    )
+                    self.app.processEvents()
+                    image = window.grab().toImage().scaled(window.size())
+                    rect = window.contentsRect()
+                    self.assertEqual(image.pixelColor(0, 0).alpha(), 0)
+                    for point in (
+                        rect.topLeft(), rect.topRight(),
+                        rect.bottomLeft(), rect.bottomRight(),
+                    ):
+                        self.assertLess(image.pixelColor(point).alpha(), 100)
+                    self.assertEqual(
+                        image.pixelColor(rect.left(), rect.center().y()),
+                        QColor("#808080"),
+                    )
+                    shadowAlpha = image.pixelColor(
+                        rect.left() - 2, rect.center().y(),
+                    ).alpha()
+                    self.assertGreater(shadowAlpha, 0)
+                    self.assertLess(shadowAlpha, 100)
+                    self.assertTrue(rect.contains(window.btnContainer.geometry()))
+
+            window.toggleWindowMode()
+            self.app.processEvents()
+            self.assertEqual(window.contentsRect(), window.rect())
+            self.assertFalse(window.background.graphicsEffect().isEnabled())
+            self.assertEqual(window.grab().toImage().pixelColor(0, 0).alpha(), 255)
+
     @patch("app.view.pages.setting_page.QFileDialog.getOpenFileName")
     def testSettingPageSelectsImageAndEnablesImageMode(self, getOpenFileName):
         page = SettingPage()

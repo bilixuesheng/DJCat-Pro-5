@@ -32,7 +32,7 @@ from app.config.paths import ASSET_DIR
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import QWIDGETSIZE_MAX
 from app.view.components.task_picker import TouchTimePicker
-from app.view.components.window_background import WindowBackground
+from app.view.components.window_background import WINDOW_SHADOW_MARGIN, WindowBackground
 from app.view.pages.broadcast_page import (
     VerticalButton,
     showActionConfirmation,
@@ -70,7 +70,8 @@ class CountdownWindow(FramelessWindow):
         super().__init__()
         self.setObjectName("CountdownWindow")
         self.titleBar.hide()
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        # 首次显示前启用透明表面，Win10 也由 Qt 绘制圆角。
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.background = WindowBackground(
             cfg.countdownBackgroundMode,
             cfg.countdownBackgroundColor,
@@ -80,7 +81,7 @@ class CountdownWindow(FramelessWindow):
             self,
         )
         self.background.lower()
-        self.background.setGeometry(self.rect())
+        self.background.setGeometry(self.contentsRect())
         # 固定布局窗口，任何模式下都不允许边缘拉伸
         self.setResizeEnabled(False)
 
@@ -293,7 +294,7 @@ class CountdownWindow(FramelessWindow):
         self.timeLabel.setText(f"{hours} : {minutes} : {seconds}")
         # 文本长度变化会影响窗口化下的自适应字号
         if self.is_windowed:
-            self._applyFonts(self.height())
+            self._applyFonts(self.contentsRect().height())
 
     def _playSound(self, name):
         self.sound.setSource(QUrl.fromLocalFile(str(ASSET_DIR / name)))
@@ -349,11 +350,12 @@ class CountdownWindow(FramelessWindow):
 
     def _updateBtnPosition(self):
         margin = self.btnLayout.spacing()
+        rect = self.contentsRect()
         if cfg.countdownActionButtonPosition.value == "左下角":
-            target_x = margin
+            target_x = rect.left() + margin
         else:
-            target_x = self.width() - self.btnContainer.width() - margin
-        target_y = self.height() - self.btnContainer.height() - margin
+            target_x = rect.right() + 1 - self.btnContainer.width() - margin
+        target_y = rect.bottom() + 1 - self.btnContainer.height() - margin
         self.btnContainer.move(target_x, target_y)
         self.btnContainer.raise_()
 
@@ -369,12 +371,19 @@ class CountdownWindow(FramelessWindow):
             if self.is_windowed
             else cfg.countdownTopmostInFullscreen.value
         )
-        flags = Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
+        flags = (
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint
+        )
         if is_top:
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
 
-        self.background.setBorderVisible(self.is_windowed)
+        margin = WINDOW_SHADOW_MARGIN if self.is_windowed else 0
+        self.setContentsMargins(margin, margin, margin, margin)
+        self.background.setRoundedWindow(self.is_windowed)
+        self.background.setGeometry(self.contentsRect())
         self.setStyleSheet("CountdownWindow { background-color: transparent; }")
         self.titleLabel.setVisible(not self.is_windowed)
 
@@ -388,7 +397,7 @@ class CountdownWindow(FramelessWindow):
             self.vBoxLayout.setContentsMargins(16, 12, 16, 56)
             # 先按目标高度缩小字体，否则旧字体的最小尺寸会钳制 resize
             self._applyFonts(220)
-            self.setFixedSize(680, 220)
+            self.setFixedSize(680 + 2 * margin, 220 + 2 * margin)
             self.move(rect.center() - self.rect().center())
         else:
             self.controlsWidget.show()
@@ -418,15 +427,15 @@ class CountdownWindow(FramelessWindow):
         if self.is_windowed:
             width = QFontMetrics(font).horizontalAdvance(self.timeLabel.text())
             margins = self.vBoxLayout.contentsMargins()
-            avail = self.width() - margins.left() - margins.right()
+            avail = self.contentsRect().width() - margins.left() - margins.right()
             if width > avail:
                 font.setPixelSize(max(32, size * avail // width))
         self.timeLabel.setFont(font)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.background.setGeometry(self.rect())
-        self._applyFonts(self.height())
+        self.background.setGeometry(self.contentsRect())
+        self._applyFonts(self.contentsRect().height())
         self._updateBtnPosition()
 
     def mousePressEvent(self, e):

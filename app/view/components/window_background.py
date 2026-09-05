@@ -1,10 +1,13 @@
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import QEvent, QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtWidgets import QGraphicsDropShadowEffect, QWidget
 from qfluentwidgets import qconfig
+
+
+WINDOW_SHADOW_MARGIN = 12
 
 
 class WindowBackground(QWidget):
@@ -28,6 +31,7 @@ class WindowBackground(QWidget):
         self._sourceKey = None
         self._sourcePixmap = None
         self._borderVisible = False
+        self._cornerRadius = 0
         self.setObjectName("window-background")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
@@ -48,6 +52,28 @@ class WindowBackground(QWidget):
             return
         self._borderVisible = visible
         self.update()
+
+    def setRoundedWindow(self, enabled: bool) -> None:
+        self._cornerRadius = 8 if enabled else 0
+        self.setBorderVisible(enabled)
+        shadow = self.graphicsEffect()
+        if enabled and shadow is None:
+            # 阴影只作用于背景，避免时间每秒更新时重新处理全部子控件。
+            shadow = QGraphicsDropShadowEffect(self)
+            shadow.setBlurRadius(WINDOW_SHADOW_MARGIN * self.devicePixelRatioF())
+            shadow.setOffset(0, 0)
+            shadow.setColor(QColor(0, 0, 0, 100))
+            self.setGraphicsEffect(shadow)
+        if shadow is not None:
+            shadow.setEnabled(enabled)
+        self.update()
+
+    def event(self, event) -> bool:
+        if event.type() == QEvent.Type.DevicePixelRatioChange:
+            shadow = self.graphicsEffect()
+            if shadow is not None:
+                shadow.setBlurRadius(WINDOW_SHADOW_MARGIN * self.devicePixelRatioF())
+        return super().event(event)
 
     def _baseColor(self) -> QColor:
         color = QColor(self._themeColor())
@@ -115,6 +141,11 @@ class WindowBackground(QWidget):
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
+        if self._cornerRadius:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            path = QPainterPath()
+            path.addRoundedRect(QRectF(self.rect()), self._cornerRadius, self._cornerRadius)
+            painter.setClipPath(path)
         painter.fillRect(self.rect(), self._baseColor())
         if self._modeItem.value == "纯色":
             painter.fillRect(self.rect(), QColor(self._colorItem.value))
@@ -123,7 +154,15 @@ class WindowBackground(QWidget):
             if image is not None:
                 painter.drawPixmap(0, 0, image)
         if self._borderVisible:
+            painter.setClipping(False)
             painter.setPen(QPen(QColor("#808080"), 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
+            if self._cornerRadius:
+                painter.drawRoundedRect(
+                    QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5),
+                    self._cornerRadius - 0.5,
+                    self._cornerRadius - 0.5,
+                )
+            else:
+                painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
         painter.end()

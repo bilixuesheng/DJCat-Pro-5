@@ -6,7 +6,7 @@ from qframelesswindow import FramelessWindow
 
 from app.config.cfg import cfg
 from app.view.components.setting_card_group import QWIDGETSIZE_MAX
-from app.view.components.window_background import WindowBackground
+from app.view.components.window_background import WINDOW_SHADOW_MARGIN, WindowBackground
 from app.view.pages.broadcast_page import VerticalButton, showCloseConfirmation
 
 
@@ -17,7 +17,8 @@ class FullscreenClockWindow(FramelessWindow):
         super().__init__()
         self.setObjectName("FullscreenClockWindow")
         self.titleBar.hide()
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        # 首次显示前启用透明表面，Win10 也由 Qt 绘制圆角。
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setResizeEnabled(False)
 
         self.background = WindowBackground(
@@ -29,7 +30,7 @@ class FullscreenClockWindow(FramelessWindow):
             self,
         )
         self.background.lower()
-        self.background.setGeometry(self.rect())
+        self.background.setGeometry(self.contentsRect())
 
         self.is_windowed = False
         self._closeFlyout = None
@@ -81,7 +82,7 @@ class FullscreenClockWindow(FramelessWindow):
     def _updateTime(self):
         now = QTime.currentTime()
         self.timeLabel.setText(now.toString("HH : mm : ss"))
-        self._applyFonts(self.height())
+        self._applyFonts(self.contentsRect().height())
         self.timer.start(max(1, 1000 - now.msec()))
 
     def _setupCornerButtons(self):
@@ -107,11 +108,12 @@ class FullscreenClockWindow(FramelessWindow):
 
     def _updateBtnPosition(self):
         margin = self.btnLayout.spacing()
+        rect = self.contentsRect()
         if cfg.fullscreenClockActionButtonPosition.value == "左下角":
-            targetX = margin
+            targetX = rect.left() + margin
         else:
-            targetX = self.width() - self.btnContainer.width() - margin
-        targetY = self.height() - self.btnContainer.height() - margin
+            targetX = rect.right() + 1 - self.btnContainer.width() - margin
+        targetY = rect.bottom() + 1 - self.btnContainer.height() - margin
         self.btnContainer.move(targetX, targetY)
         self.btnContainer.raise_()
 
@@ -126,12 +128,19 @@ class FullscreenClockWindow(FramelessWindow):
             if self.is_windowed
             else cfg.fullscreenClockTopmostInFullscreen.value
         )
-        flags = Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
+        flags = (
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint
+        )
         if isTop:
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
 
-        self.background.setBorderVisible(self.is_windowed)
+        margin = WINDOW_SHADOW_MARGIN if self.is_windowed else 0
+        self.setContentsMargins(margin, margin, margin, margin)
+        self.background.setRoundedWindow(self.is_windowed)
+        self.background.setGeometry(self.contentsRect())
         self.setStyleSheet(
             "FullscreenClockWindow { background-color: transparent; }"
         )
@@ -142,7 +151,7 @@ class FullscreenClockWindow(FramelessWindow):
             rect = self.screen().availableGeometry()
             self.vBoxLayout.setContentsMargins(16, 12, 16, 56)
             self._applyFonts(220)
-            self.setFixedSize(680, 220)
+            self.setFixedSize(680 + 2 * margin, 220 + 2 * margin)
             self.move(rect.center() - self.rect().center())
         else:
             self.vBoxLayout.setContentsMargins(40, 20, 40, 20)
@@ -170,15 +179,15 @@ class FullscreenClockWindow(FramelessWindow):
         font.setBold(True)
         width = QFontMetrics(font).horizontalAdvance(self.timeLabel.text())
         margins = self.vBoxLayout.contentsMargins()
-        available = self.width() - margins.left() - margins.right()
+        available = self.contentsRect().width() - margins.left() - margins.right()
         if width > available:
             font.setPixelSize(max(32, size * available // width))
         self.timeLabel.setFont(font)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.background.setGeometry(self.rect())
-        self._applyFonts(self.height())
+        self.background.setGeometry(self.contentsRect())
+        self._applyFonts(self.contentsRect().height())
         self._updateBtnPosition()
 
     def mousePressEvent(self, event):
