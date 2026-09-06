@@ -307,6 +307,8 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 **Tray Menu 不拥有 Home Card。** 它只根据 HomePage 提供的入口快照重建菜单，并把稳定 key 交回 MainWindow/HomePage 执行。
 
+Tray Menu 的左右键打开统一由 `SystemTrayIcon.activated` 进入 `AcrylicMenu.exec()`，不再向 `QSystemTrayIcon.setContextMenu()` 注册自定义菜单，避免 Qt 原生 QMenu 弹出流程与自定义布局混用。每次弹出先完成样式和尺寸更新，再按当前屏幕可用区域确定 Menu Reveal 的最终位置；不能在 `showEvent()` 中补移窗口，否则会被后续动画覆盖。回归验证必须走真实弹出入口并推进到动画结束，覆盖菜单重建后的首次打开、再次打开和多屏负坐标，不能只测试 `move()` 后直接 `show()`。
+
 Tray Menu 的自定义 AcrylicMenu 在 Windows 10 上统一使用方角窗口和方角边框，一级菜单和主页卡片二级菜单保持一致；Windows 11 继续使用系统圆角。该平台差异只属于 Tray Menu，不修改下拉框、输入框右键等 QFluentWidgets 菜单。
 
 **HomePage 按稳定 key 复用 Application Home Card。** 不变快照不得重建卡片或重复发布主页变化；标题、图标和动作更新原有卡片，移除时才释放对应 QWidget。
