@@ -108,7 +108,7 @@ class HomeCustomCardTest(TestCase):
         self.assertEqual(self.page.sortBtn.size(), self.page.sortBtn.sizeHint())
         card = self.page.all_cards[DEFAULT_HOME_CARD_NAMES[0]]
         self.assertEqual(card.editButton.size().toTuple(), (24, 24))
-        self.assertEqual(card.deleteButton.size().toTuple(), (24, 24))
+        self.assertEqual(card.deleteButton.size().toTuple(), (26, 26))
 
     def testCustomCardDialogOpensAfterAddMenuCallbackReturns(self):
         with mock.patch.object(RoundMenu, "exec", autospec=True) as execute:

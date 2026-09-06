@@ -205,7 +205,8 @@ class MarkdownRendererTest(TestCase):
         self.assertIn(
             f"line-height: {MarkdownView.LARGE_TEXT_LINE_HEIGHT}%", paragraph.text()
         )
-        self.assertEqual(MarkdownView()._contentLayout.spacing(), 12)
+        defaultView = MarkdownView()
+        self.assertEqual(defaultView._contentLayout.spacing(), 12)
 
         labels = window.markdownView.findChildren(QLabel)
         self.assertTrue(
