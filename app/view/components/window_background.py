@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QRectF, Qt
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QGraphicsDropShadowEffect, QWidget
 from qfluentwidgets import qconfig
@@ -74,6 +74,34 @@ class WindowBackground(QWidget):
             if shadow is not None:
                 shadow.setBlurRadius(WINDOW_SHADOW_MARGIN * self.devicePixelRatioF())
         return super().event(event)
+
+    def resizeEdges(self, position: QPointF, borderWidth: int) -> Qt.Edge:
+        """按可见圆角边框命中缩放区域，外侧仅保留 2 px 抓取余量。"""
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        outer = QPainterPath()
+        outer.addRoundedRect(
+            rect.adjusted(-2, -2, 2, 2),
+            self._cornerRadius + 1.5,
+            self._cornerRadius + 1.5,
+        )
+        inner = QPainterPath()
+        radius = max(0, self._cornerRadius - borderWidth)
+        inner.addRoundedRect(
+            rect.adjusted(borderWidth, borderWidth, -borderWidth, -borderWidth),
+            radius, radius,
+        )
+        edges = Qt.Edge(0)
+        if not outer.contains(position) or inner.contains(position):
+            return edges
+        if position.x() < borderWidth:
+            edges |= Qt.Edge.LeftEdge
+        elif position.x() >= self.width() - borderWidth:
+            edges |= Qt.Edge.RightEdge
+        if position.y() < borderWidth:
+            edges |= Qt.Edge.TopEdge
+        elif position.y() >= self.height() - borderWidth:
+            edges |= Qt.Edge.BottomEdge
+        return edges
 
     def _baseColor(self) -> QColor:
         color = QColor(self._themeColor())

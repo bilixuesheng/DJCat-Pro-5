@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QRect, Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QInputDevice
 from PySide6.QtWidgets import QApplication, QScroller, QWidget
 from PySide6.QtTest import QTest
@@ -434,7 +434,6 @@ class TrayMenuTest(TestCase):
                 cfg.showBroadcastTrayAction,
                 cfg.showHomeCardTaskTrayAction,
                 cfg.showShutdownTrayAction,
-                cfg.trayLeftClickAction,
                 cfg.trayTooltip,
                 cfg.trayHomeCardKeys,
                 cfg.trayHomeCardsInSubmenu,
@@ -744,9 +743,7 @@ class TrayMenuTest(TestCase):
                 showWindow.assert_called_once_with()
 
                 tray.onTrayIconClick(tray.ActivationReason.Context)
-                self.assertEqual(showMenu.call_count, 2)
-                showWindow.assert_called_once_with()
-                self.assertIsNone(tray.contextMenu())
+                self.assertEqual(showMenu.call_count, 1)
         finally:
             tray.deleteLater()
 
@@ -810,53 +807,19 @@ class TrayMenuTest(TestCase):
             ]
         )
         screen = getCurrentScreenGeometry()
-        cfg.set(cfg.trayLeftClickAction, "ShowMenu")
+        tray.menu.move(screen.bottomRight())
+        tray.menu.show()
+        self.app.processEvents()
         try:
-            for reason in (
-                tray.ActivationReason.Trigger,
-                tray.ActivationReason.Context,
-            ):
-                tray._rebuildMenu()
-                for opening in range(2):
-                    with self.subTest(reason=reason, opening=opening), patch(
-                        "app.view.shell.tray.QCursor.pos",
-                        return_value=screen.bottomRight(),
-                    ):
-                        tray.activated.emit(reason)
-                        animation = tray.menu.aniManager.ani
-                        self.assertEqual(animation.duration(), 250)
-                        self.assertEqual(
-                            animation.easingCurve().type(), QEasingCurve.Type.OutQuad
-                        )
-                        animation.setCurrentTime(animation.duration())
-                        self.app.processEvents()
-                        self.assertEqual(tray.menu.pos(), animation.endValue())
-                        bounds = tray.menu.geometry()
-                        self.assertTrue(screen.contains(bounds), (screen, bounds))
-                        self.assertEqual(tray.menu.view.verticalScrollBar().maximum(), 0)
-                        tray.menu.hide()
-        finally:
-            tray.menu.hide()
-            tray.deleteLater()
-
-    def testTrayMenuClampsToScreenWithNegativeOrigin(self):
-        tray = self._createTray()
-        screen = QRect(-1280, -800, 1280, 760)
-        try:
-            with (
-                patch("app.view.shell.tray.getCurrentScreenGeometry", return_value=screen),
-                patch(
-                    "qfluentwidgets.components.widgets.menu.getCurrentScreenGeometry",
-                    return_value=screen,
-                ),
-            ):
-                for position in (screen.bottomRight(), screen.topLeft() - QPoint(10, 10)):
-                    with self.subTest(position=position):
-                        tray.menu.exec(position)
-                        animation = tray.menu.aniManager.ani
-                        animation.setCurrentTime(animation.duration())
-                        self.assertTrue(screen.contains(tray.menu.geometry()))
-                        tray.menu.hide()
+            bounds = tray.menu.geometry()
+            self.assertGreaterEqual(bounds.left(), screen.left())
+            self.assertGreaterEqual(bounds.top(), screen.top())
+            self.assertLessEqual(bounds.right(), screen.right())
+            self.assertLessEqual(bounds.bottom(), screen.bottom())
+            self.assertEqual(
+                tray.menu.view.verticalScrollBar().maximum(),
+                0,
+            )
         finally:
             tray.menu.hide()
             tray.deleteLater()

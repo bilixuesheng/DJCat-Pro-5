@@ -1,8 +1,9 @@
 import json
+import sys
 import threading
 
 import requests
-from PySide6.QtCore import QEvent, QObject, QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QTextBlockFormat, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
@@ -41,13 +42,19 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 from qframelesswindow import FramelessWindow
 
+if sys.platform == "win32":
+    from ctypes.wintypes import MSG
+
+    import win32con
+    import win32gui
+
 from app.common.ai_markdown import PEAK_HOURS_TEXT, fetchQuota, machineId
 from app.common.update_download import isHttpsResponseChain
 from app.config.cfg import cfg
 from app.config.constants import AI_MARKDOWN_API
 from app.config.paths import ASSET_DIR
 from app.view.components.markdown_view import MarkdownView
-from app.view.components.window_background import WindowBackground
+from app.view.components.window_background import WINDOW_SHADOW_MARGIN, WindowBackground
 
 
 def showActionConfirmation(
@@ -299,7 +306,7 @@ class BroadcastWindow(FramelessWindow):
         super().__init__()
         self.setObjectName("BroadcastWindow")
         self.titleBar.hide()
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._is_editing = False
         self._isTracking = False
         self._closeFlyout = None
@@ -312,7 +319,7 @@ class BroadcastWindow(FramelessWindow):
             self,
         )
         self.background.lower()
-        self.background.setGeometry(self.rect())
+        self.background.setGeometry(self.contentsRect())
         cfg.customThemeMode.valueChanged.connect(self.background.refresh)
 
         self.vBoxLayout = QVBoxLayout(self)
@@ -374,7 +381,10 @@ class BroadcastWindow(FramelessWindow):
     def _applyStyle(self):
         is_dark = isDarkTheme() if cfg.customThemeMode.value == "System" else cfg.customThemeMode.value == "Dark"
         text_color = "white" if is_dark else "black"
-        self.background.setBorderVisible(self.is_windowed)
+        margin = WINDOW_SHADOW_MARGIN if self.is_windowed else 0
+        self.setContentsMargins(margin, margin, margin, margin)
+        self.background.setRoundedWindow(self.is_windowed)
+        self.background.setGeometry(self.contentsRect())
         self.setStyleSheet(f"BroadcastWindow {{ background-color: transparent; }} QTextEdit {{ color: {text_color}; background: transparent; }}")
 
     def setContent(self, title, text, is_markdown=False):
@@ -426,17 +436,18 @@ class BroadcastWindow(FramelessWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.background.setGeometry(self.rect())
+        self.background.setGeometry(self.contentsRect())
         self._updateBtnPosition()
 
     def _updateBtnPosition(self):
         margin = self.btnLayout.spacing()
+        rect = self.contentsRect()
         if cfg.broadcastActionButtonPosition.value == "左下角":
-            target_x = margin
+            target_x = rect.left() + margin
         else:
-            target_x = self.width() - self.btnContainer.width() - margin
+            target_x = rect.right() + 1 - self.btnContainer.width() - margin
 
-        target_y = self.height() - self.btnContainer.height() - margin
+        target_y = rect.bottom() + 1 - self.btnContainer.height() - margin
         self.btnContainer.move(target_x, target_y)
         self.btnContainer.raise_()
 
@@ -465,7 +476,10 @@ class BroadcastWindow(FramelessWindow):
 
     def _applyWindowState(self):
         is_top = cfg.topmostInWindowed.value if self.is_windowed else cfg.topmostInFullscreen.value
-        flags = Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
+        flags = (
+            Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint
+        )
         if is_top: flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
         # 全屏时禁用系统边缘拉伸，避免鼠标在屏幕边缘仍能调整窗口大小
@@ -475,7 +489,8 @@ class BroadcastWindow(FramelessWindow):
         if self.is_windowed:
             self.showNormal()
             rect = self.screen().availableGeometry()
-            self.resize(int(rect.width() * 0.5), int(rect.height() * 0.5))
+            margin = WINDOW_SHADOW_MARGIN
+            self.resize(int(rect.width() * 0.5) + 2 * margin, int(rect.height() * 0.5) + 2 * margin)
             self.move(rect.center() - self.rect().center())
         else:
             if cfg.showTaskbarInBroadcast.value:
@@ -487,6 +502,32 @@ class BroadcastWindow(FramelessWindow):
         self.show()
         self.raise_()
         self.activateWindow()
+
+    def nativeEvent(self, eventType, message):
+        if sys.platform == "win32" and getattr(self, "is_windowed", False):
+            msg = MSG.from_address(int(message))
+            if msg.message == win32con.WM_NCHITTEST:
+                if not self._isResizeEnabled or self.isMaximized() or self.isFullScreen():
+                    return True, win32con.HTCLIENT
+                # 消息坐标包含负坐标屏幕和触控位置，不能用鼠标光标位置代替。
+                x = (msg.lParam & 0xFFFF) - (0x10000 if msg.lParam & 0x8000 else 0)
+                y = ((msg.lParam >> 16) & 0xFFFF) - (0x10000 if msg.lParam & 0x80000000 else 0)
+                x, y = win32gui.ScreenToClient(msg.hWnd, (x, y))
+                scale = self.devicePixelRatioF()
+                position = QPointF(x / scale, y / scale) - self.background.pos()
+                edges = self.background.resizeEdges(position, self.BORDER_WIDTH)
+                hitTests = {
+                    Qt.Edge.LeftEdge: win32con.HTLEFT,
+                    Qt.Edge.RightEdge: win32con.HTRIGHT,
+                    Qt.Edge.TopEdge: win32con.HTTOP,
+                    Qt.Edge.BottomEdge: win32con.HTBOTTOM,
+                    Qt.Edge.TopEdge | Qt.Edge.LeftEdge: win32con.HTTOPLEFT,
+                    Qt.Edge.TopEdge | Qt.Edge.RightEdge: win32con.HTTOPRIGHT,
+                    Qt.Edge.BottomEdge | Qt.Edge.LeftEdge: win32con.HTBOTTOMLEFT,
+                    Qt.Edge.BottomEdge | Qt.Edge.RightEdge: win32con.HTBOTTOMRIGHT,
+                }
+                return True, hitTests.get(edges, win32con.HTCLIENT)
+        return super().nativeEvent(eventType, message)
 
     def minimizeToMini(self):
         self.hide()

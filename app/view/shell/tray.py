@@ -1,6 +1,6 @@
 import sys
 
-from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QIcon, QPainter
 from PySide6.QtWidgets import (
     QApplication,
@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import Action, FluentStyleSheet, RoundMenu, isDarkTheme
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets.common.screen import getCurrentScreenGeometry
-from qfluentwidgets.components.widgets.menu import MenuActionListWidget, MenuAnimationType
+from qfluentwidgets.components.widgets.menu import MenuActionListWidget
 from qframelesswindow import WindowEffect
 
 from app.config.cfg import cfg
@@ -90,22 +90,18 @@ class AcrylicMenu(RoundMenu):
         self.view.itemClicked.connect(self._onItemClicked)
         self.view.itemEntered.connect(self._onItemEntered)
 
-    def exec(self, pos, ani=True, aniType=MenuAnimationType.DROP_DOWN):
-        self.ensurePolished()
-        self.view.adjustSize()
-        self.adjustSize()
-        self.hBoxLayout.activate()
+    def adjustPosition(self):
+        if self.isSubMenu:
+            return super().adjustPosition()
+        m = self.hBoxLayout.contentsMargins()
         rect = getCurrentScreenGeometry()
-        x = max(rect.left(), min(pos.x(), rect.right() - self.width() - 5))
+        w = self.hBoxLayout.sizeHint().width() + 5
+        x = max(rect.left(), min(self.x() - m.left(), rect.right() - w))
         y = max(
             rect.top(),
-            min(
-                pos.y() - (0 if self.isSubMenu else 45),
-                rect.bottom() - self.height() + 1,
-            ),
+            min(self.y() - 45, rect.bottom() - self.height() + 1),
         )
-        # RoundMenu 的下拉动画会将锚点上移 4 px；显示后再 move 会被动画覆盖。
-        super().exec(QPoint(x, y + 4), ani, aniType)
+        self.move(x, y)
 
     def showEvent(self, event):
         self.windowEffect.addMenuShadowEffect(self.winId())
@@ -113,6 +109,7 @@ class AcrylicMenu(RoundMenu):
         self.windowEffect.enableBlurBehindWindow(self.winId())
         is_dark = isDarkTheme() if cfg.customThemeMode.value == "System" else cfg.customThemeMode.value == "Dark"
         self.windowEffect.setAcrylicEffect(self.winId(), "00000030" if is_dark else "FFFFFF30")
+        self.adjustPosition()
         self.raise_()
         self.activateWindow()
         self.setFocus()
@@ -275,6 +272,7 @@ class SystemTrayIcon(QSystemTrayIcon):
         menu.addAction(self.quitAction)
 
         self.menu = menu
+        self.setContextMenu(menu)
         if oldMenu is not None:
             oldMenu.close()
             oldMenu.deleteLater()
@@ -369,9 +367,7 @@ class SystemTrayIcon(QSystemTrayIcon):
         QApplication.quit()
 
     def onTrayIconClick(self, reason):
-        if reason == QSystemTrayIcon.ActivationReason.Context:
-            self.menu.exec(QCursor.pos())
-        elif reason == QSystemTrayIcon.ActivationReason.Trigger:
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
             if cfg.trayLeftClickAction.value == "ShowMenu":
                 self.menu.exec(QCursor.pos())
             else:

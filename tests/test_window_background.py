@@ -1,12 +1,13 @@
 import os
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QWidget
 
@@ -164,21 +165,29 @@ class WindowBackgroundTest(TestCase):
         self.assertTrue(countdown.background._borderVisible)
         self.assertTrue(clock.background._borderVisible)
 
-    def testClockAndCountdownPaintRoundedBackgroundAndShadow(self):
+    def testDisplayWindowsPaintRoundedBackgroundAndShadow(self):
         imagePath = Path(self.tempDir.name) / "background.png"
         source = QImage(4, 4, QImage.Format.Format_RGB32)
         source.fill(QColor("#123456"))
         self.assertTrue(source.save(str(imagePath)))
 
         for windowType, prefix in (
+            (BroadcastWindow, "broadcast"),
             (CountdownWindow, "countdown"),
             (FullscreenClockWindow, "fullscreenClock"),
         ):
             window = windowType()
+            self.addCleanup(window.deleteLater)
             self.addCleanup(window.close)
             window.is_windowed = True
-            window._setupCornerButtons()
+            if isinstance(window, BroadcastWindow):
+                window.setupLayout()
+                window._updateButtonsState()
+            else:
+                window._setupCornerButtons()
             window._applyWindowState()
+            if isinstance(window, BroadcastWindow):
+                window.resize(704, 424)
             for mode in WINDOW_BACKGROUND_MODES:
                 with self.subTest(window=windowType.__name__, mode=mode):
                     cfg.set(getattr(cfg, prefix + "BackgroundMode"), mode, save=False)
@@ -215,6 +224,78 @@ class WindowBackgroundTest(TestCase):
             self.assertEqual(window.contentsRect(), window.rect())
             self.assertFalse(window.background.graphicsEffect().isEnabled())
             self.assertEqual(window.grab().toImage().pixelColor(0, 0).alpha(), 255)
+
+    def testProjectionResizeFollowsVisibleRoundedBorder(self):
+        window = BroadcastWindow()
+        self.addCleanup(window.deleteLater)
+        self.addCleanup(window.close)
+        window.startBroadcast()
+        window.toggleWindowMode()
+        window.resize(704, 424)
+        self.app.processEvents()
+        background = window.background
+        width, height = background.width(), background.height()
+        for x, y, expected in (
+            (0, height / 2, Qt.Edge.LeftEdge),
+            (width - 1, height / 2, Qt.Edge.RightEdge),
+            (width / 2, 0, Qt.Edge.TopEdge),
+            (width / 2, height - 1, Qt.Edge.BottomEdge),
+            (3, 3, Qt.Edge.LeftEdge | Qt.Edge.TopEdge),
+            (width - 3, 3, Qt.Edge.RightEdge | Qt.Edge.TopEdge),
+            (3, height - 3, Qt.Edge.LeftEdge | Qt.Edge.BottomEdge),
+            (width - 3, height - 3, Qt.Edge.RightEdge | Qt.Edge.BottomEdge),
+            (0, 0, Qt.Edge(0)),
+            (width - 1, 0, Qt.Edge(0)),
+            (0, height - 1, Qt.Edge(0)),
+            (width - 1, height - 1, Qt.Edge(0)),
+            (-10, height / 2, Qt.Edge(0)),
+            (width / 2, height / 2, Qt.Edge(0)),
+        ):
+            with self.subTest(x=x, y=y):
+                self.assertEqual(background.resizeEdges(QPointF(x, y), 12), expected)
+        for button in (window.btn_edit, window.btn_min, window.btn_win, window.btn_close):
+            for point in (button.rect().topLeft(), button.rect().bottomRight()):
+                position = button.mapTo(window, point) - background.pos()
+                self.assertEqual(background.resizeEdges(QPointF(position), 12), Qt.Edge(0))
+        self.assertTrue(window._isResizeEnabled)
+        window.toggleWindowMode()
+        self.assertFalse(window._isResizeEnabled)
+
+    def testProjectionWindowsHitTestUsesTouchCoordinatesAndDisplayScale(self):
+        window = BroadcastWindow()
+        self.addCleanup(window.deleteLater)
+        self.addCleanup(window.close)
+        window.is_windowed = True
+        window._applyWindowState()
+        message = SimpleNamespace(message=0x84, hWnd=123, lParam=((-234 & 0xFFFF) << 16) | (-123 & 0xFFFF))
+        constants = SimpleNamespace(
+            WM_NCHITTEST=0x84, HTCLIENT=1, HTLEFT=10, HTRIGHT=11,
+            HTTOP=12, HTTOPLEFT=13, HTTOPRIGHT=14, HTBOTTOM=15,
+            HTBOTTOMLEFT=16, HTBOTTOMRIGHT=17,
+        )
+        with (
+            patch("app.view.pages.broadcast_page.sys") as windows,
+            patch("app.view.pages.broadcast_page.MSG", create=True) as nativeMessage,
+            patch("app.view.pages.broadcast_page.win32gui", create=True) as nativeGui,
+            patch("app.view.pages.broadcast_page.win32con", constants, create=True),
+        ):
+            windows.platform = "win32"
+            nativeMessage.from_address.return_value = message
+            for scale in (1, 3):
+                for position, hitTest in (
+                    (QPointF(3, 3), constants.HTTOPLEFT),
+                    (QPointF(0, 0), constants.HTCLIENT),
+                    (QPointF(0, window.background.height() / 2), constants.HTLEFT),
+                ):
+                    with self.subTest(scale=scale, position=position), patch.object(
+                        window, "devicePixelRatioF", return_value=scale,
+                    ):
+                        point = position + window.background.pos()
+                        nativeGui.ScreenToClient.return_value = (point.x() * scale, point.y() * scale)
+                        self.assertEqual(window.nativeEvent(b"windows_generic_MSG", 1), (True, hitTest))
+                        nativeGui.ScreenToClient.assert_called_with(123, (-123, -234))
+            window.setResizeEnabled(False)
+            self.assertEqual(window.nativeEvent(b"windows_generic_MSG", 1), (True, constants.HTCLIENT))
 
     @patch("app.view.pages.setting_page.QFileDialog.getOpenFileName")
     def testSettingPageSelectsImageAndEnablesImageMode(self, getOpenFileName):
