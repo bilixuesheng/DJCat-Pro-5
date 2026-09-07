@@ -557,12 +557,14 @@ class MarkdownRendererTest(TestCase):
         window.btn_win.click()
         self.assertTrue(window.is_windowed)
 
-    def testBroadcastTouchScrollDoesNotDragWindow(self):
+    def testWindowedBroadcastUsesBodyForWindowDragging(self):
         window = BroadcastWindow()
+        self.addCleanup(window.close)
         window.contentEdit.setPlainText(
             "\n".join(f"line {index}" for index in range(200))
         )
         window.is_windowed = True
+        window._updateContentInteraction()
         window.resize(720, 300)
         window.move(100, 100)
         window.show()
@@ -575,19 +577,108 @@ class MarkdownRendererTest(TestCase):
         start = QPoint(viewport.width() // 2, viewport.height() - 30)
 
         QTest.touchEvent(viewport, device).press(0, start, viewport).commit()
-        for distance in (30, 60, 90, 120):
-            QTest.touchEvent(viewport, device).move(
-                0, start - QPoint(0, distance), viewport
-            ).commit()
-            QTest.qWait(20)
-        QTest.touchEvent(viewport, device).release(
-            0, start - QPoint(0, 120), viewport
+        QTest.touchEvent(viewport, device).move(
+            0, start - QPoint(0, 80), viewport
         ).commit()
-        QTest.qWait(300)
+        QTest.touchEvent(viewport, device).release(
+            0, start - QPoint(0, 80), viewport
+        ).commit()
+        QTest.qWait(100)
 
-        self.assertGreater(scrollBar.value(), startScroll)
-        self.assertEqual(window.pos(), startPosition)
-        window.close()
+        self.assertEqual(scrollBar.value(), startScroll)
+        self.assertNotEqual(window.pos(), startPosition)
+        self.assertTrue(window._contentDragFilterInstalled)
+
+    def testFullscreenBroadcastRestoresBodyTouchScrolling(self):
+        window = BroadcastWindow()
+        self.addCleanup(window.close)
+        window.is_windowed = True
+        window._updateContentInteraction()
+
+        window.is_windowed = False
+        with patch.object(QScroller, "grabGesture") as grabGesture:
+            window._updateContentInteraction()
+
+        self.assertEqual(
+            [call.args[0] for call in grabGesture.call_args_list],
+            [
+                window.contentEdit.viewport(),
+                window.markdownView.viewport(),
+            ],
+        )
+        self.assertTrue(
+            all(
+                call.args[1] == QScroller.ScrollerGestureType.TouchGesture
+                for call in grabGesture.call_args_list
+            )
+        )
+        self.assertFalse(window._contentDragFilterInstalled)
+
+        for viewport in (
+            window.contentEdit.viewport(),
+            window.markdownView.viewport(),
+        ):
+            self.assertTrue(QScroller.hasScroller(viewport))
+
+    def testWindowedMarkdownBodyDragsWindowButScrollbarDoesNot(self):
+        window = BroadcastWindow()
+        self.addCleanup(window.close)
+        window.setContent(
+            "title",
+            "[查看作业](https://example.com)\n\n"
+            + "\n\n".join(f"正文 {index}" for index in range(80)),
+            is_markdown=True,
+        )
+        window.is_windowed = True
+        window._updateContentInteraction()
+        window.resize(720, 300)
+        window.move(100, 100)
+        window.show()
+        self.app.processEvents()
+
+        paragraph = next(
+            label
+            for label in window.markdownView.findChildren(QLabel)
+            if label.objectName() == "paragraph"
+        )
+        self.assertTrue(window._isContentWidget(paragraph))
+        self.assertFalse(window._isContentScrollBar(paragraph))
+        self.assertTrue(
+            window._isContentScrollBar(
+                window.markdownView._scroll.verticalScrollBar()
+            )
+        )
+
+        startPosition = window.pos()
+        start = paragraph.rect().center()
+        QTest.mousePress(paragraph, Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(paragraph, start + QPoint(80, 60), delay=20)
+        QTest.mouseRelease(
+            paragraph,
+            Qt.MouseButton.LeftButton,
+            pos=start + QPoint(80, 60),
+        )
+        self.app.processEvents()
+
+        self.assertNotEqual(window.pos(), startPosition)
+
+        link = next(
+            label
+            for label in window.markdownView.findChildren(QLabel)
+            if 'href="https://example.com"' in label.text()
+        )
+        with patch(
+            "app.view.components.markdown_view.QDesktopServices.openUrl"
+        ) as openUrl:
+            QTest.mouseClick(
+                link,
+                Qt.MouseButton.LeftButton,
+                pos=QPoint(
+                    link.fontMetrics().horizontalAdvance("查看作业") // 2,
+                    link.height() // 2,
+                ),
+            )
+        openUrl.assert_called_once()
 
     def testUpdateDialogUsesTouchScrollableMarkdownView(self):
         parent = QWidget()

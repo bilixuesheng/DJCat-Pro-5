@@ -415,10 +415,10 @@ Projection 的两种正文渲染器必须保持这些共同约束：
 - 左侧和顶部正文起点一致。大字号 `MarkdownView` 的内容边距固定为 4 px，与 `QTextDocument.documentMargin()` 默认值一致；普通更新日志的 MarkdownView 保留渲染器默认边距。
 - 纯文本和 Markdown 正文控件都延伸到 Projection 窗口底边；外层布局不保留底部空隙，内容自身的 4 px 边距不受影响。
 - 纯文本与大字号 Markdown 正文共享 96% 行高；Markdown 顶层块之间不额外留白，普通更新日志保留默认块间距。
-- 纯文本和 Markdown 都使用 QFluentWidgets `SmoothScrollDelegate`，并在 viewport 上注册 `QScroller.TouchGesture`，支持鼠标滚轮和平滑单指触控。
+- 全屏时纯文本和 Markdown 都使用 QFluentWidgets `SmoothScrollDelegate`，并在 viewport 上注册 `QScroller.TouchGesture`，支持鼠标滚轮和平滑单指触控；窗口化时正文不响应滚轮或拖动滚动，只能操作垂直滚动条，正文区域的鼠标或触控拖动用于移动 Projection 窗口。
 - Projection 关闭文本选择，手指拖动用于滚动而不是选择文字。
 - Projection 切换正文类型或关闭时释放旧正文控件，并立即取消其远程 Markdown 图片下载；返回编辑时仍从独立的 Projection 内容快照恢复。
-- Markdown 正文未处理的鼠标按压和拖动必须在 `MarkdownView` 边界停止，不能冒泡到外层无边框 Projection 窗口；链接、触控滚动、窗口化和关闭按钮仍需保持可用。
+- 全屏时 Markdown 正文未处理的鼠标按压和拖动必须在 `MarkdownView` 边界停止，不能冒泡到外层无边框 Projection 窗口；窗口化时由 Projection 统一接管正文拖动，但短按链接和操作按钮仍需保持可用。
 
 Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` 会覆盖整个窗口背景。窗口化时的 `1 px #808080` 边界线必须由该组件在主题色、纯色或图片绘制完成后最后绘制；全屏时不绘制。不得恢复为父窗口 QSS 边框，否则背景子控件会再次把它盖住。
 

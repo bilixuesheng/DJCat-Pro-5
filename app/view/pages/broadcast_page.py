@@ -233,6 +233,16 @@ def VerticalButton(
         force_dark=force_dark,
     )
 
+
+class _BroadcastContentDragFilter(QObject):
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+
+    def eventFilter(self, obj, event):
+        return self.window._filterContentDragEvent(obj, event)
+
+
 class FloatingMiniWindow(QWidget):
     restoreSignal = Signal()
     def __init__(self, parent=None):
@@ -309,6 +319,12 @@ class BroadcastWindow(FramelessWindow):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._is_editing = False
         self._isTracking = False
+        self._contentDragFilterInstalled = False
+        self._contentDragActive = False
+        self._contentDragStart = QPoint()
+        self._contentDragOffset = QPoint()
+        self._contentDragMoved = False
+        self._contentDragFilter = _BroadcastContentDragFilter(self)
         self._closeFlyout = None
         self.background = WindowBackground(
             cfg.broadcastBackgroundMode,
@@ -484,6 +500,7 @@ class BroadcastWindow(FramelessWindow):
         self.setWindowFlags(flags)
         # 全屏时禁用系统边缘拉伸，避免鼠标在屏幕边缘仍能调整窗口大小
         self.setResizeEnabled(self.is_windowed)
+        self._updateContentInteraction()
         self._applyStyle()
 
         if self.is_windowed:
@@ -529,6 +546,108 @@ class BroadcastWindow(FramelessWindow):
                 return True, hitTests.get(edges, win32con.HTCLIENT)
         return super().nativeEvent(eventType, message)
 
+    def _updateContentInteraction(self):
+        application = QApplication.instance()
+        if self.is_windowed:
+            for viewport in self._contentViewports():
+                QScroller.scroller(viewport).stop()
+                QScroller.ungrabGesture(viewport)
+            if application is not None and not self._contentDragFilterInstalled:
+                application.installEventFilter(self._contentDragFilter)
+                self._contentDragFilterInstalled = True
+        else:
+            for viewport in self._contentViewports():
+                QScroller.grabGesture(
+                    viewport,
+                    QScroller.ScrollerGestureType.TouchGesture,
+                )
+            self._removeContentDragFilter()
+
+    def _contentViewports(self):
+        return self.contentEdit.viewport(), self.markdownView.viewport()
+
+    def _removeContentDragFilter(self):
+        if not self._contentDragFilterInstalled:
+            return
+        application = QApplication.instance()
+        if application is not None:
+            application.removeEventFilter(self._contentDragFilter)
+        self._contentDragFilterInstalled = False
+        self._resetContentDrag()
+
+    @staticmethod
+    def _containsWidget(root, widget):
+        return widget is root or root.isAncestorOf(widget)
+
+    def _isContentWidget(self, widget):
+        if not isinstance(widget, QWidget):
+            return False
+        return any(
+            self._containsWidget(view, widget)
+            for view in (self.contentEdit, self.markdownView)
+        )
+
+    def _isContentScrollBar(self, widget):
+        if not isinstance(widget, QWidget):
+            return False
+        scrollBars = (
+            self.contentEdit.verticalScrollBar(),
+            self.markdownView._scroll.verticalScrollBar(),
+        )
+        return any(self._containsWidget(scrollBar, widget) for scrollBar in scrollBars)
+
+    def _beginContentDrag(self, globalPosition):
+        self._contentDragActive = True
+        self._contentDragStart = globalPosition
+        self._contentDragOffset = globalPosition - self.pos()
+        self._contentDragMoved = False
+
+    def _resetContentDrag(self):
+        self._contentDragActive = False
+        self._contentDragStart = QPoint()
+        self._contentDragOffset = QPoint()
+        self._contentDragMoved = False
+
+    def _filterContentDragEvent(self, obj, event):
+        if not self.is_windowed:
+            return False
+
+        eventType = event.type()
+        if (
+            eventType == QEvent.Type.MouseButtonRelease
+            and event.button() == Qt.MouseButton.LeftButton
+            and self._contentDragActive
+        ):
+            moved = self._contentDragMoved
+            self._resetContentDrag()
+            return moved
+
+        if eventType == QEvent.Type.MouseMove and self._contentDragActive:
+            globalPosition = event.globalPosition().toPoint()
+            if (
+                not self._contentDragMoved
+                and (globalPosition - self._contentDragStart).manhattanLength()
+                >= QApplication.startDragDistance()
+            ):
+                self._contentDragMoved = True
+            if self._contentDragMoved:
+                self.move(globalPosition - self._contentDragOffset)
+                return True
+            return False
+
+        if not self._isContentWidget(obj) or self._isContentScrollBar(obj):
+            return False
+
+        if eventType == QEvent.Type.Wheel:
+            return True
+        if (
+            eventType == QEvent.Type.MouseButtonPress
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            self._beginContentDrag(event.globalPosition().toPoint())
+
+        return False
+
     def minimizeToMini(self):
         self.hide()
         self.miniWindow._updateStyle()
@@ -568,6 +687,7 @@ class BroadcastWindow(FramelessWindow):
         )
 
     def closeEvent(self, event):
+        self._removeContentDragFilter()
         if self._closeFlyout is not None:
             self._closeFlyout.hide()
             self._closeFlyout.deleteLater()
