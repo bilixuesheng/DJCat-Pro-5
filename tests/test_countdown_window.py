@@ -46,8 +46,15 @@ class CountdownWindowTest(TestCase):
         self.assertTrue(self.window.controlsWidget.isHidden())
         self.assertFalse(self.window.controlsWidget.isEnabled())
         self.assertFalse(self.window._controls_visible)
-        self.assertEqual(self.window.contentsRect().size().toTuple(), (680, 220))
-        self.assertEqual(self.window.timeLabel.font().pixelSize(), 99)
+        self.assertEqual(self.window.contentsRect().size().toTuple(), (640, 200))
+        self.assertEqual(self.window.timeLabel.font().pixelSize(), 90)
+
+        self.window.remaining = 3723
+        self.window._updateDisplay()
+        self.assertEqual(
+            self.window.timeLabel.text(),
+            "1\u2009:\u20092\u2009:\u20093",
+        )
 
     def testEditPageUsesTouchTimePicker(self):
         page = CountdownEditPage()

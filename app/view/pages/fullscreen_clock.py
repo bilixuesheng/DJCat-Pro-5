@@ -81,7 +81,12 @@ class FullscreenClockWindow(FramelessWindow):
 
     def _updateTime(self):
         now = QTime.currentTime()
-        self.timeLabel.setText(now.toString("HH : mm : ss"))
+        timeFormat = (
+            "HH\u2009:\u2009mm\u2009:\u2009ss"
+            if self.is_windowed
+            else "HH : mm : ss"
+        )
+        self.timeLabel.setText(now.toString(timeFormat))
         self._applyFonts(self.contentsRect().height())
         self.timer.start(max(1, 1000 - now.msec()))
 
@@ -119,6 +124,7 @@ class FullscreenClockWindow(FramelessWindow):
 
     def toggleWindowMode(self):
         self.is_windowed = not self.is_windowed
+        self._updateTime()
         self._setupCornerButtons()
         self._applyWindowState()
 
@@ -150,8 +156,8 @@ class FullscreenClockWindow(FramelessWindow):
             self.showNormal()
             rect = self.screen().availableGeometry()
             self.vBoxLayout.setContentsMargins(16, 12, 16, 56)
-            self._applyFonts(220)
-            self.setFixedSize(680 + 2 * margin, 220 + 2 * margin)
+            self._applyFonts(200)
+            self.setFixedSize(640 + 2 * margin, 200 + 2 * margin)
             self.move(rect.center() - self.rect().center())
         else:
             self.vBoxLayout.setContentsMargins(40, 20, 40, 20)

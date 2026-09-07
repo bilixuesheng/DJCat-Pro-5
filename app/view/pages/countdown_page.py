@@ -291,7 +291,10 @@ class CountdownWindow(FramelessWindow):
     def _updateDisplay(self):
         hours, rest = divmod(self.remaining, 3600)
         minutes, seconds = divmod(rest, 60)
-        self.timeLabel.setText(f"{hours} : {minutes} : {seconds}")
+        separator = "\u2009:\u2009" if self.is_windowed else " : "
+        self.timeLabel.setText(
+            f"{hours}{separator}{minutes}{separator}{seconds}"
+        )
         # 文本长度变化会影响窗口化下的自适应字号
         if self.is_windowed:
             self._applyFonts(self.contentsRect().height())
@@ -396,8 +399,8 @@ class CountdownWindow(FramelessWindow):
             # 底部只留角落操作按钮自身的高度，时间区域不再为隐藏控件留空
             self.vBoxLayout.setContentsMargins(16, 12, 16, 56)
             # 先按目标高度缩小字体，否则旧字体的最小尺寸会钳制 resize
-            self._applyFonts(220)
-            self.setFixedSize(680 + 2 * margin, 220 + 2 * margin)
+            self._applyFonts(200)
+            self.setFixedSize(640 + 2 * margin, 200 + 2 * margin)
             self.move(rect.center() - self.rect().center())
         else:
             self.controlsWidget.show()
