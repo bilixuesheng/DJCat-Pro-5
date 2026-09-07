@@ -316,7 +316,7 @@ class InstallerLaunchDialog(MessageBoxBase):
 
 
 class MainWindow(MSFluentWindow):
-    RESIZE_BORDER_EXTRA_DIP = 2
+    RESIZE_BORDER_EXTRA_DIP = 3
 
     def __init__(self, isSilent: bool = False):
         self.searchEdit = None
