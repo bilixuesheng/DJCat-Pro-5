@@ -47,11 +47,11 @@ _Avoid_: Tray Home Card、复制卡片、独立托盘动作
 ### 课堂展示
 
 **Projection**:
-“全屏投送”产生的一次文字展示，由标题和正文组成，正文可使用纯文本或 Markdown。Projection 可全屏或窗口化显示，也可收起为恢复入口；最近一次投送的标题、正文和模式保存在本地，可再次导入。启用启动恢复后，程序退出时仍未关闭的 Projection 会在下一次普通或静默启动时自动恢复。
+“全屏投送”产生的一次文字展示，由标题和正文组成，正文可使用纯文本或 Markdown。Projection 可全屏或窗口化显示，也可收起为恢复入口；编辑器最近一次输入的标题独立保存在本地，下次进入时自动回填。最近一次投送的标题、正文和模式另存为本地快照，可再次导入。启用启动恢复后，程序退出时仍未关闭的 Projection 会在下一次普通或静默启动时自动恢复。
 _Avoid_: Broadcast、投屏（不传输屏幕或视频）、presentation
 
 **Projection Snapshot**:
-最近一次已经开始的 Projection 的本地快照，保存标题、正文、Markdown 模式和是否仍在投送。它不是尚未投送的编辑草稿；关闭投送后保留内容用于手动导入，但不再参与下次启动恢复。
+最近一次已经开始的 Projection 的本地快照，保存标题、正文、Markdown 模式和是否仍在投送。它不是尚未投送的编辑草稿，也不取代独立保存的编辑器标题；关闭投送后保留内容用于手动导入，但不再参与下次启动恢复。
 _Avoid_: Projection、editor draft、template
 
 **Exam Countdown**:
@@ -278,6 +278,7 @@ _Not_: quit（结束 DJCat 进程）
 - **Application Update** 与首次安装使用同一 Package 下载和安装链路；差别只在目标目录已有受 DJCat 管理的 Installed Application。
 - **Application Launch** 执行 Installed Application 的 Open Action；Application Store 的卡片和详情页共享同一后台运行状态，不创建第二个并发启动。
 - **Projection** 的纯文本正文由 `QTextEdit` 渲染，Markdown 正文由 `MarkdownView(largeText=True)` 渲染；两者是同一 Projection 的互斥显示方式。
+- Projection 编辑器的标题保存在 `cfg.broadcastTitle`，离开编辑器后仍保留；正文不作为编辑草稿持久化。
 - **Projection Snapshot** 保存在 `cfg.lastBroadcast`；开始 Projection 时立即写入，关闭或返回编辑只清除活动状态，不删除可再次导入的内容。
 - **Installed Mode** 与 **Portable Mode** 共享相同的目录结构，Storage Migration 移动的是整个 App Data Directory，不是单独的设置文件。
 - **Application Icon** 由个性化设置统一控制；主窗口、启动页、系统托盘和 Tray Menu 的“主页”入口共享自定义图片，但默认模式保留各位置原有资源。

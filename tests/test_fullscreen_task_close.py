@@ -39,6 +39,7 @@ class FullscreenTaskCloseTest(TestCase):
                 cfg.confirmBeforeCloseBroadcast,
                 cfg.broadcastMarkdownEnabled,
                 cfg.organizeMarkdownBeforeBroadcast,
+                cfg.broadcastTitle,
                 cfg.restoreBroadcastAtStartup,
                 cfg.lastBroadcast,
                 cfg.countdownActionButtonPosition,
@@ -65,6 +66,7 @@ class FullscreenTaskCloseTest(TestCase):
         self.assertTrue(cfg.confirmBeforeCloseCountdown.defaultValue)
         self.assertFalse(cfg.broadcastMarkdownEnabled.defaultValue)
         self.assertFalse(cfg.organizeMarkdownBeforeBroadcast.defaultValue)
+        self.assertEqual(cfg.broadcastTitle.defaultValue, "")
         self.assertFalse(cfg.restoreBroadcastAtStartup.defaultValue)
         self.assertEqual(cfg.lastBroadcast.defaultValue, {})
         self.assertTrue(cfg.confirmBeforeResetCountdown.defaultValue)
@@ -104,6 +106,7 @@ class FullscreenTaskCloseTest(TestCase):
 
         request = page._inlineAIRequest
         self.assertIsNotNone(request)
+        self.assertEqual(cfg.broadcastTitle.value, "作业")
         self.assertTrue(page.contentInput.isReadOnly())
         self.assertEqual(page.broadcastBtn.text(), "取消")
         self.assertIn("qlineargradient", page.contentInput.styleSheet())
@@ -303,7 +306,7 @@ class FullscreenTaskCloseTest(TestCase):
         self.app.processEvents()
 
         self.assertIs(container.currentWidget(), otherPage)
-        self.assertEqual(page.titleInput.text(), "")
+        self.assertEqual(page.titleInput.text(), "正在投送的标题")
         self.assertEqual(page.contentInput.toPlainText(), "")
 
         page.broadcastWin.btn_edit.click()
@@ -347,7 +350,7 @@ class FullscreenTaskCloseTest(TestCase):
         self.app.processEvents()
 
         self.assertFalse(cfg.lastBroadcast.value["active"])
-        self.assertEqual(page.titleInput.text(), "")
+        self.assertEqual(page.titleInput.text(), "上次投送的标题")
         self.assertEqual(page.contentInput.toPlainText(), "")
 
         page.markdownCheckBox.setChecked(False)
@@ -358,6 +361,27 @@ class FullscreenTaskCloseTest(TestCase):
         self.assertTrue(page.markdownCheckBox.isChecked())
         self.assertTrue(cfg.broadcastMarkdownEnabled.value)
         page.close()
+
+    def testBroadcastTitlePersistsAcrossEditorInstances(self):
+        cfg.set(cfg.broadcastTitle, "")
+        page = BroadcastEditPage()
+        page.titleInput.setText("每天继续使用的标题")
+
+        page._onBack()
+
+        self.assertEqual(page.titleInput.text(), "每天继续使用的标题")
+        self.assertEqual(cfg.broadcastTitle.value, "每天继续使用的标题")
+        savedConfig = json.loads(cfg.file.read_text(encoding="utf-8"))
+        self.assertEqual(
+            savedConfig["Broadcast"]["Title"],
+            "每天继续使用的标题",
+        )
+        page.close()
+
+        restoredPage = BroadcastEditPage()
+        self.assertEqual(restoredPage.titleInput.text(), "每天继续使用的标题")
+        self.assertEqual(restoredPage.contentInput.toPlainText(), "")
+        restoredPage.close()
 
     def testReturningToEditorEndsAutomaticStartupRecovery(self):
         page = BroadcastEditPage()

@@ -1215,6 +1215,8 @@ class BroadcastEditPage(QWidget):
         font = QFont(); font.setPointSize(20)
         self.titleInput.setFont(font)
         self.titleInput.setFixedHeight(48)
+        self.titleInput.setText(cfg.broadcastTitle.value)
+        self.titleInput.editingFinished.connect(self._saveTitle)
         self.vBoxLayout.addWidget(self.titleInput)
 
         self.contentInput = TextEdit(self)
@@ -1263,6 +1265,11 @@ class BroadcastEditPage(QWidget):
         self.broadcastWin.editClicked.connect(self._onReturnToEdit)
         self.broadcastWin.closeClicked.connect(self._onReturnToHome)
         self._activeBroadcast = None
+
+    def _saveTitle(self):
+        title = self.titleInput.text()
+        if title != cfg.broadcastTitle.value:
+            cfg.set(cfg.broadcastTitle, title)
 
     def _onMarkdownStateChanged(self, state):
         cfg.set(
@@ -1369,6 +1376,7 @@ class BroadcastEditPage(QWidget):
             cfg.set(cfg.lastBroadcast, {**broadcast, "active": False})
 
     def _onBroadcast(self):
+        self._saveTitle()
         if self._inlineAIRequest is not None:
             self._cancelInlineAIAndBroadcast()
             return
@@ -1534,6 +1542,7 @@ class BroadcastEditPage(QWidget):
         self.contentInput.setStyleSheet(style)
 
     def shutdown(self):
+        self._saveTitle()
         request = self._inlineAIRequest
         if request is None:
             return
@@ -1558,14 +1567,14 @@ class BroadcastEditPage(QWidget):
         self._setBroadcastInactive()
         showMainWindow = cfg.showMainWindowAfterBroadcast.value
         QApplication.instance().setQuitOnLastWindowClosed(showMainWindow)
-        self.titleInput.clear(); self.contentInput.clear()
+        self.contentInput.clear()
         self._activeBroadcast = None
         if showMainWindow:
             self.window().show(); self.window().raise_(); self.window().activateWindow()
         self.backSignal.emit()
 
     def _onBack(self):
-        if self.titleInput.text().strip() or self.contentInput.toPlainText().strip():
+        if self.contentInput.toPlainText().strip():
             dialog = MessageBox(
                 "未投送内容",
                 "您还有内容未投送，是否退出？",
@@ -1577,5 +1586,10 @@ class BroadcastEditPage(QWidget):
                 dialog.deleteLater()
             if not confirmed:
                 return
-        self.titleInput.clear(); self.contentInput.clear()
+        self._saveTitle()
+        self.contentInput.clear()
         self.backSignal.emit()
+
+    def hideEvent(self, event):
+        self._saveTitle()
+        super().hideEvent(event)
