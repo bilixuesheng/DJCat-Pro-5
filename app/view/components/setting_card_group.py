@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from time import monotonic
+
 from PySide6.QtCore import (
     Property,
     QByteArray,
@@ -41,6 +43,11 @@ from qfluentwidgets.components.settings.expand_setting_card import (
 from app.config.cfg import cfg
 
 QWIDGETSIZE_MAX = (1 << 24) - 1
+
+# _contentHeight() 里的 QLayout.activate() 是强制同步重排,不受 LayoutRequest 事件压缩保护。
+# 1 ms 的 Animation Tick 下内层卡片展开一次要跑几百遍,按 120 Hz 采样肉眼已看不出差别,
+# 末态由 expandAnimation.finished 补齐。
+LAYOUT_TICK_SECONDS = 1 / 120
 
 
 def _set_reveal_painting(widget: QWidget, enabled: bool) -> None:
@@ -394,6 +401,7 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
         self._headerPressCanceled = False
         self._searchActive = False
         self._searchCollapsed = False
+        self._lastCardExpandTick = 0.0
 
         self._initWidget()
         self._initLayout()
@@ -462,9 +470,7 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
             targets += card.findChildren(SettingCard)
             targets += card.findChildren(ExpandBorderWidget)
             targets += card.findChildren(GroupSeparator)
-            card.expandAnimation.valueChanged.connect(
-                lambda _: self._contentHeight()
-            )
+            card.expandAnimation.valueChanged.connect(self._onCardExpandTick)
             card.expandAnimation.finished.connect(self._contentHeight)
         for widget in targets:
             widget.installEventFilter(self.cardPaintFilter)
@@ -605,6 +611,13 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
             not self._isVisuallyCollapsed(),
             animated,
         )
+
+    def _onCardExpandTick(self, _height) -> None:
+        now = monotonic()
+        if now - self._lastCardExpandTick < LAYOUT_TICK_SECONDS:
+            return
+        self._lastCardExpandTick = now
+        self._contentHeight()
 
     def _onCollapseFinished(self) -> None:
         if not self._isVisuallyCollapsed():

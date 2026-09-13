@@ -212,6 +212,10 @@ _Avoid_: 只复制 `UserConfig.json`、运行中热切换路径
 
 ### 页面加载
 
+**Wheel Scroll Duration**:
+`app/view/components/scroll_area.py` 里 `ScrollArea` 给 QFluentWidgets 平滑滚动条设置的滚轮动画时长，替代上游 500 ms 默认值。它只影响滚轮，触控滚动由 QScroller 驱动，不经过这条路径。
+_Avoid_: Animation Tick、触控滚动惯性
+
 **Lazy Page**:
 已注册导航身份但尚未创建真实页面 QWidget 的占位页。`LazyPage.ensureLoaded()` 在首次导航或确实需要页面能力时创建真实页面，并转发必要的信号和暂存输入。
 _Avoid_: 隐藏页面（隐藏的真实页面已经构造）、后台预加载
@@ -531,7 +535,9 @@ PySide6 6.10 没有绑定 `QAnimationDriver`，DJCat 因此把 Qt 私有 `QUnifi
 - 不承诺 Presented Frame 数；DWM、VSync 和绘制耗时仍可限制屏幕实际帧率。
 - Qt 版本或打包布局变化导致私有符号不可用时必须安全退回默认动画驱动；升级 PySide6 时需要在 Windows x64 重新验证导出符号和端到端动画时长。
 
-Menu Reveal 是另一层独立优化：保留 QFluentWidgets 原始的 250 ms 时长、`OutQuad` 缓动、窗口位移、逐帧遮罩和阴影，只把每次属性变化触发的 viewport 强制刷新合并为动画结束时的一次。上游同一个方法里还负责同步 `WA_UnderMouse` 和 `HoverEnter`，这部分必须留在逐帧执行，否则展开途中光标下的菜单项不会高亮。不能改成只淡入、删除遮罩或阴影，也不能把 `NONE`、`FADE_IN_DROP_DOWN` 等其他管理器替换成下拉实现。
+1 ms 间隔只对改位置和透明度的动画是净收益。凡是每帧要调操作系统或强制同步布局的回调，都必须自己限流，否则 tick 变密等于把这类开销放大十几倍：`setMask` 在顶层菜单上落到 `SetWindowRgn`，`QLayout.activate()` 是不受 `LayoutRequest` 事件压缩保护的同步重排。只打脏标记的调用（`setFixedHeight`、`update()`）由 Qt 自行合并，不要给它们加限流——那只会让控件几何落后于动画值。
+
+Menu Reveal 是另一层独立优化：保留 QFluentWidgets 原始的 250 ms 时长、`OutQuad` 缓动、窗口位移、逐帧遮罩和阴影，只把每次属性变化触发的 viewport 强制刷新合并为动画结束时的一次。上游同一个方法里还负责同步 `WA_UnderMouse` 和 `HoverEnter`，这部分必须留在逐帧执行，否则展开途中光标下的菜单项不会高亮。逐帧遮罩按位移去重：位移不足一像素时遮罩完全相同，跳过不改变展开轨迹，但不能改成按时间采样遮罩——遮罩滞后于窗口位置会让内容错位。不能改成只淡入、删除遮罩或阴影，也不能把 `NONE`、`FADE_IN_DROP_DOWN` 等其他管理器替换成下拉实现。
 
 带蒙层的 `MaskDialogBase` 的 200 ms 淡入和 100 ms 淡出保持 QFluentWidgets 原实现，由 `QGraphicsOpacityEffect` 驱动；`app/platform/dialog_animation.py` 只复用重复设置的弹窗阴影，不接管 `showEvent` 和 `done`。不能改用 `setWindowOpacity`：`MaskDialogBase` 调用 `setWindowFlags(Qt.FramelessWindowHint)` 后窗口类型退回 `Qt::Widget`，带父窗口时 `isWindow()` 为假，`QWidget::setWindowOpacity()` 直接返回，动画会静默失效。也不能通过缩短动画、改变蒙层透明度或删除阴影换取性能。
 
