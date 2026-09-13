@@ -15,6 +15,10 @@ else:
     from qfluentwidgets import SmoothScrollArea as FluentScrollArea
 
 
+# qfluentwidgets 默认 500 ms,滚轮滚一格要缓半秒才停,教室机上尤其像没跟上手。
+WHEEL_SCROLL_DURATION_MS = 250
+
+
 class _TouchScrollGuard(QObject):
     def __init__(self, application):
         super().__init__(application)
@@ -81,6 +85,13 @@ class _TouchScrollGuard(QObject):
                 self._cancelPressedButtons(activeScrollArea)
             return False
 
+        if eventType not in (
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.MouseButtonRelease,
+        ):
+            return False
+
+        # 过滤器装在 QApplication 上,父链遍历只在真正用得到的两个分支里做。
         scrollArea = self._scrollAreaFor(obj)
         if (
             eventType == QEvent.Type.MouseButtonPress
@@ -108,14 +119,14 @@ class _TouchScrollGuard(QObject):
 class ScrollArea(FluentScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._ownScrollAnimations()
+        self._tuneScrollAnimations()
         QScroller.grabGesture(
             self.viewport(),
             QScroller.ScrollerGestureType.TouchGesture,
         )
         self._touchScrollGuard = _TouchScrollGuard.instance()
 
-    def _ownScrollAnimations(self):
+    def _tuneScrollAnimations(self):
         """Keep qfluentwidgets' smooth-bar animations inside the bar lifetime."""
         delegate = getattr(self, "delegate", None)
         if delegate is None:
@@ -123,8 +134,11 @@ class ScrollArea(FluentScrollArea):
         for name in ("vScrollBar", "hScrollBar"):
             bar = getattr(delegate, name, None)
             animation = getattr(bar, "ani", None)
-            if animation is not None and animation.parent() is None:
+            if animation is None:
+                continue
+            if animation.parent() is None:
                 animation.setParent(bar)
+            bar.setScrollAnimation(WHEEL_SCROLL_DURATION_MS)
 
     def enableTransparentBackground(self):
         self.setStyleSheet("QScrollArea{border: none; background: transparent}")

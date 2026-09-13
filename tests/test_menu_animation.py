@@ -136,6 +136,30 @@ def test_menu_syncs_hover_state_while_revealing(application, optimizedMenus):
     application.processEvents()
 
 
+def test_menu_skips_identical_masks(application, optimizedMenus):
+    menu = RoundMenu()
+    for name in "ABCDEFGH":
+        menu.addAction(QAction(name, menu))
+    manager = MenuAnimationManager.make(menu, MenuAnimationType.DROP_DOWN)
+    manager.exec(QPoint(100, 200))
+    manager.ani.pause()
+
+    with patch.object(menu, "setMask", wraps=menu.setMask) as setMask:
+        manager.ani.setCurrentTime(40)
+        for _ in range(3):
+            manager._onValueChanged()
+
+        # 位移没变时遮罩相同,不该重复触发 SetWindowRgn。
+        assert setMask.call_count == 1
+
+        manager.ani.setCurrentTime(200)
+
+        assert setMask.call_count == 2
+
+    manager.ani.stop()
+    menu.close()
+
+
 @pytest.mark.parametrize(
     ("animationType", "originalClass", "optimizedClass"),
     [

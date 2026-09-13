@@ -14,7 +14,17 @@ from qfluentwidgets.components.widgets.menu import (
 class _SmoothMenuAnimation:
     def __init__(self, menu):
         super().__init__(menu)
+        self._maskOffset = None
         self.ani.finished.connect(self._finishAnimation)
+
+    def _onValueChanged(self):
+        # 菜单是顶层 Popup,setMask 会落到 SetWindowRgn:每次分配 GDI region 并强制整窗重绘。
+        # 位移不足一像素时遮罩完全相同,跳过不改变任何观感。
+        offset = self.ani.endValue().y() - self.ani.currentValue().y()
+        if offset == self._maskOffset:
+            return
+        self._maskOffset = offset
+        super()._onValueChanged()
 
     def _updateMenuViewport(self):
         # 只省掉每帧的 viewport 强制刷新；悬停态仍逐帧同步，否则展开途中光标下的项不会高亮。
