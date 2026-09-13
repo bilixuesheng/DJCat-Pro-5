@@ -289,7 +289,7 @@ class AddTaskDialog(MessageBoxBase):
 
         self.scrollArea = ScrollArea(self.widget)
         self.scrollArea.setWidgetResizable(True)
-        self.scrollArea.setStyleSheet("QScrollArea { border: none; background: transparent; } QScrollArea > QWidget > QWidget { background: transparent; }")
+        self.scrollArea.enableTransparentBackground()
 
         self.formWidget, self.formWidgets = create_task_form(self)
         self.scrollArea.setWidget(self.formWidget)

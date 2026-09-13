@@ -12,7 +12,6 @@ from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
-    QGraphicsOpacityEffect,
     QHBoxLayout,
     QScroller,
     QSizePolicy,
@@ -30,6 +29,7 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from app.config.cfg import cfg
+from app.view.components.setting_card_group import setRevealPainting
 
 
 class TaskMasterSwitch(QWidget):
@@ -55,16 +55,6 @@ class TaskMasterSwitch(QWidget):
     def _syncChecked(self, checked):
         with QSignalBlocker(self.switchButton):
             self.switchButton.setChecked(checked)
-
-
-def _set_reveal_painting(widget, enabled):
-    if enabled:
-        if widget.graphicsEffect() is not None:
-            widget.setGraphicsEffect(None)
-    elif widget.graphicsEffect() is None:
-        effect = QGraphicsOpacityEffect(widget)
-        effect.setOpacity(0)
-        widget.setGraphicsEffect(effect)
 
 
 class TouchTimePicker(TimePicker):
@@ -161,7 +151,7 @@ class TaskExpandSettingCard(ExpandSettingCard):
         self.revealAnimation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.viewLayout.setContentsMargins(0, 0, 0, 0)
         self.viewLayout.setSpacing(0)
-        _set_reveal_painting(self.view, False)
+        setRevealPainting(self.view, False)
         self.verticalScrollBar().setValue(0)
 
     def getRevealHeight(self):
@@ -175,7 +165,7 @@ class TaskExpandSettingCard(ExpandSettingCard):
         parent = self.parentWidget()
         if parent is not None and getattr(parent, "expandCard", None) is self:
             parent.setFixedHeight(height)
-        _set_reveal_painting(self.view, self._revealHeight > 0)
+        setRevealPainting(self.view, self._revealHeight > 0)
 
     revealHeight = Property(int, getRevealHeight, setRevealHeight)
 
