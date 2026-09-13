@@ -227,8 +227,8 @@ class SystemTrayIcon(QSystemTrayIcon):
             self._refreshTaskAction(
                 self.homeCardTaskAction,
                 cfg.homeCardTasksEnabled.value,
-                "关闭定时任务",
-                "开启定时任务",
+                "关闭自动任务",
+                "开启自动任务",
                 FIF.HISTORY,
             )
         else:
@@ -327,8 +327,8 @@ class SystemTrayIcon(QSystemTrayIcon):
             self._refreshTaskAction(
                 action,
                 cfg.homeCardTasksEnabled.value,
-                "关闭定时任务",
-                "开启定时任务",
+                "关闭自动任务",
+                "开启自动任务",
                 FIF.HISTORY,
             )
 
