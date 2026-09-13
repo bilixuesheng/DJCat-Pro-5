@@ -42,7 +42,7 @@ class TrayControlPage(ScrollArea):
         self.menuCards = [
             SwitchSettingCard(
                 FluentIcon.PLAY,
-                "显示播报总开关",
+                "显示定时播报总开关",
                 "在托盘菜单中开启或关闭定时播报总开关",
                 cfg.showBroadcastTrayAction,
             ),
@@ -54,7 +54,7 @@ class TrayControlPage(ScrollArea):
             ),
             SwitchSettingCard(
                 FluentIcon.POWER_BUTTON,
-                "显示关机总开关",
+                "显示定时关机总开关",
                 "在托盘菜单中开启或关闭定时关机总开关",
                 cfg.showShutdownTrayAction,
             ),

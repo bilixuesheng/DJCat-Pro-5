@@ -197,6 +197,22 @@ class HomeCardTrayInterfaceTest(TestCase):
         finally:
             trayPage.deleteLater()
 
+    def testTrayControlPageUsesFullTaskNames(self):
+        from app.view.pages.tray_control_page import TrayControlPage
+
+        trayPage = TrayControlPage()
+        try:
+            self.assertEqual(
+                [card.titleLabel.text() for card in trayPage.menuCards[:3]],
+                [
+                    "显示定时播报总开关",
+                    "显示定时任务总开关",
+                    "显示定时关机总开关",
+                ],
+            )
+        finally:
+            trayPage.deleteLater()
+
     def testTrayControlPageKeepsTouchScrollingAndNativeControlSizes(self):
         from app.view.pages.tray_control_page import TrayControlPage
 
