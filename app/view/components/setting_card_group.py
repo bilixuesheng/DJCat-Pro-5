@@ -50,7 +50,7 @@ QWIDGETSIZE_MAX = (1 << 24) - 1
 LAYOUT_TICK_SECONDS = 1 / 120
 
 
-def _set_reveal_painting(widget: QWidget, enabled: bool) -> None:
+def setRevealPainting(widget: QWidget, enabled: bool) -> None:
     if enabled:
         if widget.graphicsEffect() is not None:
             widget.setGraphicsEffect(None)
@@ -236,7 +236,7 @@ class CollapsibleSettingCard(QWidget):
         self.expandAnimation.setDuration(200)
         self.expandAnimation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.view.setMaximumHeight(0)
-        _set_reveal_painting(self.viewContent, False)
+        setRevealPainting(self.viewContent, False)
         self.setFixedHeight(self.card.height())
         self.view.setObjectName("view")
 
@@ -305,7 +305,7 @@ class CollapsibleSettingCard(QWidget):
     def _onExpandValueChanged(self, height) -> None:
         height = int(height)
         self.setFixedHeight(self.card.height() + height)
-        _set_reveal_painting(self.viewContent, height > 0)
+        setRevealPainting(self.viewContent, height > 0)
 
     def _onExpandClicked(self) -> None:
         self.setExpand(not self.isExpand)
@@ -421,7 +421,7 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
 
         self.isCollapsed = self.objectName() not in cfg.expandedSettingGroups.value
         self.cardContainer.setMaximumHeight(0 if self.isCollapsed else QWIDGETSIZE_MAX)
-        _set_reveal_painting(self.cardView, not self.isCollapsed)
+        setRevealPainting(self.cardView, not self.isCollapsed)
         self._refreshExpandIcon()
 
     def _initLayout(self) -> None:
@@ -629,4 +629,4 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
     def _onCollapseValueChanged(self, height) -> None:
         height = max(0, int(height))
         self.setFixedHeight(self.headerWidget.height() + height)
-        _set_reveal_painting(self.cardView, height > 0)
+        setRevealPainting(self.cardView, height > 0)

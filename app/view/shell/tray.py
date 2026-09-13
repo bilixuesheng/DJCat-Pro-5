@@ -22,6 +22,32 @@ from app.config.constants import APP_NAME
 from app.config.paths import ASSET_DIR
 
 
+
+# 三类任务总开关在建菜单和刷新时共用同一组名称与图标，集中在这里，改名时不会再漏掉某一处。
+TRAY_TASK_ACTIONS = (
+    (
+        "broadcastAction",
+        cfg.showBroadcastTrayAction,
+        cfg.broadcastTasksEnabled,
+        "定时播报",
+        FIF.PLAY,
+    ),
+    (
+        "homeCardTaskAction",
+        cfg.showHomeCardTaskTrayAction,
+        cfg.homeCardTasksEnabled,
+        "自动任务",
+        FIF.HISTORY,
+    ),
+    (
+        "shutdownAction",
+        cfg.showShutdownTrayAction,
+        cfg.shutdownTasksEnabled,
+        "定时关机",
+        FIF.POWER_BUTTON,
+    ),
+)
+
 class CustomMenuStyle(QProxyStyle):
     def __init__(self, iconSize=14):
         super().__init__()
@@ -143,18 +169,9 @@ class SystemTrayIcon(QSystemTrayIcon):
 
         self._homeCards = []
         self.setHomeCards(homeCards)
-        cfg.broadcastTasksEnabled.valueChanged.connect(
-            self._refreshBroadcastAction
-        )
-        cfg.homeCardTasksEnabled.valueChanged.connect(
-            self._refreshHomeCardTaskAction
-        )
-        cfg.shutdownTasksEnabled.valueChanged.connect(
-            self._refreshShutdownAction
-        )
-        cfg.showBroadcastTrayAction.valueChanged.connect(self._rebuildMenu)
-        cfg.showHomeCardTaskTrayAction.valueChanged.connect(self._rebuildMenu)
-        cfg.showShutdownTrayAction.valueChanged.connect(self._rebuildMenu)
+        for _name, showItem, enabledItem, _label, _icon in TRAY_TASK_ACTIONS:
+            enabledItem.valueChanged.connect(self._refreshTaskActions)
+            showItem.valueChanged.connect(self._rebuildMenu)
         cfg.trayHomeCardKeys.valueChanged.connect(self._rebuildMenu)
         cfg.trayHomeCardsInSubmenu.valueChanged.connect(self._rebuildMenu)
         self._rebuildMenu()
@@ -206,47 +223,17 @@ class SystemTrayIcon(QSystemTrayIcon):
         self.showAction.triggered.connect(self._onShowActionTriggered)
         menu.addAction(self.showAction)
 
-        if cfg.showBroadcastTrayAction.value:
-            self.broadcastAction = Action(FIF.PLAY, "", menu)
-            self.broadcastAction.triggered.connect(self._toggleBroadcastTasks)
-            menu.addAction(self.broadcastAction)
-            self._refreshTaskAction(
-                self.broadcastAction,
-                cfg.broadcastTasksEnabled.value,
-                "关闭定时播报",
-                "开启定时播报",
-                FIF.PLAY,
+        for name, showItem, enabledItem, label, icon in TRAY_TASK_ACTIONS:
+            if not showItem.value:
+                setattr(self, name, None)
+                continue
+            action = Action(icon, "", menu)
+            action.triggered.connect(
+                lambda _checked=False, item=enabledItem: self._toggleTasks(item)
             )
-        else:
-            self.broadcastAction = None
-
-        if cfg.showHomeCardTaskTrayAction.value:
-            self.homeCardTaskAction = Action(FIF.HISTORY, "", menu)
-            self.homeCardTaskAction.triggered.connect(self._toggleHomeCardTasks)
-            menu.addAction(self.homeCardTaskAction)
-            self._refreshTaskAction(
-                self.homeCardTaskAction,
-                cfg.homeCardTasksEnabled.value,
-                "关闭自动任务",
-                "开启自动任务",
-                FIF.HISTORY,
-            )
-        else:
-            self.homeCardTaskAction = None
-
-        if cfg.showShutdownTrayAction.value:
-            self.shutdownAction = Action(FIF.POWER_BUTTON, "", menu)
-            self.shutdownAction.triggered.connect(self._toggleShutdownTasks)
-            menu.addAction(self.shutdownAction)
-            self._refreshTaskAction(
-                self.shutdownAction,
-                cfg.shutdownTasksEnabled.value,
-                "关闭定时关机",
-                "开启定时关机",
-                FIF.POWER_BUTTON,
-            )
-        else:
-            self.shutdownAction = None
+            menu.addAction(action)
+            setattr(self, name, action)
+            self._refreshTaskAction(action, enabledItem.value, label, icon)
 
         selected = {
             key
@@ -301,58 +288,16 @@ class SystemTrayIcon(QSystemTrayIcon):
             parent.raise_()
             parent.activateWindow()
 
-    def _toggleBroadcastTasks(self):
-        self._toggleTasks(cfg.broadcastTasksEnabled)
-
-    def _toggleHomeCardTasks(self):
-        self._toggleTasks(cfg.homeCardTasksEnabled)
-
-    def _toggleShutdownTasks(self):
-        self._toggleTasks(cfg.shutdownTasksEnabled)
-
-    def _refreshBroadcastAction(self, _value=None):
-        action = getattr(self, "broadcastAction", None)
-        if action is not None:
-            self._refreshTaskAction(
-                action,
-                cfg.broadcastTasksEnabled.value,
-                "关闭定时播报",
-                "开启定时播报",
-                FIF.PLAY,
-            )
-
-    def _refreshHomeCardTaskAction(self, _value=None):
-        action = getattr(self, "homeCardTaskAction", None)
-        if action is not None:
-            self._refreshTaskAction(
-                action,
-                cfg.homeCardTasksEnabled.value,
-                "关闭自动任务",
-                "开启自动任务",
-                FIF.HISTORY,
-            )
-
-    def _refreshShutdownAction(self, _value=None):
-        action = getattr(self, "shutdownAction", None)
-        if action is not None:
-            self._refreshTaskAction(
-                action,
-                cfg.shutdownTasksEnabled.value,
-                "关闭定时关机",
-                "开启定时关机",
-                FIF.POWER_BUTTON,
-            )
+    def _refreshTaskActions(self, _value=None):
+        for name, _showItem, enabledItem, label, icon in TRAY_TASK_ACTIONS:
+            action = getattr(self, name, None)
+            if action is not None:
+                self._refreshTaskAction(action, enabledItem.value, label, icon)
 
     @staticmethod
-    def _refreshTaskAction(
-        action,
-        enabled,
-        enabledText,
-        disabledText,
-        disabledIcon,
-    ):
-        action.setText(enabledText if enabled else disabledText)
-        action.setIcon(FIF.PAUSE if enabled else disabledIcon)
+    def _refreshTaskAction(action, enabled, label, icon):
+        action.setText(("关闭" if enabled else "开启") + label)
+        action.setIcon(FIF.PAUSE if enabled else icon)
 
     @staticmethod
     def _toggleTasks(configItem):
