@@ -48,8 +48,8 @@ class TrayControlPage(ScrollArea):
             ),
             SwitchSettingCard(
                 FluentIcon.HISTORY,
-                "显示定时任务总开关",
-                "在托盘菜单中开启或关闭定时任务总开关",
+                "显示自动任务总开关",
+                "在托盘菜单中开启或关闭自动任务总开关",
                 cfg.showHomeCardTaskTrayAction,
             ),
             SwitchSettingCard(

@@ -206,7 +206,7 @@ class HomeCardTrayInterfaceTest(TestCase):
                 [card.titleLabel.text() for card in trayPage.menuCards[:3]],
                 [
                     "显示定时播报总开关",
-                    "显示定时任务总开关",
+                    "显示自动任务总开关",
                     "显示定时关机总开关",
                 ],
             )
@@ -614,7 +614,7 @@ class TrayMenuTest(TestCase):
                 [
                     "主页",
                     "关闭定时播报",
-                    "关闭定时任务",
+                    "关闭自动任务",
                     "关闭定时关机",
                     "自定义入口",
                     "退出程序",
@@ -632,7 +632,7 @@ class TrayMenuTest(TestCase):
                 [action.text() for action in tray.menu.actions()],
             )
             self.assertIn(
-                "关闭定时任务",
+                "关闭自动任务",
                 [action.text() for action in tray.menu.actions()],
             )
             self.assertIn(
@@ -651,7 +651,7 @@ class TrayMenuTest(TestCase):
         try:
             self.assertEqual(
                 tray.homeCardTaskAction.text(),
-                "关闭定时任务",
+                "关闭自动任务",
             )
 
             tray.homeCardTaskAction.trigger()
@@ -662,7 +662,7 @@ class TrayMenuTest(TestCase):
             self.assertFalse(cfg.homeCardTasksEnabled.value)
             self.assertEqual(
                 tray.homeCardTaskAction.text(),
-                "开启定时任务",
+                "开启自动任务",
             )
 
             tray.homeCardTaskAction.trigger()
@@ -673,7 +673,7 @@ class TrayMenuTest(TestCase):
             self.assertTrue(cfg.homeCardTasksEnabled.value)
             self.assertEqual(
                 tray.homeCardTaskAction.text(),
-                "关闭定时任务",
+                "关闭自动任务",
             )
         finally:
             tray.deleteLater()
