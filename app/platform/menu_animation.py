@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from PySide6.QtCore import QEvent, QPoint, Qt
+from PySide6.QtGui import QHoverEvent
+from PySide6.QtWidgets import QApplication
 from qfluentwidgets.components.widgets.menu import (
     DropDownMenuAnimationManager,
     MenuAnimationManager,
@@ -14,7 +17,12 @@ class _SmoothMenuAnimation:
         self.ani.finished.connect(self._finishAnimation)
 
     def _updateMenuViewport(self):
-        pass
+        # 只省掉每帧的 viewport 强制刷新；悬停态仍逐帧同步，否则展开途中光标下的项不会高亮。
+        self.menu.view.setAttribute(Qt.WidgetAttribute.WA_UnderMouse, True)
+        QApplication.sendEvent(
+            self.menu.view,
+            QHoverEvent(QEvent.Type.HoverEnter, QPoint(), QPoint(1, 1)),
+        )
 
     def _finishAnimation(self):
         MenuAnimationManager._updateMenuViewport(self)

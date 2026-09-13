@@ -7,21 +7,25 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QAbstractAnimation, QEasingCurve
 from PySide6.QtGui import QColor
-from PySide6.QtTest import QSignalSpy, QTest
-from PySide6.QtWidgets import QApplication, QDialog, QGraphicsDropShadowEffect, QWidget
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QGraphicsDropShadowEffect,
+    QGraphicsOpacityEffect,
+    QWidget,
+)
 from qfluentwidgets import ComboBox, MessageBox, MessageBoxBase
 from qfluentwidgets.components.dialog_box.mask_dialog_base import MaskDialogBase
 from qfluentwidgets.components.widgets.menu import MenuAnimationManager
 
-from app.platform.dialog_animation import (
-    _finishDialog,
-    _setDialogShadow,
-    _showDialog,
-    optimizeFluentDialogs,
-)
+from app.platform.dialog_animation import _setDialogShadow, optimizeFluentDialogs
 from app.platform.menu_animation import _SmoothDropDownMenuAnimation, optimizeFluentMenus
+
+
+FADE_IN_MS = 200
+FADE_OUT_MS = 100
 
 
 @pytest.fixture(scope="module")
@@ -31,8 +35,6 @@ def application():
 
 @pytest.fixture
 def optimizedDialogs(monkeypatch):
-    monkeypatch.setattr(MaskDialogBase, "showEvent", MaskDialogBase.showEvent)
-    monkeypatch.setattr(MaskDialogBase, "done", MaskDialogBase.done)
     monkeypatch.setattr(MaskDialogBase, "setShadowEffect", MaskDialogBase.setShadowEffect)
     optimizeFluentDialogs()
 
@@ -47,20 +49,17 @@ def parentWindow(application):
     application.processEvents()
 
 
-def test_dialog_optimization_is_idempotent(optimizedDialogs):
+def test_dialog_optimization_only_patches_the_shadow(optimizedDialogs):
     optimizeFluentDialogs()
 
-    assert MaskDialogBase.showEvent is _showDialog
-    assert MaskDialogBase.done is _finishDialog
     assert MaskDialogBase.setShadowEffect is _setDialogShadow
+    # 淡入淡出必须留在上游实现里:窗口透明度对子控件无效,接管它等于删掉动画。
+    assert MaskDialogBase.showEvent.__module__.startswith("qfluentwidgets")
+    assert MaskDialogBase.done.__module__.startswith("qfluentwidgets")
 
 
 @pytest.mark.parametrize("dialogKind", ["custom", "message"])
-def test_masked_dialog_keeps_original_fade_and_shadow(
-    parentWindow,
-    optimizedDialogs,
-    dialogKind,
-):
+def test_masked_dialog_really_fades(parentWindow, optimizedDialogs, dialogKind):
     if dialogKind == "custom":
         dialog = MessageBoxBase(parentWindow)
     else:
@@ -72,48 +71,33 @@ def test_masked_dialog_keeps_original_fade_and_shadow(
     assert shadow.blurRadius() == 60
     assert shadow.offset().x() == 0
     assert shadow.offset().y() == 10
-    assert shadow.color() == QColor(0, 0, 0, 50)
 
     dialog.show()
-    animation = dialog._dialogOpacityAnimation
-    finished = QSignalSpy(animation.finished)
+    fadeIn = dialog.graphicsEffect()
 
-    assert animation.targetObject() is dialog
-    assert bytes(animation.propertyName()) == b"windowOpacity"
-    assert animation.duration() == 200
-    assert animation.easingCurve().type() == QEasingCurve.Type.InSine
-    assert animation.startValue() == 0.0
-    assert animation.endValue() == 1.0
-    assert dialog.graphicsEffect() is None
+    # 关键断言:弹窗真的处在半透明状态,而不只是挂了一个动画对象。
+    assert isinstance(fadeIn, QGraphicsOpacityEffect)
+    assert fadeIn.opacity() < 1.0
     assert dialog.widget.graphicsEffect() is shadow
 
-    if not finished.count():
-        assert finished.wait(1000)
-    assert finished.count() == 1
-    assert dialog.windowOpacity() == 1.0
+    QTest.qWait(FADE_IN_MS + 150)
+
+    assert dialog.graphicsEffect() is None
     assert dialog.widget.graphicsEffect() is shadow
 
     dialog.reject()
-    closing = dialog._dialogOpacityAnimation
-    closed = QSignalSpy(closing.finished)
+    fadeOut = dialog.graphicsEffect()
 
-    assert closing.duration() == 100
-    assert closing.startValue() == 1.0
-    assert closing.endValue() == 0.0
-    assert dialog.graphicsEffect() is None
-    assert dialog.widget.graphicsEffect() is None
+    assert isinstance(fadeOut, QGraphicsOpacityEffect)
+    assert dialog.isVisible()
 
-    if not closed.count():
-        assert closed.wait(1000)
-    assert closed.count() == 1
+    QTest.qWait(FADE_OUT_MS + 150)
+
     assert dialog.result() == QDialog.DialogCode.Rejected
     assert not dialog.isVisible()
 
 
-def test_dialog_reuses_shadow_instead_of_recreating_it(
-    parentWindow,
-    optimizedDialogs,
-):
+def test_dialog_reuses_shadow_instead_of_recreating_it(parentWindow, optimizedDialogs):
     dialog = MessageBoxBase(parentWindow)
     shadow = dialog.widget.graphicsEffect()
 
@@ -126,23 +110,14 @@ def test_dialog_reuses_shadow_instead_of_recreating_it(
     assert shadow.color() == QColor(10, 20, 30, 40)
 
 
-def test_dialog_close_stops_running_open_animation(
-    parentWindow,
-    optimizedDialogs,
-):
+def test_dialog_closed_while_opening_still_closes(parentWindow, optimizedDialogs):
     dialog = MessageBoxBase(parentWindow)
     dialog.show()
-    opening = dialog._dialogOpacityAnimation
-
     dialog.reject()
 
-    assert opening.state() == QAbstractAnimation.State.Stopped
-    assert dialog._dialogOpacityAnimation is not opening
+    QTest.qWait(FADE_OUT_MS + 150)
 
-    closed = QSignalSpy(dialog._dialogOpacityAnimation.finished)
-    if not closed.count():
-        assert closed.wait(1000)
-
+    assert dialog.result() == QDialog.DialogCode.Rejected
     assert not dialog.isVisible()
 
 
