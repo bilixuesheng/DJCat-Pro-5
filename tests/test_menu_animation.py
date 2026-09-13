@@ -7,7 +7,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEasingCurve, QPoint
+from PySide6.QtCore import QEasingCurve, QPoint, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication
@@ -113,6 +113,23 @@ def test_common_menus_keep_original_reveal_without_redundant_refreshes(
         assert shadow is not None
         assert menu.view.graphicsEffect() is shadow
         updateViewport.assert_called_once_with(manager)
+
+    menu.close()
+    widget.close()
+    application.processEvents()
+
+
+def test_menu_syncs_hover_state_while_revealing(application, optimizedMenus):
+    widget = ComboBox()
+    widget.addItems(["A", "B", "C"])
+    widget.show()
+    widget._showComboMenu()
+    menu = widget.dropMenu
+
+    QTest.qWait(ORIGINAL_MENU_ANIMATION_DURATION_MS // 2)
+
+    # 展开途中就得同步悬停态,否则光标下的菜单项要等动画结束才高亮。
+    assert menu.view.testAttribute(Qt.WidgetAttribute.WA_UnderMouse)
 
     menu.close()
     widget.close()
