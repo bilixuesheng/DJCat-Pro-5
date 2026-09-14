@@ -7,6 +7,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QScroller, QWidget
 from qfluentwidgets import Flyout, PrimaryPushButton, PushButton
@@ -46,8 +47,8 @@ class CountdownWindowTest(TestCase):
         self.assertTrue(self.window.controlsWidget.isHidden())
         self.assertFalse(self.window.controlsWidget.isEnabled())
         self.assertFalse(self.window._controls_visible)
-        self.assertEqual(self.window.contentsRect().size().toTuple(), (640, 200))
-        self.assertEqual(self.window.timeLabel.font().pixelSize(), 90)
+        self.assertEqual(self.window.contentsRect().size().toTuple(), (600, 190))
+        self.assertEqual(self.window.timeLabel.font().pixelSize(), 95)
 
         self.window.remaining = 3723
         self.window._updateDisplay()
@@ -55,6 +56,19 @@ class CountdownWindowTest(TestCase):
             self.window.timeLabel.text(),
             "1\u2009:\u20092\u2009:\u20093",
         )
+
+        self.window.remaining = 86399
+        self.window._updateDisplay()
+        margins = self.window.vBoxLayout.contentsMargins()
+        available = (
+            self.window.contentsRect().width()
+            - margins.left()
+            - margins.right()
+        )
+        width = QFontMetrics(self.window.timeLabel.font()).horizontalAdvance(
+            self.window.timeLabel.text()
+        )
+        self.assertLessEqual(width, available)
 
     def testEditPageUsesTouchTimePicker(self):
         page = CountdownEditPage()

@@ -184,6 +184,10 @@ _Avoid_: theme、CSS、System Prompt
 DJCat Pro 5 自身的新版本，通过专用更新信息和 Windows 安装程序交付。安装程序固定从 `DOWNLOAD_URL` 指向的雨云对象存储下载，不根据版本号或架构拼接 GitHub Release 地址。它独立于 Application Store，不使用 Application Catalog 或 Package。
 _Avoid_: Application Update；不加限定地称 update
 
+**Client Version**:
+用户可见的 DJCat 版本，唯一来源是 `app/common/config.py`，并用于应用内显示、Git 标签、Release、安装包文件名和更新信息。若 Client Version 包含 PEP 440 不接受的发布后缀（如 `-kb...`），`pyproject.toml` 与 `uv.lock` 仅为 Python 构建元数据使用等价的本地版本形式（如 `+kb...`），不得因此改写用户指定的 Client Version。
+_Avoid_: Python Distribution Version、把构建元数据中的 `+` 版本展示给用户
+
 **Application Update**:
 同一 Application 在 Application Catalog 中的版本高于 Installed Application，或本地执行清单修订落后时形成的更新，用新 Package 替换该应用的本地安装。它不会升级 DJCat 客户端。
 _Avoid_: Client Update；不加限定地称 update
@@ -427,7 +431,7 @@ Projection 的两种正文渲染器必须保持这些共同约束：
 
 Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` 会覆盖整个窗口背景。窗口化时的 `1 px #808080` 边界线必须由该组件在主题色、纯色或图片绘制完成后最后绘制；全屏时不绘制。不得恢复为父窗口 QSS 边框，否则背景子控件会再次把它盖住。
 
-Projection、Exam Countdown 与 Fullscreen Clock 的窗口化背景、图片裁剪和边框共用 8 px 圆角；首次显示前启用透明窗口表面，不依赖 Win11 系统圆角。Qt 阴影只附着在背景组件上，四周各留 12 px 透明空间，Exam Countdown 与 Fullscreen Clock 的可见内容仍为 640 × 200，Projection 初始可见尺寸仍为可用屏幕的一半；字体、布局与角落按钮按 `contentsRect()` 定位，不能把阴影空间算进正文尺寸。切回全屏（含保留任务栏模式）时清除透明边距、圆角、边框和阴影，背景重新铺满窗口。Projection 保留窗口化缩放：Windows 命中测试使用消息中的坐标，按 DPI 转为背景局部坐标，在可见圆角边界内侧 12 px、外侧 2 px 的圆角区域判断四边及四角，不将透明阴影外沿作为边框。圆角外的空白和角落按钮不触发缩放；全屏禁用缩放。
+Projection、Exam Countdown 与 Fullscreen Clock 的窗口化背景、图片裁剪和边框共用 8 px 圆角；首次显示前启用透明窗口表面，不依赖 Win11 系统圆角。Qt 阴影只附着在背景组件上，四周各留 12 px 透明空间，Exam Countdown 与 Fullscreen Clock 的可见内容仍为 600 × 190，Projection 初始可见尺寸仍为可用屏幕的一半；字体、布局与角落按钮按 `contentsRect()` 定位，不能把阴影空间算进正文尺寸。切回全屏（含保留任务栏模式）时清除透明边距、圆角、边框和阴影，背景重新铺满窗口。Projection 保留窗口化缩放：Windows 命中测试使用消息中的坐标，按 DPI 转为背景局部坐标，在可见圆角边界内侧 12 px、外侧 2 px 的圆角区域判断四边及四角，不将透明阴影外沿作为边框。圆角外的空白和角落按钮不触发缩放；全屏禁用缩放。
 
 AI Markdown 对话框和 Projection 编辑器内联整理的输入框都使用 2 px 渐变 QSS 忙碌边框。Qt 样式表会分别绘制边框各边，粗渐变边框在圆角处会出现斜向拼接；除非改为一次性自定义绘制完整圆角路径，否则不要再次只靠增加 QSS `border-width` 加粗。内联整理必须保存开始时的标题和正文快照；完成后投送完整结果，用户取消时先停止接收迟到信号，再立即投送快照正文。
 

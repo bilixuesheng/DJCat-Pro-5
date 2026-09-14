@@ -156,8 +156,8 @@ class FullscreenClockWindow(FramelessWindow):
             self.showNormal()
             rect = self.screen().availableGeometry()
             self.vBoxLayout.setContentsMargins(16, 12, 16, 56)
-            self._applyFonts(200)
-            self.setFixedSize(640 + 2 * margin, 200 + 2 * margin)
+            self._applyFonts(190)
+            self.setFixedSize(600 + 2 * margin, 190 + 2 * margin)
             self.move(rect.center() - self.rect().center())
         else:
             self.vBoxLayout.setContentsMargins(40, 20, 40, 20)

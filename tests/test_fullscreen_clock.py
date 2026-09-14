@@ -92,8 +92,8 @@ class FullscreenClockTest(TestCase):
         self.assertTrue(self.window.is_windowed)
         self.assertTrue(self.window.titleLabel.isHidden())
         self.assertFalse(self.window.timeLabel.isHidden())
-        self.assertEqual(self.window.contentsRect().size().toTuple(), (640, 200))
-        self.assertEqual(self.window.timeLabel.font().pixelSize(), 90)
+        self.assertEqual(self.window.contentsRect().size().toTuple(), (600, 190))
+        self.assertEqual(self.window.timeLabel.font().pixelSize(), 85)
         self.assertRegex(
             self.window.timeLabel.text(),
             r"^\d{2}\u2009:\u2009\d{2}\u2009:\u2009\d{2}$",
