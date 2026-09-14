@@ -793,7 +793,7 @@ class SettingPage(ScrollArea):
             "检查更新",
             FluentIcon.INFO,
             "关于",
-            f"© Copyright {YEAR}, {AUTHOR}. Version {VERSION}。Beta 版仅接收 Beta 通道的更新",
+            f"© Copyright {YEAR}, {AUTHOR}. Version {VERSION}",
         )
         self.errorLogCard = PushSettingCard(
             "查看错误日志",

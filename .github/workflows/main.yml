@@ -71,12 +71,23 @@ jobs:
           import sys
 
           text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+          tag = sys.argv[2]
+          version = tag.removeprefix("v")
           match = re.search(
-              r"^<!--\s*release-title:\s*(.+?)\s*-->$",
+              r"^## \[([^\]]+)\] - \d{4}-\d{2}-\d{2} - (.+?)\s*$",
               text,
               re.MULTILINE,
           )
-          print(match.group(1) if match else sys.argv[2])
+          if not match:
+              raise SystemExit(
+                  "The first release-note H2 must be: "
+                  "## [version] - YYYY-MM-DD - category"
+              )
+          if match.group(1) != version:
+              raise SystemExit(
+                  f"Release-note version {match.group(1)!r} does not match {version!r}"
+              )
+          print(f"{tag} · {match.group(2).strip()}")
           PY
           )
 
