@@ -1,5 +1,6 @@
 import json
 import re
+import subprocess
 import threading
 import time
 from collections import deque
@@ -147,8 +148,11 @@ class InstallerLaunchWorker(QObject):
 
     def run(self):
         try:
-            result = QProcess.startDetached(str(self.installerPath), [])
-            started = result[0] if isinstance(result, tuple) else bool(result)
+            subprocess.Popen(
+                [str(self.installerPath)],
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            )
+            started = True
         except Exception:
             logger.exception("启动更新安装程序失败")
             started = False
