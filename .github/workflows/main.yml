@@ -292,7 +292,7 @@ jobs:
         shell: bash
         run: |
           release_args=()
-          if [[ "$TAG" == *-* ]]; then
+          if [[ "$TAG" == *-pre.* || "$TAG" == *-rc.* || "$TAG" == *-alpha.* || "$TAG" == *-beta.* ]]; then
             release_args+=(--prerelease)
           fi
           gh release create "$TAG" release-files/* \

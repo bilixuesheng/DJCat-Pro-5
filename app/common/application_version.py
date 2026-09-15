@@ -20,7 +20,13 @@ def versionKey(value: str) -> tuple:
             (0, int(part)) if part.isdigit() else (1, part)
             for part in re.findall(r"\d+|[a-z]+", prerelease)
         )
-        return coreKey, 0 if separator else 1, prereleaseKey
+        if not separator:
+            suffixRank = 1
+        elif prerelease.startswith("kb"):
+            suffixRank = 2
+        else:
+            suffixRank = 0
+        return coreKey, suffixRank, prereleaseKey
 
     parts = re.findall(r"\d+|[a-z]+", value)
     return (

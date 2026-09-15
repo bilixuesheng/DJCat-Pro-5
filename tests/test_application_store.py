@@ -887,3 +887,8 @@ class ApplicationStoreTest(TestCase):
         self.assertTrue(isUpdateAvailable("1.0.0-rc.1", "1.0.0"))
         self.assertFalse(isUpdateAvailable("1.0.0", "1.0.0-rc.1"))
         self.assertFalse(isUpdateAvailable("1.0", "1.0.0"))
+        self.assertTrue(isUpdateAvailable("5.1.4", "5.1.4-kb20260914"))
+        self.assertFalse(isUpdateAvailable("5.1.4-kb20260914", "5.1.4"))
+        self.assertTrue(isUpdateAvailable("5.1.4-kb20260901", "5.1.4-kb20260914"))
+        self.assertFalse(isUpdateAvailable("5.1.4-kb20260914", "5.1.4-kb20260901"))
+        self.assertTrue(isUpdateAvailable("5.1.4-pre.1", "5.1.4-kb20260914"))
