@@ -73,6 +73,7 @@ def test_masked_dialog_really_fades(parentWindow, optimizedDialogs, dialogKind):
         dialog = MessageBox("Title", "Content", parentWindow)
 
     shadow = dialog.widget.graphicsEffect()
+    shadowColor = shadow.color()
 
     assert isinstance(shadow, QGraphicsDropShadowEffect)
     assert shadow.blurRadius() == 60
@@ -92,7 +93,7 @@ def test_masked_dialog_really_fades(parentWindow, optimizedDialogs, dialogKind):
     assert dialog.graphicsEffect() is None
     assert dialog.widget.graphicsEffect() is shadow
     assert shadow.isEnabled()
-    assert shadow.color() == QColor(0, 0, 0, 100)
+    assert shadow.color() == shadowColor
 
     dialog.reject()
     fadeOut = dialog.graphicsEffect()

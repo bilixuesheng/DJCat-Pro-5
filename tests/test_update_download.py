@@ -1146,10 +1146,7 @@ class UpdateWindowLifecycleTest(TestCase):
         worker = UpdateWorker(17)
         worker.finished.connect(lambda *args: results.append(args))
 
-        with patch(
-            "app.view.windows.main_window.requests.get",
-            return_value=response,
-        ):
+        with patch.object(requests, "get", return_value=response):
             worker.run()
 
         self.assertEqual(
@@ -1166,8 +1163,9 @@ class UpdateWindowLifecycleTest(TestCase):
         worker.finished.connect(lambda *args: results.append(args))
 
         with (
-            patch(
-                "app.view.windows.main_window.requests.get",
+            patch.object(
+                requests,
+                "get",
                 side_effect=[
                     requests.ConnectionError("temporary")
                     for _ in range(worker.RETRY_COUNT)
@@ -1195,10 +1193,7 @@ class UpdateWindowLifecycleTest(TestCase):
 
         with (
             patch.object(worker, "RETRY_COUNT", 0),
-            patch(
-                "app.view.windows.main_window.requests.get",
-                return_value=response,
-            ),
+            patch.object(requests, "get", return_value=response),
         ):
             worker.run()
 
@@ -1217,10 +1212,7 @@ class UpdateWindowLifecycleTest(TestCase):
 
         with (
             patch.object(worker, "RETRY_COUNT", 0),
-            patch(
-                "app.view.windows.main_window.requests.get",
-                return_value=response,
-            ),
+            patch.object(requests, "get", return_value=response),
         ):
             worker.run()
 

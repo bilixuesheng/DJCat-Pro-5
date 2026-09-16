@@ -539,8 +539,7 @@ class HomePage(ScrollArea):
         self.cardsWidget = QWidget(self.container)
         self.flowLayout = FlowLayout(self.cardsWidget, needAni=False)
         self.flowLayout.setContentsMargins(20, 10, 20, 20)
-        self.flowLayout.setAnimation(180, QEasingCurve.Type.OutCubic)
-        QTimer.singleShot(0, lambda: setattr(self.flowLayout, "needAni", True))
+        QTimer.singleShot(0, self, self._enableFlowAnimations)
         self.cardsWidget.setStyleSheet("background: transparent;")
         self.vBoxLayout.addWidget(self.cardsWidget)
 
@@ -613,6 +612,15 @@ class HomePage(ScrollArea):
         self._dragScrollTimer = QTimer(self)
         self._dragScrollTimer.setInterval(16)
         self._dragScrollTimer.timeout.connect(self._autoScrollCardDrag)
+
+    def _enableFlowAnimations(self):
+        if self.flowLayout.needAni:
+            return
+        self.flowLayout.needAni = True
+        for item in self.flowLayout._items:
+            if item.widget().property("flowAni") is None:
+                self.flowLayout._onWidgetAdded(item.widget())
+        self.flowLayout.setAnimation(180, QEasingCurve.Type.OutCubic)
 
     def homeCardEntries(self) -> list[dict]:
         entries = []

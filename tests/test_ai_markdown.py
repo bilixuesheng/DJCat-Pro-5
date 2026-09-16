@@ -304,7 +304,7 @@ class AIMarkdownTest(unittest.TestCase):
         worker = MachineRegistrationWorker()
         worker.finished.connect(codes.append)
         with patch(
-            "app.view.windows.main_window.registerMachine",
+            "app.common.ai_markdown.registerMachine",
             return_value="DJ-000321",
         ):
             worker.run()

@@ -508,6 +508,7 @@ class SettingSearchTest(TestCase):
 
     def testMediaErrorAdvancesTheScheduledAudioQueue(self):
         nextTask = {"type": "系统TTS", "content": "下一条"}
+        self.window._ensureAudioBackend()
         self.window._audioTaskActive = True
         self.window._activeAudioKind = "media"
         self.window._audioTaskQueue.append(nextTask)

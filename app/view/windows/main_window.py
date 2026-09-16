@@ -450,6 +450,18 @@ class MainWindow(MSFluentWindow):
         self._activeAudioKind = ""
         self._homeCardTaskWorkers = {}
 
+        signalBus.testAudio.connect(self._playAudioTask)
+
+        self.scheduleTimer = QTimer(self)
+        self.scheduleTimer.timeout.connect(self._checkSchedule)
+        self.scheduleTimer.start(1000)
+        self._downloadProgressTimer = QTimer(self)
+        self._downloadProgressTimer.setInterval(100)
+        self._downloadProgressTimer.timeout.connect(self._flushDownloadProgress)
+        self._triggeredScheduleDate = ""
+        self._triggeredScheduleKeys = set()
+        self._lastScheduleCheck = None
+
     def _deferredCleanupEdgeSpeech(self):
         from app.common.edge_tts import cleanup_edge_speech_files
 
@@ -468,18 +480,6 @@ class MainWindow(MSFluentWindow):
         self.player.errorOccurred.connect(self._onMediaError)
         self.tts = QTextToSpeech(self)
         self.tts.stateChanged.connect(self._onTtsStateChanged)
-
-        signalBus.testAudio.connect(self._playAudioTask)
-
-        self.scheduleTimer = QTimer(self)
-        self.scheduleTimer.timeout.connect(self._checkSchedule)
-        self.scheduleTimer.start(1000)
-        self._downloadProgressTimer = QTimer(self)
-        self._downloadProgressTimer.setInterval(100)
-        self._downloadProgressTimer.timeout.connect(self._flushDownloadProgress)
-        self._triggeredScheduleDate = ""
-        self._triggeredScheduleKeys = set()
-        self._lastScheduleCheck = None
 
     def _updateWindowTitle(self, title):
         self.setWindowTitle(title.strip() or APP_NAME)
