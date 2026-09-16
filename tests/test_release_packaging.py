@@ -74,7 +74,7 @@ def test_release_workflow_builds_only_x86_64_packages():
     assert "Windows-x86_64-Setup.exe" in workflow
     assert "gh release create" in workflow
     assert 'release_args=()' in workflow
-    assert 'if [[ "$TAG" == *-* ]]; then' in workflow
+    assert 'if [[ "$TAG" == *-pre.* || "$TAG" == *-rc.* || "$TAG" == *-alpha.* || "$TAG" == *-beta.* ]]; then' in workflow
     assert "--prerelease" in workflow
     assert "cancel-in-progress: false" in workflow
     assert '-OutFile "scripts\\ChineseSimplified.isl"' in workflow
@@ -99,6 +99,15 @@ def test_pre_release_number_is_preserved_in_windows_file_version(monkeypatch):
 
     assert "--file-version=5.0.0.22" in args
     assert "--product-version=5.0.0.22" in args
+
+
+def test_kb_release_uses_base_version_for_windows_file_version(monkeypatch):
+    monkeypatch.setattr(deploy, "VERSION", "5.1.4-kb20260914")
+
+    args = deploy.build_args()
+
+    assert "--file-version=5.1.4.0" in args
+    assert "--product-version=5.1.4.0" in args
 
 
 def test_windows_build_includes_ico_normalizer():

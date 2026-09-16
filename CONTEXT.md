@@ -185,7 +185,7 @@ DJCat Pro 5 自身的新版本，通过专用更新信息和 Windows 安装程�
 _Avoid_: Application Update；不加限定地称 update
 
 **Client Version**:
-用户可见的 DJCat 版本，唯一来源是 `app/common/config.py`。若 Client Version 包含 PEP 440 不接受的发布后缀（如 `-kb...`），`pyproject.toml` 与 `uv.lock` 使用等价的本地版本形式（如 `+kb...`），不得因此改写用户指定的 Client Version。
+用户可见的 DJCat 版本，唯一来源是 `app/common/config.py`，并用于应用内显示、Git 标签、Release、安装包文件名和更新信息。若 Client Version 包含 PEP 440 不接受的发布后缀（如 `-kb...`），`pyproject.toml` 与 `uv.lock` 仅为 Python 构建元数据使用等价的本地版本形式（如 `+kb...`），不得因此改写用户指定的 Client Version。`-kb...` 表示高于同一基础正式版的补丁发布，不属于预发布；只有 `-pre`、`-rc`、`-alpha` 和 `-beta` 后缀按预发布排序和标记。
 _Avoid_: Python Distribution Version、把构建元数据中的 `+` 版本展示给用户
 
 **Application Update**:

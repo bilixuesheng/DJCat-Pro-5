@@ -1386,9 +1386,13 @@ class UpdateWindowLifecycleTest(TestCase):
             installer.write_bytes(b"MZ")
             with (
                 patch(
-                    "app.view.windows.main_window.QProcess.startDetached",
-                    return_value=(True, 1234),
-                ) as startDetached,
+                    "app.view.windows.main_window.subprocess.CREATE_NEW_PROCESS_GROUP",
+                    512,
+                    create=True,
+                ),
+                patch(
+                    "app.view.windows.main_window.subprocess.Popen",
+                ) as popen,
                 patch(
                     "app.view.windows.main_window.InstallerLaunchDialog",
                     return_value=dialog,
@@ -1410,12 +1414,12 @@ class UpdateWindowLifecycleTest(TestCase):
 
                 self.assertTrue(dialog.shown)
                 self.assertTrue(thread.started)
-                startDetached.assert_not_called()
+                popen.assert_not_called()
                 quitApp.assert_not_called()
 
                 worker.run()
 
-        startDetached.assert_called_once_with(str(installer), [])
+        popen.assert_called_once_with([str(installer)], creationflags=512)
         infoBar.close.assert_called_once_with()
         self.assertTrue(dialog.finished)
         self.assertIsNone(self.window._installerLaunchWorker)
@@ -1432,8 +1436,13 @@ class UpdateWindowLifecycleTest(TestCase):
             installer.write_bytes(b"MZ")
             with (
                 patch(
-                    "app.view.windows.main_window.QProcess.startDetached",
-                    return_value=(False, 0),
+                    "app.view.windows.main_window.subprocess.CREATE_NEW_PROCESS_GROUP",
+                    512,
+                    create=True,
+                ),
+                patch(
+                    "app.view.windows.main_window.subprocess.Popen",
+                    side_effect=OSError("launch failed"),
                 ),
                 patch(
                     "app.view.windows.main_window.InstallerLaunchDialog",

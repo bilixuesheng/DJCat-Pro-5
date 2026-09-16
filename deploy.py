@@ -9,7 +9,7 @@ from app.config.constants import APP_NAME, AUTHOR, YEAR
 
 
 def _numeric_version(version: str) -> str:
-    match = re.fullmatch(r"(\d+\.\d+\.\d+)(?:\.(\d+)|-pre\.(\d+))?", version)
+    match = re.fullmatch(r"(\d+\.\d+\.\d+)(?:\.(\d+)|-pre\.(\d+)|-kb\d+)?", version)
     if not match:
         return "1.0.0.0"
     return f"{match.group(1)}.{match.group(2) or match.group(3) or '0'}"

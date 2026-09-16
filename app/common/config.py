@@ -1,6 +1,6 @@
 from app.config.cfg import cfg
 
 # GitHub Actions extracts this assignment as text before importing the app.
-VERSION = "5.1.4-kb20260914"
+VERSION = "5.1.5"
 
 __all__ = ["VERSION", "cfg"]
