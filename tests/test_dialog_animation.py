@@ -21,6 +21,7 @@ from qfluentwidgets.components.dialog_box.mask_dialog_base import MaskDialogBase
 from qfluentwidgets.components.widgets.menu import MenuAnimationManager
 
 from app.platform.dialog_animation import (
+    _SHADOW_FADE_MS,
     _done,
     _setDialogShadow,
     _showEvent,
@@ -86,11 +87,12 @@ def test_masked_dialog_really_fades(parentWindow, optimizedDialogs, dialogKind):
     assert dialog.widget.graphicsEffect() is shadow
     assert not shadow.isEnabled()
 
-    QTest.qWait(FADE_IN_MS + 150)
+    QTest.qWait(FADE_IN_MS + _SHADOW_FADE_MS + 150)
 
     assert dialog.graphicsEffect() is None
     assert dialog.widget.graphicsEffect() is shadow
     assert shadow.isEnabled()
+    assert shadow.color() == QColor(0, 0, 0, 100)
 
     dialog.reject()
     fadeOut = dialog.graphicsEffect()

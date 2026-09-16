@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets.components.dialog_box.mask_dialog_base import MaskDialogBase
 
+_SHADOW_FADE_MS = 150
+
 
 def _setDialogShadow(
     dialog,
@@ -29,6 +31,7 @@ def _setDialogShadow(
 def _showEvent(self, e):
     shadow = self.widget.graphicsEffect()
     hasShadow = isinstance(shadow, QGraphicsDropShadowEffect)
+    shadowColor = shadow.color() if hasShadow else None
     if hasShadow:
         shadow.setEnabled(False)
 
@@ -42,8 +45,18 @@ def _showEvent(self, e):
 
     def onFinished():
         self.setGraphicsEffect(None)
-        if hasShadow:
-            shadow.setEnabled(True)
+        if not hasShadow:
+            return
+        transparent = QColor(shadowColor)
+        transparent.setAlpha(0)
+        shadow.setColor(transparent)
+        shadow.setEnabled(True)
+        colorAni = QPropertyAnimation(shadow, b"color", self)
+        colorAni.setStartValue(transparent)
+        colorAni.setEndValue(shadowColor)
+        colorAni.setDuration(_SHADOW_FADE_MS)
+        colorAni.setEasingCurve(QEasingCurve.OutCubic)
+        colorAni.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
 
     opacityAni.finished.connect(onFinished)
     opacityAni.start()
