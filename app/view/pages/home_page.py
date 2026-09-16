@@ -537,9 +537,10 @@ class HomePage(ScrollArea):
         self.vBoxLayout.addLayout(self.headerLayout)
 
         self.cardsWidget = QWidget(self.container)
-        self.flowLayout = FlowLayout(self.cardsWidget, needAni=True)
+        self.flowLayout = FlowLayout(self.cardsWidget, needAni=False)
         self.flowLayout.setContentsMargins(20, 10, 20, 20)
         self.flowLayout.setAnimation(180, QEasingCurve.Type.OutCubic)
+        QTimer.singleShot(0, lambda: setattr(self.flowLayout, "needAni", True))
         self.cardsWidget.setStyleSheet("background: transparent;")
         self.vBoxLayout.addWidget(self.cardsWidget)
 

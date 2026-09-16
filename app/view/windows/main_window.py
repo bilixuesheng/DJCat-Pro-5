@@ -7,7 +7,6 @@ from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import requests
 from loguru import logger
 from PySide6.QtCore import (
     QObject,
@@ -19,8 +18,6 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import QIcon
-from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
-from PySide6.QtTextToSpeech import QTextToSpeech
 from PySide6.QtWidgets import QApplication, QGraphicsOpacityEffect, QVBoxLayout, QWidget
 from shiboken6 import isValid
 from qfluentwidgets import FluentIcon as FIF
@@ -43,13 +40,7 @@ from qfluentwidgets import (
     setThemeColor,
 )
 
-from app.common.ai_markdown import registerMachine
 from app.common.application_version import isUpdateAvailable
-from app.common.edge_tts import (
-    DEFAULT_EDGE_VOICE,
-    EdgeSpeechWorker,
-    cleanup_edge_speech_files,
-)
 from app.common.home_card_tasks import (
     APPLICATION_HOME_CARD_TRIGGER,
     APPLICATION_QUIT_EVENT,
@@ -110,6 +101,8 @@ class UpdateWorker(QObject):
         self.requestId = requestId
 
     def run(self):
+        import requests
+
         for retry in range(self.RETRY_COUNT + 1):
             response = None
             try:
@@ -136,6 +129,8 @@ class MachineRegistrationWorker(QObject):
     finished = Signal(str)
 
     def run(self):
+        from app.common.ai_markdown import registerMachine
+
         self.finished.emit(registerMachine() or "")
 
 
@@ -438,17 +433,15 @@ class MainWindow(MSFluentWindow):
             cfg.set(cfg.aiMarkdownMachineCode, machineCode)
 
     def initWindow(self):
-        cleanup_edge_speech_files()
+        QTimer.singleShot(0, self, self._deferredCleanupEdgeSpeech)
         self._updateWindowTitle(cfg.windowTitle.value)
         self._updateApplicationIcon()
         self.setMinimumSize(700, 400)
 
-        self.player = QMediaPlayer(self)
-        self.audioOutput = QAudioOutput(self)
-        self.player.setAudioOutput(self.audioOutput)
+        self.player = None
+        self.audioOutput = None
+        self.tts = None
         self.current_play_repeats = 0
-        self.player.mediaStatusChanged.connect(self._onMediaStatusChanged)
-        self.player.errorOccurred.connect(self._onMediaError)
         self._edge_tts_request_id = 0
         self._edge_tts_jobs = {}
         self._edge_tts_temp_path = ""
@@ -457,9 +450,24 @@ class MainWindow(MSFluentWindow):
         self._activeAudioKind = ""
         self._homeCardTaskWorkers = {}
 
+    def _deferredCleanupEdgeSpeech(self):
+        from app.common.edge_tts import cleanup_edge_speech_files
+
+        cleanup_edge_speech_files()
+
+    def _ensureAudioBackend(self):
+        if self.player is not None:
+            return
+        from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+        from PySide6.QtTextToSpeech import QTextToSpeech
+
+        self.player = QMediaPlayer(self)
+        self.audioOutput = QAudioOutput(self)
+        self.player.setAudioOutput(self.audioOutput)
+        self.player.mediaStatusChanged.connect(self._onMediaStatusChanged)
+        self.player.errorOccurred.connect(self._onMediaError)
         self.tts = QTextToSpeech(self)
         self.tts.stateChanged.connect(self._onTtsStateChanged)
-        self._setBroadcastVolume(100)
 
         signalBus.testAudio.connect(self._playAudioTask)
 
@@ -498,8 +506,10 @@ class MainWindow(MSFluentWindow):
 
     def _setBroadcastVolume(self, volume):
         volume /= 100
-        self.audioOutput.setVolume(volume)
-        self.tts.setVolume(volume)
+        if self.audioOutput is not None:
+            self.audioOutput.setVolume(volume)
+        if self.tts is not None:
+            self.tts.setVolume(volume)
 
     def _playAudioTask(self, task_data):
         if (
@@ -533,12 +543,15 @@ class MainWindow(MSFluentWindow):
         if self._resourcesShutdown:
             return False
 
+        self._ensureAudioBackend()
         volume = task_data.get("volume", 100)
         self._setBroadcastVolume(volume)
         t = task_data["type"]
         repeat_count = task_data.get("repeat", 1)
 
         if t == "Edge TTS（需要联网）":
+            from app.common.edge_tts import DEFAULT_EDGE_VOICE
+
             content = task_data.get("content", "").strip()
             if content:
                 self._startEdgeTts(
@@ -583,6 +596,8 @@ class MainWindow(MSFluentWindow):
         return False
 
     def _startEdgeTts(self, content, voice, repeat_count, volume):
+        from app.common.edge_tts import EdgeSpeechWorker
+
         self._edge_tts_request_id += 1
         request_id = self._edge_tts_request_id
         worker = EdgeSpeechWorker(request_id, content, voice)
@@ -641,7 +656,7 @@ class MainWindow(MSFluentWindow):
 
         path = self._edge_tts_temp_path
         self._edge_tts_temp_path = ""
-        if self.player.source().toLocalFile() == path:
+        if self.player is not None and self.player.source().toLocalFile() == path:
             self.player.setSource(QUrl())
         try:
             Path(path).unlink(missing_ok=True)
@@ -656,6 +671,8 @@ class MainWindow(MSFluentWindow):
             pass
 
     def _onMediaStatusChanged(self, status):
+        from PySide6.QtMultimedia import QMediaPlayer
+
         if (
             status == QMediaPlayer.MediaStatus.EndOfMedia
             and self.current_play_repeats > 0
@@ -679,6 +696,8 @@ class MainWindow(MSFluentWindow):
         self._finishAudioTask()
 
     def _onTtsStateChanged(self, state):
+        from PySide6.QtTextToSpeech import QTextToSpeech
+
         if (
             self._activeAudioKind == "tts"
             and state
@@ -1347,15 +1366,22 @@ class MainWindow(MSFluentWindow):
             setTheme(Theme.AUTO)
 
     def _onExceptionCaught(self, message: str):
-        InfoBar.error(
+        from app.config.paths import LOG_DIR
+
+        infoBar = InfoBar.error(
             title="软件可能遇到异常",
             content="请将本地报错日志发送给开发者。",
             orient=Qt.Orientation.Horizontal,
             isClosable=True,
-            duration=5000,
+            duration=8000,
             position=InfoBarPosition.BOTTOM_RIGHT,
             parent=self,
         )
+        openLogBtn = PushButton("打开日志目录", infoBar)
+        openLogBtn.clicked.connect(
+            lambda: QProcess.startDetached("explorer", [str(LOG_DIR)])
+        )
+        infoBar.addWidget(openLogBtn)
 
     def checkForUpdates(self, manual: bool = False):
         if self._resourcesShutdown:
@@ -1810,8 +1836,10 @@ class MainWindow(MSFluentWindow):
         self._navigationTarget = None
         self.scheduleTimer.stop()
         self._cancelPendingEdgeTts()
-        self.tts.stop()
-        self.player.stop()
+        if self.tts is not None:
+            self.tts.stop()
+        if self.player is not None:
+            self.player.stop()
         self._cleanupEdgeTtsFile()
         self._pendingDownloadProgress = None
         self._downloadProgressTimer.stop()
