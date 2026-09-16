@@ -617,9 +617,10 @@ class HomePage(ScrollArea):
         if self.flowLayout.needAni:
             return
         self.flowLayout.needAni = True
-        for item in self.flowLayout._items:
-            if item.widget().property("flowAni") is None:
-                self.flowLayout._onWidgetAdded(item.widget())
+        for i in range(self.flowLayout.count()):
+            w = self.flowLayout.itemAt(i).widget()
+            if w and w.property("flowAni") is None:
+                self.flowLayout._onWidgetAdded(w)
         self.flowLayout.setAnimation(180, QEasingCurve.Type.OutCubic)
 
     def homeCardEntries(self) -> list[dict]:
