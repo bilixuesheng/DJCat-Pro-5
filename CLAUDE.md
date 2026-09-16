@@ -35,7 +35,7 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 **`app/platform/menu_animation.py` 独占 QFluentWidgets 的 Menu Reveal 适配。** 它只替换 `DROP_DOWN` 和 `PULL_UP` 两种动画管理器；其他动画类型及页面组件不再分别接管菜单动画。
 
-**`app/platform/dialog_animation.py` 独占 QFluentWidgets 蒙层弹窗的公共适配，目前只复用阴影效果。** 弹窗中的下拉框仍属于 Menu Reveal；页面不得重复修补组件库或改变原有动画曲线。
+**`app/platform/dialog_animation.py` 独占 QFluentWidgets 蒙层弹窗的公共适配。** 它复用阴影效果并接管 `showEvent` 和 `done`，在淡入淡出期间暂停阴影以避免 1 ms Animation Tick 下的逐帧模糊重算；动画结束后恢复阴影。弹窗中的下拉框仍属于 Menu Reveal；页面不得重复修补组件库或改变原有动画曲线。
 
 **`ScrollArea` 统一仲裁单指触控滚动与子控件点击。** 从按钮、下拉框或卡片上起滑时，移动达到系统拖动阈值后必须取消该触控序列的按压和释放，不能在滚动结束时触发原控件；未达到阈值的短按仍按正常点击处理。页面不得各自复制这套判定。HomePage 进入卡片编辑态时由排序手势独占触控，并依靠卡片拖动的边缘自动滚动跨越视口；退出编辑态后恢复页面触控滚动。
 
@@ -169,7 +169,7 @@ AI Markdown 对话框和 Projection 编辑器内联整理的输入框都使用 2
 | `djcat.py` | 进程入口、工作目录、单实例应用、日志、配置加载和 MainWindow 创建 |
 | `app/platform/` | Windows 单实例/IPC、唤起窗口、开机启动及 Qt 运行时适配 |
 | `app/platform/animation_timer.py` | Qt 全局 Animation Tick 间隔的私有 API 适配和安全回退 |
-| `app/platform/dialog_animation.py` | QFluentWidgets 蒙层弹窗的阴影复用，淡入淡出交回上游 |
+| `app/platform/dialog_animation.py` | QFluentWidgets 蒙层弹窗的阴影复用和淡入淡出阴影暂停 |
 | `app/platform/menu_animation.py` | QFluentWidgets 全局 Menu Reveal 管理器适配，不改变原版展开视觉 |
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
@@ -268,7 +268,7 @@ PySide6 6.10 没有绑定 `QAnimationDriver`，DJCat 因此把 Qt 私有 `QUnifi
 
 Menu Reveal 是另一层独立优化：保留 QFluentWidgets 原始的 250 ms 时长、`OutQuad` 缓动、窗口位移、逐帧遮罩和阴影，只把每次属性变化触发的 viewport 强制刷新合并为动画结束时的一次。上游同一个方法里还负责同步 `WA_UnderMouse` 和 `HoverEnter`，这部分必须留在逐帧执行，否则展开途中光标下的菜单项不会高亮。逐帧遮罩按位移去重：位移不足一像素时遮罩完全相同，跳过不改变展开轨迹，但不能改成按时间采样遮罩——遮罩滞后于窗口位置会让内容错位。不能改成只淡入、删除遮罩或阴影，也不能把 `NONE`、`FADE_IN_DROP_DOWN` 等其他管理器替换成下拉实现。
 
-带蒙层的 `MaskDialogBase` 的 200 ms 淡入和 100 ms 淡出保持 QFluentWidgets 原实现，由 `QGraphicsOpacityEffect` 驱动；`app/platform/dialog_animation.py` 只复用重复设置的弹窗阴影，不接管 `showEvent` 和 `done`。不能改用 `setWindowOpacity`：`MaskDialogBase` 调用 `setWindowFlags(Qt.FramelessWindowHint)` 后窗口类型退回 `Qt::Widget`，带父窗口时 `isWindow()` 为假，`QWidget::setWindowOpacity()` 直接返回，动画会静默失效。也不能通过缩短动画、改变蒙层透明度或删除阴影换取性能。
+带蒙层的 `MaskDialogBase` 的 200 ms 淡入和 100 ms 淡出由 `QGraphicsOpacityEffect` 驱动；`app/platform/dialog_animation.py` 接管 `showEvent` 和 `done`，在不透明度动画期间暂停 `QGraphicsDropShadowEffect`（`setEnabled(False)`），动画结束后恢复。1 ms Animation Tick 下逐帧重算 blurRadius 60 的高斯模糊是掉帧的主因；暂停阴影消除了该开销，过渡期间阴影不可感知。不能改用 `setWindowOpacity`：`MaskDialogBase` 调用 `setWindowFlags(Qt.FramelessWindowHint)` 后窗口类型退回 `Qt::Widget`，带父窗口时 `isWindow()` 为假，`QWidget::setWindowOpacity()` 直接返回，动画会静默失效。也不能通过缩短动画、改变蒙层透明度或永久删除阴影换取性能。
 
 ## Code shape
 

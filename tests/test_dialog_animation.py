@@ -20,7 +20,12 @@ from qfluentwidgets import ComboBox, MessageBox, MessageBoxBase
 from qfluentwidgets.components.dialog_box.mask_dialog_base import MaskDialogBase
 from qfluentwidgets.components.widgets.menu import MenuAnimationManager
 
-from app.platform.dialog_animation import _setDialogShadow, optimizeFluentDialogs
+from app.platform.dialog_animation import (
+    _done,
+    _setDialogShadow,
+    _showEvent,
+    optimizeFluentDialogs,
+)
 from app.platform.menu_animation import _SmoothDropDownMenuAnimation, optimizeFluentMenus
 
 
@@ -36,6 +41,8 @@ def application():
 @pytest.fixture
 def optimizedDialogs(monkeypatch):
     monkeypatch.setattr(MaskDialogBase, "setShadowEffect", MaskDialogBase.setShadowEffect)
+    monkeypatch.setattr(MaskDialogBase, "showEvent", MaskDialogBase.showEvent)
+    monkeypatch.setattr(MaskDialogBase, "done", MaskDialogBase.done)
     optimizeFluentDialogs()
 
 
@@ -49,13 +56,12 @@ def parentWindow(application):
     application.processEvents()
 
 
-def test_dialog_optimization_only_patches_the_shadow(optimizedDialogs):
+def test_dialog_optimization_patches_shadow_and_transitions(optimizedDialogs):
     optimizeFluentDialogs()
 
     assert MaskDialogBase.setShadowEffect is _setDialogShadow
-    # 淡入淡出必须留在上游实现里:窗口透明度对子控件无效,接管它等于删掉动画。
-    assert MaskDialogBase.showEvent.__module__.startswith("qfluentwidgets")
-    assert MaskDialogBase.done.__module__.startswith("qfluentwidgets")
+    assert MaskDialogBase.showEvent is _showEvent
+    assert MaskDialogBase.done is _done
 
 
 @pytest.mark.parametrize("dialogKind", ["custom", "message"])
@@ -75,15 +81,16 @@ def test_masked_dialog_really_fades(parentWindow, optimizedDialogs, dialogKind):
     dialog.show()
     fadeIn = dialog.graphicsEffect()
 
-    # 关键断言:弹窗真的处在半透明状态,而不只是挂了一个动画对象。
     assert isinstance(fadeIn, QGraphicsOpacityEffect)
     assert fadeIn.opacity() < 1.0
     assert dialog.widget.graphicsEffect() is shadow
+    assert not shadow.isEnabled()
 
     QTest.qWait(FADE_IN_MS + 150)
 
     assert dialog.graphicsEffect() is None
     assert dialog.widget.graphicsEffect() is shadow
+    assert shadow.isEnabled()
 
     dialog.reject()
     fadeOut = dialog.graphicsEffect()
