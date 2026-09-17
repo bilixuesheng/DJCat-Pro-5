@@ -1,0 +1,20 @@
+{
+    "multiplier": {
+      "max": 10,
+      "min": 1,
+      "tick": 1,
+      "step": 1,
+      "text": "Text Multiplier",
+      "type": "slider",
+      "value": 7
+    },
+    "width": {
+      "max": 100,
+      "min": 0,
+      "tick": 10,
+      "step": 1,
+      "text": "Table Width",
+      "type": "slider",
+      "value": 90
+    }
+}
