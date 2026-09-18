@@ -42,7 +42,7 @@ body {
 
 .clock-container {
   grid-column: 3 / 13;
-  grid-row: 1 / 4;
+  grid-row: 2 / 4;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -52,11 +52,11 @@ body {
 
 .clock {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  font-size: calc(5vw * var(--multiplier));
-  font-weight: 200;
-  color: rgba(255, 255, 255, 0.85);
-  text-shadow: 0 0 calc(1vw * var(--multiplier)) rgba(255, 255, 255, 0.3);
-  letter-spacing: calc(0.5vw * var(--multiplier));
+  font-size: calc(9vw * var(--multiplier));
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  text-shadow: 0 0 calc(1.5vw * var(--multiplier)) rgba(255, 255, 255, 0.4);
+  letter-spacing: calc(0.8vw * var(--multiplier));
 }
 
 .element {
