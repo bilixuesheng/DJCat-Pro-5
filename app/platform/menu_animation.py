@@ -10,12 +10,24 @@ from qfluentwidgets.components.widgets.menu import (
     PullUpMenuAnimationManager,
 )
 
+from app.platform.dialog_animation import pauseDialogShadows, resumeDialogShadows
+
 
 class _SmoothMenuAnimation:
     def __init__(self, menu):
         super().__init__(menu)
         self._maskOffset = None
+        self._pausedShadows = []
         self.ani.finished.connect(self._finishAnimation)
+
+    def exec(self, pos):
+        self._pausedShadows = pauseDialogShadows()
+        super().exec(pos)
+
+    def _restoreShadows(self):
+        if self._pausedShadows:
+            resumeDialogShadows(self._pausedShadows)
+            self._pausedShadows = []
 
     def _onValueChanged(self):
         # 菜单是顶层 Popup,setMask 会落到 SetWindowRgn:每次分配 GDI region 并强制整窗重绘。
@@ -35,6 +47,7 @@ class _SmoothMenuAnimation:
         )
 
     def _finishAnimation(self):
+        self._restoreShadows()
         MenuAnimationManager._updateMenuViewport(self)
 
 
