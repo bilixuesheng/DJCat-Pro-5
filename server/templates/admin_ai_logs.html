@@ -1,0 +1,79 @@
+{% extends "admin_base.html" %}
+
+{% block title %}整理记录 · AI 写 Markdown{% endblock %}
+{% block page_name %}整理记录{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <div class="eyebrow">AI 写 Markdown</div>
+        <h1>整理记录</h1>
+        <p>浏览 AI Markdown 转换的输入输出记录，审批后可加入提示词示例。</p>
+    </div>
+    <div class="page-header-actions">
+        <a class="button button-primary" href="{{ url_for('adminConversionLogReview') }}">快速审批</a>
+    </div>
+</header>
+
+<section class="section-block" aria-labelledby="logs-title">
+    <div class="section-heading">
+        <div><span class="section-index">01</span><h2 id="logs-title">转换记录</h2></div>
+        <span>共 {{ total }} 条</span>
+    </div>
+    <div class="machine-filters" style="grid-template-columns:auto;justify-content:start;gap:0">
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <a class="button {{ 'button-primary' if status == 'all' else 'button-secondary' }}" href="{{ url_for('adminConversionLogs', status='all') }}">全部</a>
+            <a class="button {{ 'button-primary' if status == 'pending' else 'button-secondary' }}" href="{{ url_for('adminConversionLogs', status='pending') }}">未审批</a>
+            <a class="button {{ 'button-primary' if status == 'approved' else 'button-secondary' }}" href="{{ url_for('adminConversionLogs', status='approved') }}">已加入</a>
+            <a class="button {{ 'button-primary' if status == 'rejected' else 'button-secondary' }}" href="{{ url_for('adminConversionLogs', status='rejected') }}">未通过</a>
+        </div>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>#</th><th>机器</th><th>输入内容</th><th>输出内容</th><th>时间</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody>
+            {% for log in logs %}
+                <tr>
+                    <td><code>{{ log.id }}</code></td>
+                    <td><code>{{ log.machine_code }}</code></td>
+                    <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ log.input_content }}</td>
+                    <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ log.output_content }}</td>
+                    <td>{{ log.created_at }}</td>
+                    <td>
+                        {% if log.status == 'pending' %}未审批
+                        {% elif log.status == 'approved' %}已加入
+                        {% elif log.status == 'rejected' %}未通过
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if log.status == 'pending' %}
+                            <a class="table-action" href="{{ url_for('adminConversionLogAdd', logId=log.id) }}">加入示例</a>
+                        {% else %}
+                            <form method="post" action="{{ url_for('adminConversionLogSetStatus', logId=log.id) }}" data-async-form>
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <input type="hidden" name="status" value="pending">
+                                <button class="table-action" type="submit">重置为未审批</button>
+                            </form>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td class="empty" colspan="7">没有找到符合条件的整理记录。</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if total_pages > 1 %}
+    <div style="display:flex;justify-content:center;gap:12px;padding-top:28px">
+        {% if page > 1 %}
+            <a class="button button-secondary" href="{{ url_for('adminConversionLogs', status=status, page=page-1) }}">上一页</a>
+        {% endif %}
+        <span style="display:inline-flex;align-items:center;color:var(--muted);font-size:12px">{{ page }} / {{ total_pages }}</span>
+        {% if page < total_pages %}
+            <a class="button button-secondary" href="{{ url_for('adminConversionLogs', status=status, page=page+1) }}">下一页</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

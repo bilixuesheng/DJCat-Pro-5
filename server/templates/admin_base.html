@@ -31,6 +31,12 @@
                     <a class="side-link side-child {% if current_page == 'ai_prompt' %}active{% endif %}" href="{{ url_for('adminPrompt') }}" {% if current_page == 'ai_prompt' %}aria-current="page"{% endif %}>
                         提示词
                     </a>
+                    <a class="side-link side-child {% if current_page == 'ai_logs' %}active{% endif %}" href="{{ url_for('adminConversionLogs') }}" {% if current_page == 'ai_logs' %}aria-current="page"{% endif %}>
+                        整理记录
+                    </a>
+                    <a class="side-link side-child {% if current_page == 'ai_examples' %}active{% endif %}" href="{{ url_for('adminPromptExamples') }}" {% if current_page == 'ai_examples' %}aria-current="page"{% endif %}>
+                        提示词示例
+                    </a>
                     <a class="side-link side-child {% if current_page == 'ai_machines' %}active{% endif %}" href="{{ url_for('adminMachines') }}" {% if current_page == 'ai_machines' %}aria-current="page"{% endif %}>
                         注册机器
                     </a>

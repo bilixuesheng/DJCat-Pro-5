@@ -1,0 +1,105 @@
+{% extends "admin_base.html" %}
+
+{% block title %}提示词示例 · AI 写 Markdown{% endblock %}
+{% block page_name %}提示词示例{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <div class="eyebrow">AI 写 Markdown</div>
+        <h1>提示词示例</h1>
+        <p>管理发送给模型的 few-shot 示例。拖拽调整顺序，排序会影响最终提示词。</p>
+    </div>
+    <div class="page-header-actions">
+        <form method="post" action="{{ url_for('adminPromptExamplesReset') }}" data-async-form data-confirm="确定恢复为默认示例？当前所有自定义示例将被替换。">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button button-danger" type="submit">恢复默认示例</button>
+        </form>
+    </div>
+</header>
+
+<section class="section-block" aria-labelledby="examples-title">
+    <div class="section-heading">
+        <div><span class="section-index">01</span><h2 id="examples-title">示例列表</h2></div>
+        <span data-item-count>{{ examples|length }}</span>
+    </div>
+    <div class="table-wrap">
+        <table data-empty-message="还没有示例，可以从整理记录加入或恢复默认示例。" data-sortable-table data-order-url="{{ url_for('adminPromptExamplesReorder') }}" data-csrf-token="{{ csrf_token }}">
+            <thead><tr><th>顺序</th><th>输入内容</th><th>输出内容</th><th>添加时间</th><th>操作</th></tr></thead>
+            <tbody>
+            {% for example in examples %}
+                <tr data-sort-id="{{ example.id }}">
+                    <td>
+                        <span class="drag-order"><button class="drag-handle" type="button" aria-label="拖动调整顺序，方向键也可调整">⠿</button><code data-order-position>{{ '%02d'|format(loop.index) }}</code></span>
+                    </td>
+                    <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ example.input_content }}</td>
+                    <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ example.output_content }}</td>
+                    <td>{{ example.created_at }}</td>
+                    <td>
+                        <div class="table-actions">
+                            <button class="table-action" type="button" data-toggle-edit="{{ example.id }}">编辑</button>
+                            <form method="post" action="{{ url_for('adminPromptExampleDelete', exampleId=example.id) }}" data-async-form data-remove-on-success="tr" data-confirm="确认删除这条示例吗？">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button class="table-action" type="submit">删除</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                <tr data-edit-row="{{ example.id }}" hidden>
+                    <td colspan="5" style="white-space:normal">
+                        <form method="post" action="{{ url_for('adminPromptExampleEdit', exampleId=example.id) }}" data-async-form>
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <div class="form-fields two-columns" style="margin-bottom:14px">
+                                <label>输入内容
+                                    <textarea name="input_content" rows="8" required>{{ example.input_content }}</textarea>
+                                </label>
+                                <label>输出内容
+                                    <textarea name="output_content" rows="8" required>{{ example.output_content }}</textarea>
+                                </label>
+                            </div>
+                            <div style="display:flex;justify-content:flex-end;gap:10px">
+                                <button class="button button-secondary" type="button" data-toggle-edit="{{ example.id }}">取消</button>
+                                <button class="button button-primary" type="submit">保存</button>
+                            </div>
+                        </form>
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td class="empty" colspan="5">还没有示例，可以从整理记录加入或恢复默认示例。</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('[data-toggle-edit]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.toggleEdit;
+            const editRow = document.querySelector(`[data-edit-row="${id}"]`);
+            if (editRow) editRow.hidden = !editRow.hidden;
+        });
+    });
+
+    const table = document.querySelector('[data-sortable-table]');
+    if (!table) return;
+    const originalFetch = window.fetch;
+    window.fetch = function(url, options) {
+        if (typeof url === 'string' && url === table.dataset.orderUrl && options?.body instanceof FormData) {
+            const formData = options.body;
+            const newData = new FormData();
+            newData.append('csrf_token', formData.get('csrf_token'));
+            const order = [];
+            const original = [];
+            formData.getAll('item_id').forEach(id => order.push(Number(id)));
+            formData.getAll('expected_item_id').forEach(id => original.push(Number(id)));
+            newData.append('order', JSON.stringify(order));
+            newData.append('original', JSON.stringify(original));
+            return originalFetch.call(this, url, { ...options, body: newData });
+        }
+        return originalFetch.apply(this, arguments);
+    };
+});
+</script>
+{% endblock %}
