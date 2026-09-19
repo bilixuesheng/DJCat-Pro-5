@@ -866,6 +866,31 @@ class TrayMenuTest(TestCase):
             tray.menu.hide()
             tray.deleteLater()
 
+    def testClickingSubmenuAfterHoverCancelsHoverTimer(self):
+        cfg.set(cfg.trayHomeCardsInSubmenu, True)
+        tray = self._createTray()
+        tray.menu.show()
+        self.app.processEvents()
+        try:
+            submenu = tray.menu.findChildren(RoundMenu)[0]
+            item = next(
+                tray.menu.view.item(index)
+                for index in range(tray.menu.view.count())
+                if tray.menu.view.item(index).data(Qt.ItemDataRole.UserRole) is submenu
+            )
+            with (
+                patch.object(tray.menu, "isHidden", return_value=False),
+                patch.object(submenu, "exec") as showSubmenu,
+            ):
+                tray.menu._showSubMenu(item)
+                self.assertTrue(tray.menu.timer.isActive())
+                tray.menu._onItemClicked(item)
+                self.assertFalse(tray.menu.timer.isActive())
+                showSubmenu.assert_called_once()
+        finally:
+            tray.menu.hide()
+            tray.deleteLater()
+
     def testHoveringSubmenuEntrySchedulesItAfterMenuDelay(self):
         cfg.set(cfg.trayHomeCardsInSubmenu, True)
         tray = self._createTray()
