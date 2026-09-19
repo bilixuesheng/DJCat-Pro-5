@@ -18,16 +18,16 @@
 
 {% if log %}
 <div class="config-form">
-    <section class="form-section" aria-labelledby="meta-title" style="grid-template-columns:1fr">
+    <section class="form-section form-section-full" aria-labelledby="meta-title">
         <div>
             <div class="form-section-title"><span>01</span><div><h2 id="meta-title">记录信息</h2><p>机器 {{ log.machine_code }}，{{ log.created_at }}{% if log.custom_style %}，自定义风格：{{ log.custom_style }}{% endif %}。</p></div></div>
         </div>
     </section>
 
-    <section class="form-section" aria-labelledby="content-title" style="grid-template-columns:1fr">
+    <section class="form-section form-section-full" aria-labelledby="content-title">
         <div>
             <div class="form-section-title"><span>02</span><div><h2 id="content-title">内容预览</h2><p>可直接编辑内容后审批。</p></div></div>
-            <div class="form-fields two-columns" style="margin-top:20px">
+            <div class="form-fields two-columns form-fields-spaced">
                 <label>输入内容
                     <textarea name="input_content" rows="16" form="form-approve" required id="review-input">{{ log.input_content }}</textarea>
                 </label>
@@ -68,9 +68,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 </script>
 {% else %}
-<section class="section-block" style="text-align:center;padding:60px 0">
-    <p style="color:var(--muted);font-size:14px">所有待审批记录已处理完毕。</p>
-    <a class="button button-secondary" href="{{ url_for('adminConversionLogs') }}" style="margin-top:16px">返回整理记录</a>
+<section class="section-block empty-state">
+    <p class="empty-state-text">所有待审批记录已处理完毕。</p>
+    <a class="button button-secondary empty-state-action" href="{{ url_for('adminConversionLogs') }}">返回整理记录</a>
 </section>
 {% endif %}
 {% endblock %}

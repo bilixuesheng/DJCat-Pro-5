@@ -26,7 +26,7 @@
         </div>
         <div class="table-wrap">
             <table data-empty-message="还没有软件，先新增一个。" data-sortable-table data-order-url="{{ url_for('app_store.adminOrderApps') }}" data-csrf-token="{{ csrf_token }}">
-                <thead><tr><th>顺序</th><th>编号</th><th>名称</th><th>版本</th><th>安装目录</th><th>推荐</th><th>下载次数</th><th>更新时间</th><th>操作</th></tr></thead>
+                <thead><tr><th scope="col">顺序</th><th scope="col">编号</th><th scope="col">名称</th><th scope="col">版本</th><th scope="col">安装目录</th><th scope="col">推荐</th><th scope="col">下载次数</th><th scope="col">更新时间</th><th scope="col">操作</th></tr></thead>
                 <tbody>
                 {% for app in apps %}
                     <tr data-sort-id="{{ app.id }}">

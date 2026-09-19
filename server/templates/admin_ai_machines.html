@@ -25,7 +25,7 @@
     </form>
     <div class="table-wrap">
         <table data-daily-limit="{{ daily_limit }}">
-            <thead><tr><th>机器码</th><th>匿名指纹</th><th>注册时间</th><th>最后访问</th><th>今日额度</th><th>请求数</th><th></th></tr></thead>
+            <thead><tr><th scope="col">机器码</th><th scope="col">匿名指纹</th><th scope="col">注册时间</th><th scope="col">最后访问</th><th scope="col">今日额度</th><th scope="col">请求数</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead>
             <tbody>
             {% for machine in machines %}
                 <tr>

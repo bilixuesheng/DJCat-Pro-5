@@ -10,7 +10,7 @@
         <h1>运行情况</h1>
         <p>查看今日请求、额度消耗，以及服务端当前配置。</p>
     </div>
-    <span class="status-chip {% if not ai_configured %}waiting{% endif %}"><i></i>{{ '服务可调用' if ai_configured else '等待配置 API' }}</span>
+    <span class="status-chip {% if not ai_configured %}waiting{% endif %}"><i aria-hidden="true"></i>{{ '服务可调用' if ai_configured else '等待配置 API' }}</span>
 </header>
 
 <section class="section-block" aria-labelledby="runtime-title">
@@ -18,7 +18,7 @@
         <div><span class="section-index">01</span><h2 id="runtime-title">今日运行</h2></div>
         <span>每天 00:00 刷新</span>
     </div>
-    <div class="metric-grid">
+    <div class="metric-grid" aria-label="今日运行统计">
         <article class="metric-card metric-card-accent"><span>请求</span><strong>{{ stats.requests }}</strong><small>REQUESTS</small></article>
         <article class="metric-card"><span>成功</span><strong>{{ stats.success }}</strong><small>COMPLETED</small></article>
         <article class="metric-card"><span>失败</span><strong>{{ stats.failed }}</strong><small>FAILED</small></article>
@@ -35,7 +35,7 @@
     </div>
     <div class="status-layout">
         <dl class="status-list">
-            <div><dt>API 状态</dt><dd><span class="inline-dot {% if not ai_configured %}waiting{% endif %}"></span>{{ '已配置' if ai_configured else '待配置' }}</dd></div>
+            <div><dt>API 状态</dt><dd><span class="inline-dot {% if not ai_configured %}waiting{% endif %}" aria-hidden="true"></span>{{ '已配置' if ai_configured else '待配置' }}</dd></div>
             <div><dt>当前模型</dt><dd><code>{{ model }}</code></dd></div>
             <div><dt>单机每日额度</dt><dd>{{ daily_limit }} 点</dd></div>
             {% if peak_enabled %}<div><dt>高峰双倍扣除</dt><dd>已开启</dd></div>{% endif %}

@@ -19,8 +19,8 @@
 
     <form class="config-form" method="post" action="{{ url_for('app_store.adminApp', app_id=app.id) if app else url_for('app_store.adminNewApp') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <section class="form-section">
-            <div class="form-section-title"><span>01</span><div><h2>基本信息</h2><p>用于目录卡片和详情页。</p></div></div>
+        <section class="form-section" aria-labelledby="app-basic-title">
+            <div class="form-section-title"><span>01</span><div><h2 id="app-basic-title">基本信息</h2><p>用于目录卡片和详情页。</p></div></div>
             <div class="form-fields two-columns">
                 <label>软件名称<input name="name" maxlength="120" value="{{ form.name or '' }}" required></label>
                 <label>开发者<input name="developer" maxlength="120" value="{{ form.developer or '' }}"></label>
@@ -31,8 +31,8 @@
             </div>
         </section>
 
-        <section class="form-section">
-            <div class="form-section-title"><span>02</span><div><h2>安装包</h2><p>下载链接必须是 HTTPS，服务端不会替你托管文件；没有对应架构时请取消勾选。</p></div></div>
+        <section class="form-section" aria-labelledby="app-packages-title">
+            <div class="form-section-title"><span>02</span><div><h2 id="app-packages-title">安装包</h2><p>下载链接必须是 HTTPS，服务端不会替你托管文件；没有对应架构时请取消勾选。</p></div></div>
             <div class="form-fields">
             {% for architecture in architectures %}
                 {% set package = form.packages.get(architecture) %}
@@ -44,8 +44,8 @@
             </div>
         </section>
 
-        <section class="form-section">
-            <div class="form-section-title"><span>03</span><div><h2>打开动作</h2><p>安装后卡片和详情页的“打开”按钮使用。</p></div></div>
+        <section class=”form-section” aria-labelledby=”app-action-title”>
+            <div class=”form-section-title”><span>03</span><div><h2 id=”app-action-title”>打开动作</h2><p>安装后卡片和详情页的”打开”按钮使用。</p></div></div>
             <div class="form-fields two-columns" data-action-form>
                 <label>类型<select name="open_action_type" data-action-type><option value="">不设置</option><option value="program" {% if form.open_action_type == 'program' %}selected{% endif %}>程序</option><option value="url" {% if form.open_action_type == 'url' %}selected{% endif %}>HTTPS 网页</option><option value="uri" {% if form.open_action_type == 'uri' %}selected{% endif %}>系统协议</option></select></label>
                 <label>目标<input name="open_action_target" data-action-target maxlength="2048" value="{{ form.open_action_target or '' }}" placeholder="classisland.exe 或 https://example.com"></label>
@@ -54,13 +54,13 @@
             </div>
         </section>
 
-        <section class="form-section">
-            <div class="form-section-title"><span>04</span><div><h2>详情页公告</h2><p>公告固定显示在预设卡片上方，每次进入详情页都会显示。</p></div></div>
+        <section class="form-section" aria-labelledby="app-announcement-title">
+            <div class="form-section-title"><span>04</span><div><h2 id="app-announcement-title">详情页公告</h2><p>公告固定显示在预设卡片上方，每次进入详情页都会显示。</p></div></div>
             <div class="form-fields"><label>公告内容<textarea name="announcement" maxlength="1000" rows="3">{{ form.announcement or '' }}</textarea></label></div>
         </section>
 
-        <section class="form-section">
-            <div class="form-section-title"><span>05</span><div><h2>预设卡片</h2><p>预设卡片在独立页面图形化维护，不再填写 JSON。</p></div></div>
+        <section class="form-section" aria-labelledby="app-presets-title">
+            <div class="form-section-title"><span>05</span><div><h2 id="app-presets-title">预设卡片</h2><p>预设卡片在独立页面图形化维护，不再填写 JSON。</p></div></div>
             <div class="market-callout">
                 <p>为这个软件添加启动程序、网页或系统协议卡片，安装后可以固定到客户端主页。</p>
                 {% if app %}

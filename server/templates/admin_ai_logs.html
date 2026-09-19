@@ -20,24 +20,24 @@
         <div><span class="section-index">01</span><h2 id="logs-title">转换记录</h2></div>
         <span>共 {{ total }} 条</span>
     </div>
-    <div class="machine-filters" style="grid-template-columns:auto;justify-content:start;gap:0">
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <a class="button {{ 'button-primary' if status == 'all' else 'button-secondary' }}" href="{{ url_for('adminConversionLogs', status='all') }}">全部</a>
-            <a class="button {{ 'button-primary' if status == 'pending' else 'button-secondary' }}" href="{{ url_for('adminConversionLogs', status='pending') }}">未审批</a>
-            <a class="button {{ 'button-primary' if status == 'approved' else 'button-secondary' }}" href="{{ url_for('adminConversionLogs', status='approved') }}">已加入</a>
-            <a class="button {{ 'button-primary' if status == 'rejected' else 'button-secondary' }}" href="{{ url_for('adminConversionLogs', status='rejected') }}">未通过</a>
+    <div class="machine-filters filter-bar">
+        <div class="filter-tabs" role="tablist" aria-label="记录状态筛选">
+            <a class="button {{ 'button-primary' if status == 'all' else 'button-secondary' }}" href="{{ url_for('adminConversionLogs', status='all') }}" {% if status == 'all' %}aria-current="true"{% endif %}>全部</a>
+            <a class="button {{ 'button-primary' if status == 'pending' else 'button-secondary' }}" href="{{ url_for('adminConversionLogs', status='pending') }}" {% if status == 'pending' %}aria-current="true"{% endif %}>未审批</a>
+            <a class="button {{ 'button-primary' if status == 'approved' else 'button-secondary' }}" href="{{ url_for('adminConversionLogs', status='approved') }}" {% if status == 'approved' %}aria-current="true"{% endif %}>已加入</a>
+            <a class="button {{ 'button-primary' if status == 'rejected' else 'button-secondary' }}" href="{{ url_for('adminConversionLogs', status='rejected') }}" {% if status == 'rejected' %}aria-current="true"{% endif %}>未通过</a>
         </div>
     </div>
     <div class="table-wrap">
         <table>
-            <thead><tr><th>#</th><th>机器</th><th>输入内容</th><th>输出内容</th><th>时间</th><th>状态</th><th>操作</th></tr></thead>
+            <thead><tr><th scope="col">#</th><th scope="col">机器</th><th scope="col">输入内容</th><th scope="col">输出内容</th><th scope="col">时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
             <tbody>
             {% for log in logs %}
                 <tr>
                     <td><code>{{ log.id }}</code></td>
                     <td><code>{{ log.machine_code }}</code></td>
-                    <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ log.input_content }}</td>
-                    <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ log.output_content }}</td>
+                    <td class="cell-truncate">{{ log.input_content }}</td>
+                    <td class="cell-truncate">{{ log.output_content }}</td>
                     <td>{{ log.created_at }}</td>
                     <td>
                         {% if log.status == 'pending' %}未审批
@@ -65,15 +65,15 @@
     </div>
 
     {% if total_pages > 1 %}
-    <div style="display:flex;justify-content:center;gap:12px;padding-top:28px">
+    <nav class="pagination" aria-label="分页导航">
         {% if page > 1 %}
             <a class="button button-secondary" href="{{ url_for('adminConversionLogs', status=status, page=page-1) }}">上一页</a>
         {% endif %}
-        <span style="display:inline-flex;align-items:center;color:var(--muted);font-size:12px">{{ page }} / {{ total_pages }}</span>
+        <span class="pagination-indicator">{{ page }} / {{ total_pages }}</span>
         {% if page < total_pages %}
             <a class="button button-secondary" href="{{ url_for('adminConversionLogs', status=status, page=page+1) }}">下一页</a>
         {% endif %}
-    </div>
+    </nav>
     {% endif %}
 </section>
 {% endblock %}
