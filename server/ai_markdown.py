@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import re
 import secrets
@@ -34,6 +35,7 @@ MAX_SYSTEM_PROMPT_LENGTH = 20_000
 MAX_REQUEST_BYTES = 64 * 1024
 PROCESSING_TIMEOUT = timedelta(minutes=15)
 REQUEST_LOG_RETENTION_DAYS = 180
+CONVERSION_LOG_RETENTION_DAYS = 30
 DATABASE_PATH = Path(
     os.environ.get("DJCATAI_DATABASE_PATH", "ai_markdown_usage.sqlite3")
 )
@@ -62,56 +64,60 @@ def _httpsResponseChain(response, requestedUrl):
     return True
 
 
-SYSTEM_PROMPT = """你现在需要转换用户的纯文本内容，用户发来的内容可能是一份作业清单，也可能是一份任务，你需要将其转换为简洁标准的markdown格式。
-你可以使用的markdown语法有：加粗**ABC**，分割线---（少用），分点- ，以及这个>。当遇到任务一部分是正常的任务，一部分是其他的警告比如要值日，必须要像下面的示例一样用---分开
-此处给一些格式示例：
-原输入：
-语文作业做小册28页吧
-英语大册welcome部分
-物理大册往后做吧，然后复习
-要求输出：
-**【语文】**
-- 做小册28页
+DEFAULT_PROMPT_TEMPLATE = (
+    "你现在需要转换用户的纯文本内容，用户发来的内容可能是一份作业清单，"
+    "也可能是一份任务，你需要将其转换为简洁标准的markdown格式。\n"
+    "你可以使用的markdown语法有：加粗**ABC**，分割线---（少用），分点- ，"
+    "以及这个>。当遇到任务一部分是正常的任务，一部分是其他的警告比如要值日，"
+    "必须要像下面的示例一样用---分开\n"
+    "由于该内容需要在电脑屏幕上显示，尽量让行数不多。"
+)
 
-**【英语】**
-- 大册welcome部分
+DEFAULT_EXAMPLES = [
+    (
+        "语文作业做小册28页吧\n英语大册welcome部分\n物理大册往后做吧，然后复习",
+        "**【语文】**\n- 做小册28页\n\n**【英语】**\n- 大册welcome部分\n\n"
+        "**【物理】**\n- 大册往后做\n- 复习",
+    ),
+    (
+        "语文作业：\n1、上周写的试卷。2、订正默写",
+        "**【语文】**\n- 上周写的试卷\n- 订正默写\n\n"
+        "**【英语】**\n- 大册的第五第六单元assessment\n\n"
+        "**【物理】**\n- 今天写随堂小练40-42\n- 图片里内容添加到笔记上",
+    ),
+    (
+        "今天数学作业做大册103页\n值日人员到卫生区打扫",
+        "**【数学】**\n- 做大册103页\n---\n**⚠️请值日人员到卫生区打扫⚠️**",
+    ),
+    (
+        "英语中午做97页，值日",
+        "**【英语】**\n- 做97页\n---\n**⚠️请值日人员到卫生区打扫⚠️**",
+    ),
+]
 
-**【物理】**
-- 大册往后做
-- 复习
-原输入：
-语文作业：
-1、上周写的试卷。2、订正默写
-要求输出：
-**【语文】**
-- 上周写的试卷
-- 订正默写
-
-**【英语】**
-- 大册的第五第六单元assessment
-
-**【物理】**
-- 今天写随堂小练40-42
-- 图片里内容添加到笔记上
-
-原输入：
-今天数学作业做大册103页
-值日人员到卫生区打扫
-要求输出：
-**【数学】**
-- 做大册103页
----
-**⚠️请值日人员到卫生区打扫⚠️**
-
-原输入：
-英语中午做97页，值日
-要求输出：
-**【英语】**
-- 做97页
----
-**⚠️请值日人员到卫生区打扫⚠️**
-
-由于该内容需要在电脑屏幕上显示，尽量让行数不多。"""
+_LEGACY_SYSTEM_PROMPT = (
+    "你现在需要转换用户的纯文本内容，用户发来的内容可能是一份作业清单，"
+    "也可能是一份任务，你需要将其转换为简洁标准的markdown格式。\n"
+    "你可以使用的markdown语法有：加粗**ABC**，分割线---（少用），分点- ，"
+    "以及这个>。当遇到任务一部分是正常的任务，一部分是其他的警告比如要值日，"
+    "必须要像下面的示例一样用---分开\n"
+    "此处给一些格式示例：\n"
+    "原输入：\n语文作业做小册28页吧\n英语大册welcome部分\n"
+    "物理大册往后做吧，然后复习\n"
+    "要求输出：\n**【语文】**\n- 做小册28页\n\n**【英语】**\n- 大册welcome部分"
+    "\n\n**【物理】**\n- 大册往后做\n- 复习\n"
+    "原输入：\n语文作业：\n1、上周写的试卷。2、订正默写\n"
+    "要求输出：\n**【语文】**\n- 上周写的试卷\n- 订正默写\n\n"
+    "**【英语】**\n- 大册的第五第六单元assessment\n\n"
+    "**【物理】**\n- 今天写随堂小练40-42\n- 图片里内容添加到笔记上\n\n"
+    "原输入：\n今天数学作业做大册103页\n值日人员到卫生区打扫\n"
+    "要求输出：\n**【数学】**\n- 做大册103页\n---\n"
+    "**⚠️请值日人员到卫生区打扫⚠️**\n\n"
+    "原输入：\n英语中午做97页，值日\n"
+    "要求输出：\n**【英语】**\n- 做97页\n---\n"
+    "**⚠️请值日人员到卫生区打扫⚠️**\n\n"
+    "由于该内容需要在电脑屏幕上显示，尽量让行数不多。"
+)
 CUSTOM_STYLE_PREFIX = """
 
 以上为系统默认提示词，以下为用户希望自定义的微调提示词，若规则有冲突，请以下面的内容为准：
@@ -143,8 +149,61 @@ def _databaseIdentity(path, database):
     return (info.st_dev, info.st_ino, schemaVersion)
 
 
+def _migratePromptExamples(database):
+    existing = database.execute(
+        "SELECT COUNT(*) FROM prompt_examples"
+    ).fetchone()[0]
+    if existing:
+        return
+    now = _nowIso()
+    database.executemany(
+        """
+        INSERT INTO prompt_examples(input_content, output_content, sort_order, created_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        [
+            (inputText, outputText, index, now)
+            for index, (inputText, outputText) in enumerate(DEFAULT_EXAMPLES)
+        ],
+    )
+    stored = database.execute(
+        "SELECT value FROM settings WHERE key = 'system_prompt'"
+    ).fetchone()
+    if stored and stored[0].strip() == _LEGACY_SYSTEM_PROMPT.strip():
+        database.execute(
+            "UPDATE settings SET value = ? WHERE key = 'system_prompt'",
+            (DEFAULT_PROMPT_TEMPLATE,),
+        )
+    database.commit()
+
+
+def _promptExamples():
+    with closing(_connect()) as database:
+        return database.execute(
+            "SELECT input_content, output_content FROM prompt_examples "
+            "ORDER BY sort_order, id"
+        ).fetchall()
+
+
+def _formatExamples(rows):
+    if not rows:
+        return ""
+    parts = ["此处给一些格式示例："]
+    for row in rows:
+        parts.append(
+            f"原输入：\n{row['input_content']}\n"
+            f"要求输出：\n{row['output_content']}"
+        )
+    return "\n".join(parts)
+
+
 def _systemPrompt(customStyle):
-    systemPrompt = _setting("system_prompt", SYSTEM_PROMPT).strip() or SYSTEM_PROMPT
+    template = (
+        _setting("system_prompt", DEFAULT_PROMPT_TEMPLATE).strip()
+        or DEFAULT_PROMPT_TEMPLATE
+    )
+    examplesText = _formatExamples(_promptExamples())
+    systemPrompt = f"{template}\n{examplesText}" if examplesText else template
     customStyle = customStyle.strip()
     if not customStyle:
         return systemPrompt
@@ -178,8 +237,78 @@ def _quotaCost(now=None, peakEnabled=None):
         peakEnabled = _setting("peak_enabled", "1") == "1"
     if not peakEnabled:
         return 1
-    hour = (now or datetime.now(TIMEZONE)).astimezone(TIMEZONE).hour
-    return 2 if any(start <= hour < end for start, end in PEAK_HOURS) else 1
+    now = (now or datetime.now(TIMEZONE)).astimezone(TIMEZONE)
+    hour = now.hour
+    if not any(start <= hour < end for start, end in PEAK_HOURS):
+        return 1
+    if _setting("holiday_exempt", "0") == "1" and _isOffPeakDay(now):
+        return 1
+    return 2
+
+
+def _isOffPeakDay(now=None):
+    now = (now or datetime.now(TIMEZONE)).astimezone(TIMEZONE)
+    if now.weekday() >= 5:
+        return True
+    try:
+        _refreshHolidayCache()
+    except Exception:
+        pass
+    holidays = _cachedHolidays()
+    return now.strftime("%Y-%m-%d") in holidays
+
+
+def _cachedHolidays():
+    with closing(_connect()) as database:
+        row = database.execute(
+            "SELECT value FROM settings WHERE key = 'holiday_cache'"
+        ).fetchone()
+    if not row:
+        return set()
+    try:
+        data = json.loads(row[0])
+        return set(data.get("dates", []))
+    except (json.JSONDecodeError, AttributeError):
+        return set()
+
+
+def _refreshHolidayCache():
+    today = _today()
+    with closing(_connect()) as database:
+        row = database.execute(
+            "SELECT value FROM settings WHERE key = 'holiday_cache'"
+        ).fetchone()
+    if row:
+        try:
+            data = json.loads(row[0])
+            if data.get("refreshed") == today:
+                return True
+        except (json.JSONDecodeError, AttributeError):
+            pass
+    year = datetime.now(TIMEZONE).year
+    dates = set()
+    for y in (year, year + 1):
+        try:
+            resp = requests.get(
+                f"https://date.nager.at/api/v3/PublicHolidays/{y}/CN",
+                timeout=10,
+            )
+            if resp.ok:
+                for item in resp.json():
+                    dates.add(item["date"])
+        except (requests.RequestException, KeyError, ValueError):
+            pass
+    if not dates:
+        return False
+    cache = json.dumps({"refreshed": today, "dates": sorted(dates)})
+    with closing(_connect()) as database:
+        database.execute(
+            "INSERT INTO settings(key, value) VALUES ('holiday_cache', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (cache,),
+        )
+        database.commit()
+    return True
 
 
 def _connect():
@@ -236,6 +365,26 @@ def _connect():
             machine_id TEXT PRIMARY KEY,
             requests INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS conversion_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            machine_id TEXT NOT NULL,
+            input_content TEXT NOT NULL,
+            output_content TEXT NOT NULL,
+            custom_style TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending'
+        );
+        CREATE INDEX IF NOT EXISTS conversion_logs_status_idx
+            ON conversion_logs(status);
+        CREATE INDEX IF NOT EXISTS conversion_logs_created_idx
+            ON conversion_logs(created_at);
+        CREATE TABLE IF NOT EXISTS prompt_examples (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            input_content TEXT NOT NULL,
+            output_content TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
         INSERT OR IGNORE INTO machines(machine_id, registered_at, last_seen_at)
         SELECT
             machine_id,
@@ -245,6 +394,7 @@ def _connect():
         GROUP BY machine_id;
                     """
                 )
+                _migratePromptExamples(database)
                 _initializedDatabases[databaseKey] = _databaseIdentity(
                     databaseKey, database
                 )
@@ -296,11 +446,13 @@ def _saveAISettings(
     model,
     apiKey="",
     clearApiKey=False,
+    holidayExempt=False,
 ):
     settings = [
         ("daily_limit", str(dailyLimit)),
         ("peak_enabled", "1" if peakEnabled else "0"),
         ("deepseek_model", model),
+        ("holiday_exempt", "1" if holidayExempt else "0"),
     ]
     if apiKey and not clearApiKey:
         settings.append(
@@ -759,11 +911,14 @@ def convert():
     @stream_with_context
     def stream():
         completed = False
+        outputChunks = []
         try:
             for line in upstream.iter_lines(chunk_size=1):
                 if line:
                     if line.startswith(b"data:") and line[5:].strip() == b"[DONE]":
                         completed = True
+                    else:
+                        _collectOutputChunk(line, outputChunks)
                     yield line + b"\n\n"
         finally:
             try:
@@ -776,6 +931,12 @@ def convert():
                     cost,
                     day,
                 )
+                if completed:
+                    outputText = "".join(outputChunks)
+                    if outputText.strip():
+                        _saveConversionLog(
+                            machineId, content.strip(), outputText, customStyle
+                        )
 
     return Response(
         stream(),
@@ -788,6 +949,69 @@ def convert():
             "X-RateLimit-Cost": str(cost),
         },
     )
+
+
+def _collectOutputChunk(line, chunks):
+    if not line.startswith(b"data:"):
+        return
+    payload = line[5:].strip()
+    if not payload or payload == b"[DONE]":
+        return
+    try:
+        data = json.loads(payload)
+        delta = data.get("choices", [{}])[0].get("delta", {})
+        content = delta.get("content")
+        if content:
+            chunks.append(content)
+    except (json.JSONDecodeError, IndexError, AttributeError):
+        pass
+
+
+def _saveConversionLog(machineId, inputContent, outputContent, customStyle):
+    try:
+        with closing(_connect()) as database:
+            database.execute(
+                """
+                INSERT INTO conversion_logs
+                    (machine_id, input_content, output_content, custom_style, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (machineId, inputContent, outputContent, customStyle, _nowIso()),
+            )
+            database.commit()
+    except sqlite3.Error:
+        pass
+
+
+def _cleanupConversionLogs():
+    cutoff = (
+        datetime.now(TIMEZONE).date() - timedelta(days=CONVERSION_LOG_RETENTION_DAYS)
+    ).isoformat()
+    today = _today()
+    with closing(_connect()) as database:
+        marker = database.execute(
+            "SELECT value FROM settings WHERE key = 'conversion_log_cleanup_day'"
+        ).fetchone()
+        if marker and marker[0] == today:
+            return 0
+        database.execute("BEGIN IMMEDIATE")
+        marker = database.execute(
+            "SELECT value FROM settings WHERE key = 'conversion_log_cleanup_day'"
+        ).fetchone()
+        if marker and marker[0] == today:
+            database.commit()
+            return 0
+        deleted = database.execute(
+            "DELETE FROM conversion_logs WHERE created_at < ? AND status = 'pending'",
+            (cutoff,),
+        ).rowcount
+        database.execute(
+            "INSERT INTO settings(key, value) VALUES ('conversion_log_cleanup_day', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (today,),
+        )
+        database.commit()
+    return deleted
 
 
 def _adminHost():
@@ -870,6 +1094,11 @@ def _dashboardStats():
     ).isoformat()
     _recoverStaleRequests()
     _rollupOldRequests()
+    if _setting("holiday_exempt", "0") == "1":
+        try:
+            _refreshHolidayCache()
+        except Exception:
+            pass
     with closing(_connect()) as database:
         machines = database.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
         consumed = database.execute(
@@ -1100,6 +1329,7 @@ def _renderAdminSettings(submitted=None):
     values = submitted or {
         "daily_limit": _dailyLimit(),
         "peak_enabled": _setting("peak_enabled", "1") == "1",
+        "holiday_exempt": _setting("holiday_exempt", "0") == "1",
         "model": _deepseekModel(),
         "clear_api_key": False,
     }
@@ -1124,6 +1354,7 @@ def adminSettings():
     submitted = {
         "daily_limit": request.form.get("daily_limit", ""),
         "peak_enabled": bool(request.form.get("peak_enabled")),
+        "holiday_exempt": bool(request.form.get("holiday_exempt")),
         "model": request.form.get("model", ""),
         "clear_api_key": bool(request.form.get("clear_api_key")),
     }
@@ -1157,7 +1388,10 @@ def adminSettings():
                 model,
                 apiKey,
                 submitted["clear_api_key"],
+                submitted["holiday_exempt"],
             )
+            if submitted["holiday_exempt"]:
+                _refreshHolidayCache()
         except (RuntimeError, sqlite3.Error) as error:
             return _adminResponse(
                 str(error),
@@ -1169,13 +1403,188 @@ def adminSettings():
         return _adminResponse("AI 配置已保存", "success", "adminSettings")
 
 
+def _conversionLogRows(status="all", page=1, perPage=20):
+    _cleanupConversionLogs()
+    offset = (page - 1) * perPage
+    with closing(_connect()) as database:
+        if status == "all":
+            total = database.execute(
+                "SELECT COUNT(*) FROM conversion_logs"
+            ).fetchone()[0]
+            rows = database.execute(
+                """
+                SELECT cl.id, cl.machine_id, cl.input_content, cl.output_content,
+                       cl.custom_style, cl.created_at, cl.status,
+                       m.id AS machine_number
+                FROM conversion_logs cl
+                LEFT JOIN machines m ON m.machine_id = cl.machine_id
+                ORDER BY cl.created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (perPage, offset),
+            ).fetchall()
+        else:
+            total = database.execute(
+                "SELECT COUNT(*) FROM conversion_logs WHERE status = ?",
+                (status,),
+            ).fetchone()[0]
+            rows = database.execute(
+                """
+                SELECT cl.id, cl.machine_id, cl.input_content, cl.output_content,
+                       cl.custom_style, cl.created_at, cl.status,
+                       m.id AS machine_number
+                FROM conversion_logs cl
+                LEFT JOIN machines m ON m.machine_id = cl.machine_id
+                WHERE cl.status = ?
+                ORDER BY cl.created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (status, perPage, offset),
+            ).fetchall()
+    logs = []
+    for row in rows:
+        code = f"DJ-{row['machine_number']:06d}" if row["machine_number"] else ""
+        logs.append({
+            "id": row["id"],
+            "machine_code": code,
+            "input_content": row["input_content"],
+            "output_content": row["output_content"],
+            "custom_style": row["custom_style"],
+            "created_at": row["created_at"],
+            "status": row["status"],
+        })
+    totalPages = max(1, (total + perPage - 1) // perPage)
+    return logs, total, totalPages
+
+
+def _getConversionLog(logId):
+    with closing(_connect()) as database:
+        row = database.execute(
+            """
+            SELECT cl.id, cl.machine_id, cl.input_content, cl.output_content,
+                   cl.custom_style, cl.created_at, cl.status,
+                   m.id AS machine_number
+            FROM conversion_logs cl
+            LEFT JOIN machines m ON m.machine_id = cl.machine_id
+            WHERE cl.id = ?
+            """,
+            (logId,),
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "machine_code": (
+            f"DJ-{row['machine_number']:06d}" if row["machine_number"] else ""
+        ),
+        "input_content": row["input_content"],
+        "output_content": row["output_content"],
+        "custom_style": row["custom_style"],
+        "created_at": row["created_at"],
+        "status": row["status"],
+    }
+
+
+def _updateConversionLogStatus(logId, status):
+    with closing(_connect()) as database:
+        cursor = database.execute(
+            "UPDATE conversion_logs SET status = ? WHERE id = ?",
+            (status, logId),
+        )
+        database.commit()
+    return cursor.rowcount == 1
+
+
+def _addPromptExample(inputContent, outputContent):
+    now = _nowIso()
+    with closing(_connect()) as database:
+        database.execute("BEGIN IMMEDIATE")
+        maxOrder = database.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) FROM prompt_examples"
+        ).fetchone()[0]
+        cursor = database.execute(
+            """
+            INSERT INTO prompt_examples(input_content, output_content, sort_order, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (inputContent, outputContent, maxOrder + 1, now),
+        )
+        database.commit()
+    return cursor.lastrowid
+
+
+def _updatePromptExample(exampleId, inputContent, outputContent):
+    with closing(_connect()) as database:
+        cursor = database.execute(
+            "UPDATE prompt_examples SET input_content = ?, output_content = ? WHERE id = ?",
+            (inputContent, outputContent, exampleId),
+        )
+        database.commit()
+    return cursor.rowcount == 1
+
+
+def _deletePromptExample(exampleId):
+    with closing(_connect()) as database:
+        cursor = database.execute(
+            "DELETE FROM prompt_examples WHERE id = ?", (exampleId,)
+        )
+        database.commit()
+    return cursor.rowcount == 1
+
+
+def _reorderPromptExamples(orderedIds, originalIds):
+    with closing(_connect()) as database:
+        database.execute("BEGIN IMMEDIATE")
+        currentRows = database.execute(
+            "SELECT id FROM prompt_examples ORDER BY sort_order, id"
+        ).fetchall()
+        currentIds = [row["id"] for row in currentRows]
+        if currentIds != originalIds:
+            database.rollback()
+            return False
+        for index, exampleId in enumerate(orderedIds):
+            database.execute(
+                "UPDATE prompt_examples SET sort_order = ? WHERE id = ?",
+                (index, exampleId),
+            )
+        database.commit()
+    return True
+
+
+def _allPromptExamples():
+    with closing(_connect()) as database:
+        rows = database.execute(
+            "SELECT id, input_content, output_content, sort_order, created_at "
+            "FROM prompt_examples ORDER BY sort_order, id"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _resetPromptExamples():
+    now = _nowIso()
+    with closing(_connect()) as database:
+        database.execute("BEGIN IMMEDIATE")
+        database.execute("DELETE FROM prompt_examples")
+        database.executemany(
+            """
+            INSERT INTO prompt_examples(input_content, output_content, sort_order, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            [
+                (inputText, outputText, index, now)
+                for index, (inputText, outputText) in enumerate(DEFAULT_EXAMPLES)
+            ],
+        )
+        database.commit()
+
+
 def _renderAdminPrompt(systemPrompt=None):
     return render_template(
         "admin_ai_prompt.html",
         csrf_token=_csrfToken(),
         current_page="ai_prompt",
         system_prompt=(
-            _setting("system_prompt", SYSTEM_PROMPT)
+            _setting("system_prompt", DEFAULT_PROMPT_TEMPLATE)
             if systemPrompt is None
             else systemPrompt
         ),
@@ -1221,6 +1630,207 @@ def adminPrompt():
             )
         else:
             return _adminResponse("系统提示词已保存", "success", "adminPrompt")
+
+
+@app.get("/admin/ai/markdown/logs/")
+@_loginRequired
+def adminConversionLogs():
+    status = request.args.get("status", "all")
+    if status not in {"all", "pending", "approved", "rejected"}:
+        status = "all"
+    try:
+        page = max(1, int(request.args.get("page", "1")))
+    except ValueError:
+        page = 1
+    logs, total, totalPages = _conversionLogRows(status, page)
+    return render_template(
+        "admin_ai_logs.html",
+        csrf_token=_csrfToken(),
+        current_page="ai_logs",
+        logs=logs,
+        status=status,
+        page=page,
+        total=total,
+        total_pages=totalPages,
+    )
+
+
+@app.get("/admin/ai/markdown/logs/<int:logId>/add")
+@_loginRequired
+def adminConversionLogAdd(logId):
+    log = _getConversionLog(logId)
+    if not log:
+        return _adminResponse("未找到该记录", "error", "adminConversionLogs", 404)
+    return render_template(
+        "admin_ai_log_add.html",
+        csrf_token=_csrfToken(),
+        current_page="ai_logs",
+        log=log,
+        mode="add",
+    )
+
+
+@app.post("/admin/ai/markdown/logs/<int:logId>/add")
+@_loginRequired
+def adminConversionLogAddSubmit(logId):
+    _checkCsrf()
+    log = _getConversionLog(logId)
+    if not log:
+        return _adminResponse("未找到该记录", "error", "adminConversionLogs", 404)
+    inputContent = request.form.get("input_content", "").strip()
+    outputContent = request.form.get("output_content", "").strip()
+    if not inputContent or not outputContent:
+        return _adminResponse(
+            "输入和输出内容不能为空", "error", "adminConversionLogs", 400
+        )
+    _addPromptExample(inputContent, outputContent)
+    _updateConversionLogStatus(logId, "approved")
+    return _adminResponse("示例已加入提示词", "success", "adminConversionLogs")
+
+
+@app.get("/admin/ai/markdown/logs/review")
+@_loginRequired
+def adminConversionLogReview():
+    with closing(_connect()) as database:
+        row = database.execute(
+            """
+            SELECT cl.id, cl.machine_id, cl.input_content, cl.output_content,
+                   cl.custom_style, cl.created_at, cl.status,
+                   m.id AS machine_number
+            FROM conversion_logs cl
+            LEFT JOIN machines m ON m.machine_id = cl.machine_id
+            WHERE cl.status = 'pending'
+            ORDER BY cl.created_at ASC
+            LIMIT 1
+            """,
+        ).fetchone()
+    if not row:
+        return _adminResponse(
+            "没有待审批的记录", "info", "adminConversionLogs"
+        )
+    log = {
+        "id": row["id"],
+        "machine_code": (
+            f"DJ-{row['machine_number']:06d}" if row["machine_number"] else ""
+        ),
+        "input_content": row["input_content"],
+        "output_content": row["output_content"],
+        "custom_style": row["custom_style"],
+        "created_at": row["created_at"],
+        "status": row["status"],
+    }
+    pendingCount = 0
+    with closing(_connect()) as database:
+        pendingCount = database.execute(
+            "SELECT COUNT(*) FROM conversion_logs WHERE status = 'pending'"
+        ).fetchone()[0]
+    return render_template(
+        "admin_ai_log_review.html",
+        csrf_token=_csrfToken(),
+        current_page="ai_logs",
+        log=log,
+        pending_count=pendingCount,
+    )
+
+
+@app.post("/admin/ai/markdown/logs/<int:logId>/approve")
+@_loginRequired
+def adminConversionLogApprove(logId):
+    _checkCsrf()
+    log = _getConversionLog(logId)
+    if not log:
+        return _adminResponse("未找到该记录", "error", "adminConversionLogs", 404)
+    inputContent = request.form.get("input_content", "").strip()
+    outputContent = request.form.get("output_content", "").strip()
+    if not inputContent or not outputContent:
+        return _adminResponse(
+            "输入和输出内容不能为空", "error", "adminConversionLogs", 400
+        )
+    _addPromptExample(inputContent, outputContent)
+    _updateConversionLogStatus(logId, "approved")
+    return _adminResponse("示例已加入提示词", "success", "adminConversionLogReview")
+
+
+@app.post("/admin/ai/markdown/logs/<int:logId>/reject")
+@_loginRequired
+def adminConversionLogReject(logId):
+    _checkCsrf()
+    _updateConversionLogStatus(logId, "rejected")
+    return _adminResponse("已标记为未通过", "success", "adminConversionLogReview")
+
+
+@app.post("/admin/ai/markdown/logs/<int:logId>/status")
+@_loginRequired
+def adminConversionLogSetStatus(logId):
+    _checkCsrf()
+    status = request.form.get("status", "")
+    if status not in {"pending", "approved", "rejected"}:
+        return _adminResponse("无效的状态", "error", "adminConversionLogs", 400)
+    _updateConversionLogStatus(logId, status)
+    return _adminResponse("状态已更新", "success", "adminConversionLogs")
+
+
+@app.get("/admin/ai/markdown/examples/")
+@_loginRequired
+def adminPromptExamples():
+    examples = _allPromptExamples()
+    return render_template(
+        "admin_ai_examples.html",
+        csrf_token=_csrfToken(),
+        current_page="ai_examples",
+        examples=examples,
+    )
+
+
+@app.post("/admin/ai/markdown/examples/<int:exampleId>/edit")
+@_loginRequired
+def adminPromptExampleEdit(exampleId):
+    _checkCsrf()
+    inputContent = request.form.get("input_content", "").strip()
+    outputContent = request.form.get("output_content", "").strip()
+    if not inputContent or not outputContent:
+        return _adminResponse(
+            "输入和输出内容不能为空", "error", "adminPromptExamples", 400
+        )
+    if not _updatePromptExample(exampleId, inputContent, outputContent):
+        return _adminResponse("未找到该示例", "error", "adminPromptExamples", 404)
+    return _adminResponse("示例已更新", "success", "adminPromptExamples")
+
+
+@app.post("/admin/ai/markdown/examples/<int:exampleId>/delete")
+@_loginRequired
+def adminPromptExampleDelete(exampleId):
+    _checkCsrf()
+    if not _deletePromptExample(exampleId):
+        return _adminResponse("未找到该示例", "error", "adminPromptExamples", 404)
+    return _adminResponse("示例已删除", "success", "adminPromptExamples")
+
+
+@app.post("/admin/ai/markdown/examples/reorder")
+@_loginRequired
+def adminPromptExamplesReorder():
+    _checkCsrf()
+    try:
+        orderedIds = json.loads(request.form.get("order", "[]"))
+        originalIds = json.loads(request.form.get("original", "[]"))
+    except (json.JSONDecodeError, TypeError):
+        return _adminResponse("排序数据无效", "error", "adminPromptExamples", 400)
+    if not isinstance(orderedIds, list) or not isinstance(originalIds, list):
+        return _adminResponse("排序数据无效", "error", "adminPromptExamples", 400)
+    if not _reorderPromptExamples(orderedIds, originalIds):
+        if _isAjaxRequest():
+            return jsonify(message="排序已过期，请刷新页面后重试", category="error"), 409
+        flash("排序已过期，请刷新页面后重试", "error")
+        return redirect(url_for("adminPromptExamples"))
+    return _adminResponse("排序已保存", "success", "adminPromptExamples")
+
+
+@app.post("/admin/ai/markdown/examples/reset")
+@_loginRequired
+def adminPromptExamplesReset():
+    _checkCsrf()
+    _resetPromptExamples()
+    return _adminResponse("已恢复默认示例", "success", "adminPromptExamples")
 
 
 @app.get("/admin/ai/markdown/machines/")

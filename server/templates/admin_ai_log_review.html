@@ -1,0 +1,76 @@
+{% extends "admin_base.html" %}
+
+{% block title %}快速审批 · AI 写 Markdown{% endblock %}
+{% block page_name %}快速审批{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <div class="eyebrow">AI 写 Markdown / 整理记录</div>
+        <h1>快速审批</h1>
+        {% if log %}
+            <p>还有 {{ pending_count }} 条待审批。</p>
+        {% else %}
+            <p>所有记录已审批完毕。</p>
+        {% endif %}
+    </div>
+</header>
+
+{% if log %}
+<div class="config-form">
+    <section class="form-section" aria-labelledby="meta-title" style="grid-template-columns:1fr">
+        <div>
+            <div class="form-section-title"><span>01</span><div><h2 id="meta-title">记录信息</h2><p>机器 {{ log.machine_code }}，{{ log.created_at }}{% if log.custom_style %}，自定义风格：{{ log.custom_style }}{% endif %}。</p></div></div>
+        </div>
+    </section>
+
+    <section class="form-section" aria-labelledby="content-title" style="grid-template-columns:1fr">
+        <div>
+            <div class="form-section-title"><span>02</span><div><h2 id="content-title">内容预览</h2><p>可直接编辑内容后审批。</p></div></div>
+            <div class="form-fields two-columns" style="margin-top:20px">
+                <label>输入内容
+                    <textarea name="input_content" rows="16" form="form-approve" required id="review-input">{{ log.input_content }}</textarea>
+                </label>
+                <label>输出内容
+                    <textarea name="output_content" rows="16" form="form-approve" required id="review-output">{{ log.output_content }}</textarea>
+                </label>
+            </div>
+        </div>
+    </section>
+
+    <div class="form-actions">
+        <a class="button button-secondary" href="{{ url_for('adminConversionLogs') }}">返回整理记录</a>
+        <div class="form-action-buttons">
+            <form id="form-reject" method="post" action="{{ url_for('adminConversionLogReject', logId=log.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="input_content" value="">
+                <input type="hidden" name="output_content" value="">
+                <button class="button button-danger" type="submit">未通过</button>
+            </form>
+            <form id="form-approve" method="post" action="{{ url_for('adminConversionLogApprove', logId=log.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="button button-primary" type="submit">通过并加入</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const inputEl = document.getElementById('review-input');
+    const outputEl = document.getElementById('review-output');
+    const rejectForm = document.getElementById('form-reject');
+    if (!inputEl || !outputEl || !rejectForm) return;
+    rejectForm.addEventListener('submit', () => {
+        rejectForm.querySelector('[name="input_content"]').value = inputEl.value;
+        rejectForm.querySelector('[name="output_content"]').value = outputEl.value;
+    });
+});
+</script>
+{% else %}
+<section class="section-block" style="text-align:center;padding:60px 0">
+    <p style="color:var(--muted);font-size:14px">所有待审批记录已处理完毕。</p>
+    <a class="button button-secondary" href="{{ url_for('adminConversionLogs') }}" style="margin-top:16px">返回整理记录</a>
+</section>
+{% endif %}
+{% endblock %}

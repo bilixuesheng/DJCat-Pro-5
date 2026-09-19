@@ -178,6 +178,14 @@ _Avoid_: rate limit window、busy status
 桌面端用户可选的本机偏好，用来微调 AI Markdown Conversion 的输出格式；与服务端基础规则冲突时以它为准。
 _Avoid_: theme、CSS、System Prompt
 
+**Conversion Log（整理记录）**:
+一次成功的 AI Markdown Conversion 的完整输入、输出和元数据快照，存储在服务端供管理员审阅。审批后可提升为 Prompt Example。
+_Avoid_: request log（那是额度和计费的元数据记录）、history、转化记录
+
+**Prompt Example**:
+已审批并纳入系统提示词的 few-shot 输入输出对。管理员从 Conversion Log 中选取并编辑后加入；运行时按顺序动态拼接到提示词模板中。
+_Avoid_: sample、template、system prompt（Prompt Example 是提示词的一部分，不是提示词本身）
+
 ### 更新
 
 **Client Update**:

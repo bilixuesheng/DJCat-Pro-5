@@ -1,0 +1,41 @@
+{% extends "admin_base.html" %}
+
+{% block title %}加入示例 · AI 写 Markdown{% endblock %}
+{% block page_name %}加入示例{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <div class="eyebrow">AI 写 Markdown / 整理记录</div>
+        <h1>加入示例</h1>
+    </div>
+</header>
+
+<form class="config-form" method="post" action="{{ url_for('adminConversionLogAddSubmit', logId=log.id) }}" data-async-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <section class="form-section" aria-labelledby="meta-title" style="grid-template-columns:1fr">
+        <div>
+            <div class="form-section-title"><span>01</span><div><h2 id="meta-title">记录信息</h2><p>来自机器 {{ log.machine_code }}，{{ log.created_at }}。</p></div></div>
+        </div>
+    </section>
+
+    <section class="form-section" aria-labelledby="content-title" style="grid-template-columns:1fr">
+        <div>
+            <div class="form-section-title"><span>02</span><div><h2 id="content-title">示例内容</h2><p>确认或编辑后加入提示词示例。</p></div></div>
+            <div class="form-fields two-columns" style="margin-top:20px">
+                <label>输入内容
+                    <textarea name="input_content" rows="16" required>{{ log.input_content }}</textarea>
+                </label>
+                <label>输出内容
+                    <textarea name="output_content" rows="16" required>{{ log.output_content }}</textarea>
+                </label>
+            </div>
+        </div>
+    </section>
+
+    <div class="form-actions">
+        <a class="button button-secondary" href="{{ url_for('adminConversionLogs') }}">返回整理记录</a>
+        <button class="button button-primary" type="submit">加入提示词示例</button>
+    </div>
+</form>
+{% endblock %}
