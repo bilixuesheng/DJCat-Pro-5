@@ -152,6 +152,7 @@ class AcrylicMenu(RoundMenu):
         if isinstance(submenu, RoundMenu):
             self.lastHoverItem = item
             self.lastHoverSubMenuItem = item
+            self.timer.stop()
             self._onShowMenuTimeOut()
             return
         super()._onItemClicked(item)
