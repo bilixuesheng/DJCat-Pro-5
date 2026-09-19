@@ -23,7 +23,7 @@ Custom Home Card 中的一个本地动作，类型为启动程序、执行 Shell
 _Avoid_: Application Action、step、command（仅 Shell 类型是命令）
 
 **Action Sequence**:
-一次点击 Custom Home Card 后按当前顺序处理的 Home Action 集合。运行期间会读取最新动作列表，但同一动作 ID 至多执行一次；等待型动作和延时会阻塞后续动作，取消则停止尚未执行的动作。
+一次点击 Custom Home Card 后按当前顺序处理的 Home Action 集合。
 _Avoid_: workflow、macro
 
 ### 系统托盘
@@ -119,7 +119,7 @@ _Avoid_: Application、Client Installer、binary
 _Avoid_: downloaded application、Package
 
 **Application Action**:
-由 Application Catalog 提供、在 Application 边界内执行的受限动作，类型为启动安装目录内的程序、打开 HTTPS 网页或调用允许的系统 URI。作为应用默认入口时称 Open Action；由 Application Preset 引用时称 Preset Action。
+由 Application Catalog 提供、在 Application 边界内执行的受限动作。作为应用默认入口时称 Open Action；由 Application Preset 引用时称 Preset Action。
 _Avoid_: Home Action、Shell action
 
 **Application Launch**:
@@ -185,7 +185,7 @@ DJCat Pro 5 自身的新版本，通过专用更新信息和 Windows 安装程�
 _Avoid_: Application Update；不加限定地称 update
 
 **Client Version**:
-用户可见的 DJCat 版本，唯一来源是 `app/common/config.py`，并用于应用内显示、Git 标签、Release、安装包文件名和更新信息。若 Client Version 包含 PEP 440 不接受的发布后缀（如 `-kb...`），`pyproject.toml` 与 `uv.lock` 仅为 Python 构建元数据使用等价的本地版本形式（如 `+kb...`），不得因此改写用户指定的 Client Version。`-kb...` 表示高于同一基础正式版的补丁发布，不属于预发布；只有 `-pre`、`-rc`、`-alpha` 和 `-beta` 后缀按预发布排序和标记。
+用户可见的 DJCat 版本号，唯一来源是 `app/common/config.py`。
 _Avoid_: Python Distribution Version、把构建元数据中的 `+` 版本展示给用户
 
 **Application Update**:
@@ -214,67 +214,13 @@ _Avoid_: 便携 ZIP 的文件格式、Application 的安装目录
 切换 Installed Mode 与 Portable Mode 时，复制整个 App Data Directory 并改写配置中的绝对路径。迁移发生在进程退出阶段，运行中不切换路径。
 _Avoid_: 只复制 `UserConfig.json`、运行中热切换路径
 
-### 动词词汇
-
-这些动词在项目内有固定含义；新的名称优先沿用它们。
-
-**load**: 从本地配置、清单或资源读取数据。_Not_: fetch（网络请求）
-
-**save**: 把用户配置或本地状态持久化。
-
-**fetch**: 发起网络请求取得数据。_Not_: load（本地读取）
-
-**normalize**: 将兼容旧格式、缺失字段和非法值收敛为可用结构。_Not_: validate（只判断能否接受）
-
-**validate**: 检查输入或完整性约束；失败时拒绝继续，不负责修正数据。
-
-**execute**: 执行已经验证的 Home Action 或 Application Action。
-
-**activate**: 唤起已经运行的窗口或进程，不创建第二份运行实例。
-
-**install / uninstall**: 将 Application 原子地放入或从安装目录移除。
-
-**remove**: 从主页、菜单或配置中移除引用。_Not_: uninstall、delete files
-
-**clear**: 清空缓存、输入或集合。
-
-**close**: 关闭一次 Projection、Exam Countdown 或对话框；主窗口的关闭按钮只隐藏窗口。_Not_: quit（结束 DJCat 进程）
-
-**quit**: 经统一资源清理流程退出 DJCat 进程。
-
-**on\***: Qt 信号、事件或异步结果的响应函数。
-
 ## Example dialogue
 
 > **Dev:** "定时播报是不是把全屏投送安排到某个时间？"
 > **Domain expert:** "不是。Projection 显示文字；Broadcast Task 到点播放 Audio Source。"
 
-> **Dev:** "Home Card Task 选择自定义后，会不会在主页新增一张 Custom Home Card？"
-> **Domain expert:** "不会。它只在该 Home Card Task 内拥有 Action Sequence，没有独立的标题、说明和图标，也不会成为主页入口。"
-
 > **Dev:** "关闭主窗口时，会不会触发'电教猫关闭时'的自动任务？"
 > **Domain expert:** "不会。关闭主窗口只是隐藏；该 Application Lifecycle Event 只由 Tray Menu 的退出程序触发。"
 
-> **Dev:** "应用预设卡片和用户自定义卡片都可以执行动作，是同一种卡片吗？"
-> **Domain expert:** "不是。Application Home Card 执行 Application Catalog 提供的受限 Application Action；Custom Home Card 执行用户在本机编排的 Action Sequence。"
-
-> **Dev:** "托盘里的卡片是不是主页卡片的另一份副本？"
-> **Domain expert:** "不是。Tray Card Shortcut 只引用现存 Home Card，沿用主页的顺序、标题、图标和点击行为。"
-
-> **Dev:** "左键点托盘图标是不是总会打开主页？"
-> **Domain expert:** "不一定。Tray Click Action 可将左键配置为打开 Tray Menu；右键始终打开 Tray Menu。"
-
-> **Dev:** "机器码能不能当授权码，阻止别人调用 AI 接口？"
-> **Domain expert:** "不能。Machine Code 只是匿名设备的可见别名，用于查找 Daily Quota，不承担认证。"
-
 > **Dev:** "发现新版本后直接走应用市场更新就行吗？"
 > **Domain expert:** "先说清是哪一种版本。Client Update 更新 DJCat；Application Update 更新市场里的某个 Application。"
-
-> **Dev:** "应用有更新，'全部'卡片也应该显示更新吗？"
-> **Domain expert:** "不应该。'全部'保持发现和打开语义；Application Update 只在'已安装'和详情页提供。"
-
-> **Dev:** "切换到 Portable Mode 后能不能马上让当前进程改用新目录？"
-> **Domain expert:** "不能。当前进程的 App Data Directory 在启动时已经确定；正常关闭后迁移，下一次启动再选择新模式。"
-
-> **Dev:** "应用启动后没有窗口，要不要一直等待，最后提示启动失败？"
-> **Domain expert:** "不要。Application Launch 不要求新进程出现可见窗口；只有再次打开已有进程时才尝试唤起窗口。"
