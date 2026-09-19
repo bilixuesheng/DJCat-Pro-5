@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import weakref
+
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
@@ -10,6 +12,28 @@ from PySide6.QtWidgets import (
 from qfluentwidgets.components.dialog_box.mask_dialog_base import MaskDialogBase
 
 _SHADOW_FADE_MS = 150
+_activeMaskDialogs = weakref.WeakSet()
+
+
+def pauseDialogShadows():
+    paused = []
+    for dialog in list(_activeMaskDialogs):
+        try:
+            shadow = dialog.widget.graphicsEffect()
+        except RuntimeError:
+            continue
+        if isinstance(shadow, QGraphicsDropShadowEffect) and shadow.isEnabled():
+            shadow.setEnabled(False)
+            paused.append(shadow)
+    return paused
+
+
+def resumeDialogShadows(paused):
+    for shadow in paused:
+        try:
+            shadow.setEnabled(True)
+        except RuntimeError:
+            pass
 
 
 def _setDialogShadow(
@@ -29,6 +53,7 @@ def _setDialogShadow(
 
 
 def _showEvent(self, e):
+    _activeMaskDialogs.add(self)
     shadow = self.widget.graphicsEffect()
     hasShadow = isinstance(shadow, QGraphicsDropShadowEffect)
     shadowColor = shadow.color() if hasShadow else None
@@ -64,6 +89,7 @@ def _showEvent(self, e):
 
 
 def _done(self, code):
+    _activeMaskDialogs.discard(self)
     shadow = self.widget.graphicsEffect()
     if isinstance(shadow, QGraphicsDropShadowEffect):
         shadow.setEnabled(False)
