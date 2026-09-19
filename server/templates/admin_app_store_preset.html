@@ -18,8 +18,8 @@
     <form class="config-form" method="post" action="{{ url_for('app_store.adminPreset', app_id=selected_app.id, preset_id=preset.id) if editing else url_for('app_store.adminNewPreset', app_id=selected_app.id) }}" data-action-form>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="preset_app_id" value="{{ selected_app.id }}">
-        <section class="form-section">
-            <div class="form-section-title"><span>01</span><div><h2>卡片内容</h2><p>保存后可回到列表拖动排序。</p></div></div>
+        <section class="form-section" aria-labelledby="preset-content-title">
+            <div class="form-section-title"><span>01</span><div><h2 id="preset-content-title">卡片内容</h2><p>保存后可回到列表拖动排序。</p></div></div>
             <div class="form-fields two-columns">
                 <label>卡片标题<input name="preset_title" maxlength="80" value="{{ preset.title if preset else '' }}" placeholder="例如：打开 {{ selected_app.name }}" required></label>
                 <label>卡片简介<input name="preset_description" maxlength="240" value="{{ preset.description if preset else '' }}" placeholder="安装后点击卡片启动主程序"></label>

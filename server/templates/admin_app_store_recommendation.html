@@ -17,8 +17,8 @@
 
     <form class="config-form" method="post" action="{{ url_for('app_store.adminNewRecommendation') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <section class="form-section">
-            <div class="form-section-title"><span>01</span><div><h2>选择软件</h2><p>已推荐的软件不会重复出现在选项中。</p></div></div>
+        <section class="form-section" aria-labelledby="rec-select-title">
+            <div class="form-section-title"><span>01</span><div><h2 id="rec-select-title">选择软件</h2><p>已推荐的软件不会重复出现在选项中。</p></div></div>
             <div class="form-fields">
                 <label>软件
                     <select name="app_id" required {% if not apps %}disabled{% endif %}>

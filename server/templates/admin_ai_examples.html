@@ -25,15 +25,15 @@
     </div>
     <div class="table-wrap">
         <table data-empty-message="还没有示例，可以从整理记录加入或恢复默认示例。" data-sortable-table data-order-url="{{ url_for('adminPromptExamplesReorder') }}" data-csrf-token="{{ csrf_token }}">
-            <thead><tr><th>顺序</th><th>输入内容</th><th>输出内容</th><th>添加时间</th><th>操作</th></tr></thead>
+            <thead><tr><th scope="col">顺序</th><th scope="col">输入内容</th><th scope="col">输出内容</th><th scope="col">添加时间</th><th scope="col">操作</th></tr></thead>
             <tbody>
             {% for example in examples %}
                 <tr data-sort-id="{{ example.id }}">
                     <td>
                         <span class="drag-order"><button class="drag-handle" type="button" aria-label="拖动调整顺序，方向键也可调整">⠿</button><code data-order-position>{{ '%02d'|format(loop.index) }}</code></span>
                     </td>
-                    <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ example.input_content }}</td>
-                    <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ example.output_content }}</td>
+                    <td class="cell-truncate">{{ example.input_content }}</td>
+                    <td class="cell-truncate">{{ example.output_content }}</td>
                     <td>{{ example.created_at }}</td>
                     <td>
                         <div class="table-actions">
@@ -46,10 +46,10 @@
                     </td>
                 </tr>
                 <tr data-edit-row="{{ example.id }}" hidden>
-                    <td colspan="5" style="white-space:normal">
+                    <td colspan="5" class="cell-edit-row">
                         <form method="post" action="{{ url_for('adminPromptExampleEdit', exampleId=example.id) }}" data-async-form>
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                            <div class="form-fields two-columns" style="margin-bottom:14px">
+                            <div class="form-fields two-columns form-fields-compact">
                                 <label>输入内容
                                     <textarea name="input_content" rows="8" required>{{ example.input_content }}</textarea>
                                 </label>
@@ -57,7 +57,7 @@
                                     <textarea name="output_content" rows="8" required>{{ example.output_content }}</textarea>
                                 </label>
                             </div>
-                            <div style="display:flex;justify-content:flex-end;gap:10px">
+                            <div class="edit-row-actions">
                                 <button class="button button-secondary" type="button" data-toggle-edit="{{ example.id }}">取消</button>
                                 <button class="button button-primary" type="submit">保存</button>
                             </div>

@@ -14,8 +14,14 @@
 
 <form class="prompt-form" method="post" action="{{ url_for('adminPrompt') }}" data-async-form>
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <div class="prompt-header"><div><span class="section-index">01</span><h2>全局系统提示词</h2></div><span>最多 {{ max_system_prompt_length }} 个字符</span></div>
-    <textarea name="system_prompt" rows="26" maxlength="{{ max_system_prompt_length }}" required>{{ system_prompt }}</textarea>
-    <div class="prompt-footer"><p>规则修改会应用于下一次转换请求。请保留示例和输出格式要求，避免加入 API Key 等敏感信息。</p><button class="button button-primary" type="submit">保存提示词</button></div>
+    <div class="prompt-header">
+        <div><span class="section-index">01</span><h2 id="prompt-title">全局系统提示词</h2></div>
+        <span class="prompt-char-limit">最多 {{ max_system_prompt_length }} 个字符</span>
+    </div>
+    <textarea name="system_prompt" rows="26" maxlength="{{ max_system_prompt_length }}" required aria-labelledby="prompt-title">{{ system_prompt }}</textarea>
+    <div class="prompt-footer">
+        <p>规则修改会应用于下一次转换请求。请保留示例和输出格式要求，避免加入 API Key 等敏感信息。</p>
+        <button class="button button-primary" type="submit">保存提示词</button>
+    </div>
 </form>
 {% endblock %}
