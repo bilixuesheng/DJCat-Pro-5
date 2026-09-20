@@ -29,10 +29,10 @@ from flask import (
 from werkzeug.security import check_password_hash
 
 DAILY_LIMIT = 15
-MAX_CONTENT_LENGTH = 12_000
+MAX_CONTENT_LENGTH = 24_000
 MAX_CUSTOM_STYLE_LENGTH = 4_000
 MAX_SYSTEM_PROMPT_LENGTH = 20_000
-MAX_REQUEST_BYTES = 64 * 1024
+MAX_REQUEST_BYTES = 128 * 1024
 PROCESSING_TIMEOUT = timedelta(minutes=15)
 REQUEST_LOG_RETENTION_DAYS = 180
 CONVERSION_LOG_RETENTION_DAYS = 30
@@ -894,7 +894,7 @@ def convert():
                 ],
                 "thinking": {"type": "disabled"},
                 "stream": True,
-                "max_tokens": 1500,
+                "max_tokens": 8192,
             },
             stream=True,
             timeout=(10, 120),

@@ -813,6 +813,16 @@ def _streamAIMarkdown(request, emitChunk):
             limit = int(response.headers.get("X-RateLimit-Limit", limit))
             cost = int(response.headers.get("X-RateLimit-Cost", cost))
             if not response.ok:
+                if response.status_code == 502:
+                    raise RuntimeError(
+                        "这不是你的问题，也不是我们的问题。\n"
+                        "DeepSeek 服务器已离线，请等待深度求索修复，"
+                        "这可能是间歇性的问题。"
+                    )
+                if response.status_code == 503:
+                    raise RuntimeError(
+                        "电教猫 Pro 基础服务器已离线，请等待修复。"
+                    )
                 try:
                     message = response.json().get("message")
                 except (AttributeError, ValueError):
@@ -836,7 +846,7 @@ def _streamAIMarkdown(request, emitChunk):
             return
         _emitSignal(
             request.conversionFailed,
-            "无法连接 AI 服务，请检查网络后重试。",
+            "电教猫 Pro 基础服务器已离线，请等待修复。",
             remaining,
             limit,
             cost,
