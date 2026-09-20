@@ -64,6 +64,75 @@ class StorageModeTest(TestCase):
                         loaded["HOME_CARD_ICON_DIR"],
                         portableDirectory / "HomeCardIcons",
                     )
+                    self.assertFalse(loaded["_PORTABLE_FALLBACK_FAILED"])
+
+    def testFreshInstallDefaultsToPortableMode(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            appDirectory = root / "program"
+            appDirectory.mkdir(parents=True)
+            userDirectory = root / "user" / "DJCatPro"
+            portableDirectory = appDirectory / "DJCatPro"
+
+            with (
+                patch.object(sys, "frozen", True, create=True),
+                patch.object(sys, "executable", str(appDirectory / "DJCat-Pro.exe")),
+                patch.object(
+                    paths.QStandardPaths,
+                    "writableLocation",
+                    return_value=str(root / "user"),
+                ),
+            ):
+                loaded = runpy.run_path(paths.__file__)
+
+                self.assertEqual(loaded["APP_DATA_DIR"], portableDirectory)
+                self.assertTrue(portableDirectory.is_dir())
+                self.assertFalse(loaded["_PORTABLE_FALLBACK_FAILED"])
+
+    def testFreshInstallFallsBackToInstalledWhenPortableNotWritable(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            appDirectory = root / "program"
+            appDirectory.mkdir(parents=True)
+            userDirectory = root / "user" / "DJCatPro"
+            portableDirectory = appDirectory / "DJCatPro"
+
+            with (
+                patch.object(sys, "frozen", True, create=True),
+                patch.object(sys, "executable", str(appDirectory / "DJCat-Pro.exe")),
+                patch.object(
+                    paths.QStandardPaths,
+                    "writableLocation",
+                    return_value=str(root / "user"),
+                ),
+                patch.object(Path, "mkdir", side_effect=OSError("Permission denied")),
+            ):
+                loaded = runpy.run_path(paths.__file__)
+
+                self.assertEqual(loaded["APP_DATA_DIR"], userDirectory)
+                self.assertTrue(loaded["_PORTABLE_FALLBACK_FAILED"])
+
+    def testExistingInstalledUserKeepsInstalledMode(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            appDirectory = root / "program"
+            appDirectory.mkdir(parents=True)
+            userDirectory = root / "user" / "DJCatPro"
+            self._writeConfig(userDirectory)
+
+            with (
+                patch.object(sys, "frozen", True, create=True),
+                patch.object(sys, "executable", str(appDirectory / "DJCat-Pro.exe")),
+                patch.object(
+                    paths.QStandardPaths,
+                    "writableLocation",
+                    return_value=str(root / "user"),
+                ),
+            ):
+                loaded = runpy.run_path(paths.__file__)
+
+                self.assertEqual(loaded["APP_DATA_DIR"], userDirectory)
+                self.assertFalse(loaded["_PORTABLE_FALLBACK_FAILED"])
 
     def testSwitchToPortableCopiesDataAndRebasesStoredPaths(self):
         with TemporaryDirectory() as directory:
