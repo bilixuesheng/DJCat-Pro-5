@@ -385,7 +385,7 @@ class UpdateDownloadTest(TestCase):
                 get.call_args_list[0].kwargs["headers"]["Range"],
                 "bytes=1-1",
             )
-            self.assertTrue(DOWNLOAD_URL.endswith("/DJCat-Pro.exe"))
+            self.assertTrue(DOWNLOAD_URL.endswith("/DJCat-Pro.zip"))
 
     def testWholeDownloadRetriesThreeTimesBeforeSucceeding(self):
         content = b"MZ" + b"installer-data"
