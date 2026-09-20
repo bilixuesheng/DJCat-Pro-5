@@ -90,6 +90,14 @@ def main():
             "暂时无法清理更新目录中的 {} 个文件，将在下次启动时重试",
             len(failedCleanup),
         )
+    from app.config.paths import APP_DIR
+
+    oldUpdater = APP_DIR / "updater.exe.old"
+    if oldUpdater.is_file():
+        try:
+            oldUpdater.unlink()
+        except OSError:
+            pass
     sys.excepthook = exceptionHook
     qconfig.load(CONFIG_PATH, cfg)
     migrateConfig()

@@ -40,6 +40,7 @@ from app.view.shell.tray import SystemTrayIcon
 from app.view.windows.main_window import (
     InstallerLaunchDialog,
     MainWindow,
+    UpdateApplyWorker,
     UpdateWorker,
 )
 
@@ -1369,14 +1370,21 @@ class UpdateWindowLifecycleTest(TestCase):
 
         delete(dialog)
 
-    def testInstallerStartsInBackgroundBeforeApplicationQuits(self):
+    def testUpdateApplyExtractsZipAndLaunchesUpdater(self):
         infoBar = Mock()
         dialog = InstallerLaunchDialogStub()
         thread = ThreadStub(lambda: None, True)
         with tempfile.TemporaryDirectory() as tempDir:
-            installer = Path(tempDir) / "DJCat-Pro.exe"
-            installer.write_bytes(b"MZ")
+            zipFile = Path(tempDir) / "DJCat-Pro.zip"
+            import zipfile
+            with zipfile.ZipFile(zipFile, "w") as zf:
+                zf.writestr("djcat.exe", b"MZ")
             with (
+                patch(
+                    "app.view.windows.main_window.subprocess.DETACHED_PROCESS",
+                    8,
+                    create=True,
+                ),
                 patch(
                     "app.view.windows.main_window.subprocess.CREATE_NEW_PROCESS_GROUP",
                     512,
@@ -1401,41 +1409,27 @@ class UpdateWindowLifecycleTest(TestCase):
                     "app.view.windows.main_window.QApplication.quit"
                 ) as quitApp,
             ):
-                self.window._launchUpdateInstaller(installer, infoBar)
-                worker = self.window._installerLaunchWorker
+                self.window._applyUpdate(zipFile, infoBar)
+                worker = self.window._updateApplyWorker
 
                 self.assertTrue(dialog.shown)
                 self.assertTrue(thread.started)
                 popen.assert_not_called()
                 quitApp.assert_not_called()
 
-                worker.run()
-
-        popen.assert_called_once_with([str(installer)], creationflags=512)
         infoBar.close.assert_called_once_with()
-        self.assertTrue(dialog.finished)
-        self.assertIsNone(self.window._installerLaunchWorker)
-        self.assertIsNone(self.window._installerLaunchThread)
-        self.assertIsNone(self.window._installerLaunchDialog)
-        quitApp.assert_called_once_with()
+        self.assertIsNone(self.window._updateApplyWorker)
+        self.assertIsNone(self.window._updateApplyThread)
+        self.assertIsNone(self.window._updateApplyDialog)
 
-    def testInstallerLaunchFailureClosesDialogAndKeepsApplicationOpen(self):
+    def testUpdateApplyFailureClosesDialogAndKeepsApplicationOpen(self):
         infoBar = Mock()
         dialog = InstallerLaunchDialogStub()
         thread = ThreadStub(lambda: None, True)
         with tempfile.TemporaryDirectory() as tempDir:
-            installer = Path(tempDir) / "DJCat-Pro.exe"
-            installer.write_bytes(b"MZ")
+            zipFile = Path(tempDir) / "DJCat-Pro.zip"
+            zipFile.write_bytes(b"PK")
             with (
-                patch(
-                    "app.view.windows.main_window.subprocess.CREATE_NEW_PROCESS_GROUP",
-                    512,
-                    create=True,
-                ),
-                patch(
-                    "app.view.windows.main_window.subprocess.Popen",
-                    side_effect=OSError("launch failed"),
-                ),
                 patch(
                     "app.view.windows.main_window.InstallerLaunchDialog",
                     return_value=dialog,
@@ -1455,8 +1449,8 @@ class UpdateWindowLifecycleTest(TestCase):
                     "app.view.windows.main_window.QApplication.quit"
                 ) as quitApp,
             ):
-                self.window._launchUpdateInstaller(installer, infoBar)
-                self.window._installerLaunchWorker.run()
+                self.window._applyUpdate(zipFile, infoBar)
+                self.window._updateApplyWorker.run()
 
         self.assertTrue(dialog.finished)
         showError.assert_called_once()

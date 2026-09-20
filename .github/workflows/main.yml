@@ -178,6 +178,13 @@ jobs:
       - name: Verify executable architecture
         run: uv run --frozen python scripts/verify_pe_arch.py dist/djcat.dist/djcat.exe x86_64
 
+      - name: Build updater
+        shell: pwsh
+        run: |
+          cmake -B build-updater -G "Visual Studio 17 2022" -A x64 tools/updater
+          cmake --build build-updater --config Release
+          Copy-Item build-updater/Release/updater.exe dist/djcat.dist/
+
       - name: Build portable ZIP and installer
         shell: pwsh
         run: |

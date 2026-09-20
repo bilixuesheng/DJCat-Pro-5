@@ -68,7 +68,7 @@ from app.config.constants import (
     VERSION,
     normalizeReleaseVersion,
 )
-from app.config.paths import ASSET_DIR, UPDATE_INSTALLER_PATH
+from app.config.paths import APP_DIR, ASSET_DIR, UPDATE_STAGING_DIR, UPDATE_ZIP_PATH
 from app.signal_bus import signalBus
 from app.view.pages.home_page import HomePage
 from app.view.shell.tray import SystemTrayIcon
@@ -134,24 +134,58 @@ class MachineRegistrationWorker(QObject):
         self.finished.emit(registerMachine() or "")
 
 
-class InstallerLaunchWorker(QObject):
+class UpdateApplyWorker(QObject):
     finished = Signal(bool)
 
-    def __init__(self, installerPath):
+    def __init__(self, zipPath):
         super().__init__()
-        self.installerPath = installerPath
+        self.zipPath = zipPath
 
     def run(self):
+        import os
+        import shutil
+        import sys
+        import zipfile
+
         try:
+            stagingDir = UPDATE_STAGING_DIR
+            if stagingDir.exists():
+                shutil.rmtree(stagingDir)
+            stagingDir.mkdir(parents=True)
+
+            with zipfile.ZipFile(self.zipPath) as zf:
+                zf.extractall(stagingDir)
+
+            entries = list(stagingDir.iterdir())
+            if len(entries) == 1 and entries[0].is_dir():
+                stagingDir = entries[0]
+
+            self.zipPath.unlink(missing_ok=True)
+
+            updaterPath = APP_DIR / "updater.exe"
+            if not updaterPath.is_file():
+                logger.error("updater.exe not found at {}", updaterPath)
+                self.finished.emit(False)
+                return
+
+            args = [
+                str(updaterPath),
+                str(os.getpid()),
+                str(APP_DIR),
+                str(Path(sys.executable).resolve()),
+                str(stagingDir),
+            ]
             subprocess.Popen(
-                [str(self.installerPath)],
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                args,
+                creationflags=(
+                    subprocess.DETACHED_PROCESS
+                    | subprocess.CREATE_NEW_PROCESS_GROUP
+                ),
             )
-            started = True
+            self.finished.emit(True)
         except Exception:
-            logger.exception("启动更新安装程序失败")
-            started = False
-        self.finished.emit(started)
+            logger.exception("增量更新准备失败")
+            self.finished.emit(False)
 
 
 class LazyPage(QWidget):
@@ -331,9 +365,9 @@ class MainWindow(MSFluentWindow):
         self._pendingDownloadProgress = None
         self._downloadVersion = ""
         self._quitAfterDownload = False
-        self._installerLaunchWorker = None
-        self._installerLaunchThread = None
-        self._installerLaunchDialog = None
+        self._updateApplyWorker = None
+        self._updateApplyThread = None
+        self._updateApplyDialog = None
         self._navigationTarget = None
         self._pendingNavigation = None
         self._updateRequestId = 0
@@ -1582,7 +1616,7 @@ class MainWindow(MSFluentWindow):
 
         self._downloadWorker = UpdateDownloadWorker(
             DOWNLOAD_URL,
-            UPDATE_INSTALLER_PATH,
+            UPDATE_ZIP_PATH,
             requireHttps=True,
             maxBytes=MAX_UPDATE_BYTES,
         )
@@ -1677,7 +1711,7 @@ class MainWindow(MSFluentWindow):
             value /= 1024
         return f"{value:.1f} GB"
 
-    def _onUpdateDownloadFinished(self, installerPath, error, canceled):
+    def _onUpdateDownloadFinished(self, zipPath, error, canceled):
         self._pendingDownloadProgress = None
         self._downloadProgressTimer.stop()
         worker = self._downloadWorker
@@ -1710,10 +1744,10 @@ class MainWindow(MSFluentWindow):
             return
 
         if self._downloadStateToolTip is not None:
-            self._downloadStateToolTip.setContent("安装程序下载完成")
+            self._downloadStateToolTip.setContent("更新包下载完成")
             self._downloadStateToolTip.setState(True)
 
-        self._showInstallUpdateInfoBar(Path(installerPath))
+        self._showInstallUpdateInfoBar(Path(zipPath))
 
     def _restoreForUpdateMessage(self):
         if self.isMinimized():
@@ -1723,7 +1757,7 @@ class MainWindow(MSFluentWindow):
         self.raise_()
         self.activateWindow()
 
-    def _showInstallUpdateInfoBar(self, installerPath):
+    def _showInstallUpdateInfoBar(self, zipPath):
         infoBar = InfoBar(
             icon=FIF.UPDATE,
             title=f"v{self._downloadVersion} 下载完成",
@@ -1738,7 +1772,7 @@ class MainWindow(MSFluentWindow):
 
         installButton = PrimaryPushButton(FIF.UPDATE, "立即更新")
         installButton.clicked.connect(
-            lambda: self._launchUpdateInstaller(installerPath, infoBar)
+            lambda: self._applyUpdate(zipPath, infoBar)
         )
         infoBar.addWidget(installButton)
 
@@ -1747,13 +1781,13 @@ class MainWindow(MSFluentWindow):
         infoBar.addWidget(laterButton)
         infoBar.show()
 
-    def _launchUpdateInstaller(self, installerPath, infoBar):
-        if self._installerLaunchWorker is not None:
+    def _applyUpdate(self, zipPath, infoBar):
+        if self._updateApplyWorker is not None:
             return
-        if not installerPath.is_file():
+        if not zipPath.is_file():
             InfoBar.error(
                 "无法安装更新",
-                "安装程序已不存在，请重新下载。",
+                "更新包已不存在，请重新下载。",
                 duration=4000,
                 position=InfoBarPosition.BOTTOM_RIGHT,
                 parent=self,
@@ -1762,24 +1796,24 @@ class MainWindow(MSFluentWindow):
 
         infoBar.close()
         dialog = InstallerLaunchDialog(self)
-        worker = InstallerLaunchWorker(installerPath)
+        worker = UpdateApplyWorker(zipPath)
         thread = threading.Thread(target=worker.run, daemon=True)
-        self._installerLaunchDialog = dialog
-        self._installerLaunchWorker = worker
-        self._installerLaunchThread = thread
-        worker.finished.connect(self._onInstallerLaunchFinished)
+        self._updateApplyDialog = dialog
+        self._updateApplyWorker = worker
+        self._updateApplyThread = thread
+        worker.finished.connect(self._onUpdateApplyFinished)
         dialog.show()
         try:
             thread.start()
         except RuntimeError:
-            self._onInstallerLaunchFinished(False)
+            self._onUpdateApplyFinished(False)
 
-    def _onInstallerLaunchFinished(self, started):
-        worker = self._installerLaunchWorker
-        dialog = self._installerLaunchDialog
-        self._installerLaunchWorker = None
-        self._installerLaunchThread = None
-        self._installerLaunchDialog = None
+    def _onUpdateApplyFinished(self, started):
+        worker = self._updateApplyWorker
+        dialog = self._updateApplyDialog
+        self._updateApplyWorker = None
+        self._updateApplyThread = None
+        self._updateApplyDialog = None
         if worker is not None:
             worker.deleteLater()
         if dialog is not None and isValid(dialog):
@@ -1789,7 +1823,7 @@ class MainWindow(MSFluentWindow):
             return
         if not started:
             InfoBar.error(
-                "无法启动安装程序",
+                "更新失败",
                 "请重新下载后再试。",
                 duration=4000,
                 position=InfoBarPosition.BOTTOM_RIGHT,
