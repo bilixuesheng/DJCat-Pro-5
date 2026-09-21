@@ -10,3 +10,6 @@ Log/
 CHANGELOG.md
 dist/
 ai_markdown_usage.sqlite3
+
+# qfluentwidgets 在工作目录写下的默认主题配置，跑测试时产生
+/config/
