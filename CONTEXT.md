@@ -222,6 +222,28 @@ _Avoid_: 便携 ZIP 的文件格式、Application 的安装目录
 切换 Installed Mode 与 Portable Mode 时，复制整个 App Data Directory 并改写配置中的绝对路径。迁移发生在进程退出阶段，运行中不切换路径。
 _Avoid_: 只复制 `UserConfig.json`、运行中热切换路径
 
+### 设置
+
+**Setting Section**:
+设置页层级中的一个节点，由稳定 key、标题、图标和可选说明构成，含若干 Setting Card、纯文字小节和可选 Setting Preview。顶层的"设置"是根 Section。
+_Avoid_: group（可折叠分组已退役）、页面（它不是导航页面，MainWindow 不感知它）
+
+**Setting Route**:
+从根到某个 Setting Section 的稳定 key 序列，如 `broadcast.background`。面包屑显示它，Setting Suggestion 指向它。
+_Avoid_: path（与文件路径混淆）、breadcrumb（那是控件不是数据）
+
+**Setting Card**:
+Setting Section 中的一行设置项，通常绑定一个 `cfg` 配置项或一个动作按钮。部分 Setting Card 只在前置配置取特定值时可见。
+_Avoid_: 设置项（泛指值本身）、Home Card
+
+**Setting Preview**:
+Setting Section 中按当前配置实时渲染的示意图，随所在 Section 的配置项变化立即重绘。它只显示状态，不接受输入。
+_Avoid_: 缩略图、示意图（静态图片）、截图
+
+**Setting Suggestion**:
+搜索框输入时弹出的一条建议，指向某个 Setting Card 及其所属 Setting Route。只在有输入时存在，不持久化，也不改变页面内容。
+_Avoid_: 搜索结果（设置页不再有结果列表）、筛选项
+
 ## Example dialogue
 
 > **Dev:** "定时播报是不是把全屏投送安排到某个时间？"
@@ -232,3 +254,6 @@ _Avoid_: 只复制 `UserConfig.json`、运行中热切换路径
 
 > **Dev:** "发现新版本后直接走应用市场更新就行吗？"
 > **Domain expert:** "先说清是哪一种版本。Client Update 更新 DJCat；Application Update 更新市场里的某个 Application。"
+
+> **Dev:** "在设置里搜'背景颜色'，页面会只留下匹配的卡片吗？"
+> **Domain expert:** "不会。设置搜索只弹 Setting Suggestion，点一条才跳到对应的 Setting Route，页面本身从不筛选。"
