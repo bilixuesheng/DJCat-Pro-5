@@ -954,9 +954,9 @@ class SettingPage(QWidget):
         )
         personalization.addSubsectionTitle("窗口与托盘")
         personalization.addPreview(WindowTextPreview())
-        personalization.addCardList([self.windowTitleCard, self.trayTooltipCard])
-        personalization.addSubsectionTitle("导航")
-        personalization.addCardList([self.showCreditsCard])
+        personalization.addCardList(
+            [self.windowTitleCard, self.trayTooltipCard, self.showCreditsCard]
+        )
 
         software = self._addSection(
             "software",

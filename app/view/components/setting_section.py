@@ -209,11 +209,13 @@ class SettingCardHighlight(QWidget):
     def clear(self) -> None:
         self.holdTimer.stop()
         self.fadeAnimation.stop()
-        if self._target is not None:
-            self._target.removeEventFilter(self)
-            self._target = None
         self.setFade(0.0)
         self.hide()
+        if self._target is None:
+            return
+        self._target.removeEventFilter(self)
+        self._target = None
+        # 回到页面名下，否则卡片被销毁时会把这个长期持有的覆盖层一起带走。
         self.setParent(self._owner)
 
     def _fadeOut(self) -> None:

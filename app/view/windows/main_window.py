@@ -1891,6 +1891,9 @@ class MainWindow(MSFluentWindow):
         self._cleanupEdgeTtsFile()
         self._pendingDownloadProgress = None
         self._downloadProgressTimer.stop()
+        # 建议弹窗是独立顶层窗口，留着不关会拖住退出。
+        if getattr(self, "settingSuggestionMenu", None) is not None:
+            self.settingSuggestionMenu.close()
         if getattr(self, "settingPage", None) is not None:
             self.settingPage.flushPendingSave()
         for page in (

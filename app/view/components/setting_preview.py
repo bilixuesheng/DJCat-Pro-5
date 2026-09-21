@@ -9,9 +9,15 @@ from app.common.application_icon import applicationIcon, trayHomeIcon
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
 from app.view.components.banner_widget import BannerWidget
+from app.view.components.setting_card_group import SettingMaterialCard
 from app.view.components.window_background import WindowBackground
 
 PREVIEW_RADIUS = 8
+
+
+class SettingPreviewCard(SettingMaterialCard):
+    """Previews that draw loose parts sit on the same material as the cards,
+    otherwise they read as unfinished page content rather than a preview."""
 
 
 class BannerPreview(BannerWidget):
@@ -38,7 +44,7 @@ class WindowBackgroundPreview(WindowBackground):
         self.setRoundedWindow(True, shadow=False)
 
 
-class ApplicationIconPreview(QWidget):
+class ApplicationIconPreview(SettingPreviewCard):
     """The same icon as it appears in every place that shares it."""
 
     SLOTS = ("主窗口", "启动页", "系统托盘", "托盘“主页”")
@@ -155,12 +161,12 @@ class ThemePreview(QWidget):
         painter.end()
 
 
-class WindowTextPreview(QWidget):
+class WindowTextPreview(SettingPreviewCard):
     """The custom window title and tray tooltip as the user will read them."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(128)
+        self.setFixedHeight(120)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         cfg.windowTitle.valueChanged.connect(self._refresh)
         cfg.trayTooltip.valueChanged.connect(self._refresh)
@@ -180,7 +186,7 @@ class WindowTextPreview(QWidget):
         text = QColor(255, 255, 255, 222) if dark else QColor(0, 0, 0, 222)
         muted = QColor(255, 255, 255, 46) if dark else QColor(0, 0, 0, 38)
 
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        rect = QRectF(self.rect()).adjusted(40.5, 16.5, -40.5, -16.5)
         titleBar = QRectF(rect.left(), rect.top(), rect.width(), 40)
         path = QPainterPath()
         path.addRoundedRect(titleBar, PREVIEW_RADIUS, PREVIEW_RADIUS)
@@ -202,7 +208,12 @@ class WindowTextPreview(QWidget):
                 muted,
             )
 
-        tooltip = QRectF(rect.left() + 40, rect.top() + 68, rect.width() - 120, 34)
+        trayIcon = QRectF(rect.left() + 12, rect.top() + 62, 20, 20)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(muted)
+        painter.drawRoundedRect(trayIcon, 4, 4)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        tooltip = QRectF(trayIcon.right() + 10, trayIcon.top() - 6, rect.width() - 80, 32)
         bubble = QPainterPath()
         bubble.addRoundedRect(tooltip, 4, 4)
         painter.fillPath(bubble, surface)
