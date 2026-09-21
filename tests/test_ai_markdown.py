@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication, QScroller, QWidget
 
 from app.common import ai_markdown as client_ai_markdown
 from app.config.cfg import cfg
+from app.view.components.busy_glow import GLOW_MARGIN
 from app.view.pages.broadcast_page import (
     AIMarkdownDialog,
     BroadcastEditPage,
@@ -94,7 +95,7 @@ class AIMarkdownTest(unittest.TestCase):
                 )
             )
 
-    def testAIDialogFitsSmallWindowAndUsesGradientBorder(self):
+    def testAIDialogFitsSmallWindowAndRingsInputWithBusyGlow(self):
         parent = QWidget()
         parent.resize(500, 400)
         parent.show()
@@ -118,14 +119,23 @@ class AIMarkdownTest(unittest.TestCase):
         ).y()
         self.assertLess(inputBottom, quotaTop)
 
-        dialog._updateBusyStyle()
-        firstStyle = dialog.inputEdit.styleSheet()
-        dialog._updateBusyStyle()
-        self.assertIn("qlineargradient", firstStyle)
-        self.assertIn("border: 2px solid", firstStyle)
-        self.assertNotEqual(firstStyle, dialog.inputEdit.styleSheet())
-        dialog._stopBusyStyle()
-        self.assertIn("border-radius", dialog.inputEdit.styleSheet())
+        # Busy Glow 画在覆盖层上，输入框的 Fluent 样式表全程不变——旧实现每帧重写它，
+        # 连带把滚动条换成了 Qt 原生外观。
+        styleBefore = dialog.inputEdit.styleSheet()
+        dialog._glow.start()
+        self.assertTrue(dialog._glow.isRunning())
+        self.assertTrue(dialog._glow.isVisible())
+        self.assertEqual(dialog.inputEdit.styleSheet(), styleBefore)
+        # 覆盖层向外让出的空间要罩得住输入框加两侧光晕。
+        self.assertEqual(
+            dialog._glow.geometry(),
+            dialog.inputEdit.geometry().adjusted(
+                -GLOW_MARGIN, -GLOW_MARGIN, GLOW_MARGIN, GLOW_MARGIN
+            ),
+        )
+        dialog._glow.stop(immediate=True)
+        self.assertFalse(dialog._glow.isRunning())
+        self.assertEqual(dialog.inputEdit.styleSheet(), styleBefore)
 
         dialog._onQuotaReceived(8, 15, 2, True, "DJ-000123")
         self.assertIn("每天 0 点刷新", dialog.quotaLabel.text())
