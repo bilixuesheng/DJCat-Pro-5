@@ -531,11 +531,7 @@ class TrayMenuTest(TestCase):
         tray = SystemTrayIcon(self.parent)
         page = SettingPage()
         try:
-            tooltipCard = next(
-                card
-                for card in page.personalGroup.settingCards()
-                if card.titleLabel.text() == "自定义托盘文本"
-            )
+            tooltipCard = page.trayTooltipCard
             self.assertEqual(tooltipCard.lineEdit.placeholderText(), APP_NAME)
             self.assertEqual(tray.toolTip(), APP_NAME)
 

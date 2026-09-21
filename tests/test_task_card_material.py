@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from app.view.components.setting_card_group import (
-    CollapsibleSettingCardGroup,
+    SettingCardList,
     SettingMaterialCard,
 )
 from app.view.pages.schedule_page import TaskCard
@@ -21,9 +21,7 @@ class TaskCardMaterialTest(TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def testTaskCardsReuseSettingPageMaterial(self):
-        self.assertTrue(
-            issubclass(CollapsibleSettingCardGroup, SettingMaterialCard)
-        )
+        self.assertTrue(issubclass(SettingCardList, SettingMaterialCard))
         self.assertTrue(issubclass(TaskCard, SettingMaterialCard))
         self.assertTrue(issubclass(ShutdownTaskCard, SettingMaterialCard))
 

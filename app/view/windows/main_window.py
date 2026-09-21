@@ -17,7 +17,6 @@ from PySide6.QtCore import (
     QUrl,
     Signal,
 )
-from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QGraphicsOpacityEffect, QVBoxLayout, QWidget
 from shiboken6 import isValid
 from qfluentwidgets import FluentIcon as FIF
@@ -40,6 +39,7 @@ from qfluentwidgets import (
     setThemeColor,
 )
 
+from app.common.application_icon import applicationIcon
 from app.common.application_version import isUpdateAvailable
 from app.common.home_card_tasks import (
     APPLICATION_HOME_CARD_TRIGGER,
@@ -70,6 +70,7 @@ from app.config.constants import (
 )
 from app.config.paths import APP_DIR, ASSET_DIR, UPDATE_STAGING_DIR, UPDATE_ZIP_PATH
 from app.signal_bus import signalBus
+from app.view.components.setting_suggestion_menu import SettingSuggestionMenu
 from app.view.pages.home_page import HomePage
 from app.view.shell.tray import SystemTrayIcon
 
@@ -247,21 +248,22 @@ class LazySettingPage(LazyPage):
 
     def __init__(self, parent=None):
         super().__init__("SettingPage", parent)
-        self._searchText = ""
 
     def _createPage(self):
         from app.view.pages.setting_page import SettingPage
 
         page = SettingPage(self)
         page.appStoreCacheCleared.connect(self.appStoreCacheCleared.emit)
-        if self._searchText:
-            page.setSearchText(self._searchText)
         return page
 
-    def setSearchText(self, text):
-        self._searchText = text
-        if self.page is not None:
-            self.page.setSearchText(text)
+    def searchSuggestions(self, text):
+        return self.ensureLoaded().searchSuggestions(text)
+
+    def navigateToSuggestion(self, suggestion):
+        self.ensureLoaded().navigateToSuggestion(suggestion)
+
+    def navigateToRoute(self, key, animated=True):
+        self.ensureLoaded().navigateToRoute(key, animated=animated)
 
     def flushPendingSave(self):
         if self.page is not None:
@@ -519,13 +521,7 @@ class MainWindow(MSFluentWindow):
         self.setWindowTitle(title.strip() or APP_NAME)
 
     def _updateApplicationIcon(self, _value=None):
-        icon = QIcon(
-            cfg.applicationIconPath.value
-            if cfg.applicationIconSource.value == "自定义"
-            else str(ASSET_DIR / "logo.png")
-        )
-        if icon.isNull():
-            icon = QIcon(str(ASSET_DIR / "logo.png"))
+        icon = applicationIcon()
         QApplication.instance().setWindowIcon(icon)
         self.setWindowIcon(icon)
 
@@ -1059,6 +1055,10 @@ class MainWindow(MSFluentWindow):
         self.searchEdit.setPlaceholderText("搜索设置")
         self.searchEdit.hide()
         self.searchEdit.raise_()
+        self.settingSuggestionMenu = SettingSuggestionMenu(self.searchEdit)
+        self.settingSuggestionMenu.suggestionActivated.connect(
+            self._onSettingSuggestionActivated
+        )
         self.searchEdit.textChanged.connect(self._onSearchTextChanged)
         self.stackedWidget.currentChanged.connect(self._updateSearchEdit)
         self.stackedWidget.currentChanged.connect(self._onNavigationCompleted)
@@ -1291,9 +1291,21 @@ class MainWindow(MSFluentWindow):
         )
         interface = pendingTarget or self.stackedWidget.currentWidget()
         if interface is self.settingPage:
-            self.settingPage.setSearchText(text)
+            self._updateSettingSuggestions(text)
         elif interface is self.appStorePage:
             self.appStorePage.setSearchText(text)
+
+    def _updateSettingSuggestions(self, text: str) -> None:
+        if not text.strip():
+            self.settingSuggestionMenu.close()
+            return
+        suggestions = self.settingPage.searchSuggestions(text)
+        if self.settingSuggestionMenu.setSuggestions(suggestions):
+            self.settingSuggestionMenu.popup()
+
+    def _onSettingSuggestionActivated(self, suggestion) -> None:
+        self.searchEdit.clear()
+        self.settingPage.navigateToSuggestion(suggestion)
 
     def _setSearchEditVisible(
         self,
@@ -1307,6 +1319,8 @@ class MainWindow(MSFluentWindow):
             self.searchEdit.setPlaceholderText(placeholder)
         if not isSearchPage:
             self.searchEdit.clear()
+        if not isSettingPage:
+            self.settingSuggestionMenu.close()
         self.searchEdit.setVisible(isSearchPage)
         if isSearchPage:
             self._refreshSearchEditGeometry()

@@ -370,31 +370,38 @@ class SettingSearchTest(TestCase):
             if self.window.fullscreenClockWindow is not None:
                 self.window.fullscreenClockWindow.close()
 
-    def testFullscreenClockSettingsFollowRequestedGroupOrder(self):
+    def testFullscreenClockSectionsFollowRequestedOrder(self):
         page = self.window.settingPage.ensureLoaded()
-        groups = [
-            page.broadcastGroup,
-            page.aiMarkdownGroup,
-            page.countdownGroup,
-            page.fullscreenClockGroup,
-            page.personalGroup,
-            page.softwareGroup,
-        ]
+        root = page.sectionStack.view("root")
 
         self.assertEqual(
-            [page.vBoxLayout.indexOf(group) for group in groups],
-            sorted(page.vBoxLayout.indexOf(group) for group in groups),
+            [card.titleLabel.text() for card in root.navigationCards()],
+            [
+                "横幅设置",
+                "全屏投送设置",
+                "AI整理Markdown设置",
+                "考试倒计时设置",
+                "全屏时钟设置",
+                "个性化",
+                "应用",
+                "关于",
+            ],
         )
         self.assertEqual(
             [
                 card.titleLabel.text()
-                for card in page.fullscreenClockGroup.settingCards()
+                for card in page.sectionStack.view(
+                    "fullscreenClock.background"
+                ).settingCards()
+            ],
+            ["背景类型", "背景颜色", "自定义时钟背景", "图片缩放模式"],
+        )
+        self.assertEqual(
+            [
+                card.titleLabel.text()
+                for card in page.sectionStack.view("fullscreenClock").settingCards()
             ],
             [
-                "背景类型",
-                "背景颜色",
-                "自定义时钟背景",
-                "图片缩放模式",
                 "显示任务栏",
                 "开启时默认窗口化",
                 "全屏时置顶",
@@ -404,6 +411,39 @@ class SettingSearchTest(TestCase):
                 "退出前询问",
             ],
         )
+
+    def testSettingSearchOnlyOffersSuggestions(self):
+        self.window.switchTo(self.window.settingPage)
+        QTest.qWait(500)
+        page = self.window.settingPage.ensureLoaded()
+        route = page.currentRouteKey()
+
+        self.window.searchEdit.setText("横幅亮度")
+        self.app.processEvents()
+
+        self.assertEqual(page.currentRouteKey(), route)
+        self.assertEqual(
+            self.window.settingSuggestionMenu.items, ["主页横幅亮度"]
+        )
+
+        self.window.settingSuggestionMenu.suggestionActivated.emit(
+            page.searchSuggestions("横幅亮度")[0]
+        )
+        QTest.qWait(500)
+
+        self.assertEqual(self.window.searchEdit.text(), "")
+        self.assertEqual(page.currentRouteKey(), "banner")
+
+    def testLeavingTheSettingPageClosesTheSuggestions(self):
+        self.window.switchTo(self.window.settingPage)
+        QTest.qWait(500)
+        self.window.searchEdit.setText("横幅亮度")
+        self.app.processEvents()
+
+        self.window.switchTo(self.window.homePage)
+
+        self.assertFalse(self.window.settingSuggestionMenu.isVisible())
+        self.assertEqual(self.window.searchEdit.text(), "")
 
     def testBackgroundSchedulesDoNotLoadManagementPages(self):
         broadcastTask = {

@@ -117,14 +117,31 @@ class _TouchScrollGuard(QObject):
 
 
 class ScrollArea(FluentScrollArea):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, grabTouch=True):
         super().__init__(parent)
         self._tuneScrollAnimations()
+        self.isTouchGestureGrabbed = False
+        if grabTouch:
+            self.grabTouchGesture()
+        self._touchScrollGuard = _TouchScrollGuard.instance()
+
+    def grabTouchGesture(self):
+        """Grab the viewport once, and only once.
+
+        Grabbing and releasing repeatedly leaves Qt's gesture manager holding
+        stale targets, which later crashes while an unrelated window is being
+        created, so areas that may never be scrolled defer the grab until they
+        are shown instead of taking one and giving it back. The bookkeeping is
+        per instance because `QScroller.grabbedGesture()` answers with the
+        globally registered recognizer type, not with this viewport's state.
+        """
+        if self.isTouchGestureGrabbed:
+            return
         QScroller.grabGesture(
             self.viewport(),
             QScroller.ScrollerGestureType.TouchGesture,
         )
-        self._touchScrollGuard = _TouchScrollGuard.instance()
+        self.isTouchGestureGrabbed = True
 
     def _tuneScrollAnimations(self):
         """Keep qfluentwidgets' smooth-bar animations inside the bar lifetime."""

@@ -14,4 +14,6 @@
 - `cfg.expandedSettingGroups` 不再有任何读写方。配置项定义保留，以免老 `UserConfig.json` 中的键在下次保存时被清掉。
 - 条件可见的 Setting Card（如"自定义主页图片"只在图片来源为自定义时出现）原本寄生在 `setSearchText()` 上，必须解耦为由各配置项 `valueChanged` 驱动的独立刷新。
 - 隐藏的 Setting Card 不进入 Setting Suggestion：搜索不得为了展示结果而改写用户的前置设置。
-- 层级切换动画沿用 Fluent 运动基准（进入 150 px 滑入 + 300 ms 淡入 `cubic-bezier(0,0,0,1)`，退出 150 ms 淡出 `cubic-bezier(1,0,1,1)`）。150 px 是设备无关像素，Qt 的部件坐标同样是设备无关像素，因此不得再乘 `devicePixelRatio`——那会缩放两次。`main_window.py` 的 `BORDER_WIDTH` 之所以要乘，是因为它喂给原生命中测试，吃的是物理像素。
+- 层级切换是 `SlideNavigationTransitionInfo` 式的推移：进入下一级时旧页左移出场、新页自右入场，返回时反向，两页共用同一条 `cubic-bezier(0,0,0,1)` 曲线和 300 ms 时长并交叉淡入淡出。**不要**改成"旧页原地淡出"——那是 `FromBottom`（顶层切换）的特征，横向用它两页会脱节。
+- 位移 150 px 是设备无关像素，Qt 的部件坐标同样是设备无关像素，因此不得再乘 `devicePixelRatio`——那会缩放两次。`main_window.py` 的 `BORDER_WIDTH` 之所以要乘，是因为它喂给原生命中测试，吃的是物理像素。
+- 每个 Setting Section 自带 `ScrollArea` 意味着一个页面里有十几个可滚动区域。它们不能在构造时各抓一次触控手势：Qt 的手势管理器不会在目标销毁时清理，抓放循环留下的残留会在之后创建窗口时崩溃（`QWindowPrivate::connectToScreen` 读到已销毁的 `QScreen`）。因此 Section 延迟到首次显示才抓，且只抓一次。

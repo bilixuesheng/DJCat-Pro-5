@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from time import monotonic
-
 from PySide6.QtCore import (
     Property,
     QByteArray,
@@ -18,20 +16,16 @@ from PySide6.QtWidgets import (
     QAbstractButton,
     QApplication,
     QGraphicsOpacityEffect,
-    QHBoxLayout,
     QLabel,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 from qfluentwidgets import (
-    CaptionLabel,
     CardWidget,
     FluentIcon,
     FluentStyleSheet,
-    IconWidget,
     SettingCard,
-    StrongBodyLabel,
     isDarkTheme,
 )
 from qfluentwidgets.components.settings.expand_setting_card import (
@@ -40,14 +34,7 @@ from qfluentwidgets.components.settings.expand_setting_card import (
     HeaderSettingCard,
 )
 
-from app.config.cfg import cfg
-
 QWIDGETSIZE_MAX = (1 << 24) - 1
-
-# _contentHeight() 里的 QLayout.activate() 是强制同步重排,不受 LayoutRequest 事件压缩保护。
-# 1 ms 的 Animation Tick 下内层卡片展开一次要跑几百遍,按 120 Hz 采样肉眼已看不出差别,
-# 末态由 expandAnimation.finished 补齐。
-LAYOUT_TICK_SECONDS = 1 / 120
 
 
 def setRevealPainting(widget: QWidget, enabled: bool) -> None:
@@ -364,103 +351,29 @@ class CollapsibleSettingCard(QWidget):
         return True
 
 
-class CollapsibleSettingCardGroup(SettingMaterialCard):
-    def __init__(
-        self,
-        title: str,
-        key: str,
-        parent=None,
-        icon=None,
-        content: str = "",
-    ):
-        super().__init__(parent)
-        self.setObjectName(key)
+class SettingCardList(SettingMaterialCard):
+    """One translucent material shared by a flat run of setting cards."""
 
-        self.iconWidget = IconWidget(icon, self) if icon is not None else None
-        self.titleLabel = StrongBodyLabel(title, self)
-        self.contentLabel = CaptionLabel(content, self)
-        self.expandButton = SettingExpandButton(self)
-        self.cardContainer = QWidget(self)
-        self.cardView = QWidget(self.cardContainer)
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.cardLayout = QVBoxLayout(self)
         self.cardPaintFilter = CardPaintFilter(self)
         self.labelElideFilter = LabelElideFilter(self)
-        self.collapseAnimation = QPropertyAnimation(
-            self.cardContainer, QByteArray(b"maximumHeight"), self
-        )
-
-        self.headerWidget = QWidget(self)
-        self.headerLayout = QHBoxLayout(self.headerWidget)
-        self.titleLayout = QVBoxLayout()
-        self.revealLayout = QVBoxLayout(self.cardContainer)
-        self.cardLayout = QVBoxLayout(self.cardView)
-        self.vBoxLayout = QVBoxLayout(self)
-        self.separator = GroupSeparator(self.cardView)
         self._settingCards = []
         self._itemSeparators = []
-        self._headerPressPosition = None
-        self._headerPressCanceled = False
-        self._searchActive = False
-        self._searchCollapsed = False
-        self._lastCardExpandTick = 0.0
 
-        self._initWidget()
         self._initLayout()
-        self._bind()
-
-    def _initWidget(self) -> None:
-        self.expandButton.setFixedSize(26, 26)
-        if self.iconWidget is not None:
-            self.iconWidget.setFixedSize(24, 24)
-        self.headerWidget.setFixedHeight(70)
-        self.titleLabel.setFixedHeight(22)
-        self.contentLabel.setFixedHeight(18)
-
-        self.collapseAnimation.setDuration(200)
-        self.collapseAnimation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        FluentStyleSheet.SETTING_CARD_GROUP.apply(self)
-
-        self.isCollapsed = self.objectName() not in cfg.expandedSettingGroups.value
-        self.cardContainer.setMaximumHeight(0 if self.isCollapsed else QWIDGETSIZE_MAX)
-        setRevealPainting(self.cardView, not self.isCollapsed)
-        self._refreshExpandIcon()
 
     def _initLayout(self) -> None:
-        self.headerLayout.setContentsMargins(16, 15, 8, 15)
-        self.headerLayout.setSpacing(12)
-        if self.iconWidget is not None:
-            self.headerLayout.addWidget(self.iconWidget)
-        self.titleLayout.setContentsMargins(0, 0, 0, 0)
-        self.titleLayout.setSpacing(0)
-        self.titleLayout.addWidget(self.titleLabel)
-        self.titleLayout.addWidget(self.contentLabel)
-        self.headerLayout.addLayout(self.titleLayout)
-        self.headerLayout.addStretch(1)
-        self.headerLayout.addWidget(self.expandButton)
-
         self.cardLayout.setContentsMargins(0, 0, 0, 0)
         self.cardLayout.setSpacing(0)
-        self.cardLayout.addWidget(self.separator)
-        self.revealLayout.setContentsMargins(0, 0, 0, 0)
-        self.revealLayout.setSpacing(0)
-        self.revealLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.revealLayout.addWidget(self.cardView)
-
-        self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
-        self.vBoxLayout.setSpacing(0)
-        self.vBoxLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.vBoxLayout.addWidget(self.headerWidget)
-        self.vBoxLayout.addWidget(self.cardContainer)
-        self.setFixedHeight(self.headerWidget.height())
-
-    def _bind(self) -> None:
-        self.expandButton.clicked.connect(self._onExpandClicked)
-        self.collapseAnimation.finished.connect(self._onCollapseFinished)
-        self.collapseAnimation.valueChanged.connect(self._onCollapseValueChanged)
+        self.cardLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        FluentStyleSheet.SETTING_CARD_GROUP.apply(self)
 
     def addSettingCard(self, card: QWidget) -> None:
         separator = None
         if self._settingCards:
-            separator = GroupSeparator(self.cardView)
+            separator = GroupSeparator(self)
             self.cardLayout.addWidget(separator)
         self.cardLayout.addWidget(card)
         self._settingCards.append(card)
@@ -470,8 +383,6 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
             targets += card.findChildren(SettingCard)
             targets += card.findChildren(ExpandBorderWidget)
             targets += card.findChildren(GroupSeparator)
-            card.expandAnimation.valueChanged.connect(self._onCardExpandTick)
-            card.expandAnimation.finished.connect(self._contentHeight)
         for widget in targets:
             widget.installEventFilter(self.cardPaintFilter)
             if isinstance(widget, SettingCard):
@@ -484,7 +395,6 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
                     widget.vBoxLayout.setAlignment(label, Qt.AlignmentFlag.AlignVCenter)
                     label.installEventFilter(self.labelElideFilter)
                 widget.hBoxLayout.setStretchFactor(widget.vBoxLayout, 1 << 16)
-        self._contentHeight()
 
     def addSettingCards(self, cards: list[QWidget]) -> None:
         for card in cards:
@@ -495,138 +405,15 @@ class CollapsibleSettingCardGroup(SettingMaterialCard):
 
     def setSettingCardVisible(self, card: QWidget, visible: bool) -> None:
         card.setVisible(visible)
-        hasVisibleCard = False
-        for settingCard, separator in zip(
-            self._settingCards,
-            self._itemSeparators,
-        ):
-            isVisible = not settingCard.isHidden()
+        self._refreshSeparators()
+
+    def hasVisibleCard(self) -> bool:
+        return any(not card.isHidden() for card in self._settingCards)
+
+    def _refreshSeparators(self) -> None:
+        seenVisibleCard = False
+        for card, separator in zip(self._settingCards, self._itemSeparators):
+            isVisible = not card.isHidden()
             if separator is not None:
-                separator.setVisible(isVisible and hasVisibleCard)
-            hasVisibleCard |= isVisible
-        self._contentHeight()
-
-    def _contentHeight(self) -> int:
-        self.cardLayout.invalidate()
-        self.cardLayout.activate()
-        height = self.cardLayout.sizeHint().height()
-        self.cardView.setFixedHeight(height)
-        if (
-            not self._isVisuallyCollapsed()
-            and self.collapseAnimation.state()
-            == QPropertyAnimation.State.Stopped
-        ):
-            self.setFixedHeight(self.headerWidget.height() + height)
-        return height
-
-    def mousePressEvent(self, event) -> None:
-        if (
-            event.button() == Qt.MouseButton.LeftButton
-            and event.position().y() < self.cardContainer.geometry().top()
-        ):
-            self._headerPressPosition = event.globalPosition().toPoint()
-            self._headerPressCanceled = False
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event) -> None:
-        if self._headerPressPosition is not None:
-            distance = (
-                event.globalPosition().toPoint() - self._headerPressPosition
-            ).manhattanLength()
-            if (
-                distance >= QApplication.startDragDistance()
-                or not self.rect().contains(event.position().toPoint())
-                or event.position().y() >= self.cardContainer.geometry().top()
-            ):
-                self._headerPressCanceled = True
-                self.isPressed = False
-                self._updateBackgroundColor()
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event) -> None:
-        shouldToggle = (
-            event.button() == Qt.MouseButton.LeftButton
-            and self._headerPressPosition is not None
-            and not self._headerPressCanceled
-            and self.rect().contains(event.position().toPoint())
-            and event.position().y() < self.cardContainer.geometry().top()
-        )
-        self._headerPressPosition = None
-        self._headerPressCanceled = False
-        super().mouseReleaseEvent(event)
-        if shouldToggle:
-            self._onExpandClicked()
-
-    def leaveEvent(self, event) -> None:
-        if self._headerPressPosition is not None:
-            self._headerPressCanceled = True
-            self.isPressed = False
-            self._updateBackgroundColor()
-        super().leaveEvent(event)
-
-    def _onExpandClicked(self) -> None:
-        if self._searchActive:
-            self._searchCollapsed = not self._searchCollapsed
-            self._animateCollapsed(self._searchCollapsed)
-            return
-        self._setCollapsed(not self.isCollapsed)
-        key = self.objectName()
-        expandedGroups = list(cfg.expandedSettingGroups.value)
-        if not self.isCollapsed and key not in expandedGroups:
-            expandedGroups.append(key)
-        elif self.isCollapsed and key in expandedGroups:
-            expandedGroups.remove(key)
-        cfg.set(cfg.expandedSettingGroups, expandedGroups)
-
-    def _setCollapsed(self, isCollapsed: bool) -> None:
-        self.isCollapsed = isCollapsed
-        self._animateCollapsed(self._isVisuallyCollapsed())
-
-    def _animateCollapsed(self, isCollapsed: bool) -> None:
-        self._refreshExpandIcon(animated=True)
-        self.collapseAnimation.stop()
-        self.collapseAnimation.setStartValue(self.cardContainer.height())
-        self.collapseAnimation.setEndValue(
-            0 if isCollapsed else self._contentHeight()
-        )
-        self.collapseAnimation.start()
-
-    def setSearchExpanded(self, expanded: bool) -> None:
-        if expanded and not self._searchActive:
-            self._searchCollapsed = False
-        self._searchActive = expanded
-        if not expanded:
-            self._searchCollapsed = False
-        self.collapseAnimation.stop()
-        isCollapsed = self._isVisuallyCollapsed()
-        self.cardContainer.setMaximumHeight(0 if isCollapsed else QWIDGETSIZE_MAX)
-        self._onCollapseValueChanged(0 if isCollapsed else self._contentHeight())
-        self._refreshExpandIcon()
-
-    def _isVisuallyCollapsed(self) -> bool:
-        return self._searchCollapsed if self._searchActive else self.isCollapsed
-
-    def _refreshExpandIcon(self, animated: bool = False) -> None:
-        self.expandButton.setExpanded(
-            not self._isVisuallyCollapsed(),
-            animated,
-        )
-
-    def _onCardExpandTick(self, _height) -> None:
-        now = monotonic()
-        if now - self._lastCardExpandTick < LAYOUT_TICK_SECONDS:
-            return
-        self._lastCardExpandTick = now
-        self._contentHeight()
-
-    def _onCollapseFinished(self) -> None:
-        if not self._isVisuallyCollapsed():
-            self.cardContainer.setMaximumHeight(QWIDGETSIZE_MAX)
-            self._onCollapseValueChanged(self._contentHeight())
-        else:
-            self._onCollapseValueChanged(0)
-
-    def _onCollapseValueChanged(self, height) -> None:
-        height = max(0, int(height))
-        self.setFixedHeight(self.headerWidget.height() + height)
-        setRevealPainting(self.cardView, height > 0)
+                separator.setVisible(isVisible and seenVisibleCard)
+            seenVisibleCard |= isVisible

@@ -53,9 +53,15 @@ class WindowBackground(QWidget):
         self._borderVisible = visible
         self.update()
 
-    def setRoundedWindow(self, enabled: bool) -> None:
+    def setRoundedWindow(self, enabled: bool, shadow: bool = True) -> None:
+        """``shadow=False`` keeps the rounded corners for in-page previews,
+        which sit inside a scroll area and must not cast a window shadow."""
         self._cornerRadius = 8 if enabled else 0
         self.setBorderVisible(enabled)
+        if not shadow:
+            self.setGraphicsEffect(None)
+            self.update()
+            return
         shadow = self.graphicsEffect()
         if enabled and shadow is None:
             # 阴影只作用于背景，避免时间每秒更新时重新处理全部子控件。

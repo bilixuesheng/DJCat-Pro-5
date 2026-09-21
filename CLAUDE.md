@@ -22,6 +22,7 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 - Existing-card 模式的 **Home Card Task** 只保存稳定 Home Card key、用于失效提示的标题快照和打开／关闭动作；关闭只适用于 Default Home Card。Custom 模式直接拥有 Action Sequence，但不会创建 Custom Home Card。
 - AI Markdown Conversion 使用 Machine Identity 领取和结算 Daily Quota；Machine Code 只是定位该身份的可见别名。
 - Projection 编辑器中的"整理并投送"只在 Markdown 模式显示并独立记忆；它复用 AI Markdown Conversion，但启动恢复必须绕过整理流程并原样恢复 Projection Snapshot。
+- **Setting Section** 按 Setting Route 组成一棵树；顶层只有导航行，叶子才持有 Setting Card。Setting Suggestion 指向卡片及其 Route，不改变任何页面内容。
 - Animation Tick 推进动画属性；Qt/Windows 的绘制与合成链路再决定 Presented Frame。两者不能互换描述。
 - Menu Reveal 由 Animation Tick 推进，但菜单 viewport 刷新次数不是动画帧数；合并冗余刷新不能改变用户看到的展开效果。
 
@@ -36,6 +37,14 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 **`app/platform/menu_animation.py` 独占 QFluentWidgets 的 Menu Reveal 适配。** 它只替换 `DROP_DOWN` 和 `PULL_UP` 两种动画管理器；其他动画类型及页面组件不再分别接管菜单动画。
 
 **`app/platform/dialog_animation.py` 独占 QFluentWidgets 蒙层弹窗的公共适配。** 它复用阴影效果并接管 `showEvent` 和 `done`，在淡入淡出期间暂停阴影以避免 1 ms Animation Tick 下的逐帧模糊重算；淡入结束后用 `color` 属性动画将阴影 alpha 从 0 渐变到目标值，此时无外层不透明度效果只剩一层阴影，不掉帧。弹窗中的下拉框仍属于 Menu Reveal；页面不得重复修补组件库或改变原有动画曲线。
+
+**`app/view/components/setting_section.py` 独占设置页的层级导航。** Setting Section 的下钻、返回、面包屑对应的 Setting Route，以及层级之间的推移动画都由它提供；页面只负责装配内容。推移沿用 `SlideNavigationTransitionInfo`：进入下一级时旧页左移出场、新页自右入场，返回时反向，两页共用同一条 `cubic-bezier(0,0,0,1)` 曲线和 300 ms 时长并交叉淡入淡出。"旧页原地淡出"是 `FromBottom`（顶层切换）的特征，横向照搬会让两页脱节。位移 150 px 是设备无关像素，不得再乘 `devicePixelRatio`——Qt 的部件坐标本就是设备无关像素，乘了等于缩放两次；`main_window.py` 的 `BORDER_WIDTH` 要乘是因为它喂给原生命中测试，吃的是物理像素。动画期间只改 `pos` 和不透明度，不碰布局。
+
+**设置页搜索只产出 Setting Suggestion。** 页面本身不筛选、不折叠、不重排；建议只按 Setting Card 的标题匹配，条件隐藏的卡片不参与，跨 Section 重名的标题才补完整 Route 前缀。`SettingPage` 提供 `searchSuggestions()` 和 `navigateToRoute()`，弹窗由 MainWindow 拥有——搜索框属于标题栏，设置页不得反向持有它。选中建议后清空搜索框、跳到目标 Route、滚动到卡片并描一圈主题色边框，绝不改写用户的前置设置来让隐藏卡片现身。
+
+**每个 Setting Section 各自是一个 `ScrollArea`，各自记住滚动位置。** 返回上一级时停在离开时的位置，触控仲裁沿用 `ScrollArea` 既有实现，页面不另写一套。
+
+`ScrollArea` 的触控手势抓取只做一次，不能反复抓了又放：Qt 不会在目标销毁时清掉手势管理器里的记录，抓放循环留下的残留会在之后创建任意窗口时崩在 `QWindowPrivate::connectToScreen`。一次会话里大多数 Setting Section 从不打开，因此它们用 `ScrollArea(parent, grabTouch=False)` 构造，首次显示时才 `grabTouchGesture()`。是否已抓由实例自己记账——`QScroller.grabbedGesture()` 返回的是全局注册的识别器类型（任何 viewport 都非零），拿它判断会让除第一个以外的所有 `ScrollArea` 都不再抓手势，等于全局关掉触控滚动。
 
 **`ScrollArea` 统一仲裁单指触控滚动与子控件点击。** 从按钮、下拉框或卡片上起滑时，移动达到系统拖动阈值后必须取消该触控序列的按压和释放，不能在滚动结束时触发原控件；未达到阈值的短按仍按正常点击处理。页面不得各自复制这套判定。HomePage 进入卡片编辑态时由排序手势独占触控，并依靠卡片拖动的边缘自动滚动跨越视口；退出编辑态后恢复页面触控滚动。
 
@@ -69,7 +78,7 @@ Lazy Page 必须保留外部调用需要的最小接口：
 | Lazy Page | 加载前可暂存或转发的状态 |
 |---|---|
 | `LazyAppStorePage` | 搜索文字、固定卡片信号；清缓存和关闭在未加载时为空操作 |
-| `LazySettingPage` | 搜索文字、缓存清理信号；未加载时无需刷新 AI 风格草稿 |
+| `LazySettingPage` | 缓存清理信号；搜索建议和 Setting Route 导航一律转发给真实页面（导航到设置页必然已 `ensureLoaded()`，搜索框只在该页可见） |
 | `LazyTrayControlPage` | 最新 Home Card 列表 |
 | `LazyCreditsPage` | 无业务状态 |
 
@@ -178,6 +187,10 @@ AI Markdown 对话框和 Projection 编辑器内联整理的输入框都使用 2
 | `app/view/pages/` | 页面、临时展示窗口和页面级 worker 编排 |
 | `app/view/pages/home_card_task_page.py` | Home Card Task 的懒加载编辑页面；不拥有调度计时器 |
 | `app/view/components/` | 多页面复用的 Markdown、背景、滚动和设置卡片组件 |
+| `app/view/components/setting_section.py` | Setting Section 的下钻容器、导航行、推移动画和命中高亮 |
+| `app/view/components/setting_preview.py` | Setting Preview：横幅、窗口背景、软件图标、主题和窗口文本的实时示意 |
+| `app/view/components/setting_suggestion_menu.py` | Setting Suggestion 弹窗；选中后交回 Route，不把文本写回搜索框 |
+| `app/common/application_icon.py` | Application Icon 的解析：主窗口、启动页、托盘与 Tray Menu“主页”共用一处 |
 | `pyqt_github_markdown/` | 项目内置 Markdown 渲染器；不承载 DJCat 业务规则 |
 
 `app/common/application_version.py` 只包含架构和版本比较等纯函数，允许 MainWindow 在启动阶段导入。重量较大的 `app/common/application_store.py`、Custom Home Card 编辑器和 Markdown 渲染器分别在对应页面、编辑操作或更新日志首次需要时导入；`edge_tts` 依赖只在实际查询音色或合成语音时导入。

@@ -367,12 +367,19 @@ class WindowBackgroundTest(TestCase):
                     not imageVisible,
                 )
 
+        # 搜索不得让条件隐藏的卡片现身，也不该把它列进建议。
         cfg.set(cfg.broadcastBackgroundMode, "主题色", save=False)
-        page.setSearchText("背景颜色")
         self.assertTrue(page.broadcastBackgroundColorCard.isHidden())
+        self.assertNotIn(
+            page.broadcastBackgroundColorCard,
+            [item.card for item in page.searchSuggestions("背景颜色")],
+        )
         cfg.set(cfg.broadcastBackgroundMode, "纯色", save=False)
         self.assertFalse(page.broadcastBackgroundColorCard.isHidden())
-        page.setSearchText("")
+        self.assertIn(
+            page.broadcastBackgroundColorCard,
+            [item.card for item in page.searchSuggestions("背景颜色")],
+        )
 
     @patch("app.view.pages.setting_page.ColorDialog")
     def testBackgroundColorDialogUsesChineseTitle(self, colorDialog):

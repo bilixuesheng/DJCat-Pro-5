@@ -17,9 +17,9 @@ from qfluentwidgets.common.screen import getCurrentScreenGeometry
 from qfluentwidgets.components.widgets.menu import MenuActionListWidget
 from qframelesswindow import WindowEffect
 
+from app.common.application_icon import applicationIcon, trayHomeIcon
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
-from app.config.paths import ASSET_DIR
 
 
 
@@ -182,21 +182,8 @@ class SystemTrayIcon(QSystemTrayIcon):
         self.setToolTip(text.strip() or APP_NAME)
 
     def _updateApplicationIcon(self, _value=None):
-        customIcon = (
-            QIcon(cfg.applicationIconPath.value)
-            if cfg.applicationIconSource.value == "自定义"
-            else QIcon()
-        )
-        self.setIcon(
-            customIcon
-            if not customIcon.isNull()
-            else QIcon(str(ASSET_DIR / "logo.png"))
-        )
-        self._homeIcon = (
-            customIcon
-            if not customIcon.isNull()
-            else QIcon(str(ASSET_DIR / "logo_cat.png"))
-        )
+        self.setIcon(applicationIcon())
+        self._homeIcon = trayHomeIcon()
         if hasattr(self, "showAction"):
             self.showAction.setIcon(self._homeIcon)
 
