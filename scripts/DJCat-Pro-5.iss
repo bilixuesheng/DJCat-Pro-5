@@ -33,7 +33,7 @@ VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} 安装程序
 VersionInfoProductName={#MyAppName}
 SourceDir=..
-DefaultDirName={autopf}\DJCat Pro
+DefaultDirName={code:GetDefaultDir}
 DefaultGroupName=电教猫 Pro 5
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesAllowed={#MyAppArch}
@@ -64,3 +64,93 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+
+function GetDriveType(lpRootPathName: String): UINT;
+  external 'GetDriveTypeW@kernel32.dll stdcall';
+
+const
+  DRIVE_FIXED = 3;
+
+function GetDefaultDir(Param: String): String;
+var
+  UserName: String;
+begin
+  UserName := GetUserNameString;
+  if DirExists('D:\') and (GetDriveType('D:\') = DRIVE_FIXED) then
+    Result := 'D:\Users\' + UserName + '\AppData\Local\Programs\DJCat Pro'
+  else
+    Result := ExpandConstant('{autopf}\DJCat Pro');
+end;
+
+procedure DriveButtonClick(Sender: TObject);
+var
+  DriveLetter: Char;
+  UserName: String;
+begin
+  DriveLetter := Chr(TNewButton(Sender).Tag);
+  UserName := GetUserNameString;
+  WizardForm.DirEdit.Text := DriveLetter + ':\Users\' + UserName + '\AppData\Local\Programs\DJCat Pro';
+end;
+
+procedure InitializeWizard();
+var
+  HintLabel: TNewStaticText;
+  DriveButton: TNewButton;
+  I: Integer;
+  DriveLetter: Char;
+  DriveRoot: String;
+  ButtonLeft: Integer;
+  UserName: String;
+  ButtonCaption: String;
+  ButtonWidth: Integer;
+begin
+  UserName := GetUserNameString;
+
+  { Hint about Deep Freeze }
+  HintLabel := TNewStaticText.Create(WizardForm);
+  HintLabel.Parent := WizardForm.SelectDirPage;
+  HintLabel.Caption :=
+    '如果计算机使用了冰点还原等系统还原软件，建议将电教猫安装在不会被还原的分区' + #13#10 +
+    '（通常为 D 盘或其他非系统盘）。';
+  HintLabel.Top := WizardForm.DirEdit.Top + WizardForm.DirEdit.Height + ScaleY(8);
+  HintLabel.Left := WizardForm.DirEdit.Left;
+  HintLabel.Width := WizardForm.DirEdit.Width;
+  HintLabel.WordWrap := True;
+  HintLabel.AutoSize := True;
+
+  { Drive selection buttons }
+  ButtonLeft := WizardForm.DirEdit.Left;
+  for I := Ord('C') to Ord('Z') do
+  begin
+    DriveLetter := Chr(I);
+    DriveRoot := DriveLetter + ':\';
+    if DirExists(DriveRoot) and (GetDriveType(DriveRoot) = DRIVE_FIXED) then
+    begin
+      DriveButton := TNewButton.Create(WizardForm);
+      DriveButton.Parent := WizardForm.SelectDirPage;
+      DriveButton.Top := HintLabel.Top + HintLabel.Height + ScaleY(8);
+      DriveButton.Left := ButtonLeft;
+      DriveButton.Height := ScaleY(23);
+
+      if DriveLetter = 'C' then
+      begin
+        ButtonCaption := DriveLetter + ': (可能被还原)';
+        ButtonWidth := ScaleX(120);
+      end
+      else
+      begin
+        ButtonCaption := DriveLetter + ': 盘';
+        ButtonWidth := ScaleX(60);
+      end;
+
+      DriveButton.Width := ButtonWidth;
+      DriveButton.Caption := ButtonCaption;
+      DriveButton.Tag := I;
+      DriveButton.OnClick := @DriveButtonClick;
+
+      ButtonLeft := ButtonLeft + ButtonWidth + ScaleX(8);
+    end;
+  end;
+end;

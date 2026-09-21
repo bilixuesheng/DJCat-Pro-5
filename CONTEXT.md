@@ -215,7 +215,7 @@ App Data Directory 位于系统用户数据目录的存储模式。这里的 Ins
 _Avoid_: Application 安装状态、用户模式
 
 **Portable Mode**:
-App Data Directory 位于程序旁 `DJCatPro/` 的存储模式。启动时只要该目录存在就选择 Portable Mode。
+App Data Directory 位于程序旁 `DJCatPro/` 的存储模式。全新安装默认选择此模式；已有 User Data Directory 时保持 Installed Mode。
 _Avoid_: 便携 ZIP 的文件格式、Application 的安装目录
 
 **Storage Migration**:
