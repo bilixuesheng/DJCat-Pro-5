@@ -48,6 +48,8 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 **`ScrollArea` 统一仲裁单指触控滚动与子控件点击。** 从按钮、下拉框或卡片上起滑时，移动达到系统拖动阈值后必须取消该触控序列的按压和释放，不能在滚动结束时触发原控件；未达到阈值的短按仍按正常点击处理。页面不得各自复制这套判定。HomePage 进入卡片编辑态时由排序手势独占触控，并依靠卡片拖动的边缘自动滚动跨越视口；退出编辑态后恢复页面触控滚动。
 
+需要让出触控的模式调用 `ScrollArea.setTouchScrollSuppressed()`，它把拖动阈值抬到手指够不到的距离，不释放手势；页面不得自己 `QScroller.ungrabGesture()`，那就是上一条禁止的抓放循环。落在卡片上的触控本就由卡片在编辑态 `WA_AcceptTouchEvents` 并吃掉 `TouchBegin` 拿走，抑制只负责空白处不再起滚动。
+
 **Tray Menu 不拥有 Home Card。** 它只根据 HomePage 提供的入口快照重建菜单，并把稳定 key 交回 MainWindow/HomePage 执行。
 
 Tray Menu 的外观和弹出方式固定恢复为 v5.1.2：右键由注册的 context menu 打开，左键按配置调用菜单；位置调整保留在 `showEvent()`，不再叠加新的展开或定位方案。自定义 AcrylicMenu 在 Windows 10 上统一使用方角窗口和方角边框，一级菜单和主页卡片二级菜单保持一致；Windows 11 继续使用原有系统圆角、亚克力和阴影。该平台差异只属于 Tray Menu，不修改下拉框、输入框右键等 QFluentWidgets 菜单。
@@ -121,7 +123,9 @@ Application Store 首次显示前同步计算"已安装"和"全部应用"两个�
 
 Client Update 与 Application Store 的 Package 下载共用 `app/common/update_download.py` 中的 `UpdateDownloadWorker`。支持分段的下载默认以 8 个工作线程开始；后续智能扩容和全局并发限制仍由共享下载器统一控制，不能按界面各自复制线程配置。
 
-Client Update 下载完成后，MainWindow 使用后台 `UpdateApplyWorker` 解压更新 ZIP 到暂存目录并启动 `updater.exe`，期间显示不可取消且只含不确定进度环的蒙层弹窗。确认更新器进程创建成功后才关闭 DJCat；启动失败时关闭蒙层并保留当前进程显示错误，不能在 GUI 线程等待更新器启动。
+Client Update 下载完成后，MainWindow 使用后台 `UpdateApplyWorker` 解压更新 ZIP 到暂存目录并启动 `updater.exe`，期间显示不可取消且只含不确定进度环的蒙层弹窗。确认更新器进程创建成功后才关闭 DJCat；启动失败时关闭蒙层并保留当前进程显示错误，不能在 GUI 线程等待更新器启动。更新包在更新器进程创建成功之后才删除，任何一步失败都还能重来；残留的包由下次启动的 `clearUpdateDirectory()` 清掉。
+
+`updater.exe` 无法覆盖正在运行的自己，只能先改名为 `updater.exe.old` 再复制。因此复制失败必须把它改回来，启动时的 `restoreUpdaterBinary()` 也只在 `updater.exe` 确实存在时才删除备份，否则把备份提升回去。无条件删除备份会让程序目录一个更新器都不剩，之后每次 Client Update 都固定失败在"找不到更新器"。
 
 广告触控的 QApplication 全局事件过滤器只在 Application Store 可见时安装；页面隐藏或关闭时移除，避免其他页面的全部输入事件继续经过广告层。
 
@@ -189,6 +193,7 @@ Busy Glow 只表示"正在进行"，不表示完成度。对话框那张卡上�
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
 | `app/common/home_card_tasks.py` | Home Card Task schema 归一化、稳定 ID、触发事件和动作常量；不负责计时或 QWidget |
+| `tools/updater/updater.c` | Client Update 的独立更新器：等待进程退出、把暂存目录覆盖回程序目录、重启 DJCat |
 | `app/view/windows/main_window.py` | 桌面组合根、导航、长期运行任务和 Client Update UI |
 | `app/view/pages/` | 页面、临时展示窗口和页面级 worker 编排 |
 | `app/view/pages/home_card_task_page.py` | Home Card Task 的懒加载编辑页面；不拥有调度计时器 |

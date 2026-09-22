@@ -4,7 +4,14 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, QUrl, Qt
+from PySide6.QtCore import (
+    QCoreApplication,
+    QEvent,
+    QParallelAnimationGroup,
+    QPoint,
+    Qt,
+    QUrl,
+)
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -139,6 +146,47 @@ class SettingSectionTest(TestCase):
         # 回到已访问过的 Section 不该再抓一次，抓了又放会在 Qt 的手势管理器里留下残留。
         self.navigate(page, ROOT_SECTION_KEY)
         self.assertEqual(grabbed(), {ROOT_SECTION_KEY, "broadcast"})
+
+    def testRepeatedNavigationDoesNotAccumulateAnimationGroups(self):
+        page = self.buildPage()
+        stack = page.sectionStack
+
+        def liveGroups():
+            # deleteLater() 只在事件循环处理 DeferredDelete 时生效。
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            return len(stack.findChildren(QParallelAnimationGroup))
+
+        self.navigate(page, "broadcast")
+        self.navigate(page, ROOT_SECTION_KEY)
+        settled = liveGroups()
+
+        for _ in range(12):
+            self.navigate(page, "broadcast")
+            self.navigate(page, ROOT_SECTION_KEY)
+
+        # 每次推移都会新建一个动画组；不释放就会随会话一直涨。
+        self.assertEqual(liveGroups(), settled)
+
+    def testInterruptedNavigationDoesNotAccumulateAnimationGroups(self):
+        page = self.buildPage()
+        stack = page.sectionStack
+
+        def liveGroups():
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            return len(stack.findChildren(QParallelAnimationGroup))
+
+        # 不等动画结束就换目标，走 stopAnimations() 那条收尾路径。
+        for _ in range(12):
+            page.navigateToRoute("broadcast")
+            page.navigateToRoute(ROOT_SECTION_KEY)
+        self.app.processEvents()
+        interrupted = liveGroups()
+
+        for _ in range(60):
+            page.navigateToRoute("broadcast")
+            page.navigateToRoute(ROOT_SECTION_KEY)
+        self.app.processEvents()
+        self.assertEqual(liveGroups(), interrupted)
 
     def testBackgroundSectionsCarryAPreviewAndTheirOwnCards(self):
         page = self.buildPage()

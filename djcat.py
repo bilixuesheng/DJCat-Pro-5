@@ -72,7 +72,7 @@ def main():
     from PySide6.QtGui import QColor
     from qfluentwidgets import qconfig, setThemeColor
 
-    from app.common.update_download import clearUpdateDirectory
+    from app.common.update_download import clearUpdateDirectory, restoreUpdaterBinary
     from app.config.cfg import cfg, migrateConfig
     from app.config.paths import CONFIG_PATH
     from app.platform.dialog_animation import optimizeFluentDialogs
@@ -92,12 +92,10 @@ def main():
         )
     from app.config.paths import APP_DIR
 
-    oldUpdater = APP_DIR / "updater.exe.old"
-    if oldUpdater.is_file():
-        try:
-            oldUpdater.unlink()
-        except OSError:
-            pass
+    if restoreUpdaterBinary(APP_DIR):
+        from loguru import logger
+
+        logger.warning("上次更新未能替换 updater.exe，已从备份恢复")
     sys.excepthook = exceptionHook
     qconfig.load(CONFIG_PATH, cfg)
     migrateConfig()

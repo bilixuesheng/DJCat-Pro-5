@@ -161,8 +161,6 @@ class UpdateApplyWorker(QObject):
             if len(entries) == 1 and entries[0].is_dir():
                 stagingDir = entries[0]
 
-            self.zipPath.unlink(missing_ok=True)
-
             updaterPath = APP_DIR / "updater.exe"
             if not updaterPath.is_file():
                 logger.error("updater.exe not found at {}", updaterPath)
@@ -183,6 +181,9 @@ class UpdateApplyWorker(QObject):
                     | subprocess.CREATE_NEW_PROCESS_GROUP
                 ),
             )
+            # 更新器确实起来了才丢掉更新包；提前删会让任何一步失败都只能重新下载。
+            # 留下来也不会堆积：下次启动的 clearUpdateDirectory() 会清掉整个更新目录。
+            self.zipPath.unlink(missing_ok=True)
             self.finished.emit(True)
         except Exception:
             logger.exception("增量更新准备失败")

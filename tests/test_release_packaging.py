@@ -58,8 +58,11 @@ def test_installer_is_single_language_and_architecture_aware():
     assert 'Name: "chinesetraditional"' not in script
     assert "ArchitecturesAllowed={#MyAppArch}" in script
     assert "Windows-{#MyAppArchName}-Setup" in script
-    assert "DefaultDirName={autopf}\\DJCat Pro" in script
-    assert "DefaultDirName={autopf}\\DJCat Pro 5" not in script
+    # 默认目录改由 GetDefaultDir 计算，优先落在非还原分区；
+    # 没有可用固定盘时回退仍是 {autopf}\DJCat Pro，目录名不带 5。
+    assert "DefaultDirName={code:GetDefaultDir}" in script
+    assert "ExpandConstant('{autopf}\\DJCat Pro')" in script
+    assert "\\DJCat Pro 5" not in script
 
 
 def test_release_workflow_builds_only_x86_64_packages():

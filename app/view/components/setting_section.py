@@ -471,3 +471,5 @@ class _Transition:
         self.view.move(0, 0)
         if self.hideOnFinish:
             self.view.hide()
+        # 动画组挂在 stack 名下，不主动释放就会随每次下钻和返回一直累积。
+        self.group.deleteLater()

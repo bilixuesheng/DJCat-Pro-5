@@ -1694,6 +1694,14 @@ td small { color: var(--muted); }
 
 @media (hover: none), (pointer: coarse) {
     .toast-close { opacity: 1; pointer-events: auto; }
+
+    /* 触控目标回到 40 px。细指针下的紧凑密度用手指按不准，排序抓手尤其要够大：
+       目录排序在平板上完全依赖它拖动。 */
+    .table-action { min-height: 40px; }
+    .drag-handle {
+        width: 40px;
+        height: 40px;
+    }
 }
 
 

@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 import requests
 from PySide6.QtCore import QObject, Signal
 
-from app.config.paths import UPDATE_DIR
+from app.config.paths import APP_DIR, UPDATE_DIR
 
 
 INITIAL_THREAD_COUNT = 8
@@ -68,6 +68,35 @@ def clearUpdateDirectory(directory: Path = UPDATE_DIR) -> list[Path]:
         except OSError:
             failed.append(path)
     return failed
+
+
+UPDATER_NAME = "updater.exe"
+UPDATER_BACKUP_NAME = "updater.exe.old"
+
+
+def restoreUpdaterBinary(directory: Path = APP_DIR) -> bool:
+    """Reconcile updater.exe with the backup the updater leaves behind.
+
+    The updater renames its own running binary before overwriting it, because a
+    running executable cannot be replaced in place. A copy that then fails leaves
+    the backup as the only surviving updater, so deleting it unconditionally
+    would make every later Client Update fail on a missing updater with nothing
+    left to recover from. Returns True when the backup had to be promoted back.
+    """
+    backup = directory / UPDATER_BACKUP_NAME
+    if not backup.is_file():
+        return False
+    if (directory / UPDATER_NAME).is_file():
+        try:
+            backup.unlink()
+        except OSError:
+            pass
+        return False
+    try:
+        backup.replace(directory / UPDATER_NAME)
+    except OSError:
+        return False
+    return True
 
 
 class DownloadCanceled(Exception):

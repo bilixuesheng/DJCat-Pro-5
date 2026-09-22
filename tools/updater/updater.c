@@ -142,18 +142,35 @@ static BOOL copyTree(const wchar_t *src, const wchar_t *dst, const wchar_t *appD
             if (!copyTree(srcPath, dstPath, appDir)) ok = FALSE;
         } else {
             /* Handle the running updater: rename it before overwriting. */
+            wchar_t oldPath[PATH_BUF];
+            BOOL renamedUpdater = FALSE;
             if (_wcsicmp(fd.cFileName, L"updater.exe") == 0 &&
                 _wcsicmp(dst, appDir) == 0) {
-                wchar_t oldPath[PATH_BUF];
                 _snwprintf(oldPath, PATH_BUF, L"%s\\updater.exe.old", appDir);
+                oldPath[PATH_BUF - 1] = L'\0';
                 DeleteFileW(oldPath);
-                MoveFileW(dstPath, oldPath);
-                logMsg(L"Renamed running updater to updater.exe.old");
+                renamedUpdater = MoveFileW(dstPath, oldPath);
+                if (renamedUpdater)
+                    logMsg(L"Renamed running updater to updater.exe.old");
+                else
+                    logMsg(L"Could not rename running updater (err %lu)",
+                           GetLastError());
             }
             if (!CopyFileW(srcPath, dstPath, FALSE)) {
                 logMsg(L"CopyFile failed: %s -> %s (err %lu)",
                        srcPath, dstPath, GetLastError());
                 ok = FALSE;
+                /* Put the running updater back. Without this the app directory
+                   is left with no updater.exe at all, and since DJCat deletes
+                   updater.exe.old on its next start, every later Client Update
+                   fails on a missing updater with nothing left to recover. */
+                if (renamedUpdater) {
+                    if (MoveFileW(oldPath, dstPath))
+                        logMsg(L"Restored updater.exe from updater.exe.old");
+                    else
+                        logMsg(L"Could not restore updater.exe (err %lu)",
+                               GetLastError());
+                }
             }
         }
     } while (FindNextFileW(hFind, &fd));

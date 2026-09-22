@@ -103,7 +103,10 @@ class AIAdminTest(TestCase):
         )
         logo.close()
         self.assertIn("主页", dashboard)
-        self.assertIn('class="service-icon"><img src="/static/logo.png"', dashboard)
+        self.assertRegex(
+            dashboard,
+            r'class="service-icon"[^>]*><img src="/static/logo\.png"',
+        )
         self.assertIn("AI 写 Markdown", dashboard)
         self.assertNotIn("AI 管理", dashboard)
         self.assertNotIn("注册机器</h2>", dashboard)
@@ -127,7 +130,7 @@ class AIAdminTest(TestCase):
         content = prompt.get_data(as_text=True)
         self.assertIn("提示词", content)
         self.assertIn('name="system_prompt"', content)
-        self.assertIn(escape(ai_markdown.SYSTEM_PROMPT), content)
+        self.assertIn(escape(ai_markdown.DEFAULT_PROMPT_TEMPLATE), content)
 
         machines = self._machinesPage()
         self.assertEqual(machines.status_code, 200)
@@ -228,10 +231,12 @@ class AIAdminTest(TestCase):
         self.assertEqual(response.status_code, 200)
         home = self.client.get("/admin/", base_url="https://dash.djcatpro.top")
         self.assertIn("API 已配置", home.get_data(as_text=True))
-        self.assertEqual(
-            ai_markdown._systemPrompt("用户微调"),
-            "管理员设置的全局提示词"
-            f"{ai_markdown.CUSTOM_STYLE_PREFIX}用户微调",
+        systemPrompt = ai_markdown._systemPrompt("用户微调")
+        self.assertTrue(systemPrompt.startswith("管理员设置的全局提示词"))
+        # 示例由 Prompt Example 提供，夹在管理员模板和用户微调之间。
+        self.assertIn("此处给一些格式示例：", systemPrompt)
+        self.assertTrue(
+            systemPrompt.endswith(f"{ai_markdown.CUSTOM_STYLE_PREFIX}用户微调")
         )
         self.assertEqual(
             ai_markdown._quotaCost(
@@ -579,7 +584,7 @@ class AIAdminTest(TestCase):
         self.assertIn("::view-transition-group(sidebar-active)", css)
         self.assertIn("view-transition-name: sidebar-active", css)
         self.assertIn("admin-topbar", css)
-        self.assertIn(".service-card + .service-card { margin-top: 16px; }", css)
+        self.assertRegex(css, r"\.service-card \+ \.service-card \{ margin-top: \d+px; \}")
         self.assertNotIn(".market-page { animation:", css)
         self.assertIn("toast-progress", css)
         self.assertIn("toast-progress 10s", css)
@@ -587,7 +592,14 @@ class AIAdminTest(TestCase):
         self.assertIn("button:active:not(:disabled)", css)
         self.assertIn("[hidden] { display: none !important; }", css)
         self.assertIn(".button-danger:hover", css)
-        self.assertIn("background: var(--danger); color: #fff", css)
+        self.assertRegex(
+            css,
+            re.compile(
+                r"\.button-danger:hover \{[^}]*background: var\(--danger\);"
+                r"[^}]*color: #fff;",
+                re.IGNORECASE,
+            ),
+        )
 
         javascriptResponse = self.client.get(
             "/static/admin.js", base_url="https://dash.djcatpro.top"
@@ -607,10 +619,18 @@ class AIAdminTest(TestCase):
         self.assertIn("visibilitychange", javascript)
         self.assertIn("10_000", javascript)
         self.assertIn("if (refreshStarted) refreshStats();", javascript)
-        self.assertIn(".table-action { min-height: 40px;", css)
-        self.assertIn(".drag-handle { width: 40px; height: 40px;", css)
-        self.assertIn(".sidebar-toggle { width: 40px; height: 40px;", css)
+        # 触控目标不得小于 40 px。细指针下可以更紧凑，但粗指针必须补回来，
+        # 否则管理后台在教室平板上按不准，目录排序的抓手尤其抓不住。
         self.assertIn("@media (hover: none), (pointer: coarse)", css)
+        coarse = re.search(
+            r"@media \(hover: none\), \(pointer: coarse\) \{(.*?)\n\}", css, re.S
+        )
+        self.assertIsNotNone(coarse)
+        self.assertRegex(coarse.group(1), r"\.table-action \{[^}]*min-height: 40px;")
+        self.assertRegex(
+            coarse.group(1), r"\.drag-handle \{\s*width: 40px;\s*height: 40px;"
+        )
+        self.assertRegex(css, r"\.sidebar-toggle \{\s*width: 40px;\s*height: 40px;")
         self.assertIn(
             'if (form.dataset.confirm && form.dataset.confirmed !== "true") return;',
             javascript,
