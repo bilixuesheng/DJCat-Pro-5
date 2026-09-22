@@ -57,8 +57,11 @@ from app.config.paths import LOG_DIR
 from app.signal_bus import signalBus
 from app.view.components.setting_card_group import CollapsibleSettingCard
 from app.view.components.setting_preview import (
+    CLOCK_CONTENT,
+    COUNTDOWN_CONTENT,
+    PROJECTION_CONTENT,
     ApplicationIconPreview,
-    BannerPreview,
+    HomeBannerPreview,
     ThemePreview,
     WindowBackgroundPreview,
     WindowTextPreview,
@@ -759,7 +762,7 @@ class SettingPage(QWidget):
             "主页横幅的显示与自定义",
             ROOT_SECTION_KEY,
         )
-        banner.addPreview(BannerPreview())
+        banner.addPreview(HomeBannerPreview())
         banner.addCardList(
             [
                 self.showBannerCard,
@@ -790,6 +793,8 @@ class SettingPage(QWidget):
                 cfg.broadcastBackgroundColor,
                 cfg.broadcastBackgroundImagePath,
                 cfg.broadcastBackgroundScaleMode,
+                PROJECTION_CONTENT,
+                cfg.broadcastActionButtonPosition,
             )
         )
         broadcastBackground.addCardList(
@@ -849,6 +854,8 @@ class SettingPage(QWidget):
                 cfg.countdownBackgroundColor,
                 cfg.countdownBackgroundImagePath,
                 cfg.countdownBackgroundScaleMode,
+                COUNTDOWN_CONTENT,
+                cfg.countdownActionButtonPosition,
             )
         )
         countdownBackground.addCardList(
@@ -897,6 +904,8 @@ class SettingPage(QWidget):
                 cfg.fullscreenClockBackgroundColor,
                 cfg.fullscreenClockBackgroundImagePath,
                 cfg.fullscreenClockBackgroundScaleMode,
+                CLOCK_CONTENT,
+                cfg.fullscreenClockActionButtonPosition,
             )
         )
         clockBackground.addCardList(

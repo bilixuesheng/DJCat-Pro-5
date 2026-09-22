@@ -237,7 +237,7 @@ Setting Section 中的一行设置项，通常绑定一个 `cfg` 配置项或一
 _Avoid_: 设置项（泛指值本身）、Home Card
 
 **Setting Preview**:
-Setting Section 中按当前配置实时渲染的示意图，随所在 Section 的配置项变化立即重绘。它只显示状态，不接受输入。
+Setting Section 中按当前配置实时渲染的示意图，随所在 Section 的配置项变化立即重绘。它复刻目标界面的真实排布，而不是孤立地摆一张图片或一段文字。只显示状态，不接受输入。
 _Avoid_: 缩略图、示意图（静态图片）、截图
 
 **Setting Suggestion**:
