@@ -415,6 +415,18 @@ class MainWindow(MSFluentWindow):
             self.splashScreen = None
             splashScreen.finish()
 
+        from app.common.update_download import takeUpdateFailure
+
+        updateFailure = takeUpdateFailure(APP_DIR)
+        if updateFailure:
+            InfoBar.warning(
+                "更新未完成",
+                f"{updateFailure}。当前仍是原版本，可稍后重试更新。",
+                duration=8000,
+                position=InfoBarPosition.BOTTOM_RIGHT,
+                parent=self,
+            )
+
         from app.config.paths import _PORTABLE_FALLBACK_FAILED
 
         if _PORTABLE_FALLBACK_FAILED:

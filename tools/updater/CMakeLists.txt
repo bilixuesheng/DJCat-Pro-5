@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(djcat-updater C)
 
 add_executable(updater updater.c)
-target_link_libraries(updater PRIVATE shell32)
+target_link_libraries(updater PRIVATE shell32 advapi32 user32)
 
 if(MSVC)
     target_compile_options(updater PRIVATE /W4 /utf-8)

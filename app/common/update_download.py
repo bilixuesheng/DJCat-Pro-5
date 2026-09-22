@@ -99,6 +99,30 @@ def restoreUpdaterBinary(directory: Path = APP_DIR) -> bool:
     return True
 
 
+UPDATE_FAILURE_MARKER = "update-failed.txt"
+
+
+def takeUpdateFailure(directory: Path = APP_DIR) -> str:
+    """Read and clear the reason the updater left behind, or "" if it succeeded.
+
+    A Client Update that rolls back restores the previous version and relaunches
+    it, so without this the user sees a normal restart on the same version and
+    nothing explaining why. The updater writes the file with a BOM, hence
+    utf-8-sig.
+    """
+    marker = directory / UPDATE_FAILURE_MARKER
+    try:
+        reason = marker.read_text(encoding="utf-8-sig").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return ""
+    finally:
+        try:
+            marker.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return reason[0].strip() if reason else ""
+
+
 class DownloadCanceled(Exception):
     pass
 

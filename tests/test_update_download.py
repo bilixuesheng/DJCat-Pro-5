@@ -32,6 +32,7 @@ from app.common.update_download import (
     UpdateDownloadWorker,
     clearUpdateDirectory,
     restoreUpdaterBinary,
+    takeUpdateFailure,
 )
 from app.config.cfg import cfg
 from app.config.constants import (
@@ -265,6 +266,26 @@ class UpdateDownloadTest(TestCase):
 
             self.assertTrue(updateDir.is_dir())
             self.assertEqual(list(updateDir.iterdir()), [])
+
+    def testStartupReadsAndClearsTheUpdaterFailureMarker(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            appDir = Path(tempDir)
+            # 更新器写的是带 BOM 的 UTF-8，第二行是日志路径。
+            (appDir / "update-failed.txt").write_text(
+                "更新安装失败，已保留原版本\nC:\\Temp\\updater.log\n",
+                encoding="utf-8-sig",
+            )
+
+            self.assertEqual(
+                takeUpdateFailure(appDir), "更新安装失败，已保留原版本"
+            )
+            # 只提示一次，读完即清。
+            self.assertFalse((appDir / "update-failed.txt").exists())
+            self.assertEqual(takeUpdateFailure(appDir), "")
+
+    def testStartupReportsNoFailureWhenTheUpdateLanded(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            self.assertEqual(takeUpdateFailure(Path(tempDir)), "")
 
     def testStartupDropsTheUpdaterBackupWhenTheUpdaterSurvived(self):
         with tempfile.TemporaryDirectory() as tempDir:

@@ -125,7 +125,15 @@ Client Update 与 Application Store 的 Package 下载共用 `app/common/update_
 
 Client Update 下载完成后，MainWindow 使用后台 `UpdateApplyWorker` 解压更新 ZIP 到暂存目录并启动 `updater.exe`，期间显示不可取消且只含不确定进度环的蒙层弹窗。确认更新器进程创建成功后才关闭 DJCat；启动失败时关闭蒙层并保留当前进程显示错误，不能在 GUI 线程等待更新器启动。更新包在更新器进程创建成功之后才删除，任何一步失败都还能重来；残留的包由下次启动的 `clearUpdateDirectory()` 清掉。
 
-`updater.exe` 无法覆盖正在运行的自己，只能先改名为 `updater.exe.old` 再复制。因此复制失败必须把它改回来，启动时的 `restoreUpdaterBinary()` 也只在 `updater.exe` 确实存在时才删除备份，否则把备份提升回去。无条件删除备份会让程序目录一个更新器都不剩，之后每次 Client Update 都固定失败在"找不到更新器"。
+`updater.exe` 的提交点是整目录换名,不是逐文件复制:更新包换名到 `<APP_DIR>.new`,原目录换名为 `<APP_DIR>.backup`,再把新目录换成 `APP_DIR`;每一步都是同卷改名,失败时把备份换回去。逐文件复制没有这个性质——任何一个文件失败都会留下无法收拾的半更新目录。
+
+更新器不能从 `APP_DIR` 里面运行,否则正在运行的映像和打开的日志会挡住换名;它先把自己复制到 `%TEMP%\djcat_updater` 再重启。路径比对前必须把 `/` 规范成 `\`,否则调用方传正斜杠就会静默跳过重定位。
+
+Portable Mode 的 `APP_DIR\DJCatPro` 里有已安装的 Application 和应用市场缓存,动辄数 GB,因此换名前把它**改名**进新目录,不是复制。安装目录不可写时申请提权;提权后必须借 `Shell_TrayWnd` 的令牌用 `CreateProcessAsUserW` 降权重启 DJCat,否则它写出的配置和 `Program/` 会带上管理员属主,下次普通启动反而读不了。
+
+更新失败时更新器在 `APP_DIR` 写 `update-failed.txt`,MainWindow 启动时用 `takeUpdateFailure()` 读走并提示一次。回滚后程序会以原版本重启,没有这条提示用户只会看到"点了更新却什么都没变"。
+
+`restoreUpdaterBinary()` 只为从旧版本升上来的那一次保留:旧更新器仍会留下 `updater.exe.old`。新更新器不再改名自己。
 
 广告触控的 QApplication 全局事件过滤器只在 Application Store 可见时安装；页面隐藏或关闭时移除，避免其他页面的全部输入事件继续经过广告层。
 
