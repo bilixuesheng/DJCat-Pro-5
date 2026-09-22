@@ -414,6 +414,18 @@ class MainWindow(MSFluentWindow):
             self.splashScreen = None
             splashScreen.finish()
 
+        from app.config.paths import _PORTABLE_FALLBACK_FAILED
+
+        if _PORTABLE_FALLBACK_FAILED:
+            InfoBar.warning(
+                "配置存储模式",
+                "由于当前目录权限限制，无法使用便携版模式，已自动切换为安装版。"
+                "可在设置中手动切换。",
+                duration=8000,
+                position=InfoBarPosition.BOTTOM_RIGHT,
+                parent=self,
+            )
+
         if cfg.checkUpdateAtStartUp.value:
             self.checkForUpdates(manual=False)
 

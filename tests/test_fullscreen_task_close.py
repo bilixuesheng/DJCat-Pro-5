@@ -109,7 +109,9 @@ class FullscreenTaskCloseTest(TestCase):
         self.assertEqual(cfg.broadcastTitle.value, "作业")
         self.assertTrue(page.contentInput.isReadOnly())
         self.assertEqual(page.broadcastBtn.text(), "取消")
-        self.assertIn("qlineargradient", page.contentInput.styleSheet())
+        # Busy Glow 是覆盖层，不改输入框样式表：改写它会连 Fluent 滚动条一起顶掉。
+        self.assertTrue(page._inlineAIGlow.isRunning())
+        self.assertNotIn("qlineargradient", page.contentInput.styleSheet())
 
         request._resultChunks.extend(("**数学**", "\n- 97页"))
         page._appendInlineAIChunk(request, "**数学**")
@@ -691,11 +693,11 @@ class FullscreenTaskCloseTest(TestCase):
             dialog._onConversionFinished(10, 15, 1)
             self.assertFalse(dialog._quotaTimer.isActive())
 
-            dialog._busyTimer.start()
+            dialog._glow.start()
             dialog.close()
             self.app.processEvents()
 
-        self.assertFalse(dialog._busyTimer.isActive())
+        self.assertFalse(dialog._glow.isRunning())
         self.assertFalse(dialog._quotaTimer.isActive())
         dialog.deleteLater()
         parent.close()

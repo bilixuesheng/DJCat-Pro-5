@@ -174,6 +174,10 @@ _Avoid_: request count（高峰时一次请求可能消耗两点）、token quot
 可由管理员启用的双倍额度时段，当前为北京时间 9:00–12:00 和 14:00–18:00。启用时每次转换扣 2 点，其余时段扣 1 点。
 _Avoid_: rate limit window、busy status
 
+**Busy Glow（忙碌光晕）**:
+一次 AI Markdown Conversion 进行期间，环绕输入框边缘的彩色光带。它只表示"正在进行且尚未出结果"，不表示完成度——转换耗时无法预估。AI Markdown 对话框和 Projection 编辑器的内联整理共用同一个 Busy Glow。
+_Avoid_: 进度条／progress bar（它不表达百分比）、loading spinner、忙碌边框（它不是边框，会渗到框内外两侧）
+
 **Custom Markdown Style**:
 桌面端用户可选的本机偏好，用来微调 AI Markdown Conversion 的输出格式；与服务端基础规则冲突时以它为准。
 _Avoid_: theme、CSS、System Prompt
@@ -215,7 +219,7 @@ App Data Directory 位于系统用户数据目录的存储模式。这里的 Ins
 _Avoid_: Application 安装状态、用户模式
 
 **Portable Mode**:
-App Data Directory 位于程序旁 `DJCatPro/` 的存储模式。启动时只要该目录存在就选择 Portable Mode。
+App Data Directory 位于程序旁 `DJCatPro/` 的存储模式。全新安装默认选择此模式；已有 User Data Directory 时保持 Installed Mode。
 _Avoid_: 便携 ZIP 的文件格式、Application 的安装目录
 
 **Storage Migration**:

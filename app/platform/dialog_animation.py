@@ -36,6 +36,50 @@ def resumeDialogShadows(paused):
             pass
 
 
+def _findCardShadow(widget):
+    """The shadow on the enclosing MaskDialogBase's card, or None.
+
+    Deliberately not "the first drop shadow up the parent chain": that would let a
+    caller outside a dialog seize an unrelated shadow, such as WindowBackground's.
+    """
+    node = widget
+    while node is not None:
+        if isinstance(node, MaskDialogBase):
+            effect = node.widget.graphicsEffect()
+            return effect if isinstance(effect, QGraphicsDropShadowEffect) else None
+        node = node.parentWidget()
+    return None
+
+
+def fadeDialogShadow(widget, visible):
+    """Fade the mask dialog card shadow above `widget` in or out.
+
+    A QGraphicsEffect re-rasterises its whole subtree whenever any descendant repaints,
+    so a lit card shadow would re-run its blur on every frame of a long-running child
+    animation. Returns None when there is no card shadow to fade.
+    """
+    effect = _findCardShadow(widget)
+    if effect is None:
+        return None
+
+    target = getattr(effect, "_djcatShadowColor", None)
+    if target is None:
+        target = QColor(effect.color())
+        effect._djcatShadowColor = target
+
+    end = QColor(target)
+    if not visible:
+        end.setAlpha(0)
+
+    animation = QPropertyAnimation(effect, b"color", effect)
+    animation.setStartValue(QColor(effect.color()))
+    animation.setEndValue(end)
+    animation.setDuration(_SHADOW_FADE_MS)
+    animation.setEasingCurve(QEasingCurve.OutCubic)
+    animation.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
+    return animation
+
+
 def _setDialogShadow(
     dialog,
     blurRadius=60,

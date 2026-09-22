@@ -53,6 +53,7 @@ from app.common.update_download import isHttpsResponseChain
 from app.config.cfg import cfg
 from app.config.constants import AI_MARKDOWN_API
 from app.config.paths import ASSET_DIR
+from app.view.components.busy_glow import BusyGlowOverlay
 from app.view.components.markdown_view import MarkdownView
 from app.view.components.window_background import WINDOW_SHADOW_MARGIN, WindowBackground
 
@@ -763,25 +764,6 @@ def _emitSignal(signal, *args):
         pass
 
 
-def _busyTextEditStyle(borderIndex):
-    hue = borderIndex % 360
-    colors = [
-        QColor.fromHsv((hue + offset) % 360, 190, 255).name()
-        for offset in (0, 90, 180, 270, 360)
-    ]
-    stops = ", ".join(
-        f"stop:{index / 4:g} {color}"
-        for index, color in enumerate(colors)
-    )
-    background = "#343434" if isDarkTheme() else "#E8E8E8"
-    style = (
-        f"QTextEdit {{ background: {background}; border: 2px solid; "
-        f"border-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, {stops}); "
-        "border-radius: 8px; }"
-    )
-    return style, (hue + 6) % 360
-
-
 def _streamAIMarkdown(request, emitChunk):
     remaining = request._remaining if request._remaining is not None else -1
     limit = request._limit
@@ -813,6 +795,16 @@ def _streamAIMarkdown(request, emitChunk):
             limit = int(response.headers.get("X-RateLimit-Limit", limit))
             cost = int(response.headers.get("X-RateLimit-Cost", cost))
             if not response.ok:
+                if response.status_code == 502:
+                    raise RuntimeError(
+                        "这不是你的问题，也不是我们的问题。\n"
+                        "DeepSeek 服务器已离线，请等待深度求索修复，"
+                        "这可能是间歇性的问题。"
+                    )
+                if response.status_code == 503:
+                    raise RuntimeError(
+                        "电教猫 Pro 基础服务器已离线，请等待修复。"
+                    )
                 try:
                     message = response.json().get("message")
                 except (AttributeError, ValueError):
@@ -836,7 +828,7 @@ def _streamAIMarkdown(request, emitChunk):
             return
         _emitSignal(
             request.conversionFailed,
-            "无法连接 AI 服务，请检查网络后重试。",
+            "电教猫 Pro 基础服务器已离线，请等待修复。",
             remaining,
             limit,
             cost,
@@ -916,7 +908,6 @@ class AIMarkdownDialog(MessageBoxBase):
         self._limit = 15
         self._cost = 1
         self._peakEnabled = None
-        self._borderIndex = 0
         self._quotaRequestRunning = False
         self._cancelEvent = threading.Event()
         self._responseLock = threading.Lock()
@@ -938,7 +929,6 @@ class AIMarkdownDialog(MessageBoxBase):
             self.inputEdit.viewport(),
             QScroller.ScrollerGestureType.TouchGesture,
         )
-        self._inputStyle = self.inputEdit.styleSheet()
         self.quotaLabel = CaptionLabel(self)
         self.quotaLabel.setWordWrap(True)
 
@@ -947,6 +937,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self.viewLayout.addWidget(self.inputEdit)
         self.viewLayout.addWidget(self.quotaLabel)
         self.widget.setFixedWidth(min(680, max(0, self.width() - 80)))
+        self._glow = BusyGlowOverlay(self.inputEdit)
 
         self.yesButton.setText("开始整理")
         self.cancelButton.setText("取消")
@@ -956,9 +947,6 @@ class AIMarkdownDialog(MessageBoxBase):
         self.conversionFinished.connect(self._onConversionFinished)
         self.conversionFailed.connect(self._onConversionFailed)
 
-        self._busyTimer = QTimer(self)
-        self._busyTimer.setInterval(60)
-        self._busyTimer.timeout.connect(self._updateBusyStyle)
         self._quotaTimer = QTimer(self)
         self._quotaTimer.setInterval(30_000)
         self._quotaTimer.timeout.connect(self._refreshQuota)
@@ -1028,8 +1016,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self.yesButton.setEnabled(False)
         self.cancelButton.setEnabled(True)
         self.cancelButton.setText("取消整理")
-        self._busyTimer.start()
-        self._updateBusyStyle()
+        self._glow.start()
         threading.Thread(target=self._streamConversion, daemon=True).start()
 
     def _streamConversion(self):
@@ -1058,7 +1045,7 @@ class AIMarkdownDialog(MessageBoxBase):
         if response is not None:
             response.close()
         self._running = False
-        self._stopBusyStyle()
+        self._glow.stop()
 
     def _onQuotaReceived(
         self, remaining, limit, cost, peakEnabled, machineCode
@@ -1089,7 +1076,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self._remaining = remaining
         self._limit = limit
         self._cost = cost
-        self._stopBusyStyle()
+        self._glow.stop()
         self._updateQuotaLabel()
         self.yesButton.setText("使用结果")
         self.yesButton.setEnabled(True)
@@ -1107,7 +1094,7 @@ class AIMarkdownDialog(MessageBoxBase):
             self._limit = limit
             self._cost = cost
         self._remaining = None
-        self._stopBusyStyle()
+        self._glow.stop()
         self.inputEdit.setPlainText(self._source)
         self.inputEdit.setReadOnly(False)
         self.cancelButton.setEnabled(True)
@@ -1145,18 +1132,8 @@ class AIMarkdownDialog(MessageBoxBase):
                 and self._remaining >= self._cost
             )
 
-    def _updateBusyStyle(self):
-        style, self._borderIndex = _busyTextEditStyle(
-            self._borderIndex
-        )
-        self.inputEdit.setStyleSheet(style)
-
-    def _stopBusyStyle(self):
-        self._busyTimer.stop()
-        self.inputEdit.setStyleSheet(self._inputStyle)
-
     def _stopTimers(self):
-        self._busyTimer.stop()
+        self._glow.stop(immediate=True)
         self._quotaTimer.stop()
         self._flushTimer.stop()
 
@@ -1182,7 +1159,6 @@ class BroadcastEditPage(QWidget):
         self._inlineAIRequest = None
         self._inlineAISnapshot = None
         self._inlineAIPendingChunks = []
-        self._inlineAIBorderIndex = 0
         self.vBoxLayout = QVBoxLayout(self)
         self.vBoxLayout.setContentsMargins(30, 30, 30, 30)
 
@@ -1225,8 +1201,8 @@ class BroadcastEditPage(QWidget):
             self.contentInput.viewport(),
             QScroller.ScrollerGestureType.TouchGesture,
         )
-        self._contentInputStyle = self.contentInput.styleSheet()
         self.vBoxLayout.addWidget(self.contentInput)
+        self._inlineAIGlow = BusyGlowOverlay(self.contentInput)
 
         btnLayout = QHBoxLayout()
         self.templateBtn = PushButton(self)
@@ -1252,9 +1228,6 @@ class BroadcastEditPage(QWidget):
         btnLayout.addWidget(self.broadcastBtn)
         self.vBoxLayout.addLayout(btnLayout)
 
-        self._inlineAIBusyTimer = QTimer(self)
-        self._inlineAIBusyTimer.setInterval(60)
-        self._inlineAIBusyTimer.timeout.connect(self._updateInlineAIBusyStyle)
         self._inlineAIFlushTimer = QTimer(self)
         self._inlineAIFlushTimer.setSingleShot(True)
         self._inlineAIFlushTimer.setInterval(50)
@@ -1452,8 +1425,7 @@ class BroadcastEditPage(QWidget):
         ):
             widget.setEnabled(False)
         self.broadcastBtn.setText("取消")
-        self._inlineAIBusyTimer.start()
-        self._updateInlineAIBusyStyle()
+        self._inlineAIGlow.start()
         request.start()
 
     def _appendInlineAIChunk(self, request, chunk):
@@ -1522,8 +1494,7 @@ class BroadcastEditPage(QWidget):
         self._inlineAISnapshot = None
         self._inlineAIFlushTimer.stop()
         self._inlineAIPendingChunks.clear()
-        self._inlineAIBusyTimer.stop()
-        self.contentInput.setStyleSheet(self._contentInputStyle)
+        self._inlineAIGlow.stop()
         self.contentInput.setReadOnly(False)
         for widget in (
             self.backBtn,
@@ -1534,12 +1505,6 @@ class BroadcastEditPage(QWidget):
         ):
             widget.setEnabled(True)
         self._updateMarkdownUi()
-
-    def _updateInlineAIBusyStyle(self):
-        style, self._inlineAIBorderIndex = _busyTextEditStyle(
-            self._inlineAIBorderIndex
-        )
-        self.contentInput.setStyleSheet(style)
 
     def shutdown(self):
         self._saveTitle()

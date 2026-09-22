@@ -19,9 +19,18 @@ USER_DATA_DIR = Path(
     )
 ) / "DJCatPro"
 PORTABLE_DATA_DIR = APP_DIR / "DJCatPro"
-APP_DATA_DIR = (
-    PORTABLE_DATA_DIR if PORTABLE_DATA_DIR.is_dir() else USER_DATA_DIR
-)
+_PORTABLE_FALLBACK_FAILED = False
+if PORTABLE_DATA_DIR.is_dir():
+    APP_DATA_DIR = PORTABLE_DATA_DIR
+elif USER_DATA_DIR.is_dir():
+    APP_DATA_DIR = USER_DATA_DIR
+else:
+    try:
+        PORTABLE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        APP_DATA_DIR = PORTABLE_DATA_DIR
+    except OSError:
+        APP_DATA_DIR = USER_DATA_DIR
+        _PORTABLE_FALLBACK_FAILED = True
 CONFIG_PATH = APP_DATA_DIR / "UserConfig.json"
 UPDATE_DIR = APP_DIR / "Updata"
 UPDATE_ZIP_PATH = UPDATE_DIR / "DJCat-Pro.zip"
