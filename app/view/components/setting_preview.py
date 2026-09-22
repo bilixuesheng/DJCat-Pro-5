@@ -212,7 +212,16 @@ class _HomeCardRowPreview(QWidget):
 
 
 class HomeBannerPreview(SettingPreviewCard):
-    """The home page as the banner settings shape it: title, banner, cards."""
+    """The whole main window as the banner settings shape it.
+
+    The banner only makes sense in place, so the preview draws the window it
+    lives in — title bar and navigation rail — around the real banner widget,
+    the page title above it and the Home Cards below.
+    """
+
+    WINDOW_MARGIN = 16
+    TITLE_BAR_HEIGHT = 30
+    NAVIGATION_WIDTH = 52
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -227,13 +236,20 @@ class HomeBannerPreview(SettingPreviewCard):
         self._bind()
 
     def _initWidget(self) -> None:
-        self.banner.setFixedHeight(120)
+        # 标题栏 30 + 上下留白 56/28 + 内容 20/110/16/44 加三段 8 的间距。
+        self.setFixedHeight(300)
+        self.banner.setFixedHeight(110)
         self.banner.galleryLabel.hide()
         self.banner.setVisible(cfg.showBanner.value)
 
     def _initLayout(self) -> None:
-        self.vBoxLayout.setContentsMargins(18, 14, 18, 16)
-        self.vBoxLayout.setSpacing(10)
+        self.vBoxLayout.setContentsMargins(
+            self.WINDOW_MARGIN + self.NAVIGATION_WIDTH + 12,
+            self.WINDOW_MARGIN + self.TITLE_BAR_HEIGHT + 10,
+            self.WINDOW_MARGIN + 12,
+            self.WINDOW_MARGIN + 12,
+        )
+        self.vBoxLayout.setSpacing(8)
         self.vBoxLayout.addWidget(self.titleLabel)
         self.vBoxLayout.addWidget(self.banner)
         self.vBoxLayout.addWidget(self.subTitleLabel)
@@ -241,6 +257,102 @@ class HomeBannerPreview(SettingPreviewCard):
 
     def _bind(self) -> None:
         cfg.showBanner.valueChanged.connect(self.banner.setVisible)
+        cfg.applicationIconSource.valueChanged.connect(self._refresh)
+        cfg.applicationIconPath.valueChanged.connect(self._refresh)
+        cfg.windowTitle.valueChanged.connect(self._refresh)
+        qconfig.themeColor.valueChanged.connect(self._refresh)
+
+    def _refresh(self, *_args) -> None:
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHints(
+            QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
+        )
+        dark = isDarkTheme()
+        window = QRectF(self.rect()).adjusted(
+            self.WINDOW_MARGIN + 0.5,
+            self.WINDOW_MARGIN + 0.5,
+            -self.WINDOW_MARGIN - 0.5,
+            -self.WINDOW_MARGIN - 0.5,
+        )
+        path = QPainterPath()
+        path.addRoundedRect(window, 7, 7)
+        painter.fillPath(path, QColor("#272727") if dark else QColor("#f3f3f3"))
+        painter.setPen(QPen(_strokeColor(dark), 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)
+
+        self._paintTitleBar(painter, window, dark)
+        self._paintNavigation(painter, window, dark)
+        painter.end()
+
+    def _paintTitleBar(self, painter: QPainter, window: QRectF, dark: bool) -> None:
+        titleBar = QRectF(
+            window.left(), window.top(), window.width(), self.TITLE_BAR_HEIGHT
+        )
+        icon = applicationIcon()
+        iconRect = QRectF(titleBar.left() + 10, titleBar.center().y() - 7, 14, 14)
+        icon.paint(painter, iconRect.toRect())
+
+        font = QFont(self.font())
+        font.setPixelSize(11)
+        painter.setFont(font)
+        painter.setPen(_textColor(dark))
+        painter.drawText(
+            QRectF(
+                iconRect.right() + 8,
+                titleBar.top(),
+                titleBar.width() - 120,
+                titleBar.height(),
+            ),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            cfg.windowTitle.value.strip() or APP_NAME,
+        )
+
+        painter.setPen(QPen(_textColor(dark), 1.1))
+        centerY = titleBar.center().y()
+        minimize = titleBar.right() - 74
+        painter.drawLine(minimize - 4, centerY, minimize + 4, centerY)
+        maximize = titleBar.right() - 46
+        painter.drawRect(QRectF(maximize - 4, centerY - 4, 8, 8))
+        close = titleBar.right() - 18
+        painter.drawLine(close - 4, centerY - 4, close + 4, centerY + 4)
+        painter.drawLine(close - 4, centerY + 4, close + 4, centerY - 4)
+
+    def _paintNavigation(self, painter: QPainter, window: QRectF, dark: bool) -> None:
+        rail = QRectF(
+            window.left(),
+            window.top() + self.TITLE_BAR_HEIGHT,
+            self.NAVIGATION_WIDTH,
+            window.height() - self.TITLE_BAR_HEIGHT,
+        )
+        muted = _mutedColor(dark)
+        painter.setPen(Qt.PenStyle.NoPen)
+        for index in range(4):
+            top = rail.top() + 12 + index * 38
+            if top + 26 > rail.bottom():
+                break
+            if index == 0:
+                # 主页是当前页：选中项有主题色的指示条和衬底。
+                painter.setBrush(QColor(255, 255, 255, 16) if dark else QColor(0, 0, 0, 12))
+                painter.drawRoundedRect(
+                    QRectF(rail.left() + 8, top - 3, rail.width() - 16, 32), 5, 5
+                )
+                painter.setBrush(themeColor())
+                painter.drawRoundedRect(
+                    QRectF(rail.left() + 4, top + 4, 3, 16), 1.5, 1.5
+                )
+            painter.setBrush(muted)
+            painter.drawRoundedRect(
+                QRectF(rail.center().x() - 8, top, 16, 16), 4, 4
+            )
+            painter.drawRoundedRect(
+                QRectF(rail.center().x() - 10, top + 20, 20, 4), 2, 2
+            )
+        painter.setBrush(Qt.BrushStyle.NoBrush)
 
 
 class ApplicationIconPreview(SettingPreviewCard):
