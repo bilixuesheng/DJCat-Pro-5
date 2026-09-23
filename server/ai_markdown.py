@@ -118,6 +118,26 @@ _LEGACY_SYSTEM_PROMPT = (
     "**⚠️请值日人员到卫生区打扫⚠️**\n\n"
     "由于该内容需要在电脑屏幕上显示，尽量让行数不多。"
 )
+DEEPSEEK_OFFLINE_MESSAGE = (
+    "这不是你的问题，也不是我们的问题。\n"
+    "DeepSeek 服务器已离线，请等待深度求索修复，这可能是间歇性的问题。"
+)
+
+
+def _upstreamFailureMessage(status):
+    """How a failed DeepSeek call is explained to the teacher.
+
+    Only a DeepSeek outage is "not our problem". A 4xx means DeepSeek is up and
+    turned the request down -- a revoked key, an empty balance, a prompt grown
+    past the context window -- and that is for the operator to fix.
+    """
+    if status == 429:
+        return "AI 服务当前请求过多，请稍后再试。"
+    if status is not None and 400 <= status < 500:
+        return "AI 服务配置异常（如密钥失效或余额不足），请联系管理员处理。"
+    return DEEPSEEK_OFFLINE_MESSAGE
+
+
 CUSTOM_STYLE_PREFIX = """
 
 以上为系统默认提示词，以下为用户希望自定义的微调提示词，若规则有冲突，请以下面的内容为准：
@@ -278,11 +298,13 @@ def _refreshHolidayCache():
         row = database.execute(
             "SELECT value FROM settings WHERE key = 'holiday_cache'"
         ).fetchone()
+    known = []
     if row:
         try:
             data = json.loads(row[0])
             if data.get("refreshed") == today:
-                return True
+                return bool(data.get("dates"))
+            known = list(data.get("dates", []))
         except (json.JSONDecodeError, AttributeError):
             pass
     year = datetime.now(TIMEZONE).year
@@ -298,9 +320,9 @@ def _refreshHolidayCache():
                     dates.add(item["date"])
         except (requests.RequestException, KeyError, ValueError):
             pass
-    if not dates:
-        return False
-    cache = json.dumps({"refreshed": today, "dates": sorted(dates)})
+    # 拉取失败也记下"今天已试过"并保留已知日期：这个函数在峰时的每个整理请求和
+    # 每 10 秒的仪表盘轮询里都会被调用，不落缓存就会一遍遍等满超时。
+    cache = json.dumps({"refreshed": today, "dates": sorted(dates) or known})
     with closing(_connect()) as database:
         database.execute(
             "INSERT INTO settings(key, value) VALUES ('holiday_cache', ?) "
@@ -308,7 +330,7 @@ def _refreshHolidayCache():
             (cache,),
         )
         database.commit()
-    return True
+    return bool(dates)
 
 
 def _connect():
@@ -902,7 +924,13 @@ def convert():
         if not _httpsResponseChain(upstream, DEEPSEEK_API):
             raise requests.RequestException("AI 服务连接未保持 HTTPS")
         upstream.raise_for_status()
-    except (requests.RequestException, TypeError, ValueError):
+    except requests.RequestException as error:
+        if upstream is not None:
+            upstream.close()
+        _requestFinished(requestId, False, machineId, cost, day)
+        status = getattr(getattr(error, "response", None), "status_code", None)
+        return _error(_upstreamFailureMessage(status), 502)
+    except (TypeError, ValueError):
         if upstream is not None:
             upstream.close()
         _requestFinished(requestId, False, machineId, cost, day)
@@ -979,6 +1007,8 @@ def _saveConversionLog(machineId, inputContent, outputContent, customStyle):
                 (machineId, inputContent, outputContent, customStyle, _nowIso()),
             )
             database.commit()
+        # 每天至多真正执行一次；只挂在记录页上，管理员不来看就永远不清。
+        _cleanupConversionLogs()
     except sqlite3.Error:
         pass
 
@@ -1495,14 +1525,28 @@ def _updateConversionLogStatus(logId, status):
     return cursor.rowcount == 1
 
 
-def _addPromptExample(inputContent, outputContent):
+def _approveConversionLog(logId, inputContent, outputContent):
+    """Promote a Conversion Log to a Prompt Example exactly once.
+
+    The status change and the insert share one transaction and the insert only
+    happens when the status actually changed, so a double-clicked plain form or
+    a second tab cannot add the same example twice.
+    """
     now = _nowIso()
     with closing(_connect()) as database:
         database.execute("BEGIN IMMEDIATE")
+        cursor = database.execute(
+            "UPDATE conversion_logs SET status = 'approved' "
+            "WHERE id = ? AND status != 'approved'",
+            (logId,),
+        )
+        if cursor.rowcount != 1:
+            database.rollback()
+            return False
         maxOrder = database.execute(
             "SELECT COALESCE(MAX(sort_order), -1) FROM prompt_examples"
         ).fetchone()[0]
-        cursor = database.execute(
+        database.execute(
             """
             INSERT INTO prompt_examples(input_content, output_content, sort_order, created_at)
             VALUES (?, ?, ?, ?)
@@ -1510,7 +1554,7 @@ def _addPromptExample(inputContent, outputContent):
             (inputContent, outputContent, maxOrder + 1, now),
         )
         database.commit()
-    return cursor.lastrowid
+    return True
 
 
 def _updatePromptExample(exampleId, inputContent, outputContent):
@@ -1539,7 +1583,13 @@ def _reorderPromptExamples(orderedIds, originalIds):
             "SELECT id FROM prompt_examples ORDER BY sort_order, id"
         ).fetchall()
         currentIds = [row["id"] for row in currentRows]
-        if currentIds != originalIds:
+        # 新顺序必须恰好是当前这组示例的一个排列：缺项或重复都会留下并列的
+        # sort_order，拼进提示词的示例顺序就不再确定。
+        if (
+            currentIds != originalIds
+            or len(orderedIds) != len(currentIds)
+            or set(orderedIds) != set(currentIds)
+        ):
             database.rollback()
             return False
         for index, exampleId in enumerate(orderedIds):
@@ -1683,8 +1733,8 @@ def adminConversionLogAddSubmit(logId):
         return _adminResponse(
             "输入和输出内容不能为空", "error", "adminConversionLogs", 400
         )
-    _addPromptExample(inputContent, outputContent)
-    _updateConversionLogStatus(logId, "approved")
+    if not _approveConversionLog(logId, inputContent, outputContent):
+        return _adminResponse("这条记录已加入过示例", "info", "adminConversionLogs")
     return _adminResponse("示例已加入提示词", "success", "adminConversionLogs")
 
 
@@ -1746,8 +1796,10 @@ def adminConversionLogApprove(logId):
         return _adminResponse(
             "输入和输出内容不能为空", "error", "adminConversionLogs", 400
         )
-    _addPromptExample(inputContent, outputContent)
-    _updateConversionLogStatus(logId, "approved")
+    if not _approveConversionLog(logId, inputContent, outputContent):
+        return _adminResponse(
+            "这条记录已加入过示例", "info", "adminConversionLogReview"
+        )
     return _adminResponse("示例已加入提示词", "success", "adminConversionLogReview")
 
 
@@ -1810,12 +1862,15 @@ def adminPromptExampleDelete(exampleId):
 @_loginRequired
 def adminPromptExamplesReorder():
     _checkCsrf()
+    # 与应用市场各目录一样，接收 admin.js 共享排序表提交的 item_id / expected_item_id。
     try:
-        orderedIds = json.loads(request.form.get("order", "[]"))
-        originalIds = json.loads(request.form.get("original", "[]"))
-    except (json.JSONDecodeError, TypeError):
+        orderedIds = [int(value) for value in request.form.getlist("item_id")]
+        originalIds = [
+            int(value) for value in request.form.getlist("expected_item_id")
+        ]
+    except ValueError:
         return _adminResponse("排序数据无效", "error", "adminPromptExamples", 400)
-    if not isinstance(orderedIds, list) or not isinstance(originalIds, list):
+    if not orderedIds or len(orderedIds) != len(set(orderedIds)):
         return _adminResponse("排序数据无效", "error", "adminPromptExamples", 400)
     if not _reorderPromptExamples(orderedIds, originalIds):
         if _isAjaxRequest():

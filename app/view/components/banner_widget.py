@@ -14,6 +14,28 @@ from app.config.cfg import (
 from app.config.paths import ASSET_DIR
 
 
+# 主页横幅和设置页的横幅预览显示同一张原图。QPixmap 自带的 QPixmapCache 只收
+# 10 MB 以内的图，超过的（"树人门"预设解码后 15 MB，自定义照片常有几十 MB）会被
+# 两个实例各解码一份并常驻。这里只记最近一张，换图后旧的随即释放。
+_sharedSource: dict = {"key": None, "pixmap": None}
+
+
+def _loadSourceImage(path):
+    try:
+        stamp = Path(path).stat().st_mtime_ns
+    except OSError:
+        stamp = None
+    key = (path, stamp)
+    if _sharedSource["key"] != key:
+        pixmap = QPixmap(path)
+        fallback = str(ASSET_DIR / BANNER_IMAGE_PRESETS[DEFAULT_BANNER_IMAGE_SOURCE])
+        if pixmap.isNull() and path != fallback:
+            pixmap = QPixmap(fallback)
+        _sharedSource["key"] = key
+        _sharedSource["pixmap"] = None if pixmap.isNull() else pixmap
+    return _sharedSource["pixmap"]
+
+
 class BannerWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
@@ -21,7 +43,6 @@ class BannerWidget(QWidget):
 
         self._cached_pixmap = None  # 预渲染的最终图片
         self._cache_size = None     # 缓存对应的窗口尺寸
-        self._source_key = None
         self._source_pixmap = None
 
         self.vBoxLayout = QVBoxLayout(self)
@@ -101,22 +122,7 @@ class BannerWidget(QWidget):
         return temp_pixmap
 
     def _source_image(self, path):
-        try:
-            stamp = Path(path).stat().st_mtime_ns
-        except OSError:
-            stamp = None
-        key = (path, stamp)
-        if key != self._source_key:
-            pixmap = QPixmap(path)
-            if pixmap.isNull() and path != str(
-                ASSET_DIR / BANNER_IMAGE_PRESETS[DEFAULT_BANNER_IMAGE_SOURCE]
-            ):
-                fallback = str(
-                    ASSET_DIR / BANNER_IMAGE_PRESETS[DEFAULT_BANNER_IMAGE_SOURCE]
-                )
-                pixmap = QPixmap(fallback)
-            self._source_key = key
-            self._source_pixmap = None if pixmap.isNull() else pixmap
+        self._source_pixmap = _loadSourceImage(path)
         return self._source_pixmap
 
     def paintEvent(self, e):

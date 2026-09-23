@@ -5,6 +5,7 @@ import re
 import shutil
 import threading
 import time
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -68,6 +69,36 @@ def clearUpdateDirectory(directory: Path = UPDATE_DIR) -> list[Path]:
         except OSError:
             failed.append(path)
     return failed
+
+
+CLIENT_EXECUTABLE_NAME = "djcat.exe"
+
+
+def validateClientUpdateZip(path: Path) -> None:
+    """Reject a downloaded Client Update that the updater could not install.
+
+    The updater swaps the whole program directory for the staged tree, so the
+    archive has to be complete before anything is extracted: it must open as a
+    ZIP, every member must pass its CRC (a truncated or corrupted download
+    otherwise surfaces only halfway through extraction), and it must carry the
+    client at its root or under a single top-level folder, the same two shapes
+    UpdateApplyWorker unpacks.
+    """
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = [info.filename for info in archive.infolist()]
+            damaged = archive.testzip()
+    except (OSError, zipfile.BadZipFile, EOFError) as error:
+        raise ValueError("下载的更新包不是有效的 ZIP 文件") from error
+    if damaged is not None:
+        raise ValueError("下载的更新包已损坏，请重新下载")
+
+    roots = {name.split("/", 1)[0] for name in names if name.strip("/")}
+    candidates = {CLIENT_EXECUTABLE_NAME.lower()}
+    if len(roots) == 1:
+        candidates.add(f"{next(iter(roots))}/{CLIENT_EXECUTABLE_NAME}".lower())
+    if not candidates & {name.lower() for name in names}:
+        raise ValueError("更新包里没有电教猫主程序")
 
 
 UPDATER_NAME = "updater.exe"

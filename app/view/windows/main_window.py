@@ -59,6 +59,8 @@ from app.common.update_download import (
     UpdateDownloadWorker,
     clearUpdateDirectory,
     isHttpsResponseChain,
+    takeUpdateFailure,
+    validateClientUpdateZip,
 )
 from app.config.cfg import cfg
 from app.config.constants import (
@@ -414,8 +416,6 @@ class MainWindow(MSFluentWindow):
             splashScreen = self.splashScreen
             self.splashScreen = None
             splashScreen.finish()
-
-        from app.common.update_download import takeUpdateFailure
 
         updateFailure = takeUpdateFailure(APP_DIR)
         if updateFailure:
@@ -1656,6 +1656,7 @@ class MainWindow(MSFluentWindow):
         self._downloadWorker = UpdateDownloadWorker(
             DOWNLOAD_URL,
             UPDATE_ZIP_PATH,
+            validator=validateClientUpdateZip,
             requireHttps=True,
             maxBytes=MAX_UPDATE_BYTES,
         )

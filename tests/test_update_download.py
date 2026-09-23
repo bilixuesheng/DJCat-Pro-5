@@ -33,6 +33,7 @@ from app.common.update_download import (
     clearUpdateDirectory,
     restoreUpdaterBinary,
     takeUpdateFailure,
+    validateClientUpdateZip,
 )
 from app.config.cfg import cfg
 from app.config.constants import (
@@ -266,6 +267,64 @@ class UpdateDownloadTest(TestCase):
 
             self.assertTrue(updateDir.is_dir())
             self.assertEqual(list(updateDir.iterdir()), [])
+
+    def _clientZip(self, directory, entries):
+        import zipfile
+
+        path = Path(directory) / "DJCat-Pro.zip"
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name, payload in entries.items():
+                archive.writestr(name, payload)
+        return path
+
+    def testClientUpdateAcceptsTheReleaseZip(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            path = self._clientZip(
+                tempDir, {"djcat.exe": b"MZ", "updater.exe": b"MZ", "a/b.dll": b"x"}
+            )
+            validateClientUpdateZip(path)
+
+    def testClientUpdateAcceptsASingleTopLevelFolder(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            path = self._clientZip(
+                tempDir, {"DJCat-Pro-5/djcat.exe": b"MZ", "DJCat-Pro-5/x.dll": b"x"}
+            )
+            validateClientUpdateZip(path)
+
+    def testClientUpdateRejectsTheOldInstallerExe(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            path = Path(tempDir) / "DJCat-Pro.zip"
+            path.write_bytes(b"MZ" + b"\0" * 64)
+            with self.assertRaises(ValueError):
+                validateClientUpdateZip(path)
+
+    def testClientUpdateRejectsAZipWithoutTheClient(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            path = self._clientZip(tempDir, {"readme.txt": b"hi"})
+            with self.assertRaises(ValueError):
+                validateClientUpdateZip(path)
+
+    def testClientUpdateRejectsATruncatedZip(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            path = self._clientZip(tempDir, {"djcat.exe": b"MZ" * 50_000})
+            data = path.read_bytes()
+            path.write_bytes(data[: len(data) // 2])
+            with self.assertRaises(ValueError):
+                validateClientUpdateZip(path)
+
+    def testClientUpdateRejectsACorruptedMember(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            import zipfile
+
+            path = Path(tempDir) / "DJCat-Pro.zip"
+            # 不压缩，负载原样落在文件里，改一个字节只坏 CRC、不坏目录。
+            with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as archive:
+                archive.writestr("djcat.exe", b"MZ" + b"A" * 4096)
+            data = bytearray(path.read_bytes())
+            data[data.index(b"AAAA") + 10] ^= 0xFF
+            path.write_bytes(bytes(data))
+            with self.assertRaises(ValueError):
+                validateClientUpdateZip(path)
 
     def testStartupReadsAndClearsTheUpdaterFailureMarker(self):
         with tempfile.TemporaryDirectory() as tempDir:
@@ -933,6 +992,12 @@ class UpdateWindowLifecycleTest(TestCase):
         workerFactory.assert_called_once()
         self.assertEqual(workerFactory.call_args.args[0], DOWNLOAD_URL)
         self.assertTrue(workerFactory.call_args.kwargs["requireHttps"])
+        # Client Update 下载的是 ZIP；不显式给校验器就会落到默认的 PE 头校验，
+        # 每次下载完都被判成"不是有效的安装程序"。
+        self.assertIs(
+            workerFactory.call_args.kwargs.get("validator"),
+            validateClientUpdateZip,
+        )
         self.assertEqual(workerFactory.call_args.kwargs["maxBytes"], 1024**3)
         self.assertNotIn("checksumUrl", workerFactory.call_args.kwargs)
 

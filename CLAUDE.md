@@ -30,7 +30,7 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 
 **`cfg` 是客户端持久化设置的唯一来源。** 设置页、主页和托盘通过 `cfg.set(...)` 修改值；运行时对象不另建一份需要双向同步的配置副本。
 
-Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cfg.applicationIconPath` 持久化。MainWindow 同步更新 QApplication 和主窗口图标，启动页直接复用主窗口图标；SystemTrayIcon 同步更新系统托盘及已存在的"主页"菜单项，不重建菜单，也不要求重新启动。
+Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cfg.applicationIconPath` 持久化。`app/common/application_icon.py` 按来源、路径和文件修改时间缓存解析结果：设置页预览在 `paintEvent` 里取图标，每次新建 `QIcon` 都会整张重新解码。主页横幅与设置页的横幅预览共用一份解码后的原图——`QPixmap` 自带的缓存只收 10 MB 以内的图，超过的会被两个实例各解码一份并常驻。MainWindow 同步更新 QApplication 和主窗口图标，启动页直接复用主窗口图标；SystemTrayIcon 同步更新系统托盘及已存在的"主页"菜单项，不重建菜单，也不要求重新启动。
 
 **`app/platform/animation_timer.py` 独占 Qt 全局 Animation Tick 间隔。** View 和业务模块不直接调用 Qt 私有动画 API；私有符号不可用时保留 Qt 默认行为。
 
@@ -100,6 +100,12 @@ Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence�
 
 **server/app_store.py** 拥有 Application Catalog、Package 配置、Application Download Count 和管理后台写入。桌面端只消费目录和下载重定向，不能自行增加下载次数。
 
+Conversion Log 提升为 Prompt Example 必须在同一事务里完成状态变更和插入，且只在状态真正改变时插入；审批页是普通表单，双击或两个标签页都会重复提交。Prompt Example 的新顺序必须恰好是当前示例的一个排列，否则会留下并列的 `sort_order`，拼进提示词的示例顺序不再确定。整理记录的过期清理挂在写入路径上（每天至多执行一次），不能只挂在管理员打开的页面上。
+
+节假日缓存在 `_quotaCost` 和仪表盘轮询里被调用；拉取失败也要记下当天已试过并保留已知日期，否则每个峰时整理请求都会重新等满外部接口的超时。
+
+AI Markdown Conversion 失败时的归因按各层能知道的事情分工：DeepSeek 怎么回的只有服务端知道，服务端据此给出原因——只有 DeepSeek 离线（连不上或 5xx）才说"不是我们的问题"，4xx（密钥失效、余额不足、提示词超长）要请管理员处理。客户端收到服务端 JSON 就原样显示；5xx 却拿不到 JSON，说明是反向代理在替挂掉的服务端回话，才显示基础服务器离线；一个回应都没收到时先提示检查本机网络。
+
 AI Markdown 数据库的 schema 初始化缓存同时使用文件身份和 SQLite schema version；同一路径下的数据库文件被替换后必须重新初始化，普通额度和请求记录写入不能反复触发 schema 初始化。
 
 **ApplicationStore** 拥有本机 Application 规则：目录扫描、安装清单、版本合并、ZIP 安全校验、原子覆盖、卸载和 Application Action 执行。它不拥有界面按钮或 InfoBar。
@@ -121,7 +127,7 @@ Application Launch 在后台线程读取本机安装状态并执行 Open Action�
 
 Application Store 首次显示前同步计算"已安装"和"全部应用"两个网格的最终列数，避免先按旧宽度单列绘制再重新排列。后续尺寸变化仍由现有布局定时器合并，不为修复首帧闪动持续同步重排。
 
-Client Update 与 Application Store 的 Package 下载共用 `app/common/update_download.py` 中的 `UpdateDownloadWorker`。支持分段的下载默认以 8 个工作线程开始；后续智能扩容和全局并发限制仍由共享下载器统一控制，不能按界面各自复制线程配置。
+Client Update 与 Application Store 的 Package 下载共用 `app/common/update_download.py` 中的 `UpdateDownloadWorker`。它不传 `validator` 时默认按 Windows 可执行文件（`MZ` 头）校验，因此 Client Update 必须显式传 `validateClientUpdateZip`：更新包是 ZIP，落到默认校验会在每次下载完成后被判定无效。该校验要求整包 CRC 通过、主程序位于根目录或唯一的顶层目录下，与 `UpdateApplyWorker` 解开的两种形态一致；它放在轻量模块里，MainWindow 不能为此提前导入 `application_store`。支持分段的下载默认以 8 个工作线程开始；后续智能扩容和全局并发限制仍由共享下载器统一控制，不能按界面各自复制线程配置。
 
 Client Update 下载完成后，MainWindow 使用后台 `UpdateApplyWorker` 解压更新 ZIP 到暂存目录并启动 `updater.exe`，期间显示不可取消且只含不确定进度环的蒙层弹窗。确认更新器进程创建成功后才关闭 DJCat；启动失败时关闭蒙层并保留当前进程显示错误，不能在 GUI 线程等待更新器启动。更新包在更新器进程创建成功之后才删除，任何一步失败都还能重来；残留的包由下次启动的 `clearUpdateDirectory()` 清掉。
 
@@ -142,6 +148,8 @@ Portable Mode 的 `APP_DIR\DJCatPro` 里有已安装的 Application 和应用市
 ### 管理后台
 
 `server/templates/admin_base.html` 拥有 Admin Console 的共享导航布局；`server/static/admin.css` 和 `server/static/admin.js` 拥有后台共用的导航、表格拖拽和异步交互，不在各页面模板复制相同逻辑。移动端打开侧边栏时锁定页面滚动，但导航列表本身必须保留独立的纵向触控滚动。
+
+共享排序表的每一行可以带附属行（如行内编辑表单），附属行标 `data-sort-follows="<所属行 id>"` 并紧跟所属行，拖拽、方向键和恢复顺序时整块移动；只挪排序行会把编辑表单留在原处挂到别的行下面，方向键也会被夹在中间的附属行挡住。所有排序接口都接收 admin.js 提交的 `item_id` / `expected_item_id`，页面不得改写 `window.fetch` 去适配别的载荷格式。
 
 Catalog Order 由 `server/app_store.py` 按稳定 ID 写入数据库。拖拽和键盘排序提交完整新顺序及原始顺序快照；服务端在事务内核对原始顺序，过期快照返回 HTTP 409。保存失败或拖拽取消时，浏览器恢复原顺序；拖拽浮影只是临时视觉状态，不参与命中测试或持久化。Application Preset 排序必须限定在所属 Application 内。
 
