@@ -39,13 +39,24 @@ jobs:
           version: "0.12.1"
           enable-cache: true
 
-      - name: Install and test
-        shell: pwsh
-        run: |
-          uv sync --frozen
-          uv run --frozen python -m pytest -q
-          uv run --frozen python -m compileall -q app server tests
-          node --check server/static/admin.js
+      # 每条命令单独一步：pwsh 的 run 块里原生命令失败不会中断脚本，整步只看最后一条的
+      # 退出码。并在一步里时，pytest 失败会被后面成功的 node --check 盖掉。
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run tests
+        # PySide6 的 Windows wheel 在 offscreen 平台下用 FreeType 找字体，只看 Qt 自带的
+        # fonts 目录或这个变量，而 wheel 不带字体；找不到时所有字形都退化成等宽方框，
+        # 量文字宽度的测试会全部失真。
+        env:
+          QT_QPA_FONTDIR: C:\Windows\Fonts
+        run: uv run --frozen python -m pytest -q
+
+      - name: Compile sources
+        run: uv run --frozen python -m compileall -q app server tests
+
+      - name: Check admin script syntax
+        run: node --check server/static/admin.js
 
   build-updater:
     # 与发版时构建 updater.exe 的命令一致，让 MSVC 编译错误在合并前暴露，而不是在发版那一刻。

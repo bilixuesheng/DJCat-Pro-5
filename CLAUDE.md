@@ -127,7 +127,7 @@ Application Launch 在后台线程读取本机安装状态并执行 Open Action�
 
 Application Store 首次显示前同步计算"已安装"和"全部应用"两个网格的最终列数，避免先按旧宽度单列绘制再重新排列。后续尺寸变化仍由现有布局定时器合并，不为修复首帧闪动持续同步重排。
 
-`updater.exe` 由发版流水线在 windows-2022 上用 MSVC 构建，本地不需要环境；`.github/workflows/tests.yml` 在每次推送和 PR 时跑全量测试并用同样的命令构建一次 updater，让编译错误在合并前暴露。不要把这些检查并进 `main.yml`——它在发版触发路径里。
+`updater.exe` 由发版流水线在 windows-2022 上用 MSVC 构建，本地不需要环境；`.github/workflows/tests.yml` 在每次推送和 PR 时跑全量测试并用同样的命令构建一次 updater，让编译错误在合并前暴露。不要把这些检查并进 `main.yml`——它在发版触发路径里。工作流里每条原生命令单独占一步：pwsh 的多行 `run` 块不会因中间的命令失败而中断，整步只取最后一条的退出码。Windows 上的 offscreen 测试需要 `QT_QPA_FONTDIR` 指向系统字体目录，否则所有字形退化成等宽方框，量文字宽度的测试会失真。
 
 Client Update 与 Application Store 的 Package 下载共用 `app/common/update_download.py` 中的 `UpdateDownloadWorker`。它不传 `validator` 时默认按 Windows 可执行文件（`MZ` 头）校验，因此 Client Update 必须显式传 `validateClientUpdateZip`：更新包是 ZIP，落到默认校验会在每次下载完成后被判定无效。该校验要求整包 CRC 通过、主程序位于根目录或唯一的顶层目录下，与 `UpdateApplyWorker` 解开的两种形态一致；它放在轻量模块里，MainWindow 不能为此提前导入 `application_store`。支持分段的下载默认以 8 个工作线程开始；后续智能扩容和全局并发限制仍由共享下载器统一控制，不能按界面各自复制线程配置。
 
@@ -191,7 +191,7 @@ Projection、Exam Countdown 与 Fullscreen Clock 的窗口化背景、图片裁�
 
 **`app/view/components/busy_glow.py` 独占 Busy Glow。** AI Markdown 对话框和 Projection 编辑器内联整理的输入框共用同一个 `BusyGlowOverlay`；它是输入框的兄弟层而不是子控件，因此光带能同时向框内和框外渗开，并且不碰输入框的样式表——QFluentWidgets 的 TextEdit 外观正是靠 widget 级 `setStyleSheet` 装上去的，改写它会连滚动条一起换成 Qt 原生外观。不要回到 QSS 渐变边框：样式表分别绘制边框各边，粗渐变在圆角处必然斜向拼接。
 
-Busy Glow 的四条约束在 `docs/adr/0002-busy-glow-custom-paint.md` 里有完整理由，改动前先读：重绘自限 60 Hz（全局 1 ms Animation Tick 下这是必需的自我限流，不是疏忽）；已长出的部分是以底边中点为中心的一段连续圆弧，不是两条对称的臂（两条臂会在起笔点和会合点叠出亮疙瘩，调笔帽解决不了）；锥形渐变按周长弧长而非原始角度参数化，几何变化时在 `resizeEvent` 重建，动画期间只转相位；深浅主题是两套配方而不是同一套调亮度。
+Busy Glow 的约束在 `docs/adr/0002-busy-glow-custom-paint.md` 里有完整理由，改动前先读：重绘自限 60 Hz（全局 1 ms Animation Tick 下这是必需的自我限流，不是疏忽）；已长出的部分是以底边中点为中心的一段连续圆弧，不是两条对称的臂（两条臂会在起笔点和会合点叠出亮疙瘩），入场窗口乘进渐变 alpha，不另画遮罩；锥形渐变按周长弧长而非原始角度参数化，几何变化时在 `resizeEvent` 重建，动画期间只转相位、改 alpha；光晕是到边线距离的平滑函数，在 `HALO_PIXEL` 倍的低分辨率缓冲里画、平滑放大贴回，只有边线按设备像素描——不要退回多遍宽笔叠加（浅色背景上能数出台阶），也不要把光晕改回按设备像素画（开销随 DPR² 增长，150% 缩放起就超出 60 Hz 预算）；深色主题光晕按 `Plus` 加性合成、边线正常叠加，深浅主题是两套配方而不是同一套调亮度。
 
 Busy Glow 只表示"正在进行"，不表示完成度。对话框那张卡上挂着 `QGraphicsDropShadowEffect`，而 graphics effect 会因任意子控件重绘而整棵子树重新栅格化，所以光晕启动时用 `dialog_animation.fadeDialogShadow()` 把卡片阴影渐隐、结束时渐回。
 
