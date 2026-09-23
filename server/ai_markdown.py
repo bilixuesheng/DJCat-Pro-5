@@ -266,71 +266,91 @@ def _quotaCost(now=None, peakEnabled=None):
     return 2
 
 
+# holiday-cn 按国务院每年的放假通知整理，逐日列出放假日和调休补班日，
+# 正好是"相对正常周一至周五"的全部例外。nager.at 每个节日只给一天
+# （2026 年春节只有 02-17、国庆只有 10-01、清明没有），也不含补班日。
+HOLIDAY_CALENDAR_URL = (
+    "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/{year}.json"
+)
+
+
 def _isOffPeakDay(now=None):
+    """Whether DeepSeek treats the whole of `now`'s day as off-peak.
+
+    The rule is the official Chinese working calendar, not the day of the week:
+    a statutory holiday is off-peak for the whole break, weekdays it borrows
+    included, and a make-up working day (调休补班) is peak even on a weekend.
+    The calendar therefore has to be consulted before the weekday; only days
+    the schedule does not mention fall back to Saturday-Sunday off-peak.
+    """
     now = (now or datetime.now(TIMEZONE)).astimezone(TIMEZONE)
-    if now.weekday() >= 5:
-        return True
     try:
         _refreshHolidayCache()
     except Exception:
         pass
-    holidays = _cachedHolidays()
-    return now.strftime("%Y-%m-%d") in holidays
+    offDay = _offPeakCalendar().get(now.strftime("%Y-%m-%d"))
+    if offDay is not None:
+        return offDay
+    return now.weekday() >= 5
 
 
-def _cachedHolidays():
+def _storedCalendar():
     with closing(_connect()) as database:
         row = database.execute(
-            "SELECT value FROM settings WHERE key = 'holiday_cache'"
+            "SELECT value FROM settings WHERE key = 'holiday_calendar'"
         ).fetchone()
     if not row:
-        return set()
+        return None, {}
     try:
         data = json.loads(row[0])
-        return set(data.get("dates", []))
+        days = data.get("days", {})
+        if not isinstance(days, dict):
+            return data.get("refreshed"), {}
+        return data.get("refreshed"), {day: bool(off) for day, off in days.items()}
     except (json.JSONDecodeError, AttributeError):
-        return set()
+        return None, {}
+
+
+def _offPeakCalendar():
+    """Dates the official schedule mentions, mapped to whether they are days off."""
+    return _storedCalendar()[1]
 
 
 def _refreshHolidayCache():
     today = _today()
-    with closing(_connect()) as database:
-        row = database.execute(
-            "SELECT value FROM settings WHERE key = 'holiday_cache'"
-        ).fetchone()
-    known = []
-    if row:
-        try:
-            data = json.loads(row[0])
-            if data.get("refreshed") == today:
-                return bool(data.get("dates"))
-            known = list(data.get("dates", []))
-        except (json.JSONDecodeError, AttributeError):
-            pass
+    refreshed, known = _storedCalendar()
+    if refreshed == today:
+        return bool(known)
+
     year = datetime.now(TIMEZONE).year
-    dates = set()
+    fetched, loadedYears = {}, set()
     for y in (year, year + 1):
         try:
-            resp = requests.get(
-                f"https://date.nager.at/api/v3/PublicHolidays/{y}/CN",
-                timeout=10,
-            )
-            if resp.ok:
-                for item in resp.json():
-                    dates.add(item["date"])
-        except (requests.RequestException, KeyError, ValueError):
+            response = requests.get(HOLIDAY_CALENDAR_URL.format(year=y), timeout=10)
+            if not response.ok:
+                continue  # 次年的安排通常到年底才公布
+            for item in response.json()["days"]:
+                fetched[str(item["date"])] = bool(item["isOffDay"])
+            loadedYears.add(str(y))
+        except (requests.RequestException, KeyError, TypeError, ValueError):
             pass
-    # 拉取失败也记下"今天已试过"并保留已知日期：这个函数在峰时的每个整理请求和
-    # 每 10 秒的仪表盘轮询里都会被调用，不落缓存就会一遍遍等满超时。
-    cache = json.dumps({"refreshed": today, "dates": sorted(dates) or known})
+
+    # 拉到的年份以新数据为准（国务院偶尔发补充通知）；没拉到的年份保留已知日期。
+    # 失败也记下"今天已试过"：这里在峰时的每个整理请求和每 10 秒的仪表盘轮询里
+    # 都会被调用，不落缓存就会一遍遍等满超时。
+    days = {day: off for day, off in known.items() if day[:4] not in loadedYears}
+    days.update(fetched)
+    cache = json.dumps({"refreshed": today, "days": days}, sort_keys=True)
     with closing(_connect()) as database:
         database.execute(
-            "INSERT INTO settings(key, value) VALUES ('holiday_cache', ?) "
+            "INSERT INTO settings(key, value) VALUES ('holiday_calendar', ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (cache,),
         )
+        # 旧版按 nager.at 只存了放假日期，语义不同，不再读取。
+        database.execute("DELETE FROM settings WHERE key = 'holiday_cache'")
         database.commit()
-    return bool(dates)
+    return bool(loadedYears)
 
 
 def _connect():
