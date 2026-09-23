@@ -349,8 +349,11 @@ static int relocateOutOfAppDir(const wchar_t *appDir, int argc, wchar_t **argv) 
 
     STARTUPINFOW startup = { .cb = sizeof(startup) };
     PROCESS_INFORMATION process = {0};
+    /* DJCat starts the updater DETACHED_PROCESS, so there is no console to
+       inherit; without CREATE_NO_WINDOW Windows gives this console program a
+       fresh, visible console window for the whole update. */
     if (!CreateProcessW(target, command, NULL, NULL, FALSE,
-                        CREATE_NEW_PROCESS_GROUP, NULL, tempDir,
+                        CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP, NULL, tempDir,
                         &startup, &process))
         return -1;
     CloseHandle(process.hProcess);

@@ -68,3 +68,34 @@ class BannerSourceImageTest(TestCase):
         self.assertEqual(
             banner._source_pixmap.toImage().pixelColor(10, 10).name(), "#2c7ace"
         )
+
+
+class BannerHighDpiTest(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def testTheCachedBannerIsRenderedAtDevicePixels(self):
+        # 150%/200% 缩放下按逻辑尺寸渲染再被放大，横幅会发虚。
+        banner = BannerWidget()
+        self.addCleanup(banner.deleteLater)
+        banner.devicePixelRatioF = lambda: 2.0
+
+        pixmap = banner._create_cached_pixmap(450, 150)
+
+        self.assertEqual((pixmap.width(), pixmap.height()), (900, 300))
+        self.assertEqual(pixmap.devicePixelRatio(), 2.0)
+
+    def testMovingToAScreenWithAnotherScaleRebuildsTheCache(self):
+        banner = BannerWidget()
+        self.addCleanup(banner.deleteLater)
+        banner.resize(450, 150)
+        banner.show()
+        banner.grab()
+        first = banner._cached_pixmap
+
+        banner.devicePixelRatioF = lambda: 1.5
+        banner.grab()
+
+        self.assertIsNot(banner._cached_pixmap, first)
+        self.assertEqual(banner._cached_pixmap.devicePixelRatio(), 1.5)

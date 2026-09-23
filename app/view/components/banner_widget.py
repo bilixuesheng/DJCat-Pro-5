@@ -85,7 +85,9 @@ class BannerWidget(QWidget):
         if pixmap is None:
             return None
         mode = cfg.bannerScaleMode.value
-        w, h = width, height
+        # 按物理像素画，最后再标上设备像素比；按逻辑尺寸画会在 150%/200% 缩放下被放大发虚。
+        ratio = self.devicePixelRatioF()
+        w, h = max(1, round(width * ratio)), max(1, round(height * ratio))
 
         temp_pixmap = QPixmap(w, h)
         temp_pixmap.fill(Qt.GlobalColor.transparent)
@@ -119,6 +121,7 @@ class BannerWidget(QWidget):
         painter.fillRect(0, 0, w, h, gradient)
         painter.end()
 
+        temp_pixmap.setDevicePixelRatio(ratio)
         return temp_pixmap
 
     def _source_image(self, path):
@@ -137,12 +140,10 @@ class BannerWidget(QWidget):
         path.addRoundedRect(QRectF(0, 0, w, h), 10, 10)
         painter.setClipPath(path)
 
-        if (self._cached_pixmap is None or
-            self._cache_size != (w, h) or
-            self.isConfigurationChanged()):
-
+        key = (w, h, self.devicePixelRatioF())
+        if self._cached_pixmap is None or self._cache_size != key:
             self._cached_pixmap = self._create_cached_pixmap(w, h)
-            self._cache_size = (w, h)
+            self._cache_size = key
 
         if self._cached_pixmap:
             painter.drawPixmap(0, 0, self._cached_pixmap)
@@ -153,5 +154,3 @@ class BannerWidget(QWidget):
         self._invalidate_cache()
         super().resizeEvent(event)
 
-    def isConfigurationChanged(self):
-        return False  # 简化处理，依赖_updateCache调用触发

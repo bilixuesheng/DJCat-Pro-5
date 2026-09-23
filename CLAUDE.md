@@ -30,7 +30,7 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 
 **`cfg` 是客户端持久化设置的唯一来源。** 设置页、主页和托盘通过 `cfg.set(...)` 修改值；运行时对象不另建一份需要双向同步的配置副本。
 
-Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cfg.applicationIconPath` 持久化。`app/common/application_icon.py` 按来源、路径和文件修改时间缓存解析结果：设置页预览在 `paintEvent` 里取图标，每次新建 `QIcon` 都会整张重新解码。主页横幅与设置页的横幅预览共用一份解码后的原图——`QPixmap` 自带的缓存只收 10 MB 以内的图，超过的会被两个实例各解码一份并常驻。MainWindow 同步更新 QApplication 和主窗口图标，启动页直接复用主窗口图标；SystemTrayIcon 同步更新系统托盘及已存在的"主页"菜单项，不重建菜单，也不要求重新启动。
+Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cfg.applicationIconPath` 持久化。`app/common/application_icon.py` 按来源、路径和文件修改时间缓存解析结果：设置页预览在 `paintEvent` 里取图标，每次新建 `QIcon` 都会整张重新解码。主页横幅与设置页的横幅预览共用一份解码后的原图——`QPixmap` 自带的缓存只收 10 MB 以内的图，超过的会被两个实例各解码一份并常驻。横幅按物理像素渲染缓存图再标上设备像素比，缓存键包含设备像素比，否则 150%/200% 缩放下会被放大发虚、换到不同缩放的屏幕也不会重建。MainWindow 同步更新 QApplication 和主窗口图标，启动页直接复用主窗口图标；SystemTrayIcon 同步更新系统托盘及已存在的"主页"菜单项，不重建菜单，也不要求重新启动。
 
 **`app/platform/animation_timer.py` 独占 Qt 全局 Animation Tick 间隔。** View 和业务模块不直接调用 Qt 私有动画 API；私有符号不可用时保留 Qt 默认行为。
 
@@ -127,13 +127,15 @@ Application Launch 在后台线程读取本机安装状态并执行 Open Action�
 
 Application Store 首次显示前同步计算"已安装"和"全部应用"两个网格的最终列数，避免先按旧宽度单列绘制再重新排列。后续尺寸变化仍由现有布局定时器合并，不为修复首帧闪动持续同步重排。
 
+`updater.exe` 由发版流水线在 windows-2022 上用 MSVC 构建，本地不需要环境；`.github/workflows/tests.yml` 在每次推送和 PR 时跑全量测试并用同样的命令构建一次 updater，让编译错误在合并前暴露。不要把这些检查并进 `main.yml`——它在发版触发路径里。
+
 Client Update 与 Application Store 的 Package 下载共用 `app/common/update_download.py` 中的 `UpdateDownloadWorker`。它不传 `validator` 时默认按 Windows 可执行文件（`MZ` 头）校验，因此 Client Update 必须显式传 `validateClientUpdateZip`：更新包是 ZIP，落到默认校验会在每次下载完成后被判定无效。该校验要求整包 CRC 通过、主程序位于根目录或唯一的顶层目录下，与 `UpdateApplyWorker` 解开的两种形态一致；它放在轻量模块里，MainWindow 不能为此提前导入 `application_store`。支持分段的下载默认以 8 个工作线程开始；后续智能扩容和全局并发限制仍由共享下载器统一控制，不能按界面各自复制线程配置。
 
 Client Update 下载完成后，MainWindow 使用后台 `UpdateApplyWorker` 解压更新 ZIP 到暂存目录并启动 `updater.exe`，期间显示不可取消且只含不确定进度环的蒙层弹窗。确认更新器进程创建成功后才关闭 DJCat；启动失败时关闭蒙层并保留当前进程显示错误，不能在 GUI 线程等待更新器启动。更新包在更新器进程创建成功之后才删除，任何一步失败都还能重来；残留的包由下次启动的 `clearUpdateDirectory()` 清掉。
 
 `updater.exe` 的提交点是整目录换名,不是逐文件复制:更新包换名到 `<APP_DIR>.new`,原目录换名为 `<APP_DIR>.backup`,再把新目录换成 `APP_DIR`;每一步都是同卷改名,失败时把备份换回去。逐文件复制没有这个性质——任何一个文件失败都会留下无法收拾的半更新目录。
 
-更新器不能从 `APP_DIR` 里面运行,否则正在运行的映像和打开的日志会挡住换名;它先把自己复制到 `%TEMP%\djcat_updater` 再重启。路径比对前必须把 `/` 规范成 `\`,否则调用方传正斜杠就会静默跳过重定位。
+更新器不能从 `APP_DIR` 里面运行,否则正在运行的映像和打开的日志会挡住换名;它先把自己复制到 `%TEMP%\djcat_updater` 再重启,重启必须带 `CREATE_NO_WINDOW`:DJCat 以 `DETACHED_PROCESS` 启动它,没有控制台可继承,Windows 会给这个控制台程序新开一个可见的黑窗口。路径比对前必须把 `/` 规范成 `\`,否则调用方传正斜杠就会静默跳过重定位。
 
 Portable Mode 的 `APP_DIR\DJCatPro` 里有已安装的 Application 和应用市场缓存,动辄数 GB,因此换名前把它**改名**进新目录,不是复制。安装目录不可写时申请提权;提权后必须借 `Shell_TrayWnd` 的令牌用 `CreateProcessAsUserW` 降权重启 DJCat,否则它写出的配置和 `Program/` 会带上管理员属主,下次普通启动反而读不了。
 
