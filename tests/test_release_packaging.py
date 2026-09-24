@@ -142,3 +142,16 @@ def test_release_requires_an_explicit_republish_commit_for_an_existing_tag():
     assert 'gh release delete "$TAG" --yes --cleanup-tag' in workflow
     assert "--clobber" not in workflow
     assert "gh release upload" not in workflow
+
+
+def test_build_bundles_qt_chinese_translation_where_the_app_looks_for_it():
+    from app.config.paths import ASSET_DIR, QT_TRANSLATIONS_DIR
+
+    args = [arg for arg in deploy.build_args() if "qtbase_zh_CN.qm" in arg]
+
+    assert len(args) == 1
+    source, target = args[0].removeprefix("--include-data-files=").rsplit("=", 1)
+    assert Path(source.strip('"')).is_file()
+    assert target == (
+        QT_TRANSLATIONS_DIR.relative_to(ASSET_DIR.parents[1]) / "qtbase_zh_CN.qm"
+    ).as_posix()

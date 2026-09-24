@@ -7,6 +7,9 @@ from pathlib import Path
 from PySide6.QtCore import QStandardPaths
 
 ASSET_DIR = Path(__file__).resolve().parents[1] / "assets"
+# 打包版里 Qt 自带的中文翻译放在这里：Nuitka 只在用到 QtWebEngine 时才会带上 Qt 的
+# translations 目录，deploy.py 单独打进 qtbase 这一份。源码运行时用 PySide6 自带的。
+QT_TRANSLATIONS_DIR = ASSET_DIR.parent / "translations"
 APP_DIR = (
     Path(sys.executable).resolve().parent
     if getattr(sys, "frozen", False) or "__compiled__" in globals()

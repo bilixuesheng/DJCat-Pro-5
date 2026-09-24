@@ -246,6 +246,7 @@ set working directory
   → SingletonApplication (Windows single instance + IPC)
   → unlockQtAnimations (before any QWidget animation is created)
   → optimizeFluentDialogs + optimizeFluentMenus (before MainWindow or its popups are created)
+  → installTranslators (Qt qtbase + QFluentWidgets Chinese strings)
   → configure logging and clear stale Client Update files
   → qconfig.load(CONFIG_PATH, cfg)
   → MainWindow(isSilent)
@@ -263,6 +264,8 @@ set working directory
 App Data Directory 必须在导入 `cfg` 和调用 `qconfig.load` 前由 `app/config/paths.py` 确定。第二个 Windows 实例只通知现有实例显示窗口，然后退出；它不创建 MainWindow。
 
 `unlockQtAnimations()` 必须在 QApplication 创建之后、任何动画启动之前、GUI 主线程上调用。它只针对项目锁定的 Qt 运行时查找私有符号；找不到符号或动态库时记录警告并保留 Qt 默认 16 ms 间隔，不允许加载系统中另一份 Qt 来凑合。
+
+`installTranslators()` 装两份中文翻译：`FluentTranslator` 管 QFluentWidgets 自带文案（开关、输入框右键菜单、颜色对话框），Qt 的 `qtbase_zh_CN.qm` 管原生控件（数字框和 Markdown 链接的右键菜单）。Nuitka 只在用到 QtWebEngine 时才打包 Qt 的 translations 目录，所以 `deploy.py` 单独把 qtbase 这一份打进 `QT_TRANSLATIONS_DIR`；源码运行时先用 PySide6 自带的目录。
 
 `optimizeFluentDialogs()` 和 `optimizeFluentMenus()` 在 MainWindow 创建之前分别注册蒙层弹窗阴影复用和 Menu Reveal 管理器，重复调用保持幂等。菜单适配覆盖所有使用 QFluentWidgets 下拉或上拉管理器的菜单，包括对话框内部的下拉框和输入框右键菜单；其他 Popup 和 Flyout 不会自动继承蒙层弹窗优化。
 
