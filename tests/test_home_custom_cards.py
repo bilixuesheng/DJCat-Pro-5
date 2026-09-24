@@ -719,6 +719,8 @@ class HomeCustomCardTest(TestCase):
             env=os.environ,
         )
 
+    # creationflags 只在 Windows 上非零，其他平台没有 CREATE_NEW_CONSOLE 可选。
+    @unittest.skipUnless(os.name == "nt", "控制台窗口标志是 Windows 专有行为")
     @mock.patch("app.common.home_cards.subprocess.Popen")
     def testShellUsesConfiguredConsoleMode(self, popen):
         popen.return_value.poll.return_value = 0

@@ -2,7 +2,7 @@ import math
 import time
 
 from PySide6.QtCore import QPropertyAnimation, QSize, Qt, QTime, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QFontMetrics
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtMultimedia import QSoundEffect
 from PySide6.QtWidgets import (
     QApplication,
@@ -29,10 +29,15 @@ from qframelesswindow import FramelessWindow
 
 from app.config.cfg import cfg
 from app.config.paths import ASSET_DIR
+from app.platform.screens import screenFor
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import QWIDGETSIZE_MAX
 from app.view.components.task_picker import TouchTimePicker
-from app.view.components.window_background import WINDOW_SHADOW_MARGIN, WindowBackground
+from app.view.components.window_background import (
+    TIMER_THEME_BACKGROUND,
+    WINDOW_SHADOW_MARGIN,
+    WindowBackground,
+)
 from app.view.pages.broadcast_page import (
     VerticalButton,
     showActionConfirmation,
@@ -77,7 +82,7 @@ class CountdownWindow(FramelessWindow):
             cfg.countdownBackgroundColor,
             cfg.countdownBackgroundImagePath,
             cfg.countdownBackgroundScaleMode,
-            lambda: QColor("black"),
+            lambda: TIMER_THEME_BACKGROUND,
             self,
         )
         self.background.lower()
@@ -395,7 +400,7 @@ class CountdownWindow(FramelessWindow):
             self._setControlsVisible(False, animated=False)
             self.controlsWidget.hide()
             self.showNormal()
-            rect = self.screen().availableGeometry()
+            rect = screenFor(self).availableGeometry()
             # 底部只留角落操作按钮自身的高度，时间区域不再为隐藏控件留空
             self.vBoxLayout.setContentsMargins(16, 12, 16, 56)
             # 先按目标高度缩小字体，否则旧字体的最小尺寸会钳制 resize
@@ -409,7 +414,7 @@ class CountdownWindow(FramelessWindow):
             self.setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX)
             if cfg.showTaskbarInCountdown.value:
                 self.showNormal()
-                self.setGeometry(self.screen().availableGeometry())
+                self.setGeometry(screenFor(self).availableGeometry())
             else:
                 self.showFullScreen()
 

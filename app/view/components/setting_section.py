@@ -276,9 +276,14 @@ class SettingSectionView(ScrollArea):
         self.vBoxLayout.setSpacing(10)
         self.vBoxLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-    def addPreview(self, widget: QWidget) -> QWidget:
+    def addPreview(self, widget: QWidget, centered: bool = False) -> QWidget:
+        """``centered`` is for fixed-size previews; stretchy ones would shrink to
+        their size hint under an alignment flag."""
         widget.setParent(self.container)
-        self.vBoxLayout.addWidget(widget)
+        if centered:
+            self.vBoxLayout.addWidget(widget, 0, Qt.AlignmentFlag.AlignHCenter)
+        else:
+            self.vBoxLayout.addWidget(widget)
         return widget
 
     def addNavigationCard(self, card: SettingNavigationCard) -> SettingNavigationCard:
@@ -471,3 +476,5 @@ class _Transition:
         self.view.move(0, 0)
         if self.hideOnFinish:
             self.view.hide()
+        # 动画组挂在 stack 名下，不主动释放就会随每次下钻和返回一直累积。
+        self.group.deleteLater()

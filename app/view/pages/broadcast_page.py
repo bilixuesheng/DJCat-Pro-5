@@ -53,9 +53,15 @@ from app.common.update_download import isHttpsResponseChain
 from app.config.cfg import cfg
 from app.config.constants import AI_MARKDOWN_API
 from app.config.paths import ASSET_DIR
+from app.platform.screens import screenFor
 from app.view.components.busy_glow import BusyGlowOverlay
 from app.view.components.markdown_view import MarkdownView
-from app.view.components.window_background import WINDOW_SHADOW_MARGIN, WindowBackground
+from app.view.components.window_background import (
+    WINDOW_SHADOW_MARGIN,
+    WindowBackground,
+    projectionThemeBackground,
+    projectionTitleColor,
+)
 
 
 def showActionConfirmation(
@@ -332,7 +338,7 @@ class BroadcastWindow(FramelessWindow):
             cfg.broadcastBackgroundColor,
             cfg.broadcastBackgroundImagePath,
             cfg.broadcastBackgroundScaleMode,
-            self._themeBackgroundColor,
+            projectionThemeBackground,
             self,
         )
         self.background.lower()
@@ -387,14 +393,6 @@ class BroadcastWindow(FramelessWindow):
         self.btn_win.clicked.connect(self.toggleWindowMode)
         self.btn_close.clicked.connect(self._onClose)
 
-    def _themeBackgroundColor(self):
-        is_dark = (
-            isDarkTheme()
-            if cfg.customThemeMode.value == "System"
-            else cfg.customThemeMode.value == "Dark"
-        )
-        return QColor("#202020" if is_dark else "#FFFFFF")
-
     def _applyStyle(self):
         is_dark = isDarkTheme() if cfg.customThemeMode.value == "System" else cfg.customThemeMode.value == "Dark"
         text_color = "white" if is_dark else "black"
@@ -413,7 +411,7 @@ class BroadcastWindow(FramelessWindow):
         self.btn_close.updateStyle()
 
         self.titleLabel.setText(title)
-        self.titleLabel.setStyleSheet(f"color: {qconfig.themeColor.value.name()};")
+        self.titleLabel.setStyleSheet(f"color: {projectionTitleColor().name()};")
 
         if is_markdown:
             self.contentEdit.clear()
@@ -506,14 +504,14 @@ class BroadcastWindow(FramelessWindow):
 
         if self.is_windowed:
             self.showNormal()
-            rect = self.screen().availableGeometry()
+            rect = screenFor(self).availableGeometry()
             margin = WINDOW_SHADOW_MARGIN
             self.resize(int(rect.width() * 0.5) + 2 * margin, int(rect.height() * 0.5) + 2 * margin)
             self.move(rect.center() - self.rect().center())
         else:
             if cfg.showTaskbarInBroadcast.value:
                 self.showNormal()
-                self.setGeometry(self.screen().availableGeometry())
+                self.setGeometry(screenFor(self).availableGeometry())
             else:
                 self.showFullScreen()
 
@@ -653,7 +651,7 @@ class BroadcastWindow(FramelessWindow):
         self.hide()
         self.miniWindow._updateStyle()
         self.miniWindow.show()
-        rect = self.screen().availableGeometry()
+        rect = screenFor(self).availableGeometry()
         if cfg.broadcastActionButtonPosition.value == "右下角":
             self.miniWindow.move(
                 rect.left() + rect.width() - 150,
@@ -795,23 +793,18 @@ def _streamAIMarkdown(request, emitChunk):
             limit = int(response.headers.get("X-RateLimit-Limit", limit))
             cost = int(response.headers.get("X-RateLimit-Cost", cost))
             if not response.ok:
-                if response.status_code == 502:
-                    raise RuntimeError(
-                        "这不是你的问题，也不是我们的问题。\n"
-                        "DeepSeek 服务器已离线，请等待深度求索修复，"
-                        "这可能是间歇性的问题。"
-                    )
-                if response.status_code == 503:
-                    raise RuntimeError(
-                        "电教猫 Pro 基础服务器已离线，请等待修复。"
-                    )
+                # 该怪谁只有服务端知道（它看得到 DeepSeek 怎么回的），所以有服务端的
+                # 原因就照原样显示。服务端的错误都带 JSON；拿不到 JSON 的 5xx 是前面的
+                # 反向代理在替已经挂掉的服务端回话。
                 try:
                     message = response.json().get("message")
                 except (AttributeError, ValueError):
                     message = None
-                raise RuntimeError(
-                    message or f"AI 服务暂时不可用（{response.status_code}）"
-                )
+                if message:
+                    raise RuntimeError(message)
+                if response.status_code in (502, 503, 504):
+                    raise RuntimeError("电教猫 Pro 基础服务器已离线，请等待修复。")
+                raise RuntimeError(f"AI 服务暂时不可用（{response.status_code}）")
 
             response.encoding = "utf-8"
             for chunk in _iterSseContent(
@@ -826,9 +819,11 @@ def _streamAIMarkdown(request, emitChunk):
     except requests.RequestException:
         if request._cancelEvent.is_set():
             return
+        # 一个回应都没收到：可能是服务器离线，也可能是这台电脑自己没网。
         _emitSignal(
             request.conversionFailed,
-            "电教猫 Pro 基础服务器已离线，请等待修复。",
+            "无法连接电教猫 Pro 服务器。请先检查这台电脑的网络；"
+            "网络正常时，可能是服务器暂时离线。",
             remaining,
             limit,
             cost,
@@ -915,7 +910,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self._resultChunks = []
         self._pendingChunks = []
 
-        self.titleLabel = SubtitleLabel("AI整理Markdown", self)
+        self.titleLabel = SubtitleLabel("AI 整理 Markdown", self)
         self.descriptionLabel = BodyLabel(
             "将作业清单或任务填入下面的输入框，即可整理为标准 Markdown 格式。",
             self,
@@ -1212,7 +1207,7 @@ class BroadcastEditPage(QWidget):
 
         self.aiBtn = PushButton(self)
         self.aiBtn.setIcon(QIcon(str(ASSET_DIR / "deepseek.png")))
-        self.aiBtn.setText("AI整理Markdown")
+        self.aiBtn.setText("AI 整理 Markdown")
         self.aiBtn.setEnabled(False)
         self.aiBtn.clicked.connect(self._showAIMarkdownDialog)
 

@@ -197,6 +197,25 @@
         ...table.querySelectorAll("tbody > tr[data-sort-id]"),
     ];
 
+    // 附属行（行内编辑表单等）标 data-sort-follows="<所属行 id>"，紧跟在所属行后面，
+    // 和它作为一整块移动。只挪排序行会把编辑表单留在原位、挂到别的行下面，
+    // 方向键也会被夹在中间的附属行挡住。
+    const companionRows = (row) => {
+        const rows = [];
+        let next = row.nextElementSibling;
+        while (next && next.dataset.sortFollows === row.dataset.sortId) {
+            rows.push(next);
+            next = next.nextElementSibling;
+        }
+        return rows;
+    };
+
+    const rowBlockEnd = (row) => companionRows(row).at(-1) || row;
+
+    const moveRowBlock = (body, row, reference) => {
+        [row, ...companionRows(row)].forEach((item) => body.insertBefore(item, reference));
+    };
+
     const refreshTableOrder = (table) => {
         sortableRows(table).forEach((row, index) => {
             const position = row.querySelector("[data-order-position]");
@@ -246,7 +265,7 @@
             const rows = new Map(sortableRows(table).map((row) => [row.dataset.sortId, row]));
             ids.forEach((id) => {
                 const row = rows.get(id);
-                if (row) body.append(row);
+                if (row) moveRowBlock(body, row, null);
             });
             refreshTableOrder(table);
         };
@@ -272,12 +291,12 @@
             const bounds = target.getBoundingClientRect();
             const reference = clientY < bounds.top + bounds.height / 2
                 ? target
-                : target.nextElementSibling;
-            if (reference === drag.row || reference === drag.row.nextElementSibling) return;
+                : rowBlockEnd(target).nextElementSibling;
+            if (reference === drag.row || reference === rowBlockEnd(drag.row).nextElementSibling) return;
             const positions = window.matchMedia("(prefers-reduced-motion: reduce)").matches
                 ? null
                 : new Map(sortableRows(table).map((row) => [row, row.offsetTop]));
-            body.insertBefore(drag.row, reference);
+            moveRowBlock(body, drag.row, reference);
             positions?.forEach((top, row) => {
                 if (row === drag.row || top === row.offsetTop) return;
                 row.animate(
@@ -385,14 +404,20 @@
                 if (!["ArrowUp", "ArrowDown"].includes(event.key)
                     || table.dataset.sortSaving === "true") return;
                 const row = handle.closest("tr[data-sort-id]");
-                const sibling = event.key === "ArrowUp"
+                let sibling = event.key === "ArrowUp"
                     ? row.previousElementSibling
-                    : row.nextElementSibling;
-                if (!sibling?.matches("tr[data-sort-id]")) return;
+                    : rowBlockEnd(row).nextElementSibling;
+                while (sibling && !sibling.matches("tr[data-sort-id]")) {
+                    sibling = event.key === "ArrowUp"
+                        ? sibling.previousElementSibling
+                        : sibling.nextElementSibling;
+                }
+                if (!sibling) return;
                 const previousOrder = sortableRows(table).map((item) => item.dataset.sortId);
-                body.insertBefore(
+                moveRowBlock(
+                    body,
                     row,
-                    event.key === "ArrowUp" ? sibling : sibling.nextElementSibling,
+                    event.key === "ArrowUp" ? sibling : rowBlockEnd(sibling).nextElementSibling,
                 );
                 refreshTableOrder(table);
                 persist(previousOrder);
@@ -472,6 +497,7 @@
             if (form.dataset.removeOnSuccess) {
                 const target = form.closest(form.dataset.removeOnSuccess);
                 const table = target?.closest("table");
+                if (target?.dataset.sortId) companionRows(target).forEach((row) => row.remove());
                 target?.remove();
                 refreshTableOrder(table);
                 if (table?.matches("[data-sortable-table]")) {

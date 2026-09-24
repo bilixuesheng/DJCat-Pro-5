@@ -5,6 +5,7 @@ import re
 import shutil
 import threading
 import time
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -13,7 +14,7 @@ from urllib.parse import urlparse
 import requests
 from PySide6.QtCore import QObject, Signal
 
-from app.config.paths import UPDATE_DIR
+from app.config.paths import APP_DIR, UPDATE_DIR
 
 
 INITIAL_THREAD_COUNT = 8
@@ -68,6 +69,89 @@ def clearUpdateDirectory(directory: Path = UPDATE_DIR) -> list[Path]:
         except OSError:
             failed.append(path)
     return failed
+
+
+CLIENT_EXECUTABLE_NAME = "djcat.exe"
+
+
+def validateClientUpdateZip(path: Path) -> None:
+    """Reject a downloaded Client Update that the updater could not install.
+
+    The updater swaps the whole program directory for the staged tree, so the
+    archive has to be complete before anything is extracted: it must open as a
+    ZIP, every member must pass its CRC (a truncated or corrupted download
+    otherwise surfaces only halfway through extraction), and it must carry the
+    client at its root or under a single top-level folder, the same two shapes
+    UpdateApplyWorker unpacks.
+    """
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = [info.filename for info in archive.infolist()]
+            damaged = archive.testzip()
+    except (OSError, zipfile.BadZipFile, EOFError) as error:
+        raise ValueError("下载的更新包不是有效的 ZIP 文件") from error
+    if damaged is not None:
+        raise ValueError("下载的更新包已损坏，请重新下载")
+
+    roots = {name.split("/", 1)[0] for name in names if name.strip("/")}
+    candidates = {CLIENT_EXECUTABLE_NAME.lower()}
+    if len(roots) == 1:
+        candidates.add(f"{next(iter(roots))}/{CLIENT_EXECUTABLE_NAME}".lower())
+    if not candidates & {name.lower() for name in names}:
+        raise ValueError("更新包里没有电教猫主程序")
+
+
+UPDATER_NAME = "updater.exe"
+UPDATER_BACKUP_NAME = "updater.exe.old"
+
+
+def restoreUpdaterBinary(directory: Path = APP_DIR) -> bool:
+    """Reconcile updater.exe with the backup the updater leaves behind.
+
+    The updater renames its own running binary before overwriting it, because a
+    running executable cannot be replaced in place. A copy that then fails leaves
+    the backup as the only surviving updater, so deleting it unconditionally
+    would make every later Client Update fail on a missing updater with nothing
+    left to recover from. Returns True when the backup had to be promoted back.
+    """
+    backup = directory / UPDATER_BACKUP_NAME
+    if not backup.is_file():
+        return False
+    if (directory / UPDATER_NAME).is_file():
+        try:
+            backup.unlink()
+        except OSError:
+            pass
+        return False
+    try:
+        backup.replace(directory / UPDATER_NAME)
+    except OSError:
+        return False
+    return True
+
+
+UPDATE_FAILURE_MARKER = "update-failed.txt"
+
+
+def takeUpdateFailure(directory: Path = APP_DIR) -> str:
+    """Read and clear the reason the updater left behind, or "" if it succeeded.
+
+    A Client Update that rolls back restores the previous version and relaunches
+    it, so without this the user sees a normal restart on the same version and
+    nothing explaining why. The updater writes the file with a BOM, hence
+    utf-8-sig.
+    """
+    marker = directory / UPDATE_FAILURE_MARKER
+    try:
+        reason = marker.read_text(encoding="utf-8-sig").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return ""
+    finally:
+        try:
+            marker.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return reason[0].strip() if reason else ""
 
 
 class DownloadCanceled(Exception):

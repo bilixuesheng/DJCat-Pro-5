@@ -11,11 +11,15 @@ from PySide6.QtGui import QColor, QPainterPath
 from PySide6.QtWidgets import QApplication, QGraphicsDropShadowEffect, QVBoxLayout, QWidget
 
 from app.view.components.busy_glow import (
+    BREATH_AMPLITUDE,
     CORNER_RADIUS,
+    ENTRANCE_MS,
+    TAPER_FRACTION,
     GLOW_MARGIN,
     BusyGlowOverlay,
-    _grownPath,
+    _arcWindow,
     _bandColor,
+    _haloAlpha,
     _perimeter,
 )
 
@@ -73,7 +77,7 @@ class TestPerimeterParameterisation:
     def test_gradient_colours_a_point_by_its_arc_length_not_its_angle(self, app):
         overlay = BusyGlowOverlay(QWidget())
         overlay.resize(600 + 2 * GLOW_MARGIN, 200 + 2 * GLOW_MARGIN)
-        gradient = overlay._gradient(0.0)
+        _, gradient = overlay._gradients(overlay._state(0), 0)
         # The right-edge midpoint lies at angle 0, i.e. gradient position 0. Under angle
         # parameterisation that stop would carry the colour of arc fraction 0.0 instead.
         from qfluentwidgets import isDarkTheme
@@ -90,31 +94,23 @@ class TestPerimeterParameterisation:
 
 class TestGrownArc:
     def test_partial_growth_is_a_single_arc_not_two_arms(self):
-        """Two arms would overlap at the bottom seam and stack alpha into a bright blob."""
-        points, fractions = _perimeter(_rect(), CORNER_RADIUS)
-        path, _ = _grownPath(points, fractions, 0.4, _rect(), CORNER_RADIUS)
-        moves = sum(
-            1
-            for i in range(path.elementCount())
-            if path.elementAt(i).type == QPainterPath.ElementType.MoveToElement
-        )
-        assert moves == 1
+        """Two arms would overlap at the bottom seam and stack alpha into a bright blob.
+
+        A single arc centred on the bottom midpoint only ever gets dimmer away from it.
+        """
+        samples = [_arcWindow(i / 400, 0.4) for i in range(201)]
+        assert samples[0] == 1.0
+        assert all(b <= a for a, b in zip(samples, samples[1:]))
 
     def test_growth_is_centred_on_the_bottom_edge(self):
-        points, fractions = _perimeter(_rect(), CORNER_RADIUS)
-        path, _ = _grownPath(points, fractions, 0.3, _rect(), CORNER_RADIUS)
-        bounds = path.boundingRect()
-        assert bounds.bottom() == pytest.approx(200, abs=3)
-        assert bounds.top() > 100, "a 30% arc must not have reached the top edge yet"
-        assert bounds.center().x() == pytest.approx(300, abs=3)
+        for fraction in (0.02, 0.08, 0.15, 0.3):
+            assert _arcWindow(fraction, 0.3) == pytest.approx(
+                _arcWindow(1 - fraction, 0.3)
+            )
+        assert _arcWindow(0.5, 0.3) == 0.0, "a 30% arc must not have reached the top edge yet"
 
     def test_full_growth_closes_the_ring(self):
-        points, fractions = _perimeter(_rect(), CORNER_RADIUS)
-        path, taper = _grownPath(points, fractions, 1.0, _rect(), CORNER_RADIUS)
-        bounds = path.boundingRect()
-        assert bounds.top() == pytest.approx(0, abs=1)
-        assert bounds.bottom() == pytest.approx(200, abs=1)
-        assert taper == [], "a closed ring has no growing ends to fade"
+        assert all(_arcWindow(i / 100, 1.0) == 1.0 for i in range(101))
 
     def test_growing_ends_are_dimmer_than_the_middle_of_the_arc(self, app):
         """Strokes are additive, so a taper painted over the core brightens the ends
@@ -135,7 +131,11 @@ class TestGrownArc:
         tip = overlay._points[
             min(
                 range(len(fractions)),
-                key=lambda i: abs(fractions[i] - progress * 0.5),
+                # The middle of the fading end: half-way along the taper.
+                key=lambda i: abs(
+                    fractions[i]
+                    - (progress * (0.5 + TAPER_FRACTION) - TAPER_FRACTION * progress / 2)
+                ),
             )
         ]
         middle = overlay._points[
@@ -152,10 +152,25 @@ class TestGrownArc:
 
         assert alphaAt(tip) < alphaAt(middle)
 
+    def test_the_two_ends_close_gradually_instead_of_snapping_shut(self):
+        """The fading ends used to leave a dim gap at the top until the very last frame,
+        which then filled the whole gap at once."""
+        def dimmest(progress):
+            return min(_arcWindow(i / 400, progress) for i in range(401))
+
+        previous = 0.0
+        for step in range(900, 1000):
+            current = dimmest(step / 1000)
+            assert current >= previous
+            previous = current
+        assert dimmest(0.995) > 0.9
+        # The frame right before the entrance ends is already (almost) a full ring.
+        overlay = BusyGlowOverlay(QWidget())
+        lastProgress = overlay._state(ENTRANCE_MS - 16).progress
+        assert dimmest(lastProgress) > 0.95
+
     def test_zero_growth_draws_nothing(self):
-        points, fractions = _perimeter(_rect(), CORNER_RADIUS)
-        path, _ = _grownPath(points, fractions, 0.0, _rect(), CORNER_RADIUS)
-        assert path is None or path.elementCount() == 0
+        assert all(_arcWindow(i / 100, 0.0) == 0.0 for i in range(101))
 
 
 class TestThemeRecipes:
@@ -238,16 +253,27 @@ class TestOverlayLifecycle:
         assert overlay._state(0).fade == 1.0
         overlay.stop(immediate=True)
 
-    def test_glow_margin_leaves_room_for_the_widest_pass_at_peak_breath(self):
-        """Too small a margin and the outermost bloom is clipped square by the overlay."""
-        from app.view.components.busy_glow import (
-            BREATH_AMPLITUDE,
-            GLOW_MARGIN,
-            _PASSES,
-        )
+    def test_halo_fades_to_nothing_before_the_overlay_edge_at_peak_breath(self):
+        """Otherwise the outermost bloom is clipped square by the overlay's own rect."""
+        peak = 1 + BREATH_AMPLITUDE
+        assert _haloAlpha(GLOW_MARGIN - 1, peak) == 0.0
+        assert _haloAlpha(GLOW_MARGIN - 3, peak) * 255 < 1
+        assert _haloAlpha(-(GLOW_MARGIN - 1), peak) == 0.0
 
-        widest = max(width for width, _ in _PASSES)
-        assert GLOW_MARGIN >= widest * (1 + BREATH_AMPLITUDE) / 2
+    def test_halo_falls_off_smoothly_without_steps(self):
+        """The old six stacked strokes left visible rings on a light background."""
+        samples = [_haloAlpha(d / 4, 1.0) for d in range(0, 4 * GLOW_MARGIN)]
+        assert all(b <= a for a, b in zip(samples, samples[1:]))
+        jumps = [a - b for a, b in zip(samples, samples[1:])]
+        # A step shows up as one jump surrounded by flat neighbours; a smooth curve's
+        # neighbouring jumps are always about the same size.
+        for before, jump, after in zip(jumps, jumps[1:], jumps[2:]):
+            assert jump <= 2 * max(before, after) + 1 / 255
+
+    def test_halo_reaches_less_far_into_the_box_than_out_of_it(self):
+        """Text right against the edge of the input must stay readable."""
+        for distance in (4, 8, 12):
+            assert _haloAlpha(-distance, 1.0) < _haloAlpha(distance, 1.0)
 
     def test_paints_without_error_across_the_whole_lifecycle(self, host):
         from PySide6.QtGui import QImage, QPainter

@@ -17,3 +17,5 @@
 - 层级切换是 `SlideNavigationTransitionInfo` 式的推移：进入下一级时旧页左移出场、新页自右入场，返回时反向，两页共用同一条 `cubic-bezier(0,0,0,1)` 曲线和 300 ms 时长并交叉淡入淡出。**不要**改成"旧页原地淡出"——那是 `FromBottom`（顶层切换）的特征，横向用它两页会脱节。
 - 位移 150 px 是设备无关像素，Qt 的部件坐标同样是设备无关像素，因此不得再乘 `devicePixelRatio`——那会缩放两次。`main_window.py` 的 `BORDER_WIDTH` 之所以要乘，是因为它喂给原生命中测试，吃的是物理像素。
 - 每个 Setting Section 自带 `ScrollArea` 意味着一个页面里有十几个可滚动区域。它们不能在构造时各抓一次触控手势：Qt 的手势管理器不会在目标销毁时清理，抓放循环留下的残留会在之后创建窗口时崩溃（`QWindowPrivate::connectToScreen` 读到已销毁的 `QScreen`）。因此 Section 延迟到首次显示才抓，且只抓一次。
+- 交叉淡入淡出用 `QGraphicsOpacityEffect` 驱动，这看起来与"graphics effect 会让整棵子树重新栅格化"的顾虑冲突，但已经量过，不要为省这点开销改掉观感：整段 300 ms 推移多花约 6.6 ms CPU，单次重绘从 2.8–8.0 ms 涨到 3.0–8.6 ms（1.08–1.10x）。`dialog_animation.py` 之所以必须暂停阴影，差别在两处：那里是 `QGraphicsDropShadowEffect`，模糊远贵于一次不透明度相乘；而且它挂在卡片上、要陪着 Busy Glow 这种不定时长的子动画逐帧重算，不是推移这样 300 ms 就结束的一次性动作。下钻式拆分之后每个 Section 只有一屏卡片，这也是它便宜的前提——若某个 Section 重新长回整页，需要重新量。
+- 每次推移新建的 `QParallelAnimationGroup` 挂在 `SettingSectionStack` 名下，必须在 `_Transition.settle()` 里 `deleteLater()`。Qt 不会自己回收它们，漏掉就是每次下钻和返回各留一组动画对象，一次会话里线性增长。

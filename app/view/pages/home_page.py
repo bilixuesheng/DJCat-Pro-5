@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
-    QScroller,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -881,14 +880,10 @@ class HomePage(ScrollArea):
         for card in self.all_cards.values():
             card.setEditing(self._editing_cards)
 
-        if self._editing_cards:
-            QScroller.scroller(self.viewport()).stop()
-            QScroller.ungrabGesture(self.viewport())
-        else:
-            QScroller.grabGesture(
-                self.viewport(),
-                QScroller.ScrollerGestureType.TouchGesture,
-            )
+        # 编辑态由排序手势独占触控：卡片自己吃掉 TouchBegin，页面滚动则调高拖动阈值
+        # 让它起不了手。不能改回抓放手势——那正是会在手势管理器里留残留的循环。
+        self.setTouchScrollSuppressed(self._editing_cards)
+        if not self._editing_cards:
             self._saveCardOrder()
 
     def _startCardDrag(self, card, global_position):

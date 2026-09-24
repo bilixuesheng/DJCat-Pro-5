@@ -321,18 +321,51 @@ class AIMarkdownTest(unittest.TestCase):
         self.assertEqual(codes, ["DJ-000321"])
 
     def testCustomStylePrompt(self):
-        self.assertIn("英语中午做97页，值日", ai_markdown.SYSTEM_PROMPT)
+        # 示例已从单一的 SYSTEM_PROMPT 里拆出来，模板只留格式要求，
+        # 示例改由 Prompt Example 提供，两者在 _systemPrompt() 里拼装。
         self.assertIn(
             "当遇到任务一部分是正常的任务，一部分是其他的警告比如要值日，"
             "必须要像下面的示例一样用---分开",
-            ai_markdown.SYSTEM_PROMPT,
+            ai_markdown.DEFAULT_PROMPT_TEMPLATE,
         )
-        self.assertEqual(ai_markdown._systemPrompt(""), ai_markdown.SYSTEM_PROMPT)
+        self.assertIn(
+            "英语中午做97页，值日",
+            [example[0] for example in ai_markdown.DEFAULT_EXAMPLES],
+        )
 
-        customStyle = "所有提醒都放在最后"
-        prompt = ai_markdown._systemPrompt(customStyle)
+        with (
+            patch.object(
+                ai_markdown,
+                "_setting",
+                return_value=ai_markdown.DEFAULT_PROMPT_TEMPLATE,
+            ),
+            patch.object(ai_markdown, "_promptExamples", return_value=[]),
+        ):
+            systemPrompt = ai_markdown._systemPrompt("")
+            customStyle = "所有提醒都放在最后"
+            prompt = ai_markdown._systemPrompt(customStyle)
+
+        self.assertEqual(systemPrompt, ai_markdown.DEFAULT_PROMPT_TEMPLATE)
+        self.assertTrue(prompt.startswith(systemPrompt))
         self.assertIn("以上为系统默认提示词", prompt)
         self.assertTrue(prompt.endswith(customStyle))
+
+    def testPromptExamplesAreAppendedToTheTemplate(self):
+        rows = [{"input_content": "数学做大册103页", "output_content": "- 做大册103页"}]
+        with (
+            patch.object(
+                ai_markdown,
+                "_setting",
+                return_value=ai_markdown.DEFAULT_PROMPT_TEMPLATE,
+            ),
+            patch.object(ai_markdown, "_promptExamples", return_value=rows),
+        ):
+            prompt = ai_markdown._systemPrompt("")
+
+        self.assertTrue(prompt.startswith(ai_markdown.DEFAULT_PROMPT_TEMPLATE))
+        self.assertIn("此处给一些格式示例：", prompt)
+        self.assertIn("原输入：\n数学做大册103页", prompt)
+        self.assertIn("要求输出：\n- 做大册103页", prompt)
 
     def testClientSendsEnabledCustomStyle(self):
         parent = QWidget()

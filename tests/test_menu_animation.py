@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from unittest.mock import patch
 
 import pytest
@@ -99,7 +100,11 @@ def test_common_menus_keep_original_reveal_without_redundant_refreshes(
         shadow = menu.view.graphicsEffect()
 
         with patch.object(menu, "setMask", wraps=menu.setMask) as setMask:
-            QTest.qWait(ORIGINAL_MENU_ANIMATION_DURATION_MS + 40)
+            QTest.qWait(ORIGINAL_MENU_ANIMATION_DURATION_MS)
+            # 动画按真实时间推进，最后一个 tick 可能被繁忙的事件循环推迟，等结束信号。
+            deadline = time.monotonic() + 5
+            while not finished.count() and time.monotonic() < deadline:
+                QTest.qWait(10)
 
         assert finished.count() == 1
         assert isinstance(manager, _SmoothDropDownMenuAnimation)

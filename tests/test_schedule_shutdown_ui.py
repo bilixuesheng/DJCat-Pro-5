@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
@@ -653,7 +654,15 @@ class ScheduleShutdownUiTest(TestCase):
                             end,
                             delay=30,
                         )
-                        QTest.qWait(30)
+                        # QScroller 在自己的节拍里才把拖动应用到滚动条，机器一忙 30 ms 不够。
+                        moved = (
+                            (lambda: scrollBar.value() > startValue)
+                            if deltaY < 0
+                            else (lambda: scrollBar.value() < startValue)
+                        )
+                        deadline = time.monotonic() + 2
+                        while not moved() and time.monotonic() < deadline:
+                            QTest.qWait(10)
                         self.assertEqual(
                             scroller.state(),
                             QScroller.State.Dragging,

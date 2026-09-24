@@ -1,9 +1,11 @@
 import os
+import sys
 import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
@@ -29,6 +31,9 @@ from app.common.update_download import (
     SmartAccelerationController,
     UpdateDownloadWorker,
     clearUpdateDirectory,
+    restoreUpdaterBinary,
+    takeUpdateFailure,
+    validateClientUpdateZip,
 )
 from app.config.cfg import cfg
 from app.config.constants import (
@@ -214,6 +219,29 @@ class ThreadStub:
         self.started = True
 
 
+class InlineThreadStub:
+    """Runs the worker on the calling thread.
+
+    `UpdateApplyWorker` emits `finished` as a Qt signal, so running it inline
+    drives `_onUpdateApplyFinished` synchronously and the whole apply path can
+    be asserted without a real thread. A stub that only records `start()` would
+    leave the worker unrun and test nothing.
+    """
+
+    instances = []
+
+    def __init__(self, target=None, daemon=None, **_kwargs):
+        self.target = target
+        self.daemon = daemon
+        self.started = False
+        InlineThreadStub.instances.append(self)
+
+    def start(self):
+        self.started = True
+        if self.target is not None:
+            self.target()
+
+
 class InstallerLaunchDialogStub:
     def __init__(self):
         self.shown = False
@@ -239,6 +267,116 @@ class UpdateDownloadTest(TestCase):
 
             self.assertTrue(updateDir.is_dir())
             self.assertEqual(list(updateDir.iterdir()), [])
+
+    def _clientZip(self, directory, entries):
+        import zipfile
+
+        path = Path(directory) / "DJCat-Pro.zip"
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name, payload in entries.items():
+                archive.writestr(name, payload)
+        return path
+
+    def testClientUpdateAcceptsTheReleaseZip(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            path = self._clientZip(
+                tempDir, {"djcat.exe": b"MZ", "updater.exe": b"MZ", "a/b.dll": b"x"}
+            )
+            validateClientUpdateZip(path)
+
+    def testClientUpdateAcceptsASingleTopLevelFolder(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            path = self._clientZip(
+                tempDir, {"DJCat-Pro-5/djcat.exe": b"MZ", "DJCat-Pro-5/x.dll": b"x"}
+            )
+            validateClientUpdateZip(path)
+
+    def testClientUpdateRejectsTheOldInstallerExe(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            path = Path(tempDir) / "DJCat-Pro.zip"
+            path.write_bytes(b"MZ" + b"\0" * 64)
+            with self.assertRaises(ValueError):
+                validateClientUpdateZip(path)
+
+    def testClientUpdateRejectsAZipWithoutTheClient(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            path = self._clientZip(tempDir, {"readme.txt": b"hi"})
+            with self.assertRaises(ValueError):
+                validateClientUpdateZip(path)
+
+    def testClientUpdateRejectsATruncatedZip(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            path = self._clientZip(tempDir, {"djcat.exe": b"MZ" * 50_000})
+            data = path.read_bytes()
+            path.write_bytes(data[: len(data) // 2])
+            with self.assertRaises(ValueError):
+                validateClientUpdateZip(path)
+
+    def testClientUpdateRejectsACorruptedMember(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            import zipfile
+
+            path = Path(tempDir) / "DJCat-Pro.zip"
+            # 不压缩，负载原样落在文件里，改一个字节只坏 CRC、不坏目录。
+            with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as archive:
+                archive.writestr("djcat.exe", b"MZ" + b"A" * 4096)
+            data = bytearray(path.read_bytes())
+            data[data.index(b"AAAA") + 10] ^= 0xFF
+            path.write_bytes(bytes(data))
+            with self.assertRaises(ValueError):
+                validateClientUpdateZip(path)
+
+    def testStartupReadsAndClearsTheUpdaterFailureMarker(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            appDir = Path(tempDir)
+            # 更新器写的是带 BOM 的 UTF-8，第二行是日志路径。
+            (appDir / "update-failed.txt").write_text(
+                "更新安装失败，已保留原版本\nC:\\Temp\\updater.log\n",
+                encoding="utf-8-sig",
+            )
+
+            self.assertEqual(
+                takeUpdateFailure(appDir), "更新安装失败，已保留原版本"
+            )
+            # 只提示一次，读完即清。
+            self.assertFalse((appDir / "update-failed.txt").exists())
+            self.assertEqual(takeUpdateFailure(appDir), "")
+
+    def testStartupReportsNoFailureWhenTheUpdateLanded(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            self.assertEqual(takeUpdateFailure(Path(tempDir)), "")
+
+    def testStartupDropsTheUpdaterBackupWhenTheUpdaterSurvived(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            appDir = Path(tempDir)
+            (appDir / "updater.exe").write_bytes(b"new")
+            (appDir / "updater.exe.old").write_bytes(b"old")
+
+            self.assertFalse(restoreUpdaterBinary(appDir))
+
+            self.assertEqual((appDir / "updater.exe").read_bytes(), b"new")
+            self.assertFalse((appDir / "updater.exe.old").exists())
+
+    def testStartupPromotesTheBackupWhenTheUpdaterIsGone(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            appDir = Path(tempDir)
+            # 更新器改名后复制失败留下的状态：只剩备份。
+            (appDir / "updater.exe.old").write_bytes(b"old")
+
+            self.assertTrue(restoreUpdaterBinary(appDir))
+
+            # 无条件删掉备份会让程序目录一个更新器都不剩，之后每次更新都失败。
+            self.assertEqual((appDir / "updater.exe").read_bytes(), b"old")
+            self.assertFalse((appDir / "updater.exe.old").exists())
+
+    def testStartupIgnoresAMissingUpdaterBackup(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            appDir = Path(tempDir)
+            (appDir / "updater.exe").write_bytes(b"new")
+
+            self.assertFalse(restoreUpdaterBinary(appDir))
+
+            self.assertEqual((appDir / "updater.exe").read_bytes(), b"new")
 
     def testStartupCleanupDoesNotFailWhenInstallerStillLocksAFile(self):
         with tempfile.TemporaryDirectory() as tempDir:
@@ -854,6 +992,12 @@ class UpdateWindowLifecycleTest(TestCase):
         workerFactory.assert_called_once()
         self.assertEqual(workerFactory.call_args.args[0], DOWNLOAD_URL)
         self.assertTrue(workerFactory.call_args.kwargs["requireHttps"])
+        # Client Update 下载的是 ZIP；不显式给校验器就会落到默认的 PE 头校验，
+        # 每次下载完都被判成"不是有效的安装程序"。
+        self.assertIs(
+            workerFactory.call_args.kwargs.get("validator"),
+            validateClientUpdateZip,
+        )
         self.assertEqual(workerFactory.call_args.kwargs["maxBytes"], 1024**3)
         self.assertNotIn("checksumUrl", workerFactory.call_args.kwargs)
 
@@ -1370,57 +1514,120 @@ class UpdateWindowLifecycleTest(TestCase):
 
         delete(dialog)
 
-    def testUpdateApplyExtractsZipAndLaunchesUpdater(self):
+    def _runApplyUpdate(self, tempDir, zipEntries, *, withUpdater=True):
+        """Drive _applyUpdate end to end against a throwaway app/staging layout."""
+        import zipfile
+
+        root = Path(tempDir)
+        appDir = root / "app"
+        stagingDir = root / "Updata" / "staging"
+        appDir.mkdir(parents=True)
+        if withUpdater:
+            (appDir / "updater.exe").write_bytes(b"MZ-updater")
+
+        zipFile = root / "DJCat-Pro.zip"
+        with zipfile.ZipFile(zipFile, "w") as zf:
+            for name, payload in zipEntries.items():
+                zf.writestr(name, payload)
+
         infoBar = Mock()
         dialog = InstallerLaunchDialogStub()
-        thread = ThreadStub(lambda: None, True)
+        InlineThreadStub.instances.clear()
+        with (
+            patch("app.view.windows.main_window.APP_DIR", appDir),
+            patch("app.view.windows.main_window.UPDATE_STAGING_DIR", stagingDir),
+            patch(
+                "app.view.windows.main_window.subprocess.DETACHED_PROCESS",
+                8,
+                create=True,
+            ),
+            patch(
+                "app.view.windows.main_window.subprocess.CREATE_NEW_PROCESS_GROUP",
+                512,
+                create=True,
+            ),
+            patch("app.view.windows.main_window.subprocess.Popen") as popen,
+            patch(
+                "app.view.windows.main_window.InstallerLaunchDialog",
+                return_value=dialog,
+            ),
+            patch("app.view.windows.main_window.threading.Thread", InlineThreadStub),
+            patch("app.view.windows.main_window.isValid", return_value=True),
+            patch("app.view.windows.main_window.QApplication.quit") as quitApp,
+            patch.object(MainWindow, "_shutdownResources"),
+        ):
+            self.window._applyUpdate(zipFile, infoBar)
+
+        return SimpleNamespace(
+            appDir=appDir,
+            stagingDir=stagingDir,
+            zipFile=zipFile,
+            popen=popen,
+            dialog=dialog,
+            infoBar=infoBar,
+            quitApp=quitApp,
+        )
+
+    def testUpdateApplyExtractsZipAndLaunchesUpdater(self):
         with tempfile.TemporaryDirectory() as tempDir:
-            zipFile = Path(tempDir) / "DJCat-Pro.zip"
-            import zipfile
-            with zipfile.ZipFile(zipFile, "w") as zf:
-                zf.writestr("djcat.exe", b"MZ")
-            with (
-                patch(
-                    "app.view.windows.main_window.subprocess.DETACHED_PROCESS",
-                    8,
-                    create=True,
-                ),
-                patch(
-                    "app.view.windows.main_window.subprocess.CREATE_NEW_PROCESS_GROUP",
-                    512,
-                    create=True,
-                ),
-                patch(
-                    "app.view.windows.main_window.subprocess.Popen",
-                ) as popen,
-                patch(
-                    "app.view.windows.main_window.InstallerLaunchDialog",
-                    return_value=dialog,
-                ),
-                patch(
-                    "app.view.windows.main_window.threading.Thread",
-                    return_value=thread,
-                ),
-                patch(
-                    "app.view.windows.main_window.isValid",
-                    return_value=True,
-                ),
-                patch(
-                    "app.view.windows.main_window.QApplication.quit"
-                ) as quitApp,
-            ):
-                self.window._applyUpdate(zipFile, infoBar)
-                worker = self.window._updateApplyWorker
+            run = self._runApplyUpdate(
+                tempDir,
+                {"djcat.exe": b"MZ", "app/assets/logo.png": b"PNG"},
+            )
 
-                self.assertTrue(dialog.shown)
-                self.assertTrue(thread.started)
-                popen.assert_not_called()
-                quitApp.assert_not_called()
+            # 解压真的发生了，且保留了包内目录结构。
+            self.assertEqual((run.stagingDir / "djcat.exe").read_bytes(), b"MZ")
+            self.assertEqual(
+                (run.stagingDir / "app" / "assets" / "logo.png").read_bytes(), b"PNG"
+            )
 
-        infoBar.close.assert_called_once_with()
+            run.popen.assert_called_once()
+            args = run.popen.call_args.args[0]
+            self.assertEqual(args[0], str(run.appDir / "updater.exe"))
+            self.assertEqual(args[1], str(os.getpid()))
+            self.assertEqual(args[2], str(run.appDir))
+            self.assertEqual(args[3], str(Path(sys.executable).resolve()))
+            self.assertEqual(args[4], str(run.stagingDir))
+            self.assertEqual(
+                run.popen.call_args.kwargs["creationflags"], 8 | 512
+            )
+
+            # 更新器起来之后才丢更新包，任何一步失败都还能重来。
+            self.assertFalse(run.zipFile.exists())
+            run.quitApp.assert_called_once_with()
+
+        self.assertTrue(run.dialog.shown)
+        run.infoBar.close.assert_called_once_with()
         self.assertIsNone(self.window._updateApplyWorker)
         self.assertIsNone(self.window._updateApplyThread)
         self.assertIsNone(self.window._updateApplyDialog)
+
+    def testUpdateApplyFlattensASingleTopLevelDirectory(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            run = self._runApplyUpdate(
+                tempDir,
+                {"DJCat-Pro-5/djcat.exe": b"MZ", "DJCat-Pro-5/data.txt": b"NEW"},
+            )
+
+            # 打包多了一层根目录时，交给更新器的必须是里面那层。
+            args = run.popen.call_args.args[0]
+            self.assertEqual(args[4], str(run.stagingDir / "DJCat-Pro-5"))
+            self.assertEqual(
+                (run.stagingDir / "DJCat-Pro-5" / "djcat.exe").read_bytes(), b"MZ"
+            )
+
+    def testUpdateApplyKeepsTheZipWhenTheUpdaterIsMissing(self):
+        with tempfile.TemporaryDirectory() as tempDir:
+            run = self._runApplyUpdate(
+                tempDir, {"djcat.exe": b"MZ"}, withUpdater=False
+            )
+
+            run.popen.assert_not_called()
+            run.quitApp.assert_not_called()
+            # 没有 updater.exe 就不该把更新包也丢掉，否则只能重新下载。
+            self.assertTrue(run.zipFile.exists())
+
+        self.assertIsNone(self.window._updateApplyWorker)
 
     def testUpdateApplyFailureClosesDialogAndKeepsApplicationOpen(self):
         infoBar = Mock()

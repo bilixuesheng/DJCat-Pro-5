@@ -118,6 +118,26 @@ _LEGACY_SYSTEM_PROMPT = (
     "**⚠️请值日人员到卫生区打扫⚠️**\n\n"
     "由于该内容需要在电脑屏幕上显示，尽量让行数不多。"
 )
+DEEPSEEK_OFFLINE_MESSAGE = (
+    "这不是你的问题，也不是我们的问题。\n"
+    "DeepSeek 服务器已离线，请等待深度求索修复，这可能是间歇性的问题。"
+)
+
+
+def _upstreamFailureMessage(status):
+    """How a failed DeepSeek call is explained to the teacher.
+
+    Only a DeepSeek outage is "not our problem". A 4xx means DeepSeek is up and
+    turned the request down -- a revoked key, an empty balance, a prompt grown
+    past the context window -- and that is for the operator to fix.
+    """
+    if status == 429:
+        return "AI 服务当前请求过多，请稍后再试。"
+    if status is not None and 400 <= status < 500:
+        return "AI 服务配置异常（如密钥失效或余额不足），请联系管理员处理。"
+    return DEEPSEEK_OFFLINE_MESSAGE
+
+
 CUSTOM_STYLE_PREFIX = """
 
 以上为系统默认提示词，以下为用户希望自定义的微调提示词，若规则有冲突，请以下面的内容为准：
@@ -246,69 +266,91 @@ def _quotaCost(now=None, peakEnabled=None):
     return 2
 
 
+# holiday-cn 按国务院每年的放假通知整理，逐日列出放假日和调休补班日，
+# 正好是"相对正常周一至周五"的全部例外。nager.at 每个节日只给一天
+# （2026 年春节只有 02-17、国庆只有 10-01、清明没有），也不含补班日。
+HOLIDAY_CALENDAR_URL = (
+    "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/{year}.json"
+)
+
+
 def _isOffPeakDay(now=None):
+    """Whether DeepSeek treats the whole of `now`'s day as off-peak.
+
+    The rule is the official Chinese working calendar, not the day of the week:
+    a statutory holiday is off-peak for the whole break, weekdays it borrows
+    included, and a make-up working day (调休补班) is peak even on a weekend.
+    The calendar therefore has to be consulted before the weekday; only days
+    the schedule does not mention fall back to Saturday-Sunday off-peak.
+    """
     now = (now or datetime.now(TIMEZONE)).astimezone(TIMEZONE)
-    if now.weekday() >= 5:
-        return True
     try:
         _refreshHolidayCache()
     except Exception:
         pass
-    holidays = _cachedHolidays()
-    return now.strftime("%Y-%m-%d") in holidays
+    offDay = _offPeakCalendar().get(now.strftime("%Y-%m-%d"))
+    if offDay is not None:
+        return offDay
+    return now.weekday() >= 5
 
 
-def _cachedHolidays():
+def _storedCalendar():
     with closing(_connect()) as database:
         row = database.execute(
-            "SELECT value FROM settings WHERE key = 'holiday_cache'"
+            "SELECT value FROM settings WHERE key = 'holiday_calendar'"
         ).fetchone()
     if not row:
-        return set()
+        return None, {}
     try:
         data = json.loads(row[0])
-        return set(data.get("dates", []))
+        days = data.get("days", {})
+        if not isinstance(days, dict):
+            return data.get("refreshed"), {}
+        return data.get("refreshed"), {day: bool(off) for day, off in days.items()}
     except (json.JSONDecodeError, AttributeError):
-        return set()
+        return None, {}
+
+
+def _offPeakCalendar():
+    """Dates the official schedule mentions, mapped to whether they are days off."""
+    return _storedCalendar()[1]
 
 
 def _refreshHolidayCache():
     today = _today()
-    with closing(_connect()) as database:
-        row = database.execute(
-            "SELECT value FROM settings WHERE key = 'holiday_cache'"
-        ).fetchone()
-    if row:
-        try:
-            data = json.loads(row[0])
-            if data.get("refreshed") == today:
-                return True
-        except (json.JSONDecodeError, AttributeError):
-            pass
+    refreshed, known = _storedCalendar()
+    if refreshed == today:
+        return bool(known)
+
     year = datetime.now(TIMEZONE).year
-    dates = set()
+    fetched, loadedYears = {}, set()
     for y in (year, year + 1):
         try:
-            resp = requests.get(
-                f"https://date.nager.at/api/v3/PublicHolidays/{y}/CN",
-                timeout=10,
-            )
-            if resp.ok:
-                for item in resp.json():
-                    dates.add(item["date"])
-        except (requests.RequestException, KeyError, ValueError):
+            response = requests.get(HOLIDAY_CALENDAR_URL.format(year=y), timeout=10)
+            if not response.ok:
+                continue  # 次年的安排通常到年底才公布
+            for item in response.json()["days"]:
+                fetched[str(item["date"])] = bool(item["isOffDay"])
+            loadedYears.add(str(y))
+        except (requests.RequestException, KeyError, TypeError, ValueError):
             pass
-    if not dates:
-        return False
-    cache = json.dumps({"refreshed": today, "dates": sorted(dates)})
+
+    # 拉到的年份以新数据为准（国务院偶尔发补充通知）；没拉到的年份保留已知日期。
+    # 失败也记下"今天已试过"：这里在峰时的每个整理请求和每 10 秒的仪表盘轮询里
+    # 都会被调用，不落缓存就会一遍遍等满超时。
+    days = {day: off for day, off in known.items() if day[:4] not in loadedYears}
+    days.update(fetched)
+    cache = json.dumps({"refreshed": today, "days": days}, sort_keys=True)
     with closing(_connect()) as database:
         database.execute(
-            "INSERT INTO settings(key, value) VALUES ('holiday_cache', ?) "
+            "INSERT INTO settings(key, value) VALUES ('holiday_calendar', ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (cache,),
         )
+        # 旧版按 nager.at 只存了放假日期，语义不同，不再读取。
+        database.execute("DELETE FROM settings WHERE key = 'holiday_cache'")
         database.commit()
-    return True
+    return bool(loadedYears)
 
 
 def _connect():
@@ -902,7 +944,13 @@ def convert():
         if not _httpsResponseChain(upstream, DEEPSEEK_API):
             raise requests.RequestException("AI 服务连接未保持 HTTPS")
         upstream.raise_for_status()
-    except (requests.RequestException, TypeError, ValueError):
+    except requests.RequestException as error:
+        if upstream is not None:
+            upstream.close()
+        _requestFinished(requestId, False, machineId, cost, day)
+        status = getattr(getattr(error, "response", None), "status_code", None)
+        return _error(_upstreamFailureMessage(status), 502)
+    except (TypeError, ValueError):
         if upstream is not None:
             upstream.close()
         _requestFinished(requestId, False, machineId, cost, day)
@@ -979,6 +1027,8 @@ def _saveConversionLog(machineId, inputContent, outputContent, customStyle):
                 (machineId, inputContent, outputContent, customStyle, _nowIso()),
             )
             database.commit()
+        # 每天至多真正执行一次；只挂在记录页上，管理员不来看就永远不清。
+        _cleanupConversionLogs()
     except sqlite3.Error:
         pass
 
@@ -1495,14 +1545,28 @@ def _updateConversionLogStatus(logId, status):
     return cursor.rowcount == 1
 
 
-def _addPromptExample(inputContent, outputContent):
+def _approveConversionLog(logId, inputContent, outputContent):
+    """Promote a Conversion Log to a Prompt Example exactly once.
+
+    The status change and the insert share one transaction and the insert only
+    happens when the status actually changed, so a double-clicked plain form or
+    a second tab cannot add the same example twice.
+    """
     now = _nowIso()
     with closing(_connect()) as database:
         database.execute("BEGIN IMMEDIATE")
+        cursor = database.execute(
+            "UPDATE conversion_logs SET status = 'approved' "
+            "WHERE id = ? AND status != 'approved'",
+            (logId,),
+        )
+        if cursor.rowcount != 1:
+            database.rollback()
+            return False
         maxOrder = database.execute(
             "SELECT COALESCE(MAX(sort_order), -1) FROM prompt_examples"
         ).fetchone()[0]
-        cursor = database.execute(
+        database.execute(
             """
             INSERT INTO prompt_examples(input_content, output_content, sort_order, created_at)
             VALUES (?, ?, ?, ?)
@@ -1510,7 +1574,7 @@ def _addPromptExample(inputContent, outputContent):
             (inputContent, outputContent, maxOrder + 1, now),
         )
         database.commit()
-    return cursor.lastrowid
+    return True
 
 
 def _updatePromptExample(exampleId, inputContent, outputContent):
@@ -1539,7 +1603,13 @@ def _reorderPromptExamples(orderedIds, originalIds):
             "SELECT id FROM prompt_examples ORDER BY sort_order, id"
         ).fetchall()
         currentIds = [row["id"] for row in currentRows]
-        if currentIds != originalIds:
+        # 新顺序必须恰好是当前这组示例的一个排列：缺项或重复都会留下并列的
+        # sort_order，拼进提示词的示例顺序就不再确定。
+        if (
+            currentIds != originalIds
+            or len(orderedIds) != len(currentIds)
+            or set(orderedIds) != set(currentIds)
+        ):
             database.rollback()
             return False
         for index, exampleId in enumerate(orderedIds):
@@ -1683,8 +1753,8 @@ def adminConversionLogAddSubmit(logId):
         return _adminResponse(
             "输入和输出内容不能为空", "error", "adminConversionLogs", 400
         )
-    _addPromptExample(inputContent, outputContent)
-    _updateConversionLogStatus(logId, "approved")
+    if not _approveConversionLog(logId, inputContent, outputContent):
+        return _adminResponse("这条记录已加入过示例", "info", "adminConversionLogs")
     return _adminResponse("示例已加入提示词", "success", "adminConversionLogs")
 
 
@@ -1746,8 +1816,10 @@ def adminConversionLogApprove(logId):
         return _adminResponse(
             "输入和输出内容不能为空", "error", "adminConversionLogs", 400
         )
-    _addPromptExample(inputContent, outputContent)
-    _updateConversionLogStatus(logId, "approved")
+    if not _approveConversionLog(logId, inputContent, outputContent):
+        return _adminResponse(
+            "这条记录已加入过示例", "info", "adminConversionLogReview"
+        )
     return _adminResponse("示例已加入提示词", "success", "adminConversionLogReview")
 
 
@@ -1810,12 +1882,15 @@ def adminPromptExampleDelete(exampleId):
 @_loginRequired
 def adminPromptExamplesReorder():
     _checkCsrf()
+    # 与应用市场各目录一样，接收 admin.js 共享排序表提交的 item_id / expected_item_id。
     try:
-        orderedIds = json.loads(request.form.get("order", "[]"))
-        originalIds = json.loads(request.form.get("original", "[]"))
-    except (json.JSONDecodeError, TypeError):
+        orderedIds = [int(value) for value in request.form.getlist("item_id")]
+        originalIds = [
+            int(value) for value in request.form.getlist("expected_item_id")
+        ]
+    except ValueError:
         return _adminResponse("排序数据无效", "error", "adminPromptExamples", 400)
-    if not isinstance(orderedIds, list) or not isinstance(originalIds, list):
+    if not orderedIds or len(orderedIds) != len(set(orderedIds)):
         return _adminResponse("排序数据无效", "error", "adminPromptExamples", 400)
     if not _reorderPromptExamples(orderedIds, originalIds):
         if _isAjaxRequest():

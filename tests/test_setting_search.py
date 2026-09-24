@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from unittest import TestCase
@@ -65,6 +66,21 @@ class SettingSearchTest(TestCase):
         cfg.file = self.configFile
         self.tempDir.cleanup()
 
+    def _waitUntil(self, predicate, timeout=5.0):
+        # 导航动画按真实时间推进，机器一忙固定等 500 ms 就不够；等条件成立而不是等时长。
+        deadline = time.monotonic() + timeout
+        while not predicate():
+            if time.monotonic() > deadline:
+                self.fail("timed out waiting for navigation to settle")
+            QTest.qWait(10)
+
+    def _navigationSettled(self, page):
+        return (
+            self.window.stackedWidget.currentWidget() is page
+            and self.window._navigationTarget is None
+            and self.window._pendingNavigation is None
+        )
+
     def testSearchVisibilityUpdatesWhenNavigationStarts(self):
         self.assertTrue(self.window.searchEdit.isHidden())
 
@@ -77,11 +93,7 @@ class SettingSearchTest(TestCase):
             "The transition should still be running when the search appears",
         )
 
-        QTest.qWait(500)
-        self.assertIs(
-            self.window.stackedWidget.currentWidget(),
-            self.window.settingPage,
-        )
+        self._waitUntil(lambda: self._navigationSettled(self.window.settingPage))
 
         self.window.searchEdit.setText("主题")
         self.window.switchTo(self.window.homePage)
@@ -271,7 +283,9 @@ class SettingSearchTest(TestCase):
         self.window.switchTo(self.window.settingPage)
         self.window.switchTo(self.window.creditsPage)
         self.window.switchTo(self.window.creditsPage)
-        QTest.qWait(800)
+        self._waitUntil(lambda: self._navigationSettled(self.window.creditsPage))
+        # 重复的目标若被排了两次，第二次会在这之后才开始。
+        QTest.qWait(400)
 
         self.assertEqual(
             changes,
@@ -290,7 +304,7 @@ class SettingSearchTest(TestCase):
         self.window.switchTo(self.window.settingPage)
         self.window.switchTo(self.window.creditsPage)
         self.window.switchTo(schedulePage)
-        QTest.qWait(800)
+        self._waitUntil(lambda: self._navigationSettled(schedulePage))
 
         self.assertEqual(
             changes,
@@ -317,21 +331,21 @@ class SettingSearchTest(TestCase):
             with self.subTest(page=name):
                 previousCount = self.window.stackedWidget.count()
                 self.window.homePage.all_cards[title].clicked.emit()
-                QTest.qWait(500)
+                self._waitUntil(
+                    lambda: getattr(self.window, name) is not None
+                    and self._navigationSettled(getattr(self.window, name))
+                )
                 page = getattr(self.window, name)
-
-                self.assertIsNotNone(page)
-                self.assertIs(self.window.stackedWidget.currentWidget(), page)
                 self.assertEqual(
                     self.window.stackedWidget.count(),
                     previousCount + 1,
                 )
 
                 self.window._navToHome()
-                QTest.qWait(500)
+                self._waitUntil(lambda: self._navigationSettled(self.window.homePage))
 
                 self.window.homePage.all_cards[title].clicked.emit()
-                QTest.qWait(500)
+                self._waitUntil(lambda: self._navigationSettled(page))
 
                 self.assertIs(getattr(self.window, name), page)
                 self.assertEqual(
@@ -340,7 +354,7 @@ class SettingSearchTest(TestCase):
                 )
 
                 self.window._navToHome()
-                QTest.qWait(500)
+                self._waitUntil(lambda: self._navigationSettled(self.window.homePage))
 
     def testFullscreenClockOpensDirectlyWithoutAddingEditorPage(self):
         pageCount = self.window.stackedWidget.count()
@@ -359,8 +373,7 @@ class SettingSearchTest(TestCase):
             self.assertIs(self.window.stackedWidget.currentWidget(), currentPage)
 
             clock.close()
-            QTest.qWait(500)
-            self.assertTrue(self.window.isVisible())
+            self._waitUntil(self.window.isVisible)
             self.assertIs(
                 self.window.stackedWidget.currentWidget(),
                 self.window.homePage,
@@ -379,7 +392,7 @@ class SettingSearchTest(TestCase):
             [
                 "横幅设置",
                 "全屏投送设置",
-                "AI整理Markdown设置",
+                "AI 整理 Markdown 设置",
                 "考试倒计时设置",
                 "全屏时钟设置",
                 "个性化",
@@ -414,7 +427,7 @@ class SettingSearchTest(TestCase):
 
     def testSettingSearchOnlyOffersSuggestions(self):
         self.window.switchTo(self.window.settingPage)
-        QTest.qWait(500)
+        self._waitUntil(lambda: self._navigationSettled(self.window.settingPage))
         page = self.window.settingPage.ensureLoaded()
         route = page.currentRouteKey()
 
@@ -429,14 +442,14 @@ class SettingSearchTest(TestCase):
         self.window.settingSuggestionMenu.suggestionActivated.emit(
             page.searchSuggestions("横幅亮度")[0]
         )
-        QTest.qWait(500)
+        self._waitUntil(lambda: page.currentRouteKey() == "banner")
 
         self.assertEqual(self.window.searchEdit.text(), "")
         self.assertEqual(page.currentRouteKey(), "banner")
 
     def testLeavingTheSettingPageClosesTheSuggestions(self):
         self.window.switchTo(self.window.settingPage)
-        QTest.qWait(500)
+        self._waitUntil(lambda: self._navigationSettled(self.window.settingPage))
         self.window.searchEdit.setText("横幅亮度")
         self.app.processEvents()
 

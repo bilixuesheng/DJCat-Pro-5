@@ -59,6 +59,8 @@ from app.common.update_download import (
     UpdateDownloadWorker,
     clearUpdateDirectory,
     isHttpsResponseChain,
+    takeUpdateFailure,
+    validateClientUpdateZip,
 )
 from app.config.cfg import cfg
 from app.config.constants import (
@@ -161,8 +163,6 @@ class UpdateApplyWorker(QObject):
             if len(entries) == 1 and entries[0].is_dir():
                 stagingDir = entries[0]
 
-            self.zipPath.unlink(missing_ok=True)
-
             updaterPath = APP_DIR / "updater.exe"
             if not updaterPath.is_file():
                 logger.error("updater.exe not found at {}", updaterPath)
@@ -183,6 +183,9 @@ class UpdateApplyWorker(QObject):
                     | subprocess.CREATE_NEW_PROCESS_GROUP
                 ),
             )
+            # 更新器确实起来了才丢掉更新包；提前删会让任何一步失败都只能重新下载。
+            # 留下来也不会堆积：下次启动的 clearUpdateDirectory() 会清掉整个更新目录。
+            self.zipPath.unlink(missing_ok=True)
             self.finished.emit(True)
         except Exception:
             logger.exception("增量更新准备失败")
@@ -267,7 +270,7 @@ class LazySettingPage(LazyPage):
 
     def flushPendingSave(self):
         if self.page is not None:
-            self.page.aiStyleCard.flushPendingSave()
+            self.page.flushPendingSave()
 
     @property
     def windowTitleCard(self):
@@ -414,6 +417,16 @@ class MainWindow(MSFluentWindow):
             self.splashScreen = None
             splashScreen.finish()
 
+        updateFailure = takeUpdateFailure(APP_DIR)
+        if updateFailure:
+            InfoBar.warning(
+                "更新未完成",
+                f"{updateFailure}。当前仍是原版本，可稍后重试更新。",
+                duration=8000,
+                position=InfoBarPosition.BOTTOM_RIGHT,
+                parent=self,
+            )
+
         from app.config.paths import _PORTABLE_FALLBACK_FAILED
 
         if _PORTABLE_FALLBACK_FAILED:
@@ -446,10 +459,11 @@ class MainWindow(MSFluentWindow):
             self._runApplicationHomeCardTasks(SILENT_STARTUP_EVENT)
 
     def _updateResizeBorderWidth(self, screen=None):
-        screen = screen or self.screen()
+        # 不用 self.screen()：它返回的 QScreen 会被 PySide 挂成本窗口的子对象，见 app/platform/screens.py。
+        ratio = screen.devicePixelRatio() if screen is not None else self.devicePixelRatioF()
         self.BORDER_WIDTH = round(
             self.RESIZE_BORDER_PIXELS_AT_300_PERCENT
-            * screen.devicePixelRatio()
+            * ratio
             / self.RESIZE_BORDER_REFERENCE_DPR
         )
 
@@ -1643,6 +1657,7 @@ class MainWindow(MSFluentWindow):
         self._downloadWorker = UpdateDownloadWorker(
             DOWNLOAD_URL,
             UPDATE_ZIP_PATH,
+            validator=validateClientUpdateZip,
             requireHttps=True,
             maxBytes=MAX_UPDATE_BYTES,
         )

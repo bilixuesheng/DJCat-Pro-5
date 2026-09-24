@@ -30,7 +30,7 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 
 **`cfg` 是客户端持久化设置的唯一来源。** 设置页、主页和托盘通过 `cfg.set(...)` 修改值；运行时对象不另建一份需要双向同步的配置副本。
 
-Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cfg.applicationIconPath` 持久化。MainWindow 同步更新 QApplication 和主窗口图标，启动页直接复用主窗口图标；SystemTrayIcon 同步更新系统托盘及已存在的"主页"菜单项，不重建菜单，也不要求重新启动。
+Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cfg.applicationIconPath` 持久化。`app/common/application_icon.py` 按来源、路径和文件修改时间缓存解析结果：设置页预览在 `paintEvent` 里取图标，每次新建 `QIcon` 都会整张重新解码。主页横幅与设置页的横幅预览共用一份解码后的原图——`QPixmap` 自带的缓存只收 10 MB 以内的图，超过的会被两个实例各解码一份并常驻。横幅按物理像素渲染缓存图再标上设备像素比，缓存键包含设备像素比，否则 150%/200% 缩放下会被放大发虚、换到不同缩放的屏幕也不会重建。MainWindow 同步更新 QApplication 和主窗口图标，启动页直接复用主窗口图标；SystemTrayIcon 同步更新系统托盘及已存在的"主页"菜单项，不重建菜单，也不要求重新启动。
 
 **`app/platform/animation_timer.py` 独占 Qt 全局 Animation Tick 间隔。** View 和业务模块不直接调用 Qt 私有动画 API；私有符号不可用时保留 Qt 默认行为。
 
@@ -47,6 +47,8 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 `ScrollArea` 的触控手势抓取只做一次，不能反复抓了又放：Qt 不会在目标销毁时清掉手势管理器里的记录，抓放循环留下的残留会在之后创建任意窗口时崩在 `QWindowPrivate::connectToScreen`。一次会话里大多数 Setting Section 从不打开，因此它们用 `ScrollArea(parent, grabTouch=False)` 构造，首次显示时才 `grabTouchGesture()`。是否已抓由实例自己记账——`QScroller.grabbedGesture()` 返回的是全局注册的识别器类型（任何 viewport 都非零），拿它判断会让除第一个以外的所有 `ScrollArea` 都不再抓手势，等于全局关掉触控滚动。
 
 **`ScrollArea` 统一仲裁单指触控滚动与子控件点击。** 从按钮、下拉框或卡片上起滑时，移动达到系统拖动阈值后必须取消该触控序列的按压和释放，不能在滚动结束时触发原控件；未达到阈值的短按仍按正常点击处理。页面不得各自复制这套判定。HomePage 进入卡片编辑态时由排序手势独占触控，并依靠卡片拖动的边缘自动滚动跨越视口；退出编辑态后恢复页面触控滚动。
+
+需要让出触控的模式调用 `ScrollArea.setTouchScrollSuppressed()`，它把拖动阈值抬到手指够不到的距离，不释放手势；页面不得自己 `QScroller.ungrabGesture()`，那就是上一条禁止的抓放循环。落在卡片上的触控本就由卡片在编辑态 `WA_AcceptTouchEvents` 并吃掉 `TouchBegin` 拿走，抑制只负责空白处不再起滚动。
 
 **Tray Menu 不拥有 Home Card。** 它只根据 HomePage 提供的入口快照重建菜单，并把稳定 key 交回 MainWindow/HomePage 执行。
 
@@ -98,6 +100,12 @@ Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence�
 
 **server/app_store.py** 拥有 Application Catalog、Package 配置、Application Download Count 和管理后台写入。桌面端只消费目录和下载重定向，不能自行增加下载次数。
 
+Conversion Log 提升为 Prompt Example 必须在同一事务里完成状态变更和插入，且只在状态真正改变时插入；审批页是普通表单，双击或两个标签页都会重复提交。Prompt Example 的新顺序必须恰好是当前示例的一个排列，否则会留下并列的 `sort_order`，拼进提示词的示例顺序不再确定。整理记录的过期清理挂在写入路径上（每天至多执行一次），不能只挂在管理员打开的页面上。
+
+节假日豁免按 **Working Day** 判断：先查国务院放假安排（holiday-cn 数据，逐日列出放假日和调休补班日），安排里没有的日子才按周末兜底；顺序反过来就会把补班的周末算成谷时。不能用 nager.at，它每个节日只给一天、也没有补班日。日历在 `_quotaCost` 和仪表盘轮询里被调用；拉取失败也要记下当天已试过，没拉到的年份保留已知日期，否则每个峰时整理请求都会重新等满外部接口的超时。
+
+AI Markdown Conversion 失败时的归因按各层能知道的事情分工：DeepSeek 怎么回的只有服务端知道，服务端据此给出原因——只有 DeepSeek 离线（连不上或 5xx）才说"不是我们的问题"，4xx（密钥失效、余额不足、提示词超长）要请管理员处理。客户端收到服务端 JSON 就原样显示；5xx 却拿不到 JSON，说明是反向代理在替挂掉的服务端回话，才显示基础服务器离线；一个回应都没收到时先提示检查本机网络。
+
 AI Markdown 数据库的 schema 初始化缓存同时使用文件身份和 SQLite schema version；同一路径下的数据库文件被替换后必须重新初始化，普通额度和请求记录写入不能反复触发 schema 初始化。
 
 **ApplicationStore** 拥有本机 Application 规则：目录扫描、安装清单、版本合并、ZIP 安全校验、原子覆盖、卸载和 Application Action 执行。它不拥有界面按钮或 InfoBar。
@@ -119,9 +127,21 @@ Application Launch 在后台线程读取本机安装状态并执行 Open Action�
 
 Application Store 首次显示前同步计算"已安装"和"全部应用"两个网格的最终列数，避免先按旧宽度单列绘制再重新排列。后续尺寸变化仍由现有布局定时器合并，不为修复首帧闪动持续同步重排。
 
-Client Update 与 Application Store 的 Package 下载共用 `app/common/update_download.py` 中的 `UpdateDownloadWorker`。支持分段的下载默认以 8 个工作线程开始；后续智能扩容和全局并发限制仍由共享下载器统一控制，不能按界面各自复制线程配置。
+`updater.exe` 由发版流水线在 windows-2022 上用 MSVC 构建，本地不需要环境；`.github/workflows/tests.yml` 在每次推送和 PR 时跑全量测试并用同样的命令构建一次 updater，让编译错误在合并前暴露。`main.yml` 在发版前用同一套步骤再测一次；它本身在发版触发路径里，改它合并到 main 时若没改版本号，`prepare` 会因 tag 已存在失败退出，不会发版。工作流里每条原生命令单独占一步：pwsh 的多行 `run` 块不会因中间的命令失败而中断，整步只取最后一条的退出码。Windows 上的 offscreen 测试需要 `QT_QPA_FONTDIR` 指向系统字体目录，否则所有字形退化成等宽方框，量文字宽度的测试会失真。
 
-Client Update 下载完成后，MainWindow 使用后台 `UpdateApplyWorker` 解压更新 ZIP 到暂存目录并启动 `updater.exe`，期间显示不可取消且只含不确定进度环的蒙层弹窗。确认更新器进程创建成功后才关闭 DJCat；启动失败时关闭蒙层并保留当前进程显示错误，不能在 GUI 线程等待更新器启动。
+Client Update 与 Application Store 的 Package 下载共用 `app/common/update_download.py` 中的 `UpdateDownloadWorker`。它不传 `validator` 时默认按 Windows 可执行文件（`MZ` 头）校验，因此 Client Update 必须显式传 `validateClientUpdateZip`：更新包是 ZIP，落到默认校验会在每次下载完成后被判定无效。该校验要求整包 CRC 通过、主程序位于根目录或唯一的顶层目录下，与 `UpdateApplyWorker` 解开的两种形态一致；它放在轻量模块里，MainWindow 不能为此提前导入 `application_store`。支持分段的下载默认以 8 个工作线程开始；后续智能扩容和全局并发限制仍由共享下载器统一控制，不能按界面各自复制线程配置。
+
+Client Update 下载完成后，MainWindow 使用后台 `UpdateApplyWorker` 解压更新 ZIP 到暂存目录并启动 `updater.exe`，期间显示不可取消且只含不确定进度环的蒙层弹窗。确认更新器进程创建成功后才关闭 DJCat；启动失败时关闭蒙层并保留当前进程显示错误，不能在 GUI 线程等待更新器启动。更新包在更新器进程创建成功之后才删除，任何一步失败都还能重来；残留的包由下次启动的 `clearUpdateDirectory()` 清掉。
+
+`updater.exe` 的提交点是整目录换名,不是逐文件复制:更新包换名到 `<APP_DIR>.new`,原目录换名为 `<APP_DIR>.backup`,再把新目录换成 `APP_DIR`;每一步都是同卷改名,失败时把备份换回去。逐文件复制没有这个性质——任何一个文件失败都会留下无法收拾的半更新目录。
+
+更新器不能从 `APP_DIR` 里面运行,否则正在运行的映像和打开的日志会挡住换名;它先把自己复制到 `%TEMP%\djcat_updater` 再重启,重启必须带 `CREATE_NO_WINDOW`:DJCat 以 `DETACHED_PROCESS` 启动它,没有控制台可继承,Windows 会给这个控制台程序新开一个可见的黑窗口。路径比对前必须把 `/` 规范成 `\`,否则调用方传正斜杠就会静默跳过重定位。
+
+Portable Mode 的 `APP_DIR\DJCatPro` 里有已安装的 Application 和应用市场缓存,动辄数 GB,因此换名前把它**改名**进新目录,不是复制。安装目录不可写时申请提权;提权后必须借 `Shell_TrayWnd` 的令牌用 `CreateProcessAsUserW` 降权重启 DJCat,否则它写出的配置和 `Program/` 会带上管理员属主,下次普通启动反而读不了。
+
+更新失败时更新器在 `APP_DIR` 写 `update-failed.txt`,MainWindow 启动时用 `takeUpdateFailure()` 读走并提示一次。回滚后程序会以原版本重启,没有这条提示用户只会看到"点了更新却什么都没变"。
+
+`restoreUpdaterBinary()` 只为从旧版本升上来的那一次保留:旧更新器仍会留下 `updater.exe.old`。新更新器不再改名自己。
 
 广告触控的 QApplication 全局事件过滤器只在 Application Store 可见时安装；页面隐藏或关闭时移除，避免其他页面的全部输入事件继续经过广告层。
 
@@ -130,6 +150,8 @@ Client Update 下载完成后，MainWindow 使用后台 `UpdateApplyWorker` 解�
 ### 管理后台
 
 `server/templates/admin_base.html` 拥有 Admin Console 的共享导航布局；`server/static/admin.css` 和 `server/static/admin.js` 拥有后台共用的导航、表格拖拽和异步交互，不在各页面模板复制相同逻辑。移动端打开侧边栏时锁定页面滚动，但导航列表本身必须保留独立的纵向触控滚动。
+
+共享排序表的每一行可以带附属行（如行内编辑表单），附属行标 `data-sort-follows="<所属行 id>"` 并紧跟所属行，拖拽、方向键和恢复顺序时整块移动；只挪排序行会把编辑表单留在原处挂到别的行下面，方向键也会被夹在中间的附属行挡住。所有排序接口都接收 admin.js 提交的 `item_id` / `expected_item_id`，页面不得改写 `window.fetch` 去适配别的载荷格式。
 
 Catalog Order 由 `server/app_store.py` 按稳定 ID 写入数据库。拖拽和键盘排序提交完整新顺序及原始顺序快照；服务端在事务内核对原始顺序，过期快照返回 HTTP 409。保存失败或拖拽取消时，浏览器恢复原顺序；拖拽浮影只是临时视觉状态，不参与命中测试或持久化。Application Preset 排序必须限定在所属 Application 内。
 
@@ -163,13 +185,13 @@ Projection 的两种正文渲染器必须保持这些共同约束：
 - Projection 切换正文类型或关闭时释放旧正文控件，并立即取消其远程 Markdown 图片下载；返回编辑时仍从独立的 Projection 内容快照恢复。
 - 全屏时 Markdown 正文未处理的鼠标按压和拖动必须在 `MarkdownView` 边界停止，不能冒泡到外层无边框 Projection 窗口；窗口化时由 Projection 统一接管正文拖动，但短按链接和操作按钮仍需保持可用。
 
-Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` 会覆盖整个窗口背景。窗口化时的 `1 px #808080` 边界线必须由该组件在主题色、纯色或图片绘制完成后最后绘制；全屏时不绘制。不得恢复为父窗口 QSS 边框，否则背景子控件会再次把它盖住。
+Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` 会覆盖整个窗口背景。窗口化时的 `1 px #808080` 边界线必须由该组件在主题色、纯色或图片绘制完成后最后绘制；全屏时不绘制。不得恢复为父窗口 QSS 边框，否则背景子控件会再次把它盖住。配置值 `主题色` 是历史名称，不是强调色：Projection 取跟随深浅主题的窗口底色（`projectionThemeBackground()`），Exam Countdown 和 Fullscreen Clock 不论主题都铺黑底；设置页把它分别显示为"跟随主题"和"默认黑色"，存储值不变，预览与真实窗口共用同一个底色函数。
 
 Projection、Exam Countdown 与 Fullscreen Clock 的窗口化背景、图片裁剪和边框共用 8 px 圆角；首次显示前启用透明窗口表面，不依赖 Win11 系统圆角。Qt 阴影只附着在背景组件上，四周各留 12 px 透明空间，Exam Countdown 与 Fullscreen Clock 的可见内容仍为 600 × 190，Projection 初始可见尺寸仍为可用屏幕的一半；字体、布局与角落按钮按 `contentsRect()` 定位，不能把阴影空间算进正文尺寸。切回全屏（含保留任务栏模式）时清除透明边距、圆角、边框和阴影，背景重新铺满窗口。Projection 保留窗口化缩放：Windows 命中测试使用消息中的坐标，按 DPI 转为背景局部坐标，在可见圆角边界内侧 12 px、外侧 2 px 的圆角区域判断四边及四角，不将透明阴影外沿作为边框。圆角外的空白和角落按钮不触发缩放；全屏禁用缩放。
 
 **`app/view/components/busy_glow.py` 独占 Busy Glow。** AI Markdown 对话框和 Projection 编辑器内联整理的输入框共用同一个 `BusyGlowOverlay`；它是输入框的兄弟层而不是子控件，因此光带能同时向框内和框外渗开，并且不碰输入框的样式表——QFluentWidgets 的 TextEdit 外观正是靠 widget 级 `setStyleSheet` 装上去的，改写它会连滚动条一起换成 Qt 原生外观。不要回到 QSS 渐变边框：样式表分别绘制边框各边，粗渐变在圆角处必然斜向拼接。
 
-Busy Glow 的四条约束在 `docs/adr/0002-busy-glow-custom-paint.md` 里有完整理由，改动前先读：重绘自限 60 Hz（全局 1 ms Animation Tick 下这是必需的自我限流，不是疏忽）；已长出的部分是以底边中点为中心的一段连续圆弧，不是两条对称的臂（两条臂会在起笔点和会合点叠出亮疙瘩，调笔帽解决不了）；锥形渐变按周长弧长而非原始角度参数化，几何变化时在 `resizeEvent` 重建，动画期间只转相位；深浅主题是两套配方而不是同一套调亮度。
+Busy Glow 的约束在 `docs/adr/0002-busy-glow-custom-paint.md` 里有完整理由，改动前先读：重绘自限 60 Hz（全局 1 ms Animation Tick 下这是必需的自我限流，不是疏忽）；已长出的部分是以底边中点为中心的一段连续圆弧，不是两条对称的臂（两条臂会在起笔点和会合点叠出亮疙瘩），入场窗口乘进渐变 alpha，不另画遮罩；锥形渐变按周长弧长而非原始角度参数化，几何变化时在 `resizeEvent` 重建，动画期间只转相位、改 alpha；光晕是到边线距离的平滑函数，在 `HALO_PIXEL` 倍的低分辨率缓冲里画、平滑放大贴回，只有边线按设备像素描——不要退回多遍宽笔叠加（浅色背景上能数出台阶），也不要把光晕改回按设备像素画（开销随 DPR² 增长，150% 缩放起就超出 60 Hz 预算）；深色主题光晕按 `Plus` 加性合成、边线正常叠加，深浅主题是两套配方而不是同一套调亮度。
 
 Busy Glow 只表示"正在进行"，不表示完成度。对话框那张卡上挂着 `QGraphicsDropShadowEffect`，而 graphics effect 会因任意子控件重绘而整棵子树重新栅格化，所以光晕启动时用 `dialog_animation.fadeDialogShadow()` 把卡片阴影渐隐、结束时渐回。
 
@@ -186,9 +208,11 @@ Busy Glow 只表示"正在进行"，不表示完成度。对话框那张卡上�
 | `app/platform/animation_timer.py` | Qt 全局 Animation Tick 间隔的私有 API 适配和安全回退 |
 | `app/platform/dialog_animation.py` | QFluentWidgets 蒙层弹窗的阴影复用和淡入淡出阴影暂停 |
 | `app/platform/menu_animation.py` | QFluentWidgets 全局 Menu Reveal 管理器适配，不改变原版展开视觉 |
+| `app/platform/screens.py` | 取窗口所在屏幕，绕开 PySide 把 QScreen 挂成控件子对象的返回值启发式 |
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
 | `app/common/home_card_tasks.py` | Home Card Task schema 归一化、稳定 ID、触发事件和动作常量；不负责计时或 QWidget |
+| `tools/updater/updater.c` | Client Update 的独立更新器：等待进程退出、把暂存目录覆盖回程序目录、重启 DJCat |
 | `app/view/windows/main_window.py` | 桌面组合根、导航、长期运行任务和 Client Update UI |
 | `app/view/pages/` | 页面、临时展示窗口和页面级 worker 编排 |
 | `app/view/pages/home_card_task_page.py` | Home Card Task 的懒加载编辑页面；不拥有调度计时器 |
@@ -222,6 +246,7 @@ set working directory
   → SingletonApplication (Windows single instance + IPC)
   → unlockQtAnimations (before any QWidget animation is created)
   → optimizeFluentDialogs + optimizeFluentMenus (before MainWindow or its popups are created)
+  → installTranslators (Qt qtbase + QFluentWidgets Chinese strings)
   → configure logging and clear stale Client Update files
   → qconfig.load(CONFIG_PATH, cfg)
   → MainWindow(isSilent)
@@ -239,6 +264,8 @@ set working directory
 App Data Directory 必须在导入 `cfg` 和调用 `qconfig.load` 前由 `app/config/paths.py` 确定。第二个 Windows 实例只通知现有实例显示窗口，然后退出；它不创建 MainWindow。
 
 `unlockQtAnimations()` 必须在 QApplication 创建之后、任何动画启动之前、GUI 主线程上调用。它只针对项目锁定的 Qt 运行时查找私有符号；找不到符号或动态库时记录警告并保留 Qt 默认 16 ms 间隔，不允许加载系统中另一份 Qt 来凑合。
+
+`installTranslators()` 装两份中文翻译：`FluentTranslator` 管 QFluentWidgets 自带文案（开关、输入框右键菜单、颜色对话框），Qt 的 `qtbase_zh_CN.qm` 管原生控件（Markdown 链接的"复制链接地址"等 Qt 自带文案；数字框用的是 QFluentWidgets 的 `LineEditMenu`，归前者）。Nuitka 只在用到 QtWebEngine 时才打包 Qt 的 translations 目录，所以 `deploy.py` 单独把 qtbase 这一份打进 `QT_TRANSLATIONS_DIR`；源码运行时先用 PySide6 自带的目录。
 
 `optimizeFluentDialogs()` 和 `optimizeFluentMenus()` 在 MainWindow 创建之前分别注册蒙层弹窗阴影复用和 Menu Reveal 管理器，重复调用保持幂等。菜单适配覆盖所有使用 QFluentWidgets 下拉或上拉管理器的菜单，包括对话框内部的下拉框和输入框右键菜单；其他 Popup 和 Flyout 不会自动继承蒙层弹窗优化。
 
@@ -324,6 +351,7 @@ def __init__(self, parent=None):
 - 页面关闭时先设置 shutdown/cancel 状态，再等待有文件提交风险的线程；超时后也不能让回调访问已销毁控件。
 - 可计算总字节数的下载使用确定进度；无法可靠估计的文件操作使用不确定进度，不伪造百分比。
 - 新的私有 Qt/Windows API 必须封装、可失败、可回退，并有锁定版本的真实二进制验证。
+- 取窗口所在屏幕用 `app/platform/screens.py` 的 `screenFor()`，不得调用 `QWidget.screen()` 或 `QWindow.screen()`。PySide 的返回值启发式会把返回的全局 QScreen 挂成调用者的子对象：窗口销毁时 shiboken 把它一并作废，之后的父子关系处理还会把所有权交给 Python，包装对象一被回收就 delete 掉 Qt 仍在使用的 QScreen，下一次任何控件取屏幕时崩溃。只需要设备像素比时直接用 `devicePixelRatioF()`。`tests/test_screens.py` 会扫描 `app/` 拦下新的调用。
 
 ### Comments
 

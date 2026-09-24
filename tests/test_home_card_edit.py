@@ -2,13 +2,14 @@ import os
 import tempfile
 from pathlib import Path
 from unittest import TestCase
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QInputDevice
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QScroller
+from PySide6.QtWidgets import QApplication, QScroller, QScrollerProperties
 
 from app.config.cfg import cfg
 from app.view.pages.home_page import HomePage
@@ -60,8 +61,7 @@ class HomeCardEditTest(TestCase):
                 "定时关机",
             ],
         )
-        touchGesture = QScroller.grabbedGesture(self.page.viewport())
-        self.assertGreater(touchGesture.value, 0)
+        self.assertTrue(self.page.isTouchGestureGrabbed)
         QTest.mouseClick(self.page.sortBtn, Qt.MouseButton.LeftButton)
 
         for card in (
@@ -117,13 +117,42 @@ class HomeCardEditTest(TestCase):
         self.assertIsNone(firstCard.graphicsEffect())
 
         QTest.mouseClick(self.page.sortBtn, Qt.MouseButton.LeftButton)
-        self.assertGreater(
-            QScroller.grabbedGesture(self.page.viewport()).value,
-            0,
-        )
+        self.assertTrue(self.page.isTouchGestureGrabbed)
+        self.assertFalse(self.page.isTouchScrollSuppressed)
         self.assertFalse(
             firstCard.testAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents)
         )
+
+    def testEditModeSuppressesTouchScrollWithoutReleasingTheGesture(self):
+        area = self.page
+        original = QScroller.scroller(area.viewport()).scrollerProperties().scrollMetric(
+            QScrollerProperties.ScrollMetric.DragStartDistance
+        )
+
+        def dragStartDistance():
+            return (
+                QScroller.scroller(area.viewport())
+                .scrollerProperties()
+                .scrollMetric(QScrollerProperties.ScrollMetric.DragStartDistance)
+            )
+
+        with patch.object(
+            QScroller, "ungrabGesture", wraps=QScroller.ungrabGesture
+        ) as ungrab:
+            for _ in range(3):
+                QTest.mouseClick(self.page.sortBtn, Qt.MouseButton.LeftButton)
+                self.assertTrue(self.page._editing_cards)
+                self.assertTrue(area.isTouchScrollSuppressed)
+                self.assertGreater(dragStartDistance(), 1.0)
+
+                QTest.mouseClick(self.page.sortBtn, Qt.MouseButton.LeftButton)
+                self.assertFalse(self.page._editing_cards)
+                self.assertFalse(area.isTouchScrollSuppressed)
+                self.assertEqual(dragStartDistance(), original)
+
+            # 抓了又放的循环会在 Qt 的手势管理器里留下残留，之后建任意窗口都可能崩。
+            ungrab.assert_not_called()
+        self.assertTrue(area.isTouchGestureGrabbed)
 
     def testEditAndDeleteButtonsRespondToTouchInEditingMode(self):
         card = self.page.all_cards["全屏投送"]

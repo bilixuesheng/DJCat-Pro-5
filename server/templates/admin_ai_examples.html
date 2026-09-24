@@ -45,7 +45,7 @@
                         </div>
                     </td>
                 </tr>
-                <tr data-edit-row="{{ example.id }}" hidden>
+                <tr data-edit-row="{{ example.id }}" data-sort-follows="{{ example.id }}" hidden>
                     <td colspan="5" class="cell-edit-row">
                         <form method="post" action="{{ url_for('adminPromptExampleEdit', exampleId=example.id) }}" data-async-form>
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -81,25 +81,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (editRow) editRow.hidden = !editRow.hidden;
         });
     });
-
-    const table = document.querySelector('[data-sortable-table]');
-    if (!table) return;
-    const originalFetch = window.fetch;
-    window.fetch = function(url, options) {
-        if (typeof url === 'string' && url === table.dataset.orderUrl && options?.body instanceof FormData) {
-            const formData = options.body;
-            const newData = new FormData();
-            newData.append('csrf_token', formData.get('csrf_token'));
-            const order = [];
-            const original = [];
-            formData.getAll('item_id').forEach(id => order.push(Number(id)));
-            formData.getAll('expected_item_id').forEach(id => original.push(Number(id)));
-            newData.append('order', JSON.stringify(order));
-            newData.append('original', JSON.stringify(original));
-            return originalFetch.call(this, url, { ...options, body: newData });
-        }
-        return originalFetch.apply(this, arguments);
-    };
 });
 </script>
 {% endblock %}

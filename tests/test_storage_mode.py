@@ -30,7 +30,8 @@ class StorageModeTest(TestCase):
 
     def testPortableDirectoryTakesPrecedenceOnEveryStartup(self):
         with TemporaryDirectory() as directory:
-            root = Path(directory)
+            # APP_DIR 和 ApplicationStore 都 resolve()；Windows 的临时目录常是 8.3 短名。
+            root = Path(directory).resolve()
             appDirectory = root / "program"
             userDirectory = root / "user" / "DJCatPro"
             portableDirectory = appDirectory / "DJCatPro"
@@ -68,7 +69,8 @@ class StorageModeTest(TestCase):
 
     def testFreshInstallDefaultsToPortableMode(self):
         with TemporaryDirectory() as directory:
-            root = Path(directory)
+            # APP_DIR 和 ApplicationStore 都 resolve()；Windows 的临时目录常是 8.3 短名。
+            root = Path(directory).resolve()
             appDirectory = root / "program"
             appDirectory.mkdir(parents=True)
             userDirectory = root / "user" / "DJCatPro"
@@ -91,7 +93,8 @@ class StorageModeTest(TestCase):
 
     def testFreshInstallFallsBackToInstalledWhenPortableNotWritable(self):
         with TemporaryDirectory() as directory:
-            root = Path(directory)
+            # APP_DIR 和 ApplicationStore 都 resolve()；Windows 的临时目录常是 8.3 短名。
+            root = Path(directory).resolve()
             appDirectory = root / "program"
             appDirectory.mkdir(parents=True)
             userDirectory = root / "user" / "DJCatPro"
@@ -114,7 +117,8 @@ class StorageModeTest(TestCase):
 
     def testExistingInstalledUserKeepsInstalledMode(self):
         with TemporaryDirectory() as directory:
-            root = Path(directory)
+            # APP_DIR 和 ApplicationStore 都 resolve()；Windows 的临时目录常是 8.3 短名。
+            root = Path(directory).resolve()
             appDirectory = root / "program"
             appDirectory.mkdir(parents=True)
             userDirectory = root / "user" / "DJCatPro"
@@ -165,7 +169,8 @@ class StorageModeTest(TestCase):
         from app.common.application_store import ApplicationStore, ImageCache
 
         with TemporaryDirectory() as directory:
-            root = Path(directory)
+            # APP_DIR 和 ApplicationStore 都 resolve()；Windows 的临时目录常是 8.3 短名。
+            root = Path(directory).resolve()
             source = root / "user" / "DJCatPro"
             target = root / "program" / "DJCatPro"
             config = self._writeConfig(source)
@@ -256,6 +261,40 @@ class StorageModeTest(TestCase):
                 "icon_path"
             ]
             self.assertTrue(iconPath.startswith(str(target)))
+
+    def testRebaseMatchesStoredPathsThatWereNeverResolved(self):
+        """APP_DATA_DIR is not resolved, so neither are the paths stored in the config.
+
+        Short 8.3 names, junctions and mapped drives all expand to a different string;
+        matching only the expanded form left every stored path pointing at the old
+        directory. A symlink reproduces that on any platform.
+        """
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "real").mkdir()
+            try:
+                (root / "link").symlink_to(root / "real", target_is_directory=True)
+            except OSError:
+                self.skipTest("creating symlinks is not permitted here")
+            source = root / "link" / "DJCatPro"
+            target = root / "program" / "DJCatPro"
+            config = self._writeConfig(source)
+            self.assertNotEqual(str(source.resolve()), str(source))
+
+            with (
+                patch.object(paths, "APP_DATA_DIR", source),
+                patch.object(paths, "PORTABLE_DATA_DIR", target),
+                patch.object(paths, "CONFIG_PATH", config),
+            ):
+                paths.migrateAppData(target)
+
+            migrated = json.loads(
+                (target / "UserConfig.json").read_text(encoding="utf-8")
+            )
+            iconPath = migrated["HomePage"]["PinnedApplicationCards"][0]["icon_path"]
+            self.assertEqual(
+                iconPath, str(target / "AppStoreCache" / "icon.png")
+            )
 
     def testFailedPortableCopyDoesNotChangeActiveMode(self):
         with TemporaryDirectory() as directory:

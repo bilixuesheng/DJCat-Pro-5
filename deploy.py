@@ -15,6 +15,24 @@ def _numeric_version(version: str) -> str:
     return f"{match.group(1)}.{match.group(2) or match.group(3) or '0'}"
 
 
+QT_TRANSLATION_FILES = ("qtbase_zh_CN.qm",)
+
+
+def qtTranslationArgs() -> list[str]:
+    """把原生控件右键菜单等 Qt 自带文案的中文翻译打进包里，路径与 QT_TRANSLATIONS_DIR 对应。"""
+    from PySide6.QtCore import QLibraryInfo
+
+    source = Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath))
+    missing = [name for name in QT_TRANSLATION_FILES if not (source / name).is_file()]
+    if missing:
+        print(f"\n[ERROR] Missing Qt translations in {source}: {missing}")
+        sys.exit(1)
+    return [
+        f'--include-data-files="{source / name}"=app/translations/{name}'
+        for name in QT_TRANSLATION_FILES
+    ]
+
+
 def build_args() -> list[str]:
     nuitka_command = f'"{sys.executable}" -m nuitka'
 
@@ -53,6 +71,7 @@ def build_args() -> list[str]:
         "--include-package=emoji",
         "--include-package=PIL",
         "--include-data-dir=app/assets=app/assets",
+        *qtTranslationArgs(),
         "--windows-icon-from-ico=app/assets/logo.png",
         f'--company-name="{AUTHOR}"',
         f'--product-name="{APP_NAME}"',

@@ -1,0 +1,73 @@
+name: Tests
+
+# 发版流水线只在 main 上改动特定文件时才跑测试，平时的推送和 PR 没人把关，
+# 失败的测试会一路攒到下次发版才炸出来。这里在每次推送和 PR 时跑同一套检查。
+# main.yml 在发版前用同一套步骤再测一次，两边改动要同步。
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: 1
+  PYTHON_VERSION: 3.12.10
+
+jobs:
+  test-windows:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: x64
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.12.1"
+          enable-cache: true
+
+      # 每条命令单独一步：pwsh 的 run 块里原生命令失败不会中断脚本，整步只看最后一条的
+      # 退出码。并在一步里时，pytest 失败会被后面成功的 node --check 盖掉。
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run tests
+        # PySide6 的 Windows wheel 在 offscreen 平台下用 FreeType 找字体，只看 Qt 自带的
+        # fonts 目录或这个变量，而 wheel 不带字体；找不到时所有字形都退化成等宽方框，
+        # 量文字宽度的测试会全部失真。
+        env:
+          QT_QPA_FONTDIR: C:\Windows\Fonts
+        run: uv run --frozen python -m pytest -q
+
+      - name: Compile sources
+        run: uv run --frozen python -m compileall -q app server tests
+
+      - name: Check admin script syntax
+        run: node --check server/static/admin.js
+
+  build-updater:
+    # 与发版时构建 updater.exe 的命令一致，让 MSVC 编译错误在合并前暴露，而不是在发版那一刻。
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build updater with MSVC
+        shell: pwsh
+        run: |
+          cmake -B build-updater -G "Visual Studio 17 2022" -A x64 tools/updater
+          cmake --build build-updater --config Release
+          if (-not (Test-Path build-updater/Release/updater.exe)) { throw "updater.exe was not built" }

@@ -7,6 +7,9 @@ from pathlib import Path
 from PySide6.QtCore import QStandardPaths
 
 ASSET_DIR = Path(__file__).resolve().parents[1] / "assets"
+# 打包版里 Qt 自带的中文翻译放在这里：Nuitka 只在用到 QtWebEngine 时才会带上 Qt 的
+# translations 目录，deploy.py 单独打进 qtbase 这一份。源码运行时用 PySide6 自带的。
+QT_TRANSLATIONS_DIR = ASSET_DIR.parent / "translations"
 APP_DIR = (
     Path(sys.executable).resolve().parent
     if getattr(sys, "frozen", False) or "__compiled__" in globals()
@@ -50,9 +53,11 @@ def _rebaseConfigPaths(configPath: Path, source: Path, target: Path) -> None:
         return
     with configPath.open("r", encoding="utf-8") as file:
         data = json.load(file)
-    sourceText = str(source.resolve())
-    targetText = str(target.resolve())
-    sourceKey = os.path.normcase(sourceText)
+    # 配置里的路径由 APP_DATA_DIR 拼出，而它没有被 resolve()：8.3 短名、目录联接和映射
+    # 网络盘展开后都是另一串字符，只比展开后的形式会漏掉整份配置。写回时用 target 原样，
+    # 它就是下次启动 paths.py 算出的 APP_DATA_DIR。
+    sources = {str(source), str(source.resolve())}
+    targetText = str(target)
 
     def rebase(value):
         if isinstance(value, dict):
@@ -62,11 +67,12 @@ def _rebaseConfigPaths(configPath: Path, source: Path, target: Path) -> None:
         if not isinstance(value, str):
             return value
         valueKey = os.path.normcase(value)
-        if valueKey == sourceKey:
-            return targetText
-        prefix = sourceKey + os.sep
-        if valueKey.startswith(prefix):
-            return targetText + value[len(sourceText) :]
+        for sourceText in sources:
+            sourceKey = os.path.normcase(sourceText)
+            if valueKey == sourceKey:
+                return targetText
+            if valueKey.startswith(sourceKey + os.sep):
+                return targetText + value[len(sourceText) :]
         return value
 
     updated = rebase(data)

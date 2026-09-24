@@ -171,8 +171,12 @@ _Avoid_: Machine Identity、activation code、license key
 _Avoid_: request count（高峰时一次请求可能消耗两点）、token quota
 
 **Peak Hours**:
-可由管理员启用的双倍额度时段，当前为北京时间 9:00–12:00 和 14:00–18:00。启用时每次转换扣 2 点，其余时段扣 1 点。
+可由管理员启用的双倍额度时段，当前为北京时间 9:00–12:00 和 14:00–18:00。启用时每次转换扣 2 点，其余时段扣 1 点。管理员另开"节假日豁免"时，只有 **Working Day** 的这两个时段才加倍。
 _Avoid_: rate limit window、busy status
+
+**Working Day（工作日）**:
+按国务院当年放假安排认定的上班日，与 DeepSeek 空闲时段的定义一致：法定节假日整段放假（含借来的工作日）不是工作日，调休补班的周末是工作日；安排没提到的日子才按周一至周五算。
+_Avoid_: weekday（周几不等于是否上班）、holiday（只说了放假，漏了补班）
 
 **Busy Glow（忙碌光晕）**:
 一次 AI Markdown Conversion 进行期间，环绕输入框边缘的彩色光带。它只表示"正在进行且尚未出结果"，不表示完成度——转换耗时无法预估。AI Markdown 对话框和 Projection 编辑器的内联整理共用同一个 Busy Glow。

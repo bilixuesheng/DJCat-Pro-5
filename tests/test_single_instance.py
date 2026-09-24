@@ -18,6 +18,9 @@ from app.platform import application
 REPO = Path(__file__).resolve().parents[1]
 
 
+# _sendToRunningWindows 定义在 `if sys.platform == "win32"` 里，其他平台没有这个名字，
+# _lockSingleInstance 的这条分支本身也只在 Windows 上走得通。
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows IPC only")
 def test_simultaneous_second_instance_uses_lock_created_during_race():
     cleanup = MagicMock()
     cleanup.attach.return_value = False
