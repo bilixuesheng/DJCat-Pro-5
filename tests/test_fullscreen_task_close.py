@@ -660,7 +660,7 @@ class FullscreenTaskCloseTest(TestCase):
     def testBroadcastMiniWindowUsesSecondaryScreenOrigin(self):
         page = BroadcastEditPage()
         window = page.broadcastWin
-        screen = patch.object(window, "screen")
+        screen = patch("app.view.pages.broadcast_page.screenFor")
         self.app.setQuitOnLastWindowClosed(False)
         cfg.set(cfg.broadcastActionButtonPosition, "右下角")
 

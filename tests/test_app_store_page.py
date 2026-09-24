@@ -143,6 +143,25 @@ class AppStorePageTest(TestCase):
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.qtApp.processEvents()
 
+    def _waitForAdLayout(self, visible=False):
+        # 广告横幅在 0 ms 定时器里同步尺寸，视口定型后 resized 还会再触发一轮；
+        # 机器一忙，固定等 20 ms 赶不上第二轮。等几何连续两次都稳定。visible 另外
+        # 等页签切换动画走完、横幅真正露出来。
+        def settled():
+            return (
+                (not visible or self.page.adOverlay.isVisible())
+                and not self.page._adSyncTimer.isActive()
+                and self.page.adOverlay.geometry()
+                == self.page.adFlipView.viewport().geometry()
+            )
+
+        deadline = time.monotonic() + 5
+        stableChecks = 0
+        while stableChecks < 2:
+            self.assertLess(time.monotonic(), deadline, "ad layout never settled")
+            QTest.qWait(10)
+            stableChecks = stableChecks + 1 if settled() else 0
+
     def _waitForLaunch(self):
         deadline = time.monotonic() + 1
         while self.page._launching and time.monotonic() < deadline:
@@ -634,7 +653,14 @@ class AppStorePageTest(TestCase):
         self.page.resize(900, 420)
         self.page.show()
         self.page._showDetail(app)
-        QTest.qWait(220)
+        # 详情页是滑入的；过渡没走完时触点下面是过渡快照，不是预设卡片。
+        firstCard = self.page.presetCards.itemAt(0).widget()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            QTest.qWait(10)
+            under = QApplication.widgetAt(firstCard.mapToGlobal(firstCard.rect().center()))
+            if under is not None and (under is firstCard or firstCard.isAncestorOf(under)):
+                break
 
         self.assertIsInstance(self.page.detailLeftScroll, ScrollArea)
         self.assertIsInstance(self.page.presetScroll, ScrollArea)
@@ -660,10 +686,16 @@ class AppStorePageTest(TestCase):
             0, start, touchTarget
         ).commit()
         self.qtApp.processEvents()
-        QTest.touchEvent(touchTarget, device).move(
-            0, end, touchTarget
-        ).commit()
-        QTest.qWait(100)
+        # 像真手指一样分几步移动，再等 QScroller 在自己的节拍里把拖动应用到滚动条；
+        # 只合成一次大跨度移动、固定等 100 ms，机器一忙就会在拖动生效前松手。
+        for step in range(1, 5):
+            QTest.touchEvent(touchTarget, device).move(
+                0, start + (end - start) * step / 4, touchTarget
+            ).commit()
+            QTest.qWait(20)
+        deadline = time.monotonic() + 2
+        while rightScroll.value() == 0 and time.monotonic() < deadline:
+            QTest.qWait(10)
         QTest.touchEvent(touchTarget, device).release(
             0, end, touchTarget
         ).commit()
@@ -1433,7 +1465,7 @@ class AppStorePageTest(TestCase):
         self.page.show()
         self.page._switchCatalogTab(1)
         self.page._prepareAds()
-        QTest.qWait(500)
+        self._waitForAdLayout(visible=True)
 
         self.assertTrue(self.page.adOverlay.isVisible())
         start = QPoint(self.page.adOverlay.width() - 100, 90)
@@ -1465,7 +1497,7 @@ class AppStorePageTest(TestCase):
         self.page.show()
         self.page._switchCatalogTab(1)
         self.page._prepareAds()
-        QTest.qWait(20)
+        self._waitForAdLayout()
 
         start = QPoint(self.page.adOverlay.width() // 2, 30)
         jitter = start + QPoint(2, 1)
@@ -1496,7 +1528,7 @@ class AppStorePageTest(TestCase):
         self.page.show()
         self.page._switchCatalogTab(1)
         self.page._prepareAds()
-        QTest.qWait(20)
+        self._waitForAdLayout()
 
         globalPosition = self.page.adNext.mapToGlobal(
             self.page.adNext.rect().center()
@@ -1527,7 +1559,7 @@ class AppStorePageTest(TestCase):
         self.page.show()
         self.page._switchCatalogTab(1)
         self.page._prepareAds()
-        QTest.qWait(220)
+        self._waitForAdLayout()
 
         self.assertGreaterEqual(self.page.adFrame.width(), 998)
         self.assertLessEqual(self.page.adFrame.width(), 1000)
@@ -1553,7 +1585,7 @@ class AppStorePageTest(TestCase):
         self.page.show()
         self.page._switchCatalogTab(1)
         self.page._prepareAds()
-        QTest.qWait(20)
+        self._waitForAdLayout()
 
         self.assertIsInstance(self.page.adButton, PrimaryPushButton)
         self.assertLess(self.page.adButton.height(), 32)
@@ -1594,7 +1626,7 @@ class AppStorePageTest(TestCase):
         self.page.show()
         self.page._switchCatalogTab(1)
         self.page._prepareAds()
-        QTest.qWait(20)
+        self._waitForAdLayout()
 
         self.assertLessEqual(self.page.adFrame.height(), 200)
         self.assertEqual(self.page.adFlipView.borderRadius, 12)
@@ -1714,7 +1746,7 @@ class AppStorePageTest(TestCase):
         self.page.ads = [{"id": 1, "title": "Ad", "image_url": ""}]
         self.page._switchCatalogTab(1)
         self.page._prepareAds()
-        QTest.qWait(20)
+        self._waitForAdLayout()
 
         image = self.page.adOverlay.grab().toImage()
         upper = image.pixelColor(image.width() - 10, int(image.height() * 0.48))
@@ -1737,7 +1769,7 @@ class AppStorePageTest(TestCase):
         self.page.show()
         self.page._switchCatalogTab(1)
         self.page._prepareAds()
-        QTest.qWait(20)
+        self._waitForAdLayout()
 
         self.page._nextAd()
         QTest.qWait(520)
@@ -1789,7 +1821,7 @@ class AppStorePageTest(TestCase):
         self.page.show()
         self.page._switchCatalogTab(1)
         self.page._prepareAds()
-        QTest.qWait(20)
+        self._waitForAdLayout()
         self.page.adFlipView.setCurrentIndex(1)
         QTest.qWait(520)
 

@@ -459,10 +459,11 @@ class MainWindow(MSFluentWindow):
             self._runApplicationHomeCardTasks(SILENT_STARTUP_EVENT)
 
     def _updateResizeBorderWidth(self, screen=None):
-        screen = screen or self.screen()
+        # 不用 self.screen()：它返回的 QScreen 会被 PySide 挂成本窗口的子对象，见 app/platform/screens.py。
+        ratio = screen.devicePixelRatio() if screen is not None else self.devicePixelRatioF()
         self.BORDER_WIDTH = round(
             self.RESIZE_BORDER_PIXELS_AT_300_PERCENT
-            * screen.devicePixelRatio()
+            * ratio
             / self.RESIZE_BORDER_REFERENCE_DPR
         )
 

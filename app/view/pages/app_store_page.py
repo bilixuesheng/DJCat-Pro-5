@@ -937,11 +937,19 @@ class AppStorePage(ScrollArea):
         self._adDescriptionElide = LabelElideFilter(maximumLines=2)
         self.adTitle.installEventFilter(self._adTitleElide)
         self.adDescription.installEventFilter(self._adDescriptionElide)
+        # 按钮与描述同一行、放在右侧，而不是再叠一行：横幅最高 200 px，标题、两行描述
+        # 和按钮竖着叠，在 Windows 的字体行高下文字块会高出下半部，白字压到渐变还没
+        # 变暗的图上。标题仍独占一行，长标题不因按钮提前截断。
         overlayLayout.addWidget(self.adTitle)
-        overlayLayout.addWidget(self.adDescription)
         self.adButton = PrimaryPushButton("查看软件", self.adOverlay)
+        self.adButton.setMaximumHeight(30)
         self.adButton.clicked.connect(self._openAdApp)
-        overlayLayout.addWidget(self.adButton, 0, Qt.AlignmentFlag.AlignLeft)
+        bottomLayout = QHBoxLayout()
+        bottomLayout.setContentsMargins(0, 0, 0, 0)
+        bottomLayout.setSpacing(16)
+        bottomLayout.addWidget(self.adDescription, 1)
+        bottomLayout.addWidget(self.adButton, 0, Qt.AlignmentFlag.AlignBottom)
+        overlayLayout.addLayout(bottomLayout)
         self.adPrevious = self.adFlipView.preButton
         self.adNext = self.adFlipView.nextButton
         self.adOverlay.setTouchButtons((self.adPrevious, self.adNext))

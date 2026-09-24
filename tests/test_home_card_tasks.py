@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from unittest import TestCase
@@ -600,7 +601,10 @@ class HomeCardTaskRuntimeTest(TestCase):
         ):
             self.window.requestQuit()
             self.assertFalse(self.window._resourcesShutdown)
-            QTest.qWait(50)
+            # 动作在工作线程里跑完才发信号回来；机器一忙，固定等 50 ms 不够。
+            deadline = time.monotonic() + 5
+            while not quitApp.called and time.monotonic() < deadline:
+                QTest.qWait(10)
 
         execute.assert_called_once()
         quitApp.assert_called_once_with()

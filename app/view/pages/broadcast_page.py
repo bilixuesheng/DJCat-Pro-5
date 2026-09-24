@@ -53,6 +53,7 @@ from app.common.update_download import isHttpsResponseChain
 from app.config.cfg import cfg
 from app.config.constants import AI_MARKDOWN_API
 from app.config.paths import ASSET_DIR
+from app.platform.screens import screenFor
 from app.view.components.busy_glow import BusyGlowOverlay
 from app.view.components.markdown_view import MarkdownView
 from app.view.components.window_background import WINDOW_SHADOW_MARGIN, WindowBackground
@@ -506,14 +507,14 @@ class BroadcastWindow(FramelessWindow):
 
         if self.is_windowed:
             self.showNormal()
-            rect = self.screen().availableGeometry()
+            rect = screenFor(self).availableGeometry()
             margin = WINDOW_SHADOW_MARGIN
             self.resize(int(rect.width() * 0.5) + 2 * margin, int(rect.height() * 0.5) + 2 * margin)
             self.move(rect.center() - self.rect().center())
         else:
             if cfg.showTaskbarInBroadcast.value:
                 self.showNormal()
-                self.setGeometry(self.screen().availableGeometry())
+                self.setGeometry(screenFor(self).availableGeometry())
             else:
                 self.showFullScreen()
 
@@ -653,7 +654,7 @@ class BroadcastWindow(FramelessWindow):
         self.hide()
         self.miniWindow._updateStyle()
         self.miniWindow.show()
-        rect = self.screen().availableGeometry()
+        rect = screenFor(self).availableGeometry()
         if cfg.broadcastActionButtonPosition.value == "右下角":
             self.miniWindow.move(
                 rect.left() + rect.width() - 150,
