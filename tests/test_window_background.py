@@ -10,6 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QWidget
+from qfluentwidgets import qconfig
 
 from app.config.cfg import WINDOW_BACKGROUND_MODES, WINDOW_BACKGROUND_SCALE_MODES, cfg
 from app.view.components.setting_preview import (
@@ -19,7 +20,11 @@ from app.view.components.setting_preview import (
     WindowBackgroundPreview,
     _screenAspectRatio,
 )
-from app.view.components.window_background import WindowBackground
+from app.view.components.window_background import (
+    WindowBackground,
+    projectionThemeBackground,
+    projectionTitleColor,
+)
 from app.view.pages.broadcast_page import BroadcastWindow
 from app.view.pages.countdown_page import CountdownWindow
 from app.view.pages.fullscreen_clock import FullscreenClockWindow
@@ -126,6 +131,37 @@ class WindowBackgroundTest(TestCase):
         self.assertEqual(cfg.countdownBackgroundMode.value, "纯色")
         page.countdownBackgroundModeCard.comboBox.setCurrentIndex(0)
         self.assertEqual(cfg.countdownBackgroundMode.value, "主题色")
+
+    def testProjectionTitleStaysReadableOnTheDarkBackground(self):
+        def luminance(color):
+            channels = []
+            for value in (color.redF(), color.greenF(), color.blueF()):
+                channels.append(
+                    value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
+                )
+            return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+        def contrast(first, second):
+            high, low = sorted((luminance(first), luminance(second)), reverse=True)
+            return (high + 0.05) / (low + 0.05)
+
+        original = QColor(qconfig.themeColor.value)
+        self.addCleanup(qconfig.set, qconfig.themeColor, original, False)
+        accent = QColor(49, 101, 49)
+        qconfig.set(qconfig.themeColor, accent, False)
+
+        cfg.set(cfg.customThemeMode, "Light", save=False)
+        self.assertEqual(projectionTitleColor(), accent)
+
+        cfg.set(cfg.customThemeMode, "Dark", save=False)
+        background = projectionThemeBackground()
+        self.assertLess(contrast(accent, background), 3)
+        self.assertGreaterEqual(contrast(projectionTitleColor(), background), 4.5)
+
+        window = BroadcastWindow()
+        self.addCleanup(window.deleteLater)
+        window.setContent("标题", "正文")
+        self.assertIn(projectionTitleColor().name(), window.titleLabel.styleSheet())
 
     def testThemeBackgroundPreviewMatchesTheRealWindows(self):
         cfg.set(cfg.broadcastBackgroundMode, "主题色", save=False)

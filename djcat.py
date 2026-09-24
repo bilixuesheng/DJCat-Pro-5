@@ -32,7 +32,7 @@ def startApp(isSilent: bool = False):
 
 
 def installTranslators(app):
-    """Qt 原生控件（数字框、只读正文的右键菜单）和 QFluentWidgets 自带控件（开关的
+    """Qt 原生控件（Markdown 链接的右键菜单）和 QFluentWidgets 自带控件（开关的
     On/Off、输入框右键菜单、颜色对话框的 OK/Cancel）的文案默认都是英文。"""
     from PySide6.QtCore import QLibraryInfo, QLocale, QTranslator
     from qfluentwidgets import FluentTranslator

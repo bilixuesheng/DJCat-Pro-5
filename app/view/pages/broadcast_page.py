@@ -60,6 +60,7 @@ from app.view.components.window_background import (
     WINDOW_SHADOW_MARGIN,
     WindowBackground,
     projectionThemeBackground,
+    projectionTitleColor,
 )
 
 
@@ -410,7 +411,7 @@ class BroadcastWindow(FramelessWindow):
         self.btn_close.updateStyle()
 
         self.titleLabel.setText(title)
-        self.titleLabel.setStyleSheet(f"color: {qconfig.themeColor.value.name()};")
+        self.titleLabel.setStyleSheet(f"color: {projectionTitleColor().name()};")
 
         if is_markdown:
             self.contentEdit.clear()

@@ -19,6 +19,16 @@ def followsDarkTheme() -> bool:
     return isDarkTheme() if mode == "System" else mode == "Dark"
 
 
+def projectionTitleColor() -> QColor:
+    """投送标题的主题色。深色底上原始主题色往往太暗，按 QFluentWidgets 深色主题的
+    主色规则提亮（饱和度 ×0.84、明度拉满），与软件里其他深色控件的强调色一致。"""
+    color = QColor(qconfig.themeColor.value)
+    if not followsDarkTheme():
+        return color
+    hue, saturation, _value, alpha = color.getHsvF()
+    return QColor.fromHsvF(hue, saturation * 0.84, 1.0, alpha)
+
+
 def projectionThemeBackground() -> QColor:
     """投送的默认背景（配置值"主题色"，设置页显示为"跟随主题"）：跟随深浅主题，不是强调色。"""
     return QColor("#202020" if followsDarkTheme() else "#FFFFFF")

@@ -171,12 +171,12 @@ class StartupTest(TestCase):
             "edit = QLineEdit()\n"
             "menu = edit.createStandardContextMenu()\n"
             "texts = [a.text().split('\\t')[0] for a in menu.actions() if a.text()]\n"
-            "stepUp = QCoreApplication.translate('QAbstractSpinBox', '&Step up')\n"
-            "print(texts + [stepUp])\n"
+            "link = QCoreApplication.translate('QWidgetTextControl', 'Copy &Link Location')\n"
+            "print(texts + [link])\n"
         )
         expected = (
             "['撤消(&U)', '重做(&R)', '剪切(&T)', '复制(&C)', '粘贴(&P)', '删除', "
-            "'全选', '升高(&S)']"
+            "'全选', '复制链接地址(&L)']"
         )
 
         for bundledOnly in (False, True):

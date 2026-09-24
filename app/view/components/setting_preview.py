@@ -30,6 +30,7 @@ from app.view.components.window_background import (
     WindowBackground,
     followsDarkTheme,
     projectionThemeBackground,
+    projectionTitleColor,
 )
 
 PREVIEW_RADIUS = 8
@@ -146,8 +147,7 @@ class WindowBackgroundPreview(WindowBackground):
         font.setPixelSize(20)
         font.setWeight(QFont.Weight.DemiBold)
         painter.setFont(font)
-        # 真实窗口取 qconfig 里的原始主题色；themeColor() 在深色主题下会被调亮。
-        painter.setPen(qconfig.themeColor.value)
+        painter.setPen(projectionTitleColor())
         painter.drawText(
             QRectF(rect.left(), rect.top(), rect.width(), 26),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
