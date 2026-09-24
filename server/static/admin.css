@@ -8,9 +8,25 @@
    1. Design Tokens
    -------------------------------------------------------------------------- */
 
+/* 自托管而非 Google Fonts：后者在国内不可达，外链样式表会阻塞首屏渲染。 */
+@font-face {
+    font-family: 'Source Serif 4';
+    font-style: normal;
+    font-weight: 200 900;
+    font-display: swap;
+    src: url('fonts/source-serif-4.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
     color-scheme: light;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+    /* Typography — 标题衬线、界面无衬线；中文标题回退系统宋体 */
+    --font-serif: 'Source Serif 4', 'Songti SC', 'STSong', 'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', Georgia, serif;
+    --font-sans:  -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+    --font-mono:  'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+
+    font-family: var(--font-sans);
 
     /* Backgrounds */
     --paper:          #F5F1EB;
@@ -506,9 +522,10 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
 }
 .confirm-dialog h2 {
     margin: 0;
-    font-size: 20px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
+    font-family: var(--font-serif);
+    font-size: 22px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
 }
 .confirm-dialog p {
     margin: 10px 0 28px;
@@ -580,11 +597,11 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
     margin: 0;
     overflow-wrap: anywhere;
     word-break: break-word;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    font-size: clamp(40px, 5vw, 60px);
-    font-weight: 500;
-    line-height: 1.05;
-    letter-spacing: -0.035em;
+    font-family: var(--font-serif);
+    font-size: clamp(40px, 5vw, 58px);
+    font-weight: 400;
+    line-height: 1.12;
+    letter-spacing: -0.015em;
     color: var(--ink);
 }
 .page-header p {
@@ -639,9 +656,10 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
 }
 .section-heading h2 {
     margin: 0;
-    font-size: 22px;
-    font-weight: 600;
-    letter-spacing: -0.025em;
+    font-family: var(--font-serif);
+    font-size: 24px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
 }
 .section-heading > span,
 .section-heading > a {
@@ -700,10 +718,12 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
 }
 .metric-card strong {
     margin: auto 0 6px;
-    font-size: 36px;
-    font-weight: 500;
+    font-family: var(--font-serif);
+    font-size: 40px;
+    font-weight: 400;
     line-height: 1;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.02em;
+    font-variant-numeric: lining-nums tabular-nums;
 }
 .metric-card small {
     color: var(--muted);
@@ -769,9 +789,10 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
 }
 .service-title h3 {
     margin: 0;
-    font-size: 20px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
+    font-family: var(--font-serif);
+    font-size: 22px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
 }
 .service-copy p {
     margin: 5px 0 0;
@@ -930,9 +951,10 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
 }
 .form-section-title h2 {
     margin: 0;
-    font-size: 18px;
-    font-weight: 600;
-    letter-spacing: -0.015em;
+    font-family: var(--font-serif);
+    font-size: 20px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
 }
 .form-section-title p {
     margin: 6px 0 0;
@@ -1160,9 +1182,10 @@ input[type="checkbox"] {
 }
 .prompt-header h2 {
     margin: 0;
-    font-size: 20px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
+    font-family: var(--font-serif);
+    font-size: 22px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
 }
 .prompt-header > span {
     color: var(--muted);
@@ -1538,15 +1561,16 @@ td small { color: var(--muted); }
 .login-copy .eyebrow { color: var(--ink-secondary); }
 .login-copy h1 {
     margin: 16px 0 0;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    font-size: clamp(42px, 6vw, 70px);
-    font-weight: 500;
-    line-height: 1.05;
-    letter-spacing: -0.04em;
+    font-family: var(--font-serif);
+    font-size: clamp(42px, 6vw, 68px);
+    font-weight: 400;
+    line-height: 1.12;
+    letter-spacing: -0.015em;
 }
+/* 宋体没有真斜体，浏览器合成的倾斜很难看，只用颜色强调。 */
 .login-copy h1 em {
     color: var(--clay);
-    font-style: italic;
+    font-style: normal;
 }
 .login-copy p {
     max-width: 350px;
