@@ -392,7 +392,7 @@ class SettingSearchTest(TestCase):
             [
                 "横幅设置",
                 "全屏投送设置",
-                "AI整理Markdown设置",
+                "AI 整理 Markdown 设置",
                 "考试倒计时设置",
                 "全屏时钟设置",
                 "个性化",

@@ -12,6 +12,13 @@ from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QWidget
 
 from app.config.cfg import WINDOW_BACKGROUND_MODES, WINDOW_BACKGROUND_SCALE_MODES, cfg
+from app.view.components.setting_preview import (
+    COUNTDOWN_CONTENT,
+    PROJECTION_CONTENT,
+    WINDOW_PREVIEW_HEIGHT,
+    WindowBackgroundPreview,
+    _screenAspectRatio,
+)
 from app.view.components.window_background import WindowBackground
 from app.view.pages.broadcast_page import BroadcastWindow
 from app.view.pages.countdown_page import CountdownWindow
@@ -42,6 +49,7 @@ class WindowBackgroundTest(TestCase):
             cfg.fullscreenClockBackgroundColor,
             cfg.fullscreenClockBackgroundImagePath,
             cfg.fullscreenClockBackgroundScaleMode,
+            cfg.customThemeMode,
         )
         self.values = [(item, item.value) for item in self.items]
 
@@ -94,6 +102,66 @@ class WindowBackgroundTest(TestCase):
                 cfg.set(cfg.broadcastBackgroundScaleMode, mode, save=False)
                 self.app.processEvents()
                 self.assertEqual(background._image().size(), background.size())
+
+    def testDefaultBackgroundIsNamedForWhatEachWindowPaints(self):
+        page = SettingPage()
+        self.addCleanup(page.deleteLater)
+        cfg.set(cfg.broadcastBackgroundMode, "主题色", save=False)
+        cfg.set(cfg.countdownBackgroundMode, "主题色", save=False)
+        cfg.set(cfg.fullscreenClockBackgroundMode, "主题色", save=False)
+
+        for card, texts in (
+            (page.broadcastBackgroundModeCard, ["跟随主题", "纯色", "图片"]),
+            (page.countdownBackgroundModeCard, ["默认黑色", "纯色", "图片"]),
+            (page.fullscreenClockBackgroundModeCard, ["默认黑色", "纯色", "图片"]),
+        ):
+            comboBox = card.comboBox
+            with self.subTest(card=card.titleLabel.text()):
+                self.assertEqual(
+                    [comboBox.itemText(i) for i in range(comboBox.count())], texts
+                )
+                self.assertEqual(comboBox.currentText(), texts[0])
+
+        page.countdownBackgroundModeCard.comboBox.setCurrentIndex(1)
+        self.assertEqual(cfg.countdownBackgroundMode.value, "纯色")
+        page.countdownBackgroundModeCard.comboBox.setCurrentIndex(0)
+        self.assertEqual(cfg.countdownBackgroundMode.value, "主题色")
+
+    def testThemeBackgroundPreviewMatchesTheRealWindows(self):
+        cfg.set(cfg.broadcastBackgroundMode, "主题色", save=False)
+        cfg.set(cfg.countdownBackgroundMode, "主题色", save=False)
+        previews = {}
+        for kind, prefix in (
+            (PROJECTION_CONTENT, "broadcast"),
+            (COUNTDOWN_CONTENT, "countdown"),
+        ):
+            preview = WindowBackgroundPreview(
+                getattr(cfg, f"{prefix}BackgroundMode"),
+                getattr(cfg, f"{prefix}BackgroundColor"),
+                getattr(cfg, f"{prefix}BackgroundImagePath"),
+                getattr(cfg, f"{prefix}BackgroundScaleMode"),
+                kind,
+            )
+            self.addCleanup(preview.deleteLater)
+            preview.show()
+            previews[kind] = preview
+
+        def pixel(kind):
+            self.app.processEvents()
+            preview = previews[kind]
+            return preview.grab().toImage().pixelColor(20, preview.height() // 2)
+
+        for theme, projection in (("Light", "#ffffff"), ("Dark", "#202020")):
+            with self.subTest(theme=theme):
+                cfg.set(cfg.customThemeMode, theme, save=False)
+                self.assertEqual(pixel(PROJECTION_CONTENT).name(), projection)
+                self.assertEqual(pixel(COUNTDOWN_CONTENT).name(), "#000000")
+
+        for preview in previews.values():
+            self.assertEqual(preview.height(), WINDOW_PREVIEW_HEIGHT)
+            self.assertEqual(
+                preview.width(), round(WINDOW_PREVIEW_HEIGHT * _screenAspectRatio())
+            )
 
     def testWindowedBorderIsPaintedAboveDarkBackground(self):
         parent = QWidget()

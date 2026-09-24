@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt, QTime, QTimer, Signal
-from PySide6.QtGui import QColor, QFontMetrics
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon as FIF
 from qframelesswindow import FramelessWindow
@@ -7,7 +7,11 @@ from qframelesswindow import FramelessWindow
 from app.config.cfg import cfg
 from app.platform.screens import screenFor
 from app.view.components.setting_card_group import QWIDGETSIZE_MAX
-from app.view.components.window_background import WINDOW_SHADOW_MARGIN, WindowBackground
+from app.view.components.window_background import (
+    TIMER_THEME_BACKGROUND,
+    WINDOW_SHADOW_MARGIN,
+    WindowBackground,
+)
 from app.view.pages.broadcast_page import VerticalButton, showCloseConfirmation
 
 
@@ -27,7 +31,7 @@ class FullscreenClockWindow(FramelessWindow):
             cfg.fullscreenClockBackgroundColor,
             cfg.fullscreenClockBackgroundImagePath,
             cfg.fullscreenClockBackgroundScaleMode,
-            lambda: QColor("black"),
+            lambda: TIMER_THEME_BACKGROUND,
             self,
         )
         self.background.lower()

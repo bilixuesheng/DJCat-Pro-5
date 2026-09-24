@@ -20,6 +20,7 @@ from shiboken6 import delete
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
 from app.config.paths import LOG_DIR
+from app.view.components.setting_card_group import SettingCardList
 from app.view.components.setting_section import (
     ROOT_SECTION_KEY,
     SLIDE_DURATION_MS,
@@ -30,7 +31,7 @@ from app.view.pages.setting_page import SettingPage
 TOP_LEVEL_SECTIONS = [
     "横幅设置",
     "全屏投送设置",
-    "AI整理Markdown设置",
+    "AI 整理 Markdown 设置",
     "考试倒计时设置",
     "全屏时钟设置",
     "个性化",
@@ -201,6 +202,40 @@ class SettingSectionTest(TestCase):
                 self.assertIn(backgroundCard, view.settingCards())
                 self.assertEqual(len(view.settingCards()), 4)
                 self.assertEqual(view.navigationCards(), ())
+
+    def testShortSectionListDoesNotStretchToThePageBottom(self):
+        page = self.buildPage()
+        page.resize(900, 1200)
+        self.navigate(page, "aiMarkdown")
+        cardList = page.aiStyleCard.parentWidget()
+        while not isinstance(cardList, SettingCardList):
+            cardList = cardList.parentWidget()
+
+        self.assertEqual(cardList.height(), cardList.sizeHint().height())
+        self.assertLess(
+            cardList.geometry().bottom(),
+            page.sectionStack.view("aiMarkdown").viewport().height() - 100,
+        )
+
+    def testLineEditSettingSavesWhileTypingAndFlushesOnLeave(self):
+        original = cfg.windowTitle.value
+        self.addCleanup(cfg.set, cfg.windowTitle, original)
+        page = self.buildPage()
+        lineEdit = page.windowTitleCard.lineEdit
+
+        lineEdit.setText("第一版")
+        self.assertEqual(cfg.windowTitle.value, original)
+        self.assertTrue(page.windowTitleCard.saveTimer.isActive())
+        for _ in range(100):
+            if cfg.windowTitle.value == "第一版":
+                break
+            QTest.qWait(20)
+        self.assertEqual(cfg.windowTitle.value, "第一版")
+
+        lineEdit.setText("第二版")
+        page.flushPendingSave()
+        self.assertEqual(cfg.windowTitle.value, "第二版")
+        self.assertFalse(page.windowTitleCard.saveTimer.isActive())
 
     def testAboutSectionKeepsErrorLogBetweenAuthorAndAbout(self):
         page = self.buildPage()

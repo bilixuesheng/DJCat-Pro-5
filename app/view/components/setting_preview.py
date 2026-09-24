@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetricsF,
+    QGuiApplication,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     CaptionLabel,
@@ -17,7 +25,12 @@ from app.config.cfg import cfg
 from app.config.constants import APP_NAME
 from app.view.components.banner_widget import BannerWidget
 from app.view.components.setting_card_group import SettingMaterialCard
-from app.view.components.window_background import WindowBackground
+from app.view.components.window_background import (
+    TIMER_THEME_BACKGROUND,
+    WindowBackground,
+    followsDarkTheme,
+    projectionThemeBackground,
+)
 
 PREVIEW_RADIUS = 8
 
@@ -48,6 +61,17 @@ def _textColor(dark: bool) -> QColor:
     return QColor(255, 255, 255, 222) if dark else QColor(0, 0, 0, 222)
 
 
+WINDOW_PREVIEW_HEIGHT = 216
+
+
+def _screenAspectRatio() -> float:
+    screen = QGuiApplication.primaryScreen()
+    size = screen.geometry().size() if screen is not None else None
+    if not size or size.height() <= 0:
+        return 16 / 9
+    return min(2.4, max(1.25, size.width() / size.height()))
+
+
 class WindowBackgroundPreview(WindowBackground):
     """A Projection / Countdown / Clock window rendered inside the page.
 
@@ -66,19 +90,32 @@ class WindowBackgroundPreview(WindowBackground):
         actionPositionItem=None,
         parent=None,
     ):
+        # 默认背景和真实窗口取同一个底色：投送跟随深浅主题，倒计时和时钟是黑底。
+        projection = contentKind == PROJECTION_CONTENT
         super().__init__(
             modeItem,
             colorItem,
             imagePathItem,
             scaleModeItem,
+            projectionThemeBackground if projection else (lambda: TIMER_THEME_BACKGROUND),
             parent=parent,
         )
         self._contentKind = contentKind
         self._actionPositionItem = actionPositionItem
-        self.setFixedHeight(190)
+        # 三种窗口默认全屏：按屏幕比例画，图片背景的裁切位置才和真实窗口一致。
+        self.setFixedSize(
+            round(WINDOW_PREVIEW_HEIGHT * _screenAspectRatio()), WINDOW_PREVIEW_HEIGHT
+        )
         self.setRoundedWindow(True, shadow=False)
         if actionPositionItem is not None:
             actionPositionItem.valueChanged.connect(self._onActionPositionChanged)
+        if projection:
+            cfg.customThemeMode.valueChanged.connect(self._invalidate)
+            qconfig.themeChanged.connect(self._invalidate)
+
+    def _darkFurniture(self) -> bool:
+        """投送窗口的文字和按钮跟随深浅主题；倒计时和时钟始终是黑底上的白字。"""
+        return self._contentKind != PROJECTION_CONTENT or followsDarkTheme()
 
     def _onActionPositionChanged(self, *_args) -> None:
         self.update()
@@ -109,14 +146,17 @@ class WindowBackgroundPreview(WindowBackground):
         font.setPixelSize(20)
         font.setWeight(QFont.Weight.DemiBold)
         painter.setFont(font)
-        painter.setPen(themeColor())
+        # 真实窗口取 qconfig 里的原始主题色；themeColor() 在深色主题下会被调亮。
+        painter.setPen(qconfig.themeColor.value)
         painter.drawText(
             QRectF(rect.left(), rect.top(), rect.width(), 26),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             "投送标题",
         )
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(255, 255, 255, 132))
+        painter.setBrush(
+            QColor(255, 255, 255, 132) if self._darkFurniture() else QColor(0, 0, 0, 110)
+        )
         widths = (0.92, 0.86, 0.94, 0.58)
         for index, ratio in enumerate(widths):
             painter.drawRoundedRect(
@@ -137,14 +177,20 @@ class WindowBackgroundPreview(WindowBackground):
             Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
             title,
         )
+        text = "00 : 45 : 00" if self._contentKind == COUNTDOWN_CONTENT else "09 : 24 : 30"
         font.setPixelSize(46)
         font.setWeight(QFont.Weight.DemiBold)
+        # 预览宽度随屏幕比例变化，4:3 屏上 46 px 的时间会超出两侧。
+        width = QFontMetricsF(font).horizontalAdvance(text)
+        available = rect.width() * 0.88
+        if width > available:
+            font.setPixelSize(max(12, int(46 * available / width)))
         painter.setFont(font)
         painter.setPen(QColor(255, 255, 255, 235))
         painter.drawText(
             QRectF(rect.left(), rect.top() + 36, rect.width(), 60),
             Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
-            "00 : 45 : 00" if self._contentKind == COUNTDOWN_CONTENT else "09 : 24 : 30",
+            text,
         )
 
     def _paintActionButtons(self, painter: QPainter, rect: QRectF) -> None:
@@ -158,16 +204,27 @@ class WindowBackgroundPreview(WindowBackground):
         left = rect.left() + margin if onLeft else rect.right() - margin - total
         top = rect.bottom() - margin - height
 
+        dark = self._darkFurniture()
         for index in range(count):
             button = QRectF(left + index * (width + spacing), top, width, height)
-            # 主色的关闭按钮落在主题色背景上会糊成一片，描一道细边让它始终可辨。
-            painter.setPen(QPen(QColor(255, 255, 255, 110), 1))
+            primary = index == count - 1
+            # 与真实窗口的按钮同色：关闭是主题色，其余是按深浅主题的半透明底。细边让
+            # 主题色的关闭按钮落在同色背景上也能分辨。
+            painter.setPen(
+                QPen(QColor(255, 255, 255, 110) if dark else QColor(0, 0, 0, 40), 1)
+            )
             painter.setBrush(
-                themeColor() if index == count - 1 else QColor(0, 0, 0, 92)
+                qconfig.themeColor.value
+                if primary
+                else QColor(255, 255, 255, 26) if dark else QColor(0, 0, 0, 13)
             )
             painter.drawRoundedRect(button, 5, 5)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(255, 255, 255, 170))
+            painter.setBrush(
+                QColor(255, 255, 255, 200)
+                if primary or dark
+                else QColor(0, 0, 0, 170)
+            )
             painter.drawRoundedRect(
                 QRectF(button.center().x() - 5, button.top() + 9, 10, 10), 2, 2
             )

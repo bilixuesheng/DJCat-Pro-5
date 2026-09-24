@@ -368,6 +368,9 @@ class SettingCardList(SettingMaterialCard):
         self.cardLayout.setContentsMargins(0, 0, 0, 0)
         self.cardLayout.setSpacing(0)
         self.cardLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        # 分区比视口矮时滚动区会把内容撑满视口，Preferred 会把多出的高度分给列表，
+        # 底色面板被拉长到页面底部。建议高度随可折叠卡片展开而变，Maximum 仍跟得上。
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         FluentStyleSheet.SETTING_CARD_GROUP.apply(self)
 
     def addSettingCard(self, card: QWidget) -> None:

@@ -270,7 +270,7 @@ class LazySettingPage(LazyPage):
 
     def flushPendingSave(self):
         if self.page is not None:
-            self.page.aiStyleCard.flushPendingSave()
+            self.page.flushPendingSave()
 
     @property
     def windowTitleCard(self):

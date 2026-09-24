@@ -111,3 +111,28 @@ class StartupTest(TestCase):
             result.stdout.strip().splitlines()[-1],
             "[False, False, False, False]",
         )
+
+    def testFluentTranslatorShowsBuiltInSwitchTextInChinese(self):
+        repo = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import os; os.environ['QT_QPA_PLATFORM'] = 'offscreen'; "
+                "from PySide6.QtWidgets import QApplication; "
+                "import djcat; "
+                "app = QApplication([]); "
+                "djcat.installFluentTranslator(app); "
+                "from qfluentwidgets import SwitchButton; "
+                "button = SwitchButton(); "
+                "off = button.getText(); "
+                "button.setChecked(True); "
+                "print([off, button.getText()])",
+            ],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.stdout.strip().splitlines()[-1], "['关', '开']")

@@ -185,7 +185,7 @@ Projection 的两种正文渲染器必须保持这些共同约束：
 - Projection 切换正文类型或关闭时释放旧正文控件，并立即取消其远程 Markdown 图片下载；返回编辑时仍从独立的 Projection 内容快照恢复。
 - 全屏时 Markdown 正文未处理的鼠标按压和拖动必须在 `MarkdownView` 边界停止，不能冒泡到外层无边框 Projection 窗口；窗口化时由 Projection 统一接管正文拖动，但短按链接和操作按钮仍需保持可用。
 
-Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` 会覆盖整个窗口背景。窗口化时的 `1 px #808080` 边界线必须由该组件在主题色、纯色或图片绘制完成后最后绘制；全屏时不绘制。不得恢复为父窗口 QSS 边框，否则背景子控件会再次把它盖住。
+Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` 会覆盖整个窗口背景。窗口化时的 `1 px #808080` 边界线必须由该组件在主题色、纯色或图片绘制完成后最后绘制；全屏时不绘制。不得恢复为父窗口 QSS 边框，否则背景子控件会再次把它盖住。配置值 `主题色` 是历史名称，不是强调色：Projection 取跟随深浅主题的窗口底色（`projectionThemeBackground()`），Exam Countdown 和 Fullscreen Clock 不论主题都铺黑底；设置页把它分别显示为"跟随主题"和"默认黑色"，存储值不变，预览与真实窗口共用同一个底色函数。
 
 Projection、Exam Countdown 与 Fullscreen Clock 的窗口化背景、图片裁剪和边框共用 8 px 圆角；首次显示前启用透明窗口表面，不依赖 Win11 系统圆角。Qt 阴影只附着在背景组件上，四周各留 12 px 透明空间，Exam Countdown 与 Fullscreen Clock 的可见内容仍为 600 × 190，Projection 初始可见尺寸仍为可用屏幕的一半；字体、布局与角落按钮按 `contentsRect()` 定位，不能把阴影空间算进正文尺寸。切回全屏（含保留任务栏模式）时清除透明边距、圆角、边框和阴影，背景重新铺满窗口。Projection 保留窗口化缩放：Windows 命中测试使用消息中的坐标，按 DPI 转为背景局部坐标，在可见圆角边界内侧 12 px、外侧 2 px 的圆角区域判断四边及四角，不将透明阴影外沿作为边框。圆角外的空白和角落按钮不触发缩放；全屏禁用缩放。
 

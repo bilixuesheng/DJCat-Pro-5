@@ -56,7 +56,11 @@ from app.config.paths import ASSET_DIR
 from app.platform.screens import screenFor
 from app.view.components.busy_glow import BusyGlowOverlay
 from app.view.components.markdown_view import MarkdownView
-from app.view.components.window_background import WINDOW_SHADOW_MARGIN, WindowBackground
+from app.view.components.window_background import (
+    WINDOW_SHADOW_MARGIN,
+    WindowBackground,
+    projectionThemeBackground,
+)
 
 
 def showActionConfirmation(
@@ -333,7 +337,7 @@ class BroadcastWindow(FramelessWindow):
             cfg.broadcastBackgroundColor,
             cfg.broadcastBackgroundImagePath,
             cfg.broadcastBackgroundScaleMode,
-            self._themeBackgroundColor,
+            projectionThemeBackground,
             self,
         )
         self.background.lower()
@@ -387,14 +391,6 @@ class BroadcastWindow(FramelessWindow):
         self.btn_min.clicked.connect(self.minimizeToMini)
         self.btn_win.clicked.connect(self.toggleWindowMode)
         self.btn_close.clicked.connect(self._onClose)
-
-    def _themeBackgroundColor(self):
-        is_dark = (
-            isDarkTheme()
-            if cfg.customThemeMode.value == "System"
-            else cfg.customThemeMode.value == "Dark"
-        )
-        return QColor("#202020" if is_dark else "#FFFFFF")
 
     def _applyStyle(self):
         is_dark = isDarkTheme() if cfg.customThemeMode.value == "System" else cfg.customThemeMode.value == "Dark"
@@ -913,7 +909,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self._resultChunks = []
         self._pendingChunks = []
 
-        self.titleLabel = SubtitleLabel("AI整理Markdown", self)
+        self.titleLabel = SubtitleLabel("AI 整理 Markdown", self)
         self.descriptionLabel = BodyLabel(
             "将作业清单或任务填入下面的输入框，即可整理为标准 Markdown 格式。",
             self,
@@ -1210,7 +1206,7 @@ class BroadcastEditPage(QWidget):
 
         self.aiBtn = PushButton(self)
         self.aiBtn.setIcon(QIcon(str(ASSET_DIR / "deepseek.png")))
-        self.aiBtn.setText("AI整理Markdown")
+        self.aiBtn.setText("AI 整理 Markdown")
         self.aiBtn.setEnabled(False)
         self.aiBtn.clicked.connect(self._showAIMarkdownDialog)
 

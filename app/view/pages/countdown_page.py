@@ -2,7 +2,7 @@ import math
 import time
 
 from PySide6.QtCore import QPropertyAnimation, QSize, Qt, QTime, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QFontMetrics
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtMultimedia import QSoundEffect
 from PySide6.QtWidgets import (
     QApplication,
@@ -33,7 +33,11 @@ from app.platform.screens import screenFor
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import QWIDGETSIZE_MAX
 from app.view.components.task_picker import TouchTimePicker
-from app.view.components.window_background import WINDOW_SHADOW_MARGIN, WindowBackground
+from app.view.components.window_background import (
+    TIMER_THEME_BACKGROUND,
+    WINDOW_SHADOW_MARGIN,
+    WindowBackground,
+)
 from app.view.pages.broadcast_page import (
     VerticalButton,
     showActionConfirmation,
@@ -78,7 +82,7 @@ class CountdownWindow(FramelessWindow):
             cfg.countdownBackgroundColor,
             cfg.countdownBackgroundImagePath,
             cfg.countdownBackgroundScaleMode,
-            lambda: QColor("black"),
+            lambda: TIMER_THEME_BACKGROUND,
             self,
         )
         self.background.lower()

@@ -5,11 +5,12 @@ from typing import NamedTuple
 
 from loguru import logger
 from PySide6.QtCore import QUrl, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QFont
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QFileDialog,
+    QHBoxLayout,
     QVBoxLayout,
     QWidget,
 )
@@ -34,6 +35,8 @@ from qfluentwidgets import (
     SwitchSettingCard,
     TextEdit,
     ToolButton,
+    isDarkTheme,
+    qconfig,
     setFont,
     setThemeColor,
 )
@@ -48,7 +51,6 @@ from app.config.cfg import (
     BANNER_IMAGE_PRESETS,
     BANNER_PRESET_SCALE_MODES,
     THEME_COLOR_PRESETS,
-    WINDOW_BACKGROUND_MODES,
     WINDOW_BACKGROUND_SCALE_MODES,
     cfg,
 )
@@ -74,6 +76,11 @@ from app.view.components.setting_section import (
     SettingSectionStack,
     SettingSectionView,
 )
+
+# 配置里存的仍是 WINDOW_BACKGROUND_MODES 的原值，这里只换显示文字：第一项不是强调色，
+# 投送跟随深浅主题铺白底或深灰底，倒计时和时钟不论主题都是黑底。
+PROJECTION_BACKGROUND_MODE_TEXTS = ("跟随主题", "纯色", "图片")
+TIMER_BACKGROUND_MODE_TEXTS = ("默认黑色", "纯色", "图片")
 
 CUSTOM_STYLE_PLACEHOLDER = (
     "所有关于值日的消息全部使用---与前面的任务分割开，然后使用"
@@ -111,9 +118,18 @@ class LineEditSettingCard(SettingCard):
         self.hBoxLayout.addSpacing(16)
 
     def _bind(self) -> None:
-        self.lineEdit.editingFinished.connect(
-            lambda: cfg.set(self.configItem, self.lineEdit.text())
-        )
+        # 边打字边写，上方的预览才会跟着变；防抖是因为 cfg.set 每次都会写盘。
+        self.saveTimer = QTimer(self)
+        self.saveTimer.setSingleShot(True)
+        self.saveTimer.setInterval(300)
+        self.saveTimer.timeout.connect(self.flushPendingSave)
+        self.lineEdit.textChanged.connect(self.saveTimer.start)
+        self.lineEdit.editingFinished.connect(self.flushPendingSave)
+
+    def flushPendingSave(self) -> None:
+        self.saveTimer.stop()
+        if self.configItem.value != self.lineEdit.text():
+            cfg.set(self.configItem, self.lineEdit.text())
 
 
 class CacheSettingCard(SettingCard):
@@ -170,6 +186,28 @@ class LocalizedColorSettingCard(FluentColorSettingCard):
             dialog.deleteLater()
 
 
+class _ColorSwatch(QWidget):
+    """一小块颜色，代替把 RGB 数字直接写给用户看。"""
+
+    def __init__(self, color, parent=None):
+        super().__init__(parent)
+        self._color = QColor(color)
+        self.setFixedSize(16, 16)
+
+    def setColor(self, color) -> None:
+        self._color = QColor(color)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        border = QColor(255, 255, 255, 60) if isDarkTheme() else QColor(0, 0, 0, 40)
+        painter.setPen(QPen(border, 1))
+        painter.setBrush(self._color)
+        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 4, 4)
+        painter.end()
+
+
 class ThemeColorSettingCard(CollapsibleSettingCard):
     def __init__(self, parent=None):
         super().__init__(
@@ -184,31 +222,41 @@ class ThemeColorSettingCard(CollapsibleSettingCard):
         self._bind()
 
     def _initWidget(self) -> None:
+        self.choiceSwatch = _ColorSwatch(qconfig.themeColor.value, self)
         self.choiceLabel = BodyLabel(self)
         self.radioWidget = QWidget(self.view)
         self.radioLayout = QVBoxLayout(self.radioWidget)
         self.buttonGroup = QButtonGroup(self)
         self.presetButtons = {
-            name: RadioButton(
-                f"预设: {name} ({rgb[0]}, {rgb[1]}, {rgb[2]})",
-                self.radioWidget,
-            )
+            name: RadioButton(f"预设: {name}", self.radioWidget)
+            for name, rgb in THEME_COLOR_PRESETS
+        }
+        self.presetSwatches = {
+            name: _ColorSwatch(QColor(*rgb), self.radioWidget)
             for name, rgb in THEME_COLOR_PRESETS
         }
         self.customButton = RadioButton("自定义颜色", self.radioWidget)
 
     def _initLayout(self) -> None:
+        self.addWidget(self.choiceSwatch)
         self.addWidget(self.choiceLabel)
         self.radioLayout.setSpacing(19)
         self.radioLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.radioLayout.setContentsMargins(48, 18, 0, 18)
-        for button in [*self.presetButtons.values(), self.customButton]:
+        for name, button in [*self.presetButtons.items(), (None, self.customButton)]:
             self.buttonGroup.addButton(button)
-            self.radioLayout.addWidget(button)
+            row = QHBoxLayout()
+            row.setSpacing(8)
+            row.addWidget(button)
+            if name is not None:
+                row.addWidget(self.presetSwatches[name])
+            row.addStretch(1)
+            self.radioLayout.addLayout(row)
         self.addGroupWidget(self.radioWidget)
 
     def _bind(self) -> None:
         self.buttonGroup.buttonClicked.connect(self._onButtonClicked)
+        qconfig.themeColorChanged.connect(self.choiceSwatch.setColor)
 
     def _loadSelection(self) -> None:
         preset = cfg.themeColorPreset.value
@@ -253,7 +301,7 @@ class AIMarkdownStyleSettingCard(CollapsibleSettingCard):
     def __init__(self, parent=None):
         super().__init__(
             FluentIcon.EDIT,
-            "自定义微调Markdown风格",
+            "自定义微调 Markdown 风格",
             "根据偏好调整 AI 输出的 Markdown 格式，最多 4000 个字符",
             parent,
         )
@@ -285,7 +333,7 @@ class AIMarkdownStyleSettingCard(CollapsibleSettingCard):
 
         enabled = cfg.aiMarkdownCustomStyleEnabled.value
         self.switchButton.setChecked(enabled)
-        self.switchButton.setText("开启" if enabled else "关闭")
+        self.switchButton.setText("开" if enabled else "关")
         self.setExpandedImmediately(enabled)
 
         self.saveTimer.setSingleShot(True)
@@ -296,7 +344,7 @@ class AIMarkdownStyleSettingCard(CollapsibleSettingCard):
 
     def _onCheckedChanged(self, enabled: bool) -> None:
         cfg.set(cfg.aiMarkdownCustomStyleEnabled, enabled)
-        self.switchButton.setText("开启" if enabled else "关闭")
+        self.switchButton.setText("开" if enabled else "关")
         self.setExpand(enabled)
 
     def flushPendingSave(self) -> None:
@@ -452,8 +500,8 @@ class SettingPage(QWidget):
             cfg.broadcastBackgroundMode,
             FluentIcon.PHOTO,
             "背景类型",
-            "选择主题色、纯色或图片背景",
-            texts=WINDOW_BACKGROUND_MODES,
+            "选择跟随主题、纯色或图片背景",
+            texts=PROJECTION_BACKGROUND_MODE_TEXTS,
         )
         self.broadcastBackgroundColorCard = LocalizedColorSettingCard(
             cfg.broadcastBackgroundColor,
@@ -551,8 +599,8 @@ class SettingPage(QWidget):
             cfg.countdownBackgroundMode,
             FluentIcon.PHOTO,
             "背景类型",
-            "选择主题色、纯色或图片背景",
-            texts=WINDOW_BACKGROUND_MODES,
+            "选择默认黑色、纯色或图片背景",
+            texts=TIMER_BACKGROUND_MODE_TEXTS,
         )
         self.countdownBackgroundColorCard = LocalizedColorSettingCard(
             cfg.countdownBackgroundColor,
@@ -621,8 +669,8 @@ class SettingPage(QWidget):
             cfg.fullscreenClockBackgroundMode,
             FluentIcon.PHOTO,
             "背景类型",
-            "选择主题色、纯色或图片背景",
-            texts=WINDOW_BACKGROUND_MODES,
+            "选择默认黑色、纯色或图片背景",
+            texts=TIMER_BACKGROUND_MODE_TEXTS,
         )
         self.fullscreenClockBackgroundColorCard = LocalizedColorSettingCard(
             cfg.fullscreenClockBackgroundColor,
@@ -795,7 +843,8 @@ class SettingPage(QWidget):
                 cfg.broadcastBackgroundScaleMode,
                 PROJECTION_CONTENT,
                 cfg.broadcastActionButtonPosition,
-            )
+            ),
+            centered=True,
         )
         broadcastBackground.addCardList(
             [
@@ -825,7 +874,7 @@ class SettingPage(QWidget):
 
         aiMarkdown = self._addSection(
             "aiMarkdown",
-            "AI整理Markdown设置",
+            "AI 整理 Markdown 设置",
             FluentIcon.EDIT,
             "AI 整理功能和 Markdown 风格",
             ROOT_SECTION_KEY,
@@ -856,7 +905,8 @@ class SettingPage(QWidget):
                 cfg.countdownBackgroundScaleMode,
                 COUNTDOWN_CONTENT,
                 cfg.countdownActionButtonPosition,
-            )
+            ),
+            centered=True,
         )
         countdownBackground.addCardList(
             [
@@ -906,7 +956,8 @@ class SettingPage(QWidget):
                 cfg.fullscreenClockBackgroundScaleMode,
                 CLOCK_CONTENT,
                 cfg.fullscreenClockActionButtonPosition,
-            )
+            ),
+            centered=True,
         )
         clockBackground.addCardList(
             [
@@ -1287,8 +1338,12 @@ class SettingPage(QWidget):
             size = 0
         self.clearAppStoreCacheCard.setCacheSize(size)
 
+    def flushPendingSave(self) -> None:
+        for card in (self.aiStyleCard, self.windowTitleCard, self.trayTooltipCard):
+            card.flushPendingSave()
+
     def hideEvent(self, event) -> None:
-        self.aiStyleCard.flushPendingSave()
+        self.flushPendingSave()
         super().hideEvent(event)
 
     def _refreshAIQuota(self) -> None:

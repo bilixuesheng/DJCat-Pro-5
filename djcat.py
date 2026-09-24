@@ -31,6 +31,18 @@ def startApp(isSilent: bool = False):
     return windowClass(isSilent=isSilent)
 
 
+def installFluentTranslator(app):
+    """QFluentWidgets 自带控件的文案（开关的 On/Off、颜色对话框的 OK/Cancel）默认是英文。"""
+    from PySide6.QtCore import QLocale
+    from qfluentwidgets import FluentTranslator
+
+    # 翻译器挂在 app 上，否则 Python 对象被回收后翻译就失效了。
+    app._fluentTranslator = FluentTranslator(
+        QLocale(QLocale.Language.Chinese, QLocale.Country.China)
+    )
+    app.installTranslator(app._fluentTranslator)
+
+
 def configureLogging():
     from loguru import logger
     from app.config.paths import LOG_DIR
@@ -80,6 +92,8 @@ def main():
 
     optimizeFluentDialogs()
     optimizeFluentMenus()
+
+    installFluentTranslator(app)
 
     configureLogging()
     failedCleanup = clearUpdateDirectory()
