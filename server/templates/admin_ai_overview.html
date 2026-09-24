@@ -16,20 +16,23 @@
 <section class="section-block" aria-labelledby="runtime-title">
     <div class="section-heading">
         <div><span class="section-index">01</span><h2 id="runtime-title">今日运行</h2></div>
-        <span>每天 00:00 刷新</span>
+        <span><span class="live-count"><span class="inline-dot" aria-hidden="true"></span>处理中 {{ stats.processing }}</span> · 每天 00:00 刷新</span>
     </div>
-    <div class="stat-sheet">
-        <div class="stat-group">
-            <dl class="stat-row" aria-label="今日运行统计">
-                <div class="stat"><dt>请求</dt><dd>{{ stats.requests }}</dd></div>
-                <div class="stat"><dt><span class="stat-dot success" aria-hidden="true"></span>成功</dt><dd>{{ stats.success }}</dd></div>
-                <div class="stat"><dt><span class="stat-dot danger" aria-hidden="true"></span>失败</dt><dd>{{ stats.failed }}</dd></div>
-                <div class="stat"><dt><span class="stat-dot pending" aria-hidden="true"></span>处理中</dt><dd>{{ stats.processing }}</dd></div>
-                <div class="stat"><dt>消耗额度</dt><dd>{{ stats.consumed }}</dd></div>
-                <div class="stat"><dt>注册机器</dt><dd>{{ stats.machines }}</dd></div>
-            </dl>
+    <dl class="figure-row" aria-label="今日运行统计">
+        <div class="figure">
+            <dt>请求</dt>
+            <dd class="figure-value">{{ stats.requests }}</dd>
+            <dd class="figure-note"><span class="inline-dot" aria-hidden="true"></span>成功 {{ stats.success }}<span class="inline-dot danger" aria-hidden="true"></span>失败 {{ stats.failed }}</dd>
         </div>
-    </div>
+        <div class="figure">
+            <dt>消耗额度</dt>
+            <dd class="figure-value">{{ stats.consumed }}</dd>
+        </div>
+        <div class="figure">
+            <dt>注册机器</dt>
+            <dd class="figure-value">{{ stats.machines }}</dd>
+        </div>
+    </dl>
 </section>
 
 <section class="section-block" aria-labelledby="state-title">

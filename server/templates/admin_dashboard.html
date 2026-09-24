@@ -15,26 +15,23 @@
 <section class="section-block" aria-labelledby="today-title">
     <div class="section-heading">
         <div><span class="section-index">01</span><h2 id="today-title">今日数据</h2></div>
-        <span>每 10 秒自动更新</span>
+        <span><span class="live-count"><span class="inline-dot" aria-hidden="true"></span>处理中 <span data-stat="processing">{{ stats.processing }}</span></span> · 每 10 秒自动更新</span>
     </div>
-    <div class="stat-sheet">
-        <div class="stat-group">
-            <h3 class="stat-group-title">AI 写 Markdown</h3>
-            <dl class="stat-row">
-                <div class="stat"><dt>请求</dt><dd data-stat="today.ai_requests">{{ stats.today.ai_requests }}</dd></div>
-                <div class="stat"><dt><span class="stat-dot success" aria-hidden="true"></span>成功</dt><dd data-stat="today.ai_success">{{ stats.today.ai_success }}</dd></div>
-                <div class="stat"><dt><span class="stat-dot danger" aria-hidden="true"></span>失败</dt><dd data-stat="today.ai_failed">{{ stats.today.ai_failed }}</dd></div>
-                <div class="stat"><dt><span class="stat-dot pending" aria-hidden="true"></span>处理中</dt><dd data-stat="processing">{{ stats.processing }}</dd></div>
-                <div class="stat"><dt>额度消耗</dt><dd data-stat="consumed">{{ stats.consumed }}</dd></div>
-            </dl>
+    <dl class="figure-row">
+        <div class="figure">
+            <dt>AI 请求</dt>
+            <dd class="figure-value" data-stat="today.ai_requests">{{ stats.today.ai_requests }}</dd>
+            <dd class="figure-note"><span class="inline-dot" aria-hidden="true"></span>成功 <span data-stat="today.ai_success">{{ stats.today.ai_success }}</span><span class="inline-dot danger" aria-hidden="true"></span>失败 <span data-stat="today.ai_failed">{{ stats.today.ai_failed }}</span></dd>
         </div>
-        <div class="stat-group">
-            <h3 class="stat-group-title">应用市场</h3>
-            <dl class="stat-row">
-                <div class="stat"><dt>应用下载</dt><dd data-stat="today.market_downloads">{{ stats.today.market_downloads }}</dd></div>
-            </dl>
+        <div class="figure">
+            <dt>额度消耗</dt>
+            <dd class="figure-value" data-stat="consumed">{{ stats.consumed }}</dd>
         </div>
-    </div>
+        <div class="figure">
+            <dt>应用下载</dt>
+            <dd class="figure-value" data-stat="today.market_downloads">{{ stats.today.market_downloads }}</dd>
+        </div>
+    </dl>
 </section>
 
 <section class="section-block" aria-labelledby="all-data-title">
@@ -42,27 +39,21 @@
         <div><span class="section-index">02</span><h2 id="all-data-title">全部数据</h2></div>
         <span>从服务启用以来累计</span>
     </div>
-    <div class="stat-sheet">
-        <div class="stat-group">
-            <h3 class="stat-group-title">AI 写 Markdown</h3>
-            <dl class="stat-row">
-                <div class="stat"><dt>请求</dt><dd data-stat="all.ai_requests">{{ stats.all.ai_requests }}</dd></div>
-                <div class="stat"><dt><span class="stat-dot success" aria-hidden="true"></span>成功</dt><dd data-stat="all.ai_success">{{ stats.all.ai_success }}</dd></div>
-                <div class="stat"><dt><span class="stat-dot danger" aria-hidden="true"></span>失败</dt><dd data-stat="all.ai_failed">{{ stats.all.ai_failed }}</dd></div>
-                <div class="stat"><dt>额度消耗</dt><dd data-stat="all_consumed">{{ stats.all_consumed }}</dd></div>
-                <div class="stat"><dt>注册机器</dt><dd data-stat="machines">{{ stats.machines }}</dd></div>
-            </dl>
+    <dl class="figure-row">
+        <div class="figure">
+            <dt>AI 请求</dt>
+            <dd class="figure-value" data-stat="all.ai_requests">{{ stats.all.ai_requests }}</dd>
+            <dd class="figure-note"><span class="inline-dot" aria-hidden="true"></span>成功 <span data-stat="all.ai_success">{{ stats.all.ai_success }}</span><span class="inline-dot danger" aria-hidden="true"></span>失败 <span data-stat="all.ai_failed">{{ stats.all.ai_failed }}</span></dd>
         </div>
-        <div class="stat-group">
-            <h3 class="stat-group-title">应用市场</h3>
-            <dl class="stat-row">
-                <div class="stat"><dt>应用下载</dt><dd data-stat="all.market_downloads">{{ stats.all.market_downloads }}</dd></div>
-                <div class="stat"><dt>已发布软件</dt><dd data-stat="market.apps">{{ stats.market.apps }}</dd></div>
-                <div class="stat"><dt>启用广告</dt><dd data-stat="market.ads">{{ stats.market.ads }}</dd></div>
-                <div class="stat"><dt>预设卡片</dt><dd data-stat="market.presets">{{ stats.market.presets }}</dd></div>
-            </dl>
+        <div class="figure">
+            <dt>应用下载</dt>
+            <dd class="figure-value" data-stat="all.market_downloads">{{ stats.all.market_downloads }}</dd>
         </div>
-    </div>
+        <div class="figure">
+            <dt>注册机器</dt>
+            <dd class="figure-value" data-stat="machines">{{ stats.machines }}</dd>
+        </div>
+    </dl>
 </section>
 
 <section class="section-block" aria-labelledby="services-title">
