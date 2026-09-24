@@ -13,6 +13,8 @@ from PySide6.QtWidgets import QApplication, QGraphicsDropShadowEffect, QVBoxLayo
 from app.view.components.busy_glow import (
     BREATH_AMPLITUDE,
     CORNER_RADIUS,
+    ENTRANCE_MS,
+    TAPER_FRACTION,
     GLOW_MARGIN,
     BusyGlowOverlay,
     _arcWindow,
@@ -129,7 +131,11 @@ class TestGrownArc:
         tip = overlay._points[
             min(
                 range(len(fractions)),
-                key=lambda i: abs(fractions[i] - progress * 0.5),
+                # The middle of the fading end: half-way along the taper.
+                key=lambda i: abs(
+                    fractions[i]
+                    - (progress * (0.5 + TAPER_FRACTION) - TAPER_FRACTION * progress / 2)
+                ),
             )
         ]
         middle = overlay._points[
@@ -145,6 +151,23 @@ class TestGrownArc:
             ).alpha()
 
         assert alphaAt(tip) < alphaAt(middle)
+
+    def test_the_two_ends_close_gradually_instead_of_snapping_shut(self):
+        """The fading ends used to leave a dim gap at the top until the very last frame,
+        which then filled the whole gap at once."""
+        def dimmest(progress):
+            return min(_arcWindow(i / 400, progress) for i in range(401))
+
+        previous = 0.0
+        for step in range(900, 1000):
+            current = dimmest(step / 1000)
+            assert current >= previous
+            previous = current
+        assert dimmest(0.995) > 0.9
+        # The frame right before the entrance ends is already (almost) a full ring.
+        overlay = BusyGlowOverlay(QWidget())
+        lastProgress = overlay._state(ENTRANCE_MS - 16).progress
+        assert dimmest(lastProgress) > 0.95
 
     def test_zero_growth_draws_nothing(self):
         assert all(_arcWindow(i / 100, 0.0) == 0.0 for i in range(101))

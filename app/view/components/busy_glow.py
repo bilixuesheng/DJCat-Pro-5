@@ -61,20 +61,19 @@ _SHIMMER_FLOOR = 0.35
 GLOW_MARGIN = 34
 _HALO_REACH = GLOW_MARGIN - 1
 
-# Apple 智能的取色：蓝紫 → 紫 → 粉 → 珊瑚红 → 杏橙 → 紫 → 回蓝紫。不走满 360° 色相：
-# 绕整圈必然经过纯绿纯黄，那两段感知亮度最高，放在光带里只会刺眼。
+# 蓝 → 靛 → 紫 → 粉 → 橙 → 回蓝。不走满 360° 色相：绕整圈必然经过纯绿纯黄，
+# 那两段感知亮度最高，放在光带里只会刺眼。
 _BAND_STOPS = (
-    (0.00, "#8D9FFF"),
-    (0.20, "#BC82F3"),
-    (0.40, "#F5B9EA"),
-    (0.58, "#FF6778"),
-    (0.78, "#FFBA71"),
-    (0.90, "#C686FF"),
-    (1.00, "#8D9FFF"),
+    (0.00, "#0A84FF"),
+    (0.22, "#5E5CE6"),
+    (0.44, "#BF5AF2"),
+    (0.62, "#FF2D92"),
+    (0.82, "#FF9F0A"),
+    (1.00, "#0A84FF"),
 )
 
-_LIGHT_SATURATION = 1.70
-_LIGHT_VALUE = 0.95
+_LIGHT_SATURATION = 1.30
+_LIGHT_VALUE = 0.68
 
 _COLOR_TABLE_SIZE = 720
 _colorTables: dict[bool, list[QColor]] = {}
@@ -90,8 +89,8 @@ class _GlowFrame(NamedTuple):
 def _bandColor(position: float, dark: bool) -> QColor:
     """光带上 `position` 处的颜色，0 是底边中点。
 
-    深色配方靠加性合成"发光"；浅色背景上没有比接近白更亮的余地，粉彩色会直接消失，
-    所以浅色配方提饱和、略降明度，靠比背景更浓的颜色显形。
+    深色配方靠加性合成"发光"；浅色背景上没有比接近白更亮的余地，
+    所以浅色配方提饱和、降明度，靠比背景更暗更浓的颜色显形。
     """
     position %= 1.0
     for (lo, loName), (hi, hiName) in zip(_BAND_STOPS, _BAND_STOPS[1:]):
@@ -158,15 +157,19 @@ def _arcWindow(fraction: float, progress: float) -> float:
 
     把它描述成从底边中点升起的两条臂，两条臂会在起笔点和会合点重叠，alpha 叠加成
     两个亮疙瘩。这里只有一段弧，不存在重叠。
+
+    弧的实心部分伸到一半周长时，两端的渐隐段还在顶部留着一段缺口；所以弧要多伸出
+    一截渐隐的长度，让两端渐隐在顶部逐渐补满，进度到 1 时恰好是完整一圈。只伸到
+    一半周长的话，最后一帧会把那段缺口一下子补上，看着像"啪"地合拢。
     """
     if progress >= 1.0:
         return 1.0
     if progress <= 0.0:
         return 0.0
-    half = progress * 0.5
     taper = max(1e-3, TAPER_FRACTION * progress)
+    reach = progress * (0.5 + TAPER_FRACTION)
     distance = min(fraction, 1.0 - fraction)
-    return max(0.0, min(1.0, (half - distance) / taper))
+    return max(0.0, min(1.0, (reach - distance) / taper))
 
 
 def _roundedPath(box: QRectF, radius: float) -> QPainterPath:
