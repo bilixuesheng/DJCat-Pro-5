@@ -10,7 +10,14 @@
 
 :root {
     color-scheme: light;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+    /* Typography — 页面衬线，控件无衬线；只用系统字体，不依赖外部字体服务 */
+    --font-serif: Georgia, 'Songti SC', 'STSong', 'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', serif;
+    --font-sans:  -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+    --font-mono:  'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+
+    font-family: var(--font-serif);
+
 
     /* Backgrounds */
     --paper:          #F5F1EB;
@@ -89,6 +96,8 @@ body {
 
 a { color: inherit; text-decoration: none; }
 button, input, select, textarea { font: inherit; }
+/* 小字号宋体在 Windows 上发虚，可操作控件和密集表格保留无衬线体。 */
+button, input, select, textarea, table, .button, .table-action { font-family: var(--font-sans); }
 
 button {
     cursor: pointer;
@@ -506,9 +515,9 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
 }
 .confirm-dialog h2 {
     margin: 0;
-    font-size: 20px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
+    font-size: 22px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
 }
 .confirm-dialog p {
     margin: 10px 0 28px;
@@ -562,7 +571,6 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
 
 .eyebrow,
 .section-index,
-.metric-card small,
 .page-context {
     font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
 }
@@ -580,11 +588,10 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
     margin: 0;
     overflow-wrap: anywhere;
     word-break: break-word;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    font-size: clamp(40px, 5vw, 60px);
-    font-weight: 500;
-    line-height: 1.05;
-    letter-spacing: -0.035em;
+    font-size: clamp(40px, 5vw, 58px);
+    font-weight: 400;
+    line-height: 1.12;
+    letter-spacing: -0.015em;
     color: var(--ink);
 }
 .page-header p {
@@ -639,9 +646,9 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
 }
 .section-heading h2 {
     margin: 0;
-    font-size: 22px;
-    font-weight: 600;
-    letter-spacing: -0.025em;
+    font-size: 24px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
 }
 .section-heading > span,
 .section-heading > a {
@@ -670,55 +677,60 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
 
 
 /* --------------------------------------------------------------------------
-   11. Metric Cards
+   11. Figures
    -------------------------------------------------------------------------- */
 
-.metric-grid {
+.figure-row {
+    margin: 0;
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border-top: 1px solid var(--line);
 }
-.metric-card {
-    min-height: 138px;
-    padding: 20px 22px;
-    display: flex;
-    flex-direction: column;
-    border: 1px solid var(--line-faint);
-    border-radius: var(--radius);
-    background: var(--surface);
-    box-shadow: var(--shadow-sm);
-    transition: box-shadow var(--duration-normal), transform var(--duration-normal);
+.figure {
+    min-width: 0;
+    padding: 24px 32px 6px;
+    border-left: 1px solid var(--line);
 }
-.metric-card:hover {
-    box-shadow: var(--shadow-md);
-    transform: translateY(-2px);
-}
-.metric-card > span {
+.figure:first-child { padding-left: 0; border-left: 0; }
+.figure dt {
     color: var(--ink-secondary);
-    font-size: 12px;
-    font-weight: 600;
+    font-size: 14px;
+    line-height: 1.4;
 }
-.metric-card strong {
-    margin: auto 0 6px;
-    font-size: 36px;
-    font-weight: 500;
+.figure-value {
+    margin: 18px 0 0;
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: clamp(44px, 5vw, 60px);
+    font-weight: 300;
     line-height: 1;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.035em;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
 }
-.metric-card small {
-    color: var(--muted);
-    font-size: 10px;
-    letter-spacing: 0.03em;
+.figure-note {
+    margin: 12px 0 0;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    color: var(--muted-strong);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
 }
+.figure-note .inline-dot { margin-left: 4px; }
+.figure-note .inline-dot:first-child { margin-left: 0; }
+.inline-dot.danger { background: var(--danger); }
 
-.metric-card-accent {
-    border-color: var(--clay);
-    background: var(--clay);
-    color: #FFF;
+.live-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--ink-secondary);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
 }
-.metric-card-accent > span,
-.metric-card-accent small { color: rgba(255, 255, 255, 0.85); }
-.metric-card-accent strong { color: #FFF; }
 
 
 /* --------------------------------------------------------------------------
@@ -769,9 +781,9 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
 }
 .service-title h3 {
     margin: 0;
-    font-size: 20px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
+    font-size: 22px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
 }
 .service-copy p {
     margin: 5px 0 0;
@@ -930,9 +942,9 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
 }
 .form-section-title h2 {
     margin: 0;
-    font-size: 18px;
-    font-weight: 600;
-    letter-spacing: -0.015em;
+    font-size: 20px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
 }
 .form-section-title p {
     margin: 6px 0 0;
@@ -1160,9 +1172,9 @@ input[type="checkbox"] {
 }
 .prompt-header h2 {
     margin: 0;
-    font-size: 20px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
+    font-size: 22px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
 }
 .prompt-header > span {
     color: var(--muted);
@@ -1538,15 +1550,15 @@ td small { color: var(--muted); }
 .login-copy .eyebrow { color: var(--ink-secondary); }
 .login-copy h1 {
     margin: 16px 0 0;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    font-size: clamp(42px, 6vw, 70px);
-    font-weight: 500;
-    line-height: 1.05;
-    letter-spacing: -0.04em;
+    font-size: clamp(42px, 6vw, 68px);
+    font-weight: 400;
+    line-height: 1.12;
+    letter-spacing: -0.015em;
 }
+/* 宋体没有真斜体，浏览器合成的倾斜很难看，只用颜色强调。 */
 .login-copy h1 em {
     color: var(--clay);
-    font-style: italic;
+    font-style: normal;
 }
 .login-copy p {
     max-width: 350px;
@@ -1682,6 +1694,7 @@ td small { color: var(--muted); }
     .page-main { width: min(100% - 48px, 1100px); }
     .status-layout { grid-template-columns: 1fr; }
     .form-section { grid-template-columns: 190px minmax(0, 1fr); }
+    .figure { padding-right: 20px; padding-left: 20px; }
     .login-shell { grid-template-columns: 1fr; }
     .login-visual { min-height: 380px; }
     .login-form-panel { min-height: 500px; }
@@ -1736,15 +1749,14 @@ td small { color: var(--muted); }
     .mobile-title-break { display: block; }
     .page-header h1 { font-size: clamp(34px, 12vw, 50px); }
 
-    .metric-grid {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 8px;
+    .figure-row { grid-template-columns: 1fr; }
+    .figure,
+    .figure:first-child {
+        padding: 20px 0 18px;
+        border-left: 0;
     }
-    .metric-card {
-        min-height: 116px;
-        padding: 16px;
-    }
-    .metric-card strong { font-size: 30px; }
+    .figure + .figure { border-top: 1px solid var(--line-faint); }
+    .figure-value { margin-top: 12px; font-size: 44px; }
 
     .section-heading,
     .machine-heading {

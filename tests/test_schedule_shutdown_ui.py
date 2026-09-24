@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QAbstractAnimation, QEvent, QPoint, QPointF, Qt
+from PySide6.QtCore import QAbstractAnimation, QEvent, QPoint, QPointF, Qt, QTime
 from PySide6.QtGui import QImage, QInputDevice, QPixmap, QWheelEvent
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import (
@@ -592,6 +592,9 @@ class ScheduleShutdownUiTest(TestCase):
     def testTimePickerPopupColumnsEnableTouchScrolling(self):
         picker = TouchTimePicker(showSeconds=True)
         self.addCleanup(picker.deleteLater)
+        # 未设时间时面板取当前时刻，小时列是重复两遍的循环列表，靠近末尾时
+        # 滚轮会回绕到前半段的同一小时；固定在中段，结果才不随 CI 的钟点变化。
+        picker.setTime(QTime(6, 30, 30))
 
         picker.show()
         QApplication.processEvents()
