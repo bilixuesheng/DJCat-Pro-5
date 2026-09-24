@@ -582,6 +582,29 @@ class AdvertisementFrame(QWidget):
         super().leaveEvent(event)
 
 
+# 横幅上压文字的暗色渐变：原设计从 38% 高度开始变暗；文字块更高时提前到标题上方 24 px。
+AD_SCRIM_START = 0.38
+AD_SCRIM_LEAD_PX = 24
+
+
+def _adOverlayStyle(start: float) -> str:
+    """暗色渐变的起点跟着标题提前：字体行高和描述行数都会改变文字块的高度，
+    固定在 38% 时，Windows 字体下的两行描述会让白色标题落在还没变暗的图上。"""
+    stops = (
+        (start, "transparent"),
+        (start + 0.10, "rgba(0,0,0,45)"),
+        (start + 0.20, "rgba(0,0,0,95)"),
+        (start + 0.36, "rgba(0,0,0,175)"),
+    )
+    gradient = ", ".join(f"stop: {min(position, 0.99):.2f} {color}" for position, color in stops)
+    return (
+        "QWidget#AdvertisementOverlay {"
+        f"background: qlineargradient(y1: 0, y2: 1, {gradient}, stop: 1 rgba(0,0,0,245));"
+        "border-radius: 12px;"
+        "}"
+    )
+
+
 class AdvertisementOverlay(QWidget):
     previousRequested = Signal()
     nextRequested = Signal()
@@ -912,14 +935,8 @@ class AppStorePage(ScrollArea):
             touchTarget.installEventFilter(self.adOverlay)
         self.adOverlay.setObjectName("AdvertisementOverlay")
         self.adOverlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.adOverlay.setStyleSheet(
-            "QWidget#AdvertisementOverlay {"
-            "background: qlineargradient(y1: 0, y2: 1, stop: 0.38 transparent, "
-            "stop: 0.48 rgba(0,0,0,45), stop: 0.58 rgba(0,0,0,95), "
-            "stop: 0.74 rgba(0,0,0,175), stop: 1 rgba(0,0,0,245));"
-            "border-radius: 12px;"
-            "}"
-        )
+        self._adScrimStart = AD_SCRIM_START
+        self.adOverlay.setStyleSheet(_adOverlayStyle(self._adScrimStart))
         overlayLayout = QVBoxLayout(self.adOverlay)
         overlayLayout.setContentsMargins(20, 0, 20, 10)
         overlayLayout.setSpacing(4)
@@ -937,19 +954,13 @@ class AppStorePage(ScrollArea):
         self._adDescriptionElide = LabelElideFilter(maximumLines=2)
         self.adTitle.installEventFilter(self._adTitleElide)
         self.adDescription.installEventFilter(self._adDescriptionElide)
-        # 按钮与描述同一行、放在右侧，而不是再叠一行：横幅最高 200 px，标题、两行描述
-        # 和按钮竖着叠，在 Windows 的字体行高下文字块会高出下半部，白字压到渐变还没
-        # 变暗的图上。标题仍独占一行，长标题不因按钮提前截断。
         overlayLayout.addWidget(self.adTitle)
+        overlayLayout.addWidget(self.adDescription)
+        overlayLayout.addSpacing(6)
         self.adButton = PrimaryPushButton("查看软件", self.adOverlay)
         self.adButton.setMaximumHeight(30)
         self.adButton.clicked.connect(self._openAdApp)
-        bottomLayout = QHBoxLayout()
-        bottomLayout.setContentsMargins(0, 0, 0, 0)
-        bottomLayout.setSpacing(16)
-        bottomLayout.addWidget(self.adDescription, 1)
-        bottomLayout.addWidget(self.adButton, 0, Qt.AlignmentFlag.AlignBottom)
-        overlayLayout.addLayout(bottomLayout)
+        overlayLayout.addWidget(self.adButton, 0, Qt.AlignmentFlag.AlignLeft)
         self.adPrevious = self.adFlipView.preButton
         self.adNext = self.adFlipView.nextButton
         self.adOverlay.setTouchButtons((self.adPrevious, self.adNext))
@@ -1792,6 +1803,26 @@ class AppStorePage(ScrollArea):
                 self.adFlipView.scrollToIndex(self.adFlipView.currentIndex())
                 self.adFlipView.scrollBar.duration = duration
 
+    def _fitAdText(self):
+        # 描述按实际行数占高度：固定预留两行时，一行描述会在按钮上方空出一整行，
+        # 还把整组文字往上顶。行数取决于布局后的宽度，所以改完高度要再排一次。
+        lines = len(self._adDescriptionElide.displayLines(self.adDescription))
+        height = self.adDescription.fontMetrics().lineSpacing() * max(1, min(2, lines))
+        if self.adDescription.height() != height:
+            self.adDescription.setFixedHeight(height)
+            self.adOverlay.layout().setGeometry(self.adOverlay.rect())
+        overlayHeight = self.adOverlay.height()
+        if overlayHeight <= 0:
+            return
+        # 只提前、不推后：文字块矮时保持原设计的起点，下半部仍整片压暗。
+        start = round(
+            max(0.0, min(AD_SCRIM_START, (self.adTitle.y() - AD_SCRIM_LEAD_PX) / overlayHeight)),
+            2,
+        )
+        if start != self._adScrimStart:
+            self._adScrimStart = start
+            self.adOverlay.setStyleSheet(_adOverlayStyle(start))
+
     def _positionAdOverlay(self):
         viewportGeometry = self.adFlipView.viewport().geometry()
         self.adOverlay.setGeometry(viewportGeometry)
@@ -1799,6 +1830,7 @@ class AppStorePage(ScrollArea):
         # keep its content layout in sync with the new viewport size immediately.
         if self.adOverlay.layout() is not None:
             self.adOverlay.layout().setGeometry(self.adOverlay.rect())
+            self._fitAdText()
         previousY = max(0, (self.adOverlay.height() - self.adPrevious.height()) // 2)
         previousPosition = self.adOverlay.mapTo(
             self.adPrevious.parentWidget(),

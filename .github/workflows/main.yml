@@ -128,13 +128,22 @@ jobs:
           version: "0.12.1"
           enable-cache: true
 
-      - name: Install and test
-        shell: pwsh
-        run: |
-          uv sync --frozen
-          uv run --frozen python -m pytest -q
-          uv run --frozen python -m compileall -q app server tests
-          node --check server/static/admin.js
+      # 每条命令单独一步：pwsh 的多行 run 块不会因中间的命令失败而中断，整步只看
+      # 最后一条的退出码，并在一起时 pytest 失败会被后面成功的 node --check 盖掉。
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run tests
+        # offscreen 平台在 Windows 上只从这里找字体，找不到时字形全是等宽方框。
+        env:
+          QT_QPA_FONTDIR: C:\Windows\Fonts
+        run: uv run --frozen python -m pytest -q
+
+      - name: Compile sources
+        run: uv run --frozen python -m compileall -q app server tests
+
+      - name: Check admin script syntax
+        run: node --check server/static/admin.js
 
   build-windows:
     needs: [ prepare, test-windows ]

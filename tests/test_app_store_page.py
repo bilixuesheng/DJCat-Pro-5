@@ -1740,6 +1740,29 @@ class AppStorePageTest(TestCase):
 
         stop.assert_called_once_with()
 
+    def testShortAdvertisementDescriptionDoesNotReserveASecondLine(self):
+        """A reserved empty second line opened a gap above the button and pushed the
+        whole copy up into the unshaded part of the image."""
+        self.page.resize(1000, 800)
+        self.page.show()
+        self.page.ads = [
+            {"id": 1, "title": "Ad", "description": "short", "image_url": "", "app_id": 1},
+            {"id": 2, "title": "Ad", "description": "long " * 200, "image_url": "", "app_id": 1},
+        ]
+        self.page._switchCatalogTab(1)
+        self.page._prepareAds()
+        self._waitForAdLayout()
+        lineSpacing = self.page.adDescription.fontMetrics().lineSpacing()
+        self.assertEqual(self.page.adDescription.height(), lineSpacing)
+        gap = self.page.adButton.y() - self.page.adDescription.geometry().bottom()
+
+        self.page._onAdChanged(1)
+        self._waitForAdLayout()
+        self.assertEqual(self.page.adDescription.height(), lineSpacing * 2)
+        self.assertEqual(
+            self.page.adButton.y() - self.page.adDescription.geometry().bottom(), gap
+        )
+
     def testAdvertisementGradientDarkensTheWholeLowerArea(self):
         self.page.resize(1000, 800)
         self.page.show()
