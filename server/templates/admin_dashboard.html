@@ -17,13 +17,23 @@
         <div><span class="section-index">01</span><h2 id="today-title">今日数据</h2></div>
         <span>每 10 秒自动更新</span>
     </div>
-    <div class="metric-grid" aria-label="今日统计">
-        <article class="metric-card metric-card-accent"><span>今日 AI 请求</span><strong data-stat="today.ai_requests">{{ stats.today.ai_requests }}</strong><small>AI REQUESTS TODAY</small></article>
-        <article class="metric-card"><span>今日应用下载</span><strong data-stat="today.market_downloads">{{ stats.today.market_downloads }}</strong><small>APP DOWNLOADS TODAY</small></article>
-        <article class="metric-card"><span>今日成功</span><strong data-stat="today.ai_success">{{ stats.today.ai_success }}</strong><small>COMPLETED TODAY</small></article>
-        <article class="metric-card"><span>今日失败</span><strong data-stat="today.ai_failed">{{ stats.today.ai_failed }}</strong><small>FAILED TODAY</small></article>
-        <article class="metric-card"><span>今日处理中</span><strong data-stat="processing">{{ stats.processing }}</strong><small>PROCESSING TODAY</small></article>
-        <article class="metric-card"><span>今日额度消耗</span><strong data-stat="consumed">{{ stats.consumed }}</strong><small>QUOTA USED TODAY</small></article>
+    <div class="stat-sheet">
+        <div class="stat-group">
+            <h3 class="stat-group-title">AI 写 Markdown</h3>
+            <dl class="stat-row">
+                <div class="stat"><dt>请求</dt><dd data-stat="today.ai_requests">{{ stats.today.ai_requests }}</dd></div>
+                <div class="stat"><dt><span class="stat-dot success" aria-hidden="true"></span>成功</dt><dd data-stat="today.ai_success">{{ stats.today.ai_success }}</dd></div>
+                <div class="stat"><dt><span class="stat-dot danger" aria-hidden="true"></span>失败</dt><dd data-stat="today.ai_failed">{{ stats.today.ai_failed }}</dd></div>
+                <div class="stat"><dt><span class="stat-dot pending" aria-hidden="true"></span>处理中</dt><dd data-stat="processing">{{ stats.processing }}</dd></div>
+                <div class="stat"><dt>额度消耗</dt><dd data-stat="consumed">{{ stats.consumed }}</dd></div>
+            </dl>
+        </div>
+        <div class="stat-group">
+            <h3 class="stat-group-title">应用市场</h3>
+            <dl class="stat-row">
+                <div class="stat"><dt>应用下载</dt><dd data-stat="today.market_downloads">{{ stats.today.market_downloads }}</dd></div>
+            </dl>
+        </div>
     </div>
 </section>
 
@@ -32,16 +42,26 @@
         <div><span class="section-index">02</span><h2 id="all-data-title">全部数据</h2></div>
         <span>从服务启用以来累计</span>
     </div>
-    <div class="metric-grid" aria-label="累计统计">
-        <article class="metric-card"><span>AI 请求</span><strong data-stat="all.ai_requests">{{ stats.all.ai_requests }}</strong><small>ALL AI REQUESTS</small></article>
-        <article class="metric-card"><span>AI 成功</span><strong data-stat="all.ai_success">{{ stats.all.ai_success }}</strong><small>ALL COMPLETED</small></article>
-        <article class="metric-card"><span>AI 失败</span><strong data-stat="all.ai_failed">{{ stats.all.ai_failed }}</strong><small>ALL FAILED</small></article>
-        <article class="metric-card"><span>应用下载</span><strong data-stat="all.market_downloads">{{ stats.all.market_downloads }}</strong><small>ALL APP DOWNLOADS</small></article>
-        <article class="metric-card"><span>额度消耗</span><strong data-stat="all_consumed">{{ stats.all_consumed }}</strong><small>ALL QUOTA USED</small></article>
-        <article class="metric-card"><span>已发布软件</span><strong data-stat="market.apps">{{ stats.market.apps }}</strong><small>PUBLISHED APPS</small></article>
-        <article class="metric-card"><span>启用广告</span><strong data-stat="market.ads">{{ stats.market.ads }}</strong><small>ACTIVE ADS</small></article>
-        <article class="metric-card"><span>预设卡片</span><strong data-stat="market.presets">{{ stats.market.presets }}</strong><small>MARKET PRESETS</small></article>
-        <article class="metric-card"><span>注册机器</span><strong data-stat="machines">{{ stats.machines }}</strong><small>REGISTERED MACHINES</small></article>
+    <div class="stat-sheet">
+        <div class="stat-group">
+            <h3 class="stat-group-title">AI 写 Markdown</h3>
+            <dl class="stat-row">
+                <div class="stat"><dt>请求</dt><dd data-stat="all.ai_requests">{{ stats.all.ai_requests }}</dd></div>
+                <div class="stat"><dt><span class="stat-dot success" aria-hidden="true"></span>成功</dt><dd data-stat="all.ai_success">{{ stats.all.ai_success }}</dd></div>
+                <div class="stat"><dt><span class="stat-dot danger" aria-hidden="true"></span>失败</dt><dd data-stat="all.ai_failed">{{ stats.all.ai_failed }}</dd></div>
+                <div class="stat"><dt>额度消耗</dt><dd data-stat="all_consumed">{{ stats.all_consumed }}</dd></div>
+                <div class="stat"><dt>注册机器</dt><dd data-stat="machines">{{ stats.machines }}</dd></div>
+            </dl>
+        </div>
+        <div class="stat-group">
+            <h3 class="stat-group-title">应用市场</h3>
+            <dl class="stat-row">
+                <div class="stat"><dt>应用下载</dt><dd data-stat="all.market_downloads">{{ stats.all.market_downloads }}</dd></div>
+                <div class="stat"><dt>已发布软件</dt><dd data-stat="market.apps">{{ stats.market.apps }}</dd></div>
+                <div class="stat"><dt>启用广告</dt><dd data-stat="market.ads">{{ stats.market.ads }}</dd></div>
+                <div class="stat"><dt>预设卡片</dt><dd data-stat="market.presets">{{ stats.market.presets }}</dd></div>
+            </dl>
+        </div>
     </div>
 </section>
 

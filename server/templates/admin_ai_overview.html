@@ -18,13 +18,17 @@
         <div><span class="section-index">01</span><h2 id="runtime-title">今日运行</h2></div>
         <span>每天 00:00 刷新</span>
     </div>
-    <div class="metric-grid" aria-label="今日运行统计">
-        <article class="metric-card metric-card-accent"><span>请求</span><strong>{{ stats.requests }}</strong><small>REQUESTS</small></article>
-        <article class="metric-card"><span>成功</span><strong>{{ stats.success }}</strong><small>COMPLETED</small></article>
-        <article class="metric-card"><span>失败</span><strong>{{ stats.failed }}</strong><small>FAILED</small></article>
-        <article class="metric-card"><span>处理中</span><strong>{{ stats.processing }}</strong><small>PROCESSING</small></article>
-        <article class="metric-card"><span>消耗额度</span><strong>{{ stats.consumed }}</strong><small>QUOTA USED</small></article>
-        <article class="metric-card"><span>注册机器</span><strong>{{ stats.machines }}</strong><small>REGISTERED</small></article>
+    <div class="stat-sheet">
+        <div class="stat-group">
+            <dl class="stat-row" aria-label="今日运行统计">
+                <div class="stat"><dt>请求</dt><dd>{{ stats.requests }}</dd></div>
+                <div class="stat"><dt><span class="stat-dot success" aria-hidden="true"></span>成功</dt><dd>{{ stats.success }}</dd></div>
+                <div class="stat"><dt><span class="stat-dot danger" aria-hidden="true"></span>失败</dt><dd>{{ stats.failed }}</dd></div>
+                <div class="stat"><dt><span class="stat-dot pending" aria-hidden="true"></span>处理中</dt><dd>{{ stats.processing }}</dd></div>
+                <div class="stat"><dt>消耗额度</dt><dd>{{ stats.consumed }}</dd></div>
+                <div class="stat"><dt>注册机器</dt><dd>{{ stats.machines }}</dd></div>
+            </dl>
+        </div>
     </div>
 </section>
 

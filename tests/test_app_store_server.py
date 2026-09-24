@@ -521,7 +521,7 @@ class AppStoreServerTest(TestCase):
         dashboard = self.client.get("/admin/", base_url="https://dash.djcatpro.top")
         self.assertEqual(dashboard.status_code, 200)
         body = dashboard.get_data(as_text=True)
-        self.assertIn("今日应用下载", body)
+        self.assertIn('data-stat="today.market_downloads"', body)
         self.assertIn("全部数据", body)
         self.assertIn("应用市场", body)
         self.assertIn("累计下载", body)
