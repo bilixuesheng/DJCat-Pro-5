@@ -859,9 +859,18 @@ class ApplicationStore:
                 json.dumps(manifest, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            # 遍历整个旧安装目录可能要好几秒，放在锁外：持锁期间界面线程上的
+            # installed() 会一起卡住。
+            if target.exists():
+                _assertNoLinks(target)
             with self._installedLock:
                 if target.exists():
-                    _assertNoLinks(target)
+                    if target.is_symlink() or getattr(
+                        target, "is_junction", lambda: False
+                    )():
+                        raise ApplicationStoreError(
+                            "现有安装目录包含链接，已停止覆盖安装"
+                        )
                     if not target.is_dir():
                         raise ApplicationStoreError("应用安装目录不是文件夹")
                     try:
@@ -981,6 +990,13 @@ class ApplicationStore:
             self._installedStamp = endStamp
             self._installedCopies = copies
             return dict(result)
+
+    def applicationRunning(self, app: dict) -> bool:
+        local = self.installed().get(int(app["id"]))
+        if local is None:
+            return False
+        with self._installedLock:
+            return self._applicationRunning(local.path)
 
     def uninstall(self, appOrInstallDir: dict | InstalledApplication | str) -> None:
         appId = None

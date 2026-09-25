@@ -2250,7 +2250,11 @@ class AppStorePage(QWidget):
         worker = None
         try:
             worker = downloadWorker(app, self.store)
-            thread = threading.Thread(target=worker.run, daemon=True)
+            thread = threading.Thread(
+                target=self._downloadInBackground,
+                args=(app, worker),
+                daemon=True,
+            )
         except Exception as error:
             self.store.downloadSlots.release()
             if worker is not None:
@@ -2401,6 +2405,19 @@ class AppStorePage(QWidget):
         if self.currentApp and int(self.currentApp["id"]) == appId:
             self._updateDetailAction()
 
+    def _downloadInBackground(self, app, worker):
+        # 程序是否在运行原本要等下载、解压完、替换目录时才查；那时才失败，
+        # 下载好的包也跟着删掉，关掉程序后还得整包重下。
+        if app.get("installed"):
+            try:
+                running = self.store.applicationRunning(app)
+            except Exception:
+                running = False
+            if running:
+                worker.finished.emit("", "软件仍在运行，请完全退出后再更新", False)
+                return
+        worker.run()
+
     def _showDownloadRetry(self, name, message):
         title = f"{name} 下载重试" if name else "下载重试"
         InfoBar.warning(title, message, duration=2000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
@@ -2421,7 +2438,8 @@ class AppStorePage(QWidget):
             self._updateVisibleCardState(appId)
             self._updateDetailAction()
             if error:
-                InfoBar.error("下载失败", error, duration=5000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
+                title = "更新失败" if app.get("installed") else "下载失败"
+                InfoBar.error(title, error, duration=5000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
             return
         self._installing.add(appId)
         self._downloadStates[appId] = "安装中"

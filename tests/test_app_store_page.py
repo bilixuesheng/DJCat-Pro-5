@@ -77,6 +77,17 @@ class _CancelableWorker(QObject):
         self.cancelEvent.set()
 
 
+class _DownloadWorker(QObject):
+    progressChanged = Signal(int, int, int, int)
+    retrying = Signal(int, int, str)
+    finished = Signal(str, str, bool)
+
+    def __init__(self):
+        super().__init__()
+        self.run = Mock()
+        self.cancel = Mock()
+
+
 class _IgnoringCancelWorker:
     def __init__(self):
         self.canceled = threading.Event()
@@ -2548,6 +2559,33 @@ class AppStorePageTest(TestCase):
 
         self.assertEqual(self.page.catalog[0]["icon_url"], "")
         self.assertEqual(self.page.ads[0]["image_url"], "")
+
+    def testUpdateWhileRunningFailsBeforeDownloading(self):
+        app = _apps(1)[0] | {
+            "name": "Demo",
+            "installed": True,
+            "update_available": True,
+        }
+        worker = _DownloadWorker()
+        self.page.store.downloadSlots = Mock()
+        self.page.store.applicationRunning = Mock(return_value=True)
+
+        with patch(
+            "app.view.pages.app_store_page.downloadWorker",
+            return_value=worker,
+        ), patch.object(InfoBar, "error") as showError:
+            self.page._onAppAction(app)
+            deadline = time.monotonic() + 1
+            while app["id"] in self.page._downloadJobs and time.monotonic() < deadline:
+                QTest.qWait(10)
+
+        worker.run.assert_not_called()
+        self.page.store.downloadSlots.release.assert_called_once_with()
+        self.assertEqual(
+            showError.call_args.args[:2],
+            ("更新失败", "软件仍在运行，请完全退出后再更新"),
+        )
+        self.assertNotIn(app["id"], self.page._downloadStates)
 
     def testDownloadThreadConstructionFailureRollsBackStartup(self):
         app = _apps(1)[0]

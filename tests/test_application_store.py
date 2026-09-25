@@ -779,6 +779,48 @@ class ApplicationStoreTest(TestCase):
 
         self.assertEqual((installed.path / "app.exe").read_bytes(), b"first")
 
+    def testApplicationRunningChecksTheInstalledCopy(self):
+        installed = self.store.installZip(self._app(), self._zip())
+        executable = installed.path / "app.exe"
+
+        self.assertFalse(self.store.applicationRunning(self._app()))
+        self.assertFalse(
+            self.store.applicationRunning(self._app() | {"id": 999})
+        )
+        with patch(
+            "app.common.application_store._runningExecutablesUnder",
+            return_value=[executable],
+        ):
+            self.assertTrue(self.store.applicationRunning(self._app()))
+
+    def testUpdateWalksExistingInstallationOutsideTheInstalledLock(self):
+        # 遍历旧安装目录可能要好几秒；持锁期间界面线程上的 installed() 会跟着卡住。
+        self.store.installZip(self._app(), self._zip())
+        heldDuringWalk = []
+
+        def assertNoLinks(_root):
+            # RLock 在同一线程可重入，只能从另一个线程探测它是否被占着。
+            probe = []
+            thread = threading.Thread(
+                target=lambda: probe.append(
+                    self.store._installedLock.acquire(timeout=0.2)
+                    and (self.store._installedLock.release() or True)
+                )
+            )
+            thread.start()
+            thread.join()
+            heldDuringWalk.append(not probe[0])
+
+        with patch(
+            "app.common.application_store._assertNoLinks",
+            side_effect=assertNoLinks,
+        ):
+            self.store.installZip(
+                self._app() | {"version": "3.0.0"}, self._zip(content=b"new")
+            )
+
+        self.assertEqual(heldDuringWalk, [False])
+
     @patch("app.common.application_store._activateProcessWindow", return_value=None)
     @patch("app.common.application_store.subprocess.Popen")
     def testProgramLaunchWaitsForInstallationOperation(self, popen, _activate):
