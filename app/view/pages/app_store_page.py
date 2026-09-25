@@ -1,6 +1,6 @@
 import threading
 import time
-from queue import Empty, PriorityQueue, Queue
+from queue import Empty, Queue
 from pathlib import Path
 
 from loguru import logger
@@ -185,13 +185,12 @@ class CatalogWorker(QObject):
 class CatalogImageWorker(QObject):
     imageLoaded = Signal(str, str)
     completed = Signal()
-    # New catalog generations must not wait behind canceled pages' queued URLs.
-    _jobs = PriorityQueue()
+    # 新一批图片开始前旧的一批总会先被取消，排在前面的旧任务出队即跳过，
+    # 所以普通先进先出队列就够了；线程是 daemon，退出程序不等图片下载。
+    _jobs = Queue()
     _poolLock = threading.Lock()
     _poolThreads = set()
     _threadSequence = 0
-    _generationSequence = 0
-    _jobSequence = 0
     _poolSize = 4
     _poolIdleTimeout = 0.5
 
@@ -204,9 +203,6 @@ class CatalogImageWorker(QObject):
             )
         )
         self._cancelEvent = threading.Event()
-        with self._poolLock:
-            type(self)._generationSequence += 1
-            self._generation = type(self)._generationSequence
 
     def cancel(self):
         self._cancelEvent.set()
@@ -236,7 +232,7 @@ class CatalogImageWorker(QObject):
         current = threading.current_thread()
         while True:
             try:
-                _priority, _jobSequence, store, url, cancelEvent, results = cls._jobs.get(
+                store, url, cancelEvent, results = cls._jobs.get(
                     timeout=cls._poolIdleTimeout
                 )
             except Empty:
@@ -266,19 +262,7 @@ class CatalogImageWorker(QObject):
                 return
             results = Queue()
             for url in self.urls:
-                with self._poolLock:
-                    type(self)._jobSequence += 1
-                    jobSequence = type(self)._jobSequence
-                self._jobs.put(
-                    (
-                        -self._generation,
-                        jobSequence,
-                        self.store,
-                        url,
-                        self._cancelEvent,
-                        results,
-                    )
-                )
+                self._jobs.put((self.store, url, self._cancelEvent, results))
             self._ensurePool()
 
             completed = 0
