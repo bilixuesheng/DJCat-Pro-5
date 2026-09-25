@@ -148,6 +148,45 @@ class SettingSectionTest(TestCase):
         self.navigate(page, ROOT_SECTION_KEY)
         self.assertEqual(grabbed(), {ROOT_SECTION_KEY, "broadcast"})
 
+    def testTransitionSlidesSnapshotsInsteadOfLivePages(self):
+        page = self.buildPage()
+        stack = page.sectionStack
+        root = stack.view(ROOT_SECTION_KEY)
+        target = stack.view("broadcast")
+
+        page.navigateToRoute("broadcast")
+        self.app.processEvents()
+
+        # 整页挂不透明度效果时每个 Animation Tick 都要重新栅格化整棵子树。
+        self.assertTrue(stack.isAnimating())
+        for view in (root, target):
+            with self.subTest(view=view.key):
+                self.assertIsNone(view.graphicsEffect())
+                self.assertTrue(view.isHidden())
+
+        QTest.qWait(SLIDE_DURATION_MS + 80)
+        self.app.processEvents()
+
+        self.assertFalse(stack.isAnimating())
+        self.assertTrue(root.isHidden())
+        self.assertFalse(target.isHidden())
+        self.assertEqual(target.pos(), QPoint(0, 0))
+        self.assertEqual(target.size(), stack.size())
+
+    def testResizeDuringTransitionSettlesOnTheTarget(self):
+        page = self.buildPage()
+        stack = page.sectionStack
+
+        page.navigateToRoute("broadcast")
+        self.app.processEvents()
+        page.resize(1000, 700)
+        self.app.processEvents()
+
+        self.assertFalse(stack.isAnimating())
+        self.assertFalse(stack.view("broadcast").isHidden())
+        self.assertTrue(stack.view(ROOT_SECTION_KEY).isHidden())
+        self.assertEqual(stack.view("broadcast").size(), stack.size())
+
     def testRepeatedNavigationDoesNotAccumulateAnimationGroups(self):
         page = self.buildPage()
         stack = page.sectionStack

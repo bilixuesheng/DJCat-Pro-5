@@ -724,12 +724,18 @@ class AppStorePageTest(TestCase):
         self.page.stack.setAnimationEnabled(False)
         self.page.show()
 
-        with patch.object(QScroller, "ungrabGesture") as ungrab:
+        # 抓了又放的循环会在 Qt 的手势管理器里留下残留，之后建任意窗口都可能崩。
+        # 页面本身不滚动，进出详情既不放掉也不重抓任何手势。
+        with patch.object(QScroller, "ungrabGesture") as ungrab, patch.object(
+            QScroller, "grabGesture"
+        ) as grab:
             for _ in range(3):
                 self.page._showDetail(_apps(1)[0])
                 self.page._backToOverview()
 
         ungrab.assert_not_called()
+        grab.assert_not_called()
+        self.assertTrue(self.page.installedScroll.isTouchGestureGrabbed)
 
     def testFirstSwitchToAllApplicationsStillSlides(self):
         # 全部应用第一次渲染会让内容变高；整页一个滚动区时，这次变高会把横移当场掐断。

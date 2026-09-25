@@ -1,4 +1,5 @@
 import sys
+import weakref
 
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
@@ -21,6 +22,43 @@ WHEEL_SCROLL_DURATION_MS = 250
 
 # DragStartDistance 的单位是米,手指够不到 1000 m,滚动因此永远不会起手。
 SUPPRESSED_DRAG_START_DISTANCE = 1000.0
+
+
+def setTouchScrollSuppressed(viewport, suppressed: bool, restoreDistance=None):
+    """Make a grabbed viewport's scroller inert, or bring it back.
+
+    Returns the drag threshold to pass back as ``restoreDistance`` when lifting
+    the suppression. Views outside ``ScrollArea`` (Projection body, nested
+    scroll areas) use this instead of ``QScroller.ungrabGesture``: releasing and
+    re-grabbing is the cycle that leaves stale targets in Qt's gesture manager.
+    """
+    scroller = QScroller.scroller(viewport)
+    scroller.stop()
+    properties = scroller.scrollerProperties()
+    metric = QScrollerProperties.ScrollMetric.DragStartDistance
+    if suppressed:
+        # 记下当前值再抬高，恢复时才不会把别处调过的阈值一并抹掉。
+        current = properties.scrollMetric(metric)
+        if current < SUPPRESSED_DRAG_START_DISTANCE:
+            restoreDistance = current
+        properties.setScrollMetric(metric, SUPPRESSED_DRAG_START_DISTANCE)
+    elif restoreDistance is not None:
+        properties.setScrollMetric(metric, restoreDistance)
+    scroller.setScrollerProperties(properties)
+    return restoreDistance
+
+
+# 自绘多个可按区域的控件（不是 QAbstractButton）登记在这里，起滑时和按钮一样被取消按压。
+_touchPressTargets = weakref.WeakSet()
+
+
+def registerTouchPressTarget(widget) -> None:
+    """Let a custom-painted widget drop its pressed cell when a touch turns into a scroll.
+
+    The widget must provide ``cancelTouchPress()``. Buttons need no registration:
+    the guard finds every pressed ``QAbstractButton`` under the scroll area.
+    """
+    _touchPressTargets.add(widget)
 
 
 class _TouchScrollGuard(QObject):
@@ -56,6 +94,12 @@ class _TouchScrollGuard(QObject):
         for button in scrollArea.findChildren(QAbstractButton):
             if button.isDown():
                 button.setDown(False)
+        for target in tuple(_touchPressTargets):
+            try:
+                if scrollArea.isAncestorOf(target):
+                    target.cancelTouchPress()
+            except RuntimeError:
+                _touchPressTargets.discard(target)
 
     def eventFilter(self, obj, event):
         eventType = event.type()
@@ -145,17 +189,11 @@ class ScrollArea(FluentScrollArea):
             return
         if not suppressed and self._dragStartDistance is None:
             return
-        scroller = QScroller.scroller(self.viewport())
-        scroller.stop()
-        properties = scroller.scrollerProperties()
-        metric = QScrollerProperties.ScrollMetric.DragStartDistance
-        if suppressed:
-            # 记下当前值再抬高，恢复时才不会把别处调过的阈值一并抹掉。
-            self._dragStartDistance = properties.scrollMetric(metric)
-            properties.setScrollMetric(metric, SUPPRESSED_DRAG_START_DISTANCE)
-        else:
-            properties.setScrollMetric(metric, self._dragStartDistance)
-        scroller.setScrollerProperties(properties)
+        self._dragStartDistance = setTouchScrollSuppressed(
+            self.viewport(),
+            suppressed,
+            self._dragStartDistance,
+        )
         self.isTouchScrollSuppressed = suppressed
 
     def grabTouchGesture(self):
