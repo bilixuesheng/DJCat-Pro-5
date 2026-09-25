@@ -1058,14 +1058,14 @@ def _isAjaxRequest():
 
 
 def _adminResponse(
-    message, category, endpoint, status=200, url_values=None, renderer=None
+    message, category, endpoint, status=200, urlValues=None, renderer=None
 ):
     if _isAjaxRequest():
         return jsonify(message=message, category=category), status
     flash(message, category)
     if renderer is not None:
         return renderer(), status
-    return redirect(url_for(endpoint, **(url_values or {})))
+    return redirect(url_for(endpoint, **(urlValues or {})))
 
 
 def _adminRoute(view):
@@ -1860,17 +1860,17 @@ def adminLogout():
 
 
 try:
-    from .app_store import marketplaceStats, register_app_store
+    from .app_store import marketplaceStats, registerAppStore
 except ImportError:
-    from app_store import marketplaceStats, register_app_store
+    from app_store import marketplaceStats, registerAppStore
 
-register_app_store(
+registerAppStore(
     app,
     connect=_connect,
-    login_required=_loginRequired,
-    csrf_token=_csrfToken,
-    check_csrf=_checkCsrf,
-    admin_response=_adminResponse,
+    loginRequired=_loginRequired,
+    csrfToken=_csrfToken,
+    checkCsrf=_checkCsrf,
+    adminResponse=_adminResponse,
 )
 
 
