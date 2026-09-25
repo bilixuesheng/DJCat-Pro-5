@@ -276,6 +276,8 @@ def _activateProcessWindow(process, stopEvent=None, onFailure=None):
             finally:
                 ctypes.windll.kernel32.CloseHandle(handle)
 
+        # Ghost Downloader 3 启动后不显示主窗口，按可见窗口枚举找不到它；它留有一个
+        # 隐藏的 GhostDownloaderIPC 窗口，收到 WM_USER+1 才显示主窗口。
         def wakeGhostIpc(allowFallback):
             try:
                 window = user32.FindWindowW("GhostDownloaderIPC", None)

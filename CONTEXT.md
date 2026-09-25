@@ -197,7 +197,7 @@ _Avoid_: sample、template、system prompt（Prompt Example 是提示词的一�
 ### 更新
 
 **Client Update**:
-DJCat Pro 5 自身的新版本，通过专用更新信息和 Windows 安装程序交付。它独立于 Application Store，不使用 Application Catalog 或 Package。
+DJCat Pro 5 自身的新版本，通过专用更新信息和更新 ZIP 交付，DJCat 退出后由独立的更新器整目录替换程序目录。它独立于 Application Store，不使用 Application Catalog 或 Package。
 _Avoid_: Application Update；不加限定地称 update
 
 **Client Version**:

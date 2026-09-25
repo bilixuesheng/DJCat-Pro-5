@@ -212,7 +212,7 @@ Busy Glow 只表示"正在进行"，不表示完成度。对话框那张卡上�
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
 | `app/common/home_card_tasks.py` | Home Card Task schema 归一化、稳定 ID、触发事件和动作常量；不负责计时或 QWidget |
-| `tools/updater/updater.c` | Client Update 的独立更新器：等待进程退出、把暂存目录覆盖回程序目录、重启 DJCat |
+| `tools/updater/updater.c` | Client Update 的独立更新器：等待进程退出、把暂存目录整目录换名为程序目录（失败时换回备份）、重启 DJCat |
 | `app/view/windows/main_window.py` | 桌面组合根、导航、长期运行任务和 Client Update UI |
 | `app/view/pages/` | 页面、临时展示窗口和页面级 worker 编排 |
 | `app/view/pages/home_card_task_page.py` | Home Card Task 的懒加载编辑页面；不拥有调度计时器 |
@@ -323,7 +323,7 @@ Menu Reveal 是另一层独立优化：保留 QFluentWidgets 原始的 250 ms �
 
 项目自有 Python 名称沿用现有风格：类使用 `PascalCase`，函数、方法和局部变量使用 `camelCase`，常量使用 `UPPER_SNAKE_CASE`，内部实现加 `_` 前缀。Qt 事件重载保留 Qt 名称，如 `showEvent`、`resizeEvent`。
 
-业务名称优先使用本文件 Language 中定义的词。特别注意：
+业务名称优先使用 `CONTEXT.md` Language 中定义的词。特别注意：
 
 - Projection 与 Broadcast Task 不能共用无修饰的 `broadcast` 业务含义；
 - Client Update 与 Application Update 必须写明种类；
