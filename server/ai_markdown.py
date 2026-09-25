@@ -342,11 +342,7 @@ def _refreshHolidayCache():
     days.update(fetched)
     cache = json.dumps({"refreshed": today, "days": days}, sort_keys=True)
     with closing(_connect()) as database:
-        database.execute(
-            "INSERT INTO settings(key, value) VALUES ('holiday_calendar', ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (cache,),
-        )
+        _putSetting(database, "holiday_calendar", cache)
         # 旧的 holiday_cache 只存放假日期、没有补班日，不能当作这份日历用。
         database.execute("DELETE FROM settings WHERE key = 'holiday_cache'")
         database.commit()
@@ -443,6 +439,14 @@ def _connect():
     return database
 
 
+def _putSetting(database, key, value):
+    database.execute(
+        "INSERT INTO settings(key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+
+
 def _setting(key, default=None):
     with closing(_connect()) as database:
         row = database.execute(
@@ -505,13 +509,8 @@ def _saveAISettings(
         )
     with closing(_connect()) as database:
         database.execute("BEGIN IMMEDIATE")
-        database.executemany(
-            """
-            INSERT INTO settings(key, value) VALUES (?, ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-            """,
-            settings,
-        )
+        for key, value in settings:
+            _putSetting(database, key, value)
         if clearApiKey:
             database.execute("DELETE FROM settings WHERE key = 'deepseek_api_key'")
         database.commit()
@@ -519,13 +518,7 @@ def _saveAISettings(
 
 def _saveSystemPrompt(systemPrompt):
     with closing(_connect()) as database:
-        database.execute(
-            """
-            INSERT INTO settings(key, value) VALUES ('system_prompt', ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-            """,
-            (systemPrompt,),
-        )
+        _putSetting(database, "system_prompt", systemPrompt)
         database.commit()
 
 
@@ -665,11 +658,7 @@ def _rollupOldRequests():
             (cutoff,),
         ).fetchone()
         if not candidate:
-            database.execute(
-                "INSERT INTO settings(key, value) VALUES ('request_log_rollup_day', ?) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (today,),
-            )
+            _putSetting(database, "request_log_rollup_day", today)
             database.commit()
             return 0
         dailyRows = database.execute(
@@ -728,11 +717,7 @@ def _rollupOldRequests():
             (cutoff,),
         )
         database.execute("DELETE FROM usage WHERE day < ?", (cutoff,))
-        database.execute(
-            "INSERT INTO settings(key, value) VALUES ('request_log_rollup_day', ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (today,),
-        )
+        _putSetting(database, "request_log_rollup_day", today)
         database.commit()
     return len(dailyRows)
 
@@ -1028,11 +1013,7 @@ def _cleanupConversionLogs():
             "DELETE FROM conversion_logs WHERE created_at < ? AND status = 'pending'",
             (cutoff,),
         ).rowcount
-        database.execute(
-            "INSERT INTO settings(key, value) VALUES ('conversion_log_cleanup_day', ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (today,),
-        )
+        _putSetting(database, "conversion_log_cleanup_day", today)
         database.commit()
     return deleted
 
@@ -1862,10 +1843,9 @@ def adminPromptExamplesReorder():
     if not orderedIds or len(orderedIds) != len(set(orderedIds)):
         return _adminResponse("排序数据无效", "error", "adminPromptExamples", 400)
     if not _reorderPromptExamples(orderedIds, originalIds):
-        if _isAjaxRequest():
-            return jsonify(message="排序已过期，请刷新页面后重试", category="error"), 409
-        flash("排序已过期，请刷新页面后重试", "error")
-        return redirect(url_for("adminPromptExamples"))
+        return _adminResponse(
+            "排序已过期，请刷新页面后重试", "error", "adminPromptExamples", 409
+        )
     return _adminResponse("排序已保存", "success", "adminPromptExamples")
 
 

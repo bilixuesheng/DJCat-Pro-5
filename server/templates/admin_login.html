@@ -40,19 +40,6 @@
             </div>
         </section>
     </main>
-    {% with flashes = get_flashed_messages(with_categories=true) %}
-        {% if flashes %}
-            <div class="toast-region" aria-live="polite" aria-atomic="true">
-                {% for category, message in flashes %}
-                    <div class="toast toast-{{ category if category in ('success', 'error') else 'info' }}" data-toast role="{{ 'alert' if category == 'error' else 'status' }}">
-                        <span class="toast-mark" aria-hidden="true"></span>
-                        <p>{{ message }}</p>
-                        <button class="toast-close" type="button" data-toast-close aria-label="关闭提示">×</button>
-                        <span class="toast-progress" aria-hidden="true"></span>
-                    </div>
-                {% endfor %}
-            </div>
-        {% endif %}
-    {% endwith %}
+    {% include "_toasts.html" %}
 </body>
 </html>

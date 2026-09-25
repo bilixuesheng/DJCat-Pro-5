@@ -207,6 +207,11 @@ def _formAction(actionType, target, arguments):
     return _safeAction(actionType, target, arguments) if arguments is not None else None
 
 
+def _openDatabase(connect):
+    _ensureSchema(connect)
+    return closing(connect())
+
+
 def _ensureSchema(connect):
     with closing(connect()) as database, _schemaInitLock:
         databaseRow = database.execute("PRAGMA database_list").fetchone()
@@ -377,8 +382,7 @@ def _ensureSchema(connect):
 def marketplaceStats(connect, day):
     """Return marketplace totals for the dashboard without changing catalog data."""
 
-    _ensureSchema(connect)
-    with closing(connect()) as database:
+    with _openDatabase(connect) as database:
         todayDownloads = database.execute(
             "SELECT COUNT(*) FROM market_download_events "
             "WHERE downloaded_at >= datetime(?, '-8 hours') "
@@ -539,21 +543,9 @@ def _advertisementForm():
     ), ""
 
 
-def _requestedOrder():
-    values = request.form.getlist("item_id")
+def _requestedIds(field):
     try:
-        ids = [int(value) for value in values]
-    except (TypeError, ValueError):
-        return None
-    if not ids or len(ids) != len(set(ids)) or any(itemId <= 0 for itemId in ids):
-        return None
-    return ids
-
-
-def _requestedExpectedOrder():
-    values = request.form.getlist("expected_item_id")
-    try:
-        ids = [int(value) for value in values]
+        ids = [int(value) for value in request.form.getlist(field)]
     except (TypeError, ValueError):
         return None
     if not ids or len(ids) != len(set(ids)) or any(itemId <= 0 for itemId in ids):
@@ -618,14 +610,13 @@ def register_app_store(
     def saveOrder(kind, label, endpoint, appId=None):
         check_csrf()
         urlValues = {"app_id": appId} if appId is not None else None
-        ids = _requestedOrder()
-        expectedIds = _requestedExpectedOrder()
+        ids = _requestedIds("item_id")
+        expectedIds = _requestedIds("expected_item_id")
         if ids is None or expectedIds is None:
             return admin_response(
                 f"{label}顺序无效", "error", endpoint, 400, url_values=urlValues
             )
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             database.execute("BEGIN IMMEDIATE")
             if not _reorderItems(database, kind, ids, expectedIds, appId):
                 database.rollback()
@@ -659,8 +650,7 @@ def register_app_store(
     @blueprint.get("/app-store/catalog")
     @apiRoute
     def catalog():
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             rows = database.execute(
                 "SELECT * FROM market_applications ORDER BY sort_order, id"
             ).fetchall()
@@ -725,8 +715,7 @@ def register_app_store(
         architecture = request.args.get("arch", "").lower()
         if architecture not in ARCHITECTURES:
             return jsonify(message="不支持的客户端架构"), 400
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             row = database.execute(
                 """
                 SELECT p.download_url
@@ -783,8 +772,7 @@ def register_app_store(
     @blueprint.get("/admin/app-store/apps/")
     @login_required
     def adminApps():
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             rows = database.execute(
                 "SELECT * FROM market_applications ORDER BY sort_order, id"
             ).fetchall()
@@ -806,8 +794,7 @@ def register_app_store(
         return _saveApp(app_id) if request.method == "POST" else _renderApp(app_id)
 
     def _renderApp(appId, submitted=None):
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             row, storedForm = _adminFormData(database, appId)
         if appId is not None and row is None:
             abort(404)
@@ -895,8 +882,7 @@ def register_app_store(
             "packages": packageForm,
         }
         if appId is not None:
-            _ensureSchema(connect)
-            with closing(connect()) as database:
+            with _openDatabase(connect) as database:
                 existing = database.execute(
                     "SELECT install_dir FROM market_applications WHERE id = ?",
                     (appId,),
@@ -909,8 +895,7 @@ def register_app_store(
                 errors.append("已发布软件不能直接修改安装目录，请新建软件或执行迁移")
         if errors:
             return formErrors(errors, lambda: _renderApp(appId, submitted))
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             try:
                 database.execute("BEGIN IMMEDIATE")
                 existingApp = (
@@ -1064,8 +1049,7 @@ def register_app_store(
     @login_required
     def adminDeleteApp(app_id):
         check_csrf()
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             deleted = database.execute(
                 "DELETE FROM market_applications WHERE id = ?", (app_id,)
             )
@@ -1097,8 +1081,7 @@ def register_app_store(
                 return _renderPresetForm(appId, int(request.args["edit"]))
             except (TypeError, ValueError):
                 abort(404)
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             apps = database.execute(
                 """
                 SELECT a.id, a.name, a.version, a.sort_order,
@@ -1142,8 +1125,7 @@ def register_app_store(
         )
 
     def _renderPresetForm(appId, presetId=None, submitted=None):
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             selectedApp = database.execute(
                 "SELECT id, name, version FROM market_applications WHERE id = ?",
                 (appId,),
@@ -1208,8 +1190,7 @@ def register_app_store(
     def _savePreset(appId, presetId):
         check_csrf()
         if request.form.get("delete"):
-            _ensureSchema(connect)
-            with closing(connect()) as database:
+            with _openDatabase(connect) as database:
                 database.execute("BEGIN IMMEDIATE")
                 row = database.execute(
                     "SELECT app_id FROM market_presets WHERE id = ?",
@@ -1274,8 +1255,7 @@ def register_app_store(
                 errors,
                 lambda: _renderPresetForm(appId, presetId, submitted),
             )
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             database.execute("BEGIN IMMEDIATE")
             if not database.execute("SELECT 1 FROM market_applications WHERE id = ?", (appId,)).fetchone():
                 return admin_response(
@@ -1393,8 +1373,7 @@ def register_app_store(
                 return _renderAd(int(request.args["edit"]))
             except (TypeError, ValueError):
                 abort(404)
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             ads = database.execute(
                 """
                 SELECT ad.*, a.name AS app_name FROM market_advertisements ad
@@ -1410,8 +1389,7 @@ def register_app_store(
         )
 
     def _renderAd(adId=None, submitted=None):
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             ad = (
                 database.execute(
                     "SELECT * FROM market_advertisements WHERE id = ?", (adId,)
@@ -1556,8 +1534,7 @@ def register_app_store(
     @blueprint.get("/admin/app-store/recommendations/")
     @login_required
     def adminRecommendations():
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             rows = database.execute(
                 "SELECT * FROM market_applications WHERE recommended = 1 "
                 "ORDER BY recommended_order, sort_order, id"
@@ -1622,8 +1599,7 @@ def register_app_store(
     @login_required
     def adminDeleteRecommendation(app_id):
         check_csrf()
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             updated = database.execute(
                 "UPDATE market_applications SET recommended = 0, "
                 "recommended_order = NULL WHERE id = ? AND recommended = 1",
