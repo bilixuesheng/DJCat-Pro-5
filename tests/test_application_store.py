@@ -461,7 +461,7 @@ class ApplicationStoreTest(TestCase):
             "appStoreImageCache",
             self.store.cache,
         ):
-            applicationStoreModule.beginAppStorePackageOperation()
+            self.store.downloadSlots.acquire()
             try:
                 with self.assertRaisesRegex(
                     ApplicationStoreError,
@@ -470,7 +470,7 @@ class ApplicationStoreTest(TestCase):
                     applicationStoreModule.clearAppStoreCache()
                 self.assertTrue(package.exists())
             finally:
-                applicationStoreModule.endAppStorePackageOperation()
+                self.store.downloadSlots.release()
 
             applicationStoreModule.clearAppStoreCache()
 

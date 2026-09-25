@@ -622,45 +622,41 @@ class ImageCache:
 
 
 appStoreImageCache = ImageCache()
-_packageOperationLock = threading.Lock()
-_activePackageOperations = 0
-
-
-def beginAppStorePackageOperation() -> None:
-    global _activePackageOperations
-    with _packageOperationLock:
-        _activePackageOperations += 1
-
-
-def endAppStorePackageOperation() -> None:
-    global _activePackageOperations
-    with _packageOperationLock:
-        _activePackageOperations = max(0, _activePackageOperations - 1)
-
-
-def clearAppStoreCache() -> None:
-    with _packageOperationLock:
-        if _activePackageOperations:
-            raise ApplicationStoreError(
-                "有应用正在下载或安装，请完成后再清理缓存"
-            )
-        appStoreImageCache.clear()
 
 
 class DownloadSlots:
-    """Small shared limiter used by every marketplace download action."""
+    """Limits concurrent Package downloads.
+
+    A slot is held from the start of a download until its Package is installed
+    or discarded, so an occupied slot also means the cache must not be cleared.
+    """
 
     def __init__(self, maximum: int = 3):
         self.maximum = maximum
         self.active = 0
+        self._lock = threading.Lock()
 
     def acquire(self) -> None:
-        if self.active >= self.maximum:
-            raise DownloadLimitError("同时最多下载 3 个应用")
-        self.active += 1
+        with self._lock:
+            if self.active >= self.maximum:
+                raise DownloadLimitError("同时最多下载 3 个应用")
+            self.active += 1
 
     def release(self) -> None:
-        self.active = max(0, self.active - 1)
+        with self._lock:
+            self.active = max(0, self.active - 1)
+
+
+packageSlots = DownloadSlots()
+
+
+def clearAppStoreCache() -> None:
+    with packageSlots._lock:
+        if packageSlots.active:
+            raise ApplicationStoreError(
+                "有应用正在下载或安装，请完成后再清理缓存"
+            )
+        appStoreImageCache.clear()
 
 
 class ApplicationStore:
@@ -675,7 +671,7 @@ class ApplicationStore:
         self.programDir.mkdir(parents=True, exist_ok=True)
         self.cache = cache or appStoreImageCache
         self.architecture = clientArchitecture()
-        self.downloadSlots = DownloadSlots()
+        self.downloadSlots = packageSlots
         self._launchedProcesses = {}
         self._activationStop = threading.Event()
         self._activationThreads = {}
@@ -1200,10 +1196,8 @@ __all__ = [
     "InstalledApplication",
     "UnsafeArchiveError",
     "clientArchitecture",
-    "beginAppStorePackageOperation",
     "clearAppStoreCache",
     "downloadWorker",
-    "endAppStorePackageOperation",
     "isUpdateAvailable",
     "appStoreImageCache",
     "validateZip",

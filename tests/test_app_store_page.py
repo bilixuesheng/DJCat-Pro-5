@@ -2185,15 +2185,12 @@ class AppStorePageTest(TestCase):
             with patch(
                 "app.view.pages.app_store_page.threading.Thread",
                 side_effect=RuntimeError("thread construction failed"),
-            ), patch(
-                "app.view.pages.app_store_page.endAppStorePackageOperation"
-            ) as endOperation, patch.object(InfoBar, "error") as showError:
+            ), patch.object(InfoBar, "error") as showError:
                 self.page._onDownloadFinished(app, str(package), "", False)
 
             self.assertFalse(package.exists())
 
         self.page.store.downloadSlots.release.assert_called_once_with()
-        endOperation.assert_called_once_with()
         showError.assert_called_once()
         self.assertNotIn(appId, self.page._downloadJobs)
         self.assertNotIn(appId, self.page._installing)
@@ -2227,31 +2224,25 @@ class AppStorePageTest(TestCase):
         self.page.store.downloadSlots = Mock()
         self.page._downloadJobs[app["id"]] = (thread, worker)
         slotReleased = threading.Event()
-        operationEnded = threading.Event()
         self.page.store.downloadSlots.release.side_effect = slotReleased.set
 
         try:
             with patch(
                 "app.view.pages.app_store_page.SHUTDOWN_WAIT_SECONDS",
                 0.01,
-            ), patch(
-                "app.view.pages.app_store_page.endAppStorePackageOperation",
-                side_effect=operationEnded.set,
-            ) as endOperation:
+            ):
                 self.page.shutdown()
                 self.page.shutdown()
 
                 self.assertTrue(worker.canceled.is_set())
                 self.assertTrue(thread.is_alive())
                 self.assertFalse(slotReleased.is_set())
-                self.assertFalse(operationEnded.is_set())
 
                 worker.release.set()
-                self.assertTrue(operationEnded.wait(1))
+                self.assertTrue(slotReleased.wait(1))
                 QTest.qWait(20)
 
             self.page.store.downloadSlots.release.assert_called_once_with()
-            endOperation.assert_called_once_with()
         finally:
             worker.release.set()
             thread.join(1)
@@ -2262,7 +2253,6 @@ class AppStorePageTest(TestCase):
         installStarted = threading.Event()
         allowInstallToFinish = threading.Event()
         slotReleased = threading.Event()
-        operationEnded = threading.Event()
         installThread = None
         self.page.store.downloadSlots = Mock()
         self.page.store.downloadSlots.release.side_effect = slotReleased.set
@@ -2281,10 +2271,7 @@ class AppStorePageTest(TestCase):
                 with patch(
                     "app.view.pages.app_store_page.SHUTDOWN_WAIT_SECONDS",
                     0.01,
-                ), patch(
-                    "app.view.pages.app_store_page.endAppStorePackageOperation",
-                    side_effect=operationEnded.set,
-                ) as endOperation:
+                ):
                     self.page._onDownloadFinished(
                         app,
                         str(package),
@@ -2302,14 +2289,12 @@ class AppStorePageTest(TestCase):
 
                     self.assertTrue(installThread.is_alive())
                     self.assertFalse(slotReleased.is_set())
-                    self.assertFalse(operationEnded.is_set())
 
                     allowInstallToFinish.set()
-                    self.assertTrue(operationEnded.wait(1))
+                    self.assertTrue(slotReleased.wait(1))
                     self.page._onInstallFinished(appId, None, "")
 
                 self.page.store.downloadSlots.release.assert_called_once_with()
-                endOperation.assert_called_once_with()
             finally:
                 allowInstallToFinish.set()
                 if installThread is not None:

@@ -58,9 +58,7 @@ from qfluentwidgets import FluentIcon as FIF
 from app.common.application_store import (
     ApplicationStore,
     ApplicationStoreError,
-    beginAppStorePackageOperation,
     downloadWorker,
-    endAppStorePackageOperation,
 )
 from app.common.home_cards import (
     DIRECT_APPLICATION_PRESET_ID,
@@ -75,19 +73,10 @@ SHUTDOWN_WAIT_SECONDS = 0.5
 ALL_APPS_PAGE_SIZE = 6
 QWIDGETSIZE_MAX = (1 << 24) - 1
 _LIVE_CATALOG_URI_SCHEMES = frozenset({"classisland"})
-_packageOperationReleaseLock = threading.Lock()
-
-
-def _releasePackageOperation(downloadSlots):
-    with _packageOperationReleaseLock:
-        downloadSlots.release()
-        endAppStorePackageOperation()
-
-
-def _deferPackageOperationRelease(thread, downloadSlots):
+def _releaseSlotAfterExit(thread, downloadSlots):
     def releaseAfterExit():
         thread.join()
-        _releasePackageOperation(downloadSlots)
+        downloadSlots.release()
 
     threading.Thread(
         target=releaseAfterExit,
@@ -1251,12 +1240,12 @@ class AppStorePage(ScrollArea):
             threadAlive = thread.is_alive()
             if self._downloadJobs.pop(appId, None) is not None:
                 if threadAlive:
-                    _deferPackageOperationRelease(
+                    _releaseSlotAfterExit(
                         thread,
                         self.store.downloadSlots,
                     )
                 else:
-                    _releasePackageOperation(self.store.downloadSlots)
+                    self.store.downloadSlots.release()
             self._downloadStates.pop(appId, None)
             self._downloadProgress.pop(appId, None)
             if threadAlive:
@@ -1272,12 +1261,12 @@ class AppStorePage(ScrollArea):
         for appId in tuple(self._installing):
             thread = installThreads.get(appId)
             if thread is not None and thread.is_alive():
-                _deferPackageOperationRelease(
+                _releaseSlotAfterExit(
                     thread,
                     self.store.downloadSlots,
                 )
             else:
-                _releasePackageOperation(self.store.downloadSlots)
+                self.store.downloadSlots.release()
         self._installing.clear()
         with self._fileOperationLock:
             self._installThreads.clear()
@@ -2016,7 +2005,6 @@ class AppStorePage(ScrollArea):
                 worker.deleteLater()
             InfoBar.error("无法开始下载", str(error), duration=4000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
             return
-        beginAppStorePackageOperation()
         self._downloadJobs[appId] = (thread, worker)
         self._downloadStates[appId] = "下载中 0%"
         self._downloadProgress[appId] = 0
@@ -2040,7 +2028,7 @@ class AppStorePage(ScrollArea):
             self._downloadJobs.pop(appId, None)
             self._downloadStates.pop(appId, None)
             self._downloadProgress.pop(appId, None)
-            _releasePackageOperation(self.store.downloadSlots)
+            self.store.downloadSlots.release()
             worker.deleteLater()
             InfoBar.error("无法开始下载", str(error), duration=4000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
             return
@@ -2141,7 +2129,7 @@ class AppStorePage(ScrollArea):
         if not self._pendingProgress:
             self._progressTimer.stop()
         if canceled or error or not path:
-            _releasePackageOperation(self.store.downloadSlots)
+            self.store.downloadSlots.release()
             self._downloadStates.pop(appId, None)
             self._downloadProgress.pop(appId, None)
             self._updateVisibleCardState(appId)
@@ -2171,7 +2159,7 @@ class AppStorePage(ScrollArea):
                     self._fileOperationThreads.discard(thread)
                     self._installThreads.pop(appId, None)
             self._installing.discard(appId)
-            _releasePackageOperation(self.store.downloadSlots)
+            self.store.downloadSlots.release()
             self._downloadStates.pop(appId, None)
             self._downloadProgress.pop(appId, None)
             try:
@@ -2217,7 +2205,7 @@ class AppStorePage(ScrollArea):
         self._installing.discard(appId)
         with self._fileOperationLock:
             self._installThreads.pop(appId, None)
-        _releasePackageOperation(self.store.downloadSlots)
+        self.store.downloadSlots.release()
         self._downloadStates.pop(appId, None)
         self._downloadProgress.pop(appId, None)
         if error:
