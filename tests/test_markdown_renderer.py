@@ -10,7 +10,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QBuffer, QIODevice, QPoint, Qt
 from PySide6.QtGui import QImage, QInputDevice, QTextBlockFormat
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QScroller, QTextEdit, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QScroller,
+    QScrollerProperties,
+    QTextEdit,
+    QWidget,
+)
 
 from app.view.components.markdown_view import MarkdownView
 from app.view.pages.broadcast_page import BroadcastWindow
@@ -592,33 +599,42 @@ class MarkdownRendererTest(TestCase):
     def testFullscreenBroadcastRestoresBodyTouchScrolling(self):
         window = BroadcastWindow()
         self.addCleanup(window.close)
-        window.is_windowed = True
-        window._updateContentInteraction()
-
-        window.is_windowed = False
-        with patch.object(QScroller, "grabGesture") as grabGesture:
-            window._updateContentInteraction()
-
-        self.assertEqual(
-            [call.args[0] for call in grabGesture.call_args_list],
-            [
-                window.contentEdit.viewport(),
-                window.markdownView.viewport(),
-            ],
-        )
-        self.assertTrue(
-            all(
-                call.args[1] == QScroller.ScrollerGestureType.TouchGesture
-                for call in grabGesture.call_args_list
-            )
-        )
-        self.assertFalse(window._contentDragFilterInstalled)
-
-        for viewport in (
+        viewports = (
             window.contentEdit.viewport(),
             window.markdownView.viewport(),
-        ):
-            self.assertTrue(QScroller.hasScroller(viewport))
+        )
+
+        def dragStartDistances():
+            return [
+                QScroller.scroller(viewport)
+                .scrollerProperties()
+                .scrollMetric(QScrollerProperties.ScrollMetric.DragStartDistance)
+                for viewport in viewports
+            ]
+
+        original = dragStartDistances()
+        # 抓了又放的循环会在 Qt 的手势管理器里留下残留，之后建任意窗口都可能崩；
+        # 切换窗口化只能调拖动阈值。
+        with patch.object(QScroller, "grabGesture") as grabGesture, patch.object(
+            QScroller, "ungrabGesture"
+        ) as ungrabGesture:
+            for _ in range(3):
+                window.is_windowed = True
+                window._updateContentInteraction()
+                self.assertTrue(window._contentDragFilterInstalled)
+                self.assertTrue(
+                    all(distance > 1.0 for distance in dragStartDistances())
+                )
+
+                window.is_windowed = False
+                window._updateContentInteraction()
+                self.assertFalse(window._contentDragFilterInstalled)
+                self.assertEqual(dragStartDistances(), original)
+
+        grabGesture.assert_not_called()
+        ungrabGesture.assert_not_called()
+        for viewport in viewports:
+            self.assertGreater(QScroller.grabbedGesture(viewport).value, 0)
 
     def testWindowedMarkdownBodyDragsWindowButScrollbarDoesNot(self):
         window = BroadcastWindow()

@@ -1939,7 +1939,9 @@ class AppStorePage(ScrollArea):
         self._resizeDetailStack()
         self.stack.setCurrentWidget(self.detail, isBack=False)
         self.verticalScrollBar().setValue(0)
-        QScroller.ungrabGesture(self.viewport())
+        # 详情页由两侧各自的 ScrollArea 滚动；外层只让出触控，不放掉手势——
+        # 抓了又放会在 Qt 的手势管理器里留下残留，之后创建窗口时崩溃。
+        self.setTouchScrollSuppressed(True)
 
     def _backToOverview(self):
         self._beginViewportUpdate(self._catalogScrollPosition)
@@ -1952,10 +1954,7 @@ class AppStorePage(ScrollArea):
         self.stack.setMinimumHeight(0)
         self.stack.setMaximumHeight(QWIDGETSIZE_MAX)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        QScroller.grabGesture(
-            self.viewport(),
-            QScroller.ScrollerGestureType.TouchGesture,
-        )
+        self.setTouchScrollSuppressed(False)
         target = 0 if self.pivot.currentRouteKey() == "installed" else 1
         self.catalogStack.setCurrentIndex(target)
         if target == 0:

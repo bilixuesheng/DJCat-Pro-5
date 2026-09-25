@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import weakref
-
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
@@ -11,29 +9,11 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets.components.dialog_box.mask_dialog_base import MaskDialogBase
 
+from app.platform.shadow_effect import SilhouetteShadowEffect
+
 _SHADOW_FADE_MS = 150
-_activeMaskDialogs = weakref.WeakSet()
-
-
-def pauseDialogShadows():
-    paused = []
-    for dialog in list(_activeMaskDialogs):
-        try:
-            shadow = dialog.widget.graphicsEffect()
-        except RuntimeError:
-            continue
-        if isinstance(shadow, QGraphicsDropShadowEffect) and shadow.isEnabled():
-            shadow.setEnabled(False)
-            paused.append(shadow)
-    return paused
-
-
-def resumeDialogShadows(paused):
-    for shadow in paused:
-        try:
-            shadow.setEnabled(True)
-        except RuntimeError:
-            pass
+# 与 QFluentWidgets 对话框 #centerWidget 的 border-radius 一致。
+DIALOG_CARD_RADIUS = 10
 
 
 def _findCardShadow(widget):
@@ -86,9 +66,11 @@ def _setDialogShadow(
     offset=(0, 10),
     color=QColor(0, 0, 0, 100),
 ):
+    # 原版阴影每次重绘都把整张卡片离屏重画再模糊一遍，叠在上层弹窗下面时，上层的任何
+    # 重绘都会让下层卡片再模糊一次。轮廓阴影只在卡片尺寸变化时模糊一次。
     shadow = dialog.widget.graphicsEffect()
-    if not isinstance(shadow, QGraphicsDropShadowEffect):
-        shadow = QGraphicsDropShadowEffect(dialog.widget)
+    if not isinstance(shadow, SilhouetteShadowEffect):
+        shadow = SilhouetteShadowEffect(DIALOG_CARD_RADIUS, dialog.widget)
         dialog.widget.setGraphicsEffect(shadow)
 
     shadow.setBlurRadius(blurRadius)
@@ -97,7 +79,6 @@ def _setDialogShadow(
 
 
 def _showEvent(self, e):
-    _activeMaskDialogs.add(self)
     shadow = self.widget.graphicsEffect()
     hasShadow = isinstance(shadow, QGraphicsDropShadowEffect)
     shadowColor = shadow.color() if hasShadow else None
@@ -133,7 +114,6 @@ def _showEvent(self, e):
 
 
 def _done(self, code):
-    _activeMaskDialogs.discard(self)
     shadow = self.widget.graphicsEffect()
     if isinstance(shadow, QGraphicsDropShadowEffect):
         shadow.setEnabled(False)

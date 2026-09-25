@@ -7,10 +7,11 @@ from unittest import TestCase, mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
-from PySide6.QtGui import QInputDevice
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, QTimer
+from PySide6.QtGui import QInputDevice, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QScroller, QWidget
+from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import (
     RoundMenu,
     ToggleToolButton,
@@ -166,7 +167,7 @@ class HomeCustomCardTest(TestCase):
                     if isinstance(dialog, IconPickerDialog):
                         self.assertEqual(
                             dialog.gridWidget.height(),
-                            dialog.grid.heightForWidth(
+                            dialog.gridWidget.heightForWidth(
                                 dialog.scrollArea.viewport().width() - 8
                             ),
                         )
@@ -259,19 +260,107 @@ class HomeCustomCardTest(TestCase):
     def testIconPickerClearsLayoutAndShowsSelectionImmediately(self):
         parent = QWidget()
         parent.resize(900, 700)
+        parent.show()
         dialog = IconPickerDialog(parent)
         try:
+            dialog.show()
+            self.app.processEvents()
             dialog._selectFluent("ADD")
+            grid = dialog.gridWidget
             self.assertEqual(dialog.previewLabel.text(), "ADD")
-            selected = [button for button in dialog._buttons if button.isChecked()]
-            self.assertEqual(len(selected), 1)
-            self.assertIsInstance(selected[0], ToggleToolButton)
-            self.assertIn(
-                themeColor().name().lower(),
-                selected[0].styleSheet().lower(),
+            self.assertEqual(grid.checkedIndex(), grid.indexOfKey("ADD"))
+
+            # 选中格与 ToggleToolButton 选中态一样铺主题色。
+            rect = grid.cellRect(grid.checkedIndex())
+            image = grid.grab(rect).toImage()
+            self.assertEqual(
+                image.pixelColor(3, image.height() // 2).rgb(),
+                themeColor().rgb(),
             )
+
             dialog._clearGrid()
-            self.assertEqual(dialog.grid.count(), 0)
+            self.assertEqual(grid.count(), 0)
+        finally:
+            dialog.deleteLater()
+            parent.deleteLater()
+
+    def testIconPickerPaintsTheLibraryWithoutAWidgetPerIcon(self):
+        # 175 个 ToggleToolButton 各自要样式表抛光、提示过滤器和布局项，打开弹窗要卡半秒。
+        parent = QWidget()
+        parent.resize(900, 700)
+        dialog = IconPickerDialog(parent)
+        try:
+            grid = dialog.gridWidget
+            self.assertEqual(grid.count(), len(FIF.__members__))
+            self.assertEqual(grid.findChildren(QWidget), [])
+
+            dialog.searchEdit.setText("arrow")
+            visible = [grid.items()[index].key for index in grid.visibleIndexes()]
+            self.assertTrue(visible)
+            self.assertTrue(all("arrow" in name.lower() for name in visible))
+            self.assertEqual(
+                grid.height(),
+                grid.heightForWidth(dialog.scrollArea.viewport().width() - 8),
+            )
+
+            dialog.searchEdit.clear()
+            self.assertEqual(len(grid.visibleIndexes()), grid.count())
+        finally:
+            dialog.deleteLater()
+            parent.deleteLater()
+
+    def testIconPickerCellsClickAndShowFluentTooltips(self):
+        parent = QWidget()
+        parent.resize(900, 700)
+        parent.show()
+        dialog = IconPickerDialog(parent)
+        try:
+            dialog.show()
+            self.app.processEvents()
+            grid = dialog.gridWidget
+            index = grid.indexOfKey("HOME")
+            center = grid.cellRect(index).center()
+
+            # 测试类里另有顶层 HomePage 盖在同一位置，真实光标移动会被它截走，直接投递悬停。
+            QApplication.sendEvent(
+                grid,
+                QMouseEvent(
+                    QEvent.Type.MouseMove,
+                    QPointF(center),
+                    QPointF(grid.mapToGlobal(center)),
+                    Qt.MouseButton.NoButton,
+                    Qt.MouseButton.NoButton,
+                    Qt.KeyboardModifier.NoModifier,
+                ),
+            )
+            QTest.qWait(450)
+            self.assertEqual(grid.toolTipText(), "HOME")
+
+            QTest.mouseClick(grid, Qt.MouseButton.LeftButton, pos=center)
+            self.assertEqual(dialog.selected()[0], {"type": "fluent", "name": "HOME"})
+            self.assertEqual(grid.checkedIndex(), index)
+
+            # 在格子上按下、拖到别处松开不算点击，与按钮一致。
+            other = grid.cellRect(grid.indexOfKey("ADD")).center()
+            QTest.mousePress(grid, Qt.MouseButton.LeftButton, pos=other)
+            QTest.mouseMove(grid, center)
+            QTest.mouseRelease(grid, Qt.MouseButton.LeftButton, pos=center)
+            self.assertEqual(dialog.selected()[0]["name"], "HOME")
+        finally:
+            dialog.deleteLater()
+            parent.deleteLater()
+
+    def testIconPickerCellPressIsCancelledWhenTouchStartsScrolling(self):
+        from app.view.components.scroll_area import _TouchScrollGuard
+
+        parent = QWidget()
+        parent.resize(900, 700)
+        dialog = IconPickerDialog(parent)
+        try:
+            grid = dialog.gridWidget
+            grid._pressed = grid.indexOfKey("ADD")
+            _TouchScrollGuard._cancelPressedButtons(dialog.scrollArea)
+            self.assertIsNone(grid._pressed)
         finally:
             dialog.deleteLater()
             parent.deleteLater()
@@ -340,7 +429,6 @@ class HomeCustomCardTest(TestCase):
                 row.dragHandle,
                 row.editButton,
                 row.deleteButton,
-                icon_dialog._buttons[0],
             ):
                 with self.subTest(widget=widget.toolTip()):
                     self.assertTrue(widget.findChildren(ToolTipFilter))

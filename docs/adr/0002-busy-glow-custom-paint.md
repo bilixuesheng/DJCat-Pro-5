@@ -18,7 +18,7 @@ Busy Glow 原本由一个 60 ms 的 `QTimer` 驱动，每一帧用 `setStyleShee
 - **已长出的部分是一段连续圆弧，不是两条对称的臂。** 进场时光带从底边中点向两侧爬升，直觉上是两条臂，但两条臂会在起笔点和会合点重叠，alpha 叠加成两个亮疙瘩。表述成以底边中点为中心的单段圆弧后，底边接缝不存在；长满时换成闭合路径，顶边接缝也不存在。不要为了"两条臂"再去调笔帽。
 - **锥形渐变按周长弧长参数化，不按原始角度。** `QConicalGradient` 按角度分配颜色，在扁矩形上会让颜色沿短边飞掠、沿长边爬行。色标位置按各边弧长占比重排后颜色才匀速绕圈。色标的角度位置和弧长位置随几何变化，在 `resizeEvent` 缓存；渐变对象本身每帧重建，因为它的颜色取决于相位。
 - **深浅主题是两套配方，不是同一套调亮度。** 光感来自"比背景亮"，浅色主题下没有比接近白更亮的余地，因此浅色配方改为提饱和、降明度，靠"比背景浓"显形。这是观感上的妥协，不是参数微调。
-- **`app/view/components/busy_glow.py` 依赖 `app/platform/dialog_animation.py`。** AI Markdown 对话框的卡片上挂着 `blurRadius=60` 的 `QGraphicsDropShadowEffect`，而带 graphics effect 的控件只要有子控件重绘就会整棵子树重新栅格化并重跑模糊。Busy Glow 把重绘频率从 16.7 Hz 提到 60 Hz，等于把这项开销放大 3.6 倍，因此光晕启动时复用 `dialog_animation` 的阴影 alpha 渐变把卡片阴影渐隐、结束时渐回。view 组件依赖 platform 适配层是这条约束的直接结果。内联整理所在的 `BroadcastEditPage` 是普通 QWidget，没有这个问题。
+- **`app/view/components/busy_glow.py` 依赖 `app/platform/dialog_animation.py`。** AI Markdown 对话框的卡片上挂着 `blurRadius=60` 的 `QGraphicsDropShadowEffect`，而带 graphics effect 的控件只要有子控件重绘就会整棵子树重新栅格化并重跑模糊。Busy Glow 把重绘频率从 16.7 Hz 提到 60 Hz，等于把这项开销放大 3.6 倍，因此光晕启动时复用 `dialog_animation` 的阴影 alpha 渐变把卡片阴影渐隐、结束时渐回。view 组件依赖 platform 适配层是这条约束的直接结果。内联整理所在的 `BroadcastEditPage` 是普通 QWidget，没有这个问题。（后记：弹窗卡片阴影后来换成了 `app/platform/shadow_effect.py` 的 Silhouette Shadow，按尺寸只模糊一次、子控件直接绘制，上述放大已不存在；渐隐保留为既有观感，依赖关系不变。）
 - Busy Glow 不表达完成度。转换耗时无法预估，任何百分比都是伪造的。
 
 ## 平滑光晕
