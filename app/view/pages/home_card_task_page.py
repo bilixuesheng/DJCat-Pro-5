@@ -28,7 +28,7 @@ from app.common.home_card_tasks import (
     SILENT_STARTUP_EVENT,
     normalize_home_card_tasks,
 )
-from app.common.home_cards import new_id, validate_action
+from app.common.home_cards import new_id
 from app.config.cfg import cfg
 from app.view.components.home_card_dialog import ActionSequenceEditor
 from app.view.components.task_page import (
@@ -404,39 +404,20 @@ class AddHomeCardTaskDialog(ScheduledTaskDialog):
         self.cancelButton.setText("取消")
 
     def validate(self):
-        data = home_card_task_data(self.formWidgets)
-        if data["mode"] == EXISTING_HOME_CARD_TASK:
-            if data["targetKey"] not in self.formWidgets.get("homeCards", {}):
-                InfoBar.error(
-                    "无法保存",
-                    "请选择一个当前存在的主页卡片",
-                    duration=3000,
-                    position=InfoBarPosition.TOP,
-                    parent=self,
-                )
-                return False
-        else:
-            if not data["actions"]:
-                InfoBar.error(
-                    "无法保存",
-                    "至少添加一个动作",
-                    duration=3000,
-                    position=InfoBarPosition.TOP,
-                    parent=self,
-                )
-                return False
-            for action in data["actions"]:
-                error = validate_action(action)
-                if error:
-                    InfoBar.error(
-                        "动作无效",
-                        error,
-                        duration=3000,
-                        position=InfoBarPosition.TOP,
-                        parent=self,
-                    )
-                    return False
-        return True
+        widgets = self.formWidgets
+        data = home_card_task_data(widgets)
+        if data["mode"] != EXISTING_HOME_CARD_TASK:
+            return widgets["actionEditor"].validate(self)
+        if data["targetKey"] in widgets.get("homeCards", {}):
+            return True
+        InfoBar.error(
+            "无法保存",
+            "请选择一个当前存在的主页卡片",
+            duration=3000,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+        return False
 
     def getData(self):
         return {"id": new_id(), **super().getData()}

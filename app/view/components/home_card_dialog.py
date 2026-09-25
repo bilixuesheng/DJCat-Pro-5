@@ -23,6 +23,8 @@ from qfluentwidgets import (
     CheckBox,
     ComboBox,
     IconWidget,
+    InfoBar,
+    InfoBarPosition,
     LineEdit,
     MessageBoxBase,
     PlainTextEdit,
@@ -423,6 +425,16 @@ class ActionListWidget(QWidget):
         super().hideEvent(event)
 
 
+def _showError(parent, title, message):
+    InfoBar.error(
+        title,
+        message,
+        duration=3000,
+        position=InfoBarPosition.TOP,
+        parent=parent,
+    )
+
+
 class ActionSequenceEditor(QWidget):
     changed = Signal()
 
@@ -444,6 +456,18 @@ class ActionSequenceEditor(QWidget):
 
     def actions(self) -> list[dict]:
         return self.actionList.actions()
+
+    def validate(self, noticeParent) -> bool:
+        actions = self.actions()
+        if not actions:
+            _showError(noticeParent, "无法保存", "至少添加一个动作")
+            return False
+        for action in actions:
+            error = validate_action(action)
+            if error:
+                _showError(noticeParent, "动作无效", error)
+                return False
+        return True
 
     def addAction(self):
         dialog = ActionEditorDialog(parent=_dialog_host(self))
@@ -627,9 +651,7 @@ class ActionEditorDialog(_ResponsiveMessageBox):
     def validate(self) -> bool:
         error = validate_action(self.getData())
         if error:
-            from qfluentwidgets import InfoBar, InfoBarPosition
-
-            InfoBar.error("动作无效", error, duration=3000, position=InfoBarPosition.TOP, parent=self)
+            _showError(self, "动作无效", error)
             return False
         return True
 
@@ -774,9 +796,7 @@ class IconPickerDialog(_ResponsiveMessageBox):
         try:
             images = extract_icon_images(path)
         except HomeCardError as error:
-            from qfluentwidgets import InfoBar, InfoBarPosition
-
-            InfoBar.error("图标读取失败", str(error), duration=3000, position=InfoBarPosition.TOP, parent=self)
+            _showError(self, "图标读取失败", str(error))
             return
         self.gridWidget.setItems(
             [
@@ -903,31 +923,16 @@ class CustomCardDialog(_ResponsiveMessageBox):
     def validate(self) -> bool:
         title = self.titleEdit.text().strip()
         if not title:
-            from qfluentwidgets import InfoBar, InfoBarPosition
-
-            InfoBar.error("无法保存", "请输入卡片标题", duration=3000, position=InfoBarPosition.TOP, parent=self)
+            _showError(self, "无法保存", "请输入卡片标题")
             return False
-        actions = self.actionList.actions()
-        if not actions:
-            from qfluentwidgets import InfoBar, InfoBarPosition
-
-            InfoBar.error("无法保存", "至少添加一个动作", duration=3000, position=InfoBarPosition.TOP, parent=self)
+        if not self.actionEditor.validate(self):
             return False
-        for action in actions:
-            error = validate_action(action)
-            if error:
-                from qfluentwidgets import InfoBar, InfoBarPosition
-
-                InfoBar.error("动作无效", error, duration=3000, position=InfoBarPosition.TOP, parent=self)
-                return False
         if self._staged_image is not None:
             try:
                 self._icon = {"type": "file", "file": save_icon_image(self._staged_image)}
                 self._staged_image = None
             except HomeCardError as error:
-                from qfluentwidgets import InfoBar, InfoBarPosition
-
-                InfoBar.error("无法保存图标", str(error), duration=3000, position=InfoBarPosition.TOP, parent=self)
+                _showError(self, "无法保存图标", str(error))
                 return False
         return True
 
