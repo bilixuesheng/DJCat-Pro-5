@@ -1062,6 +1062,67 @@ class ApplicationStore:
                 # startup retries hidden artifact cleanup after file locks are gone.
                 pass
 
+    def syncInstalledMetadata(self, apps) -> int:
+        """Copy same-version catalog changes into the installed manifests.
+
+        Only a new version downloads the package again. A newer manifest
+        revision at the same version (renamed, new presets, fixed action) is
+        written into the local manifest instead, otherwise presets added later
+        would wait for a version that may never come. Returns how many
+        manifests were rewritten.
+        """
+        synced = 0
+        with self._installedLock:
+            installed = self.installed()
+            for app in apps if isinstance(apps, list) else ():
+                if not isinstance(app, dict):
+                    continue
+                try:
+                    local = installed.get(int(app["id"]))
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if local is None or str(app.get("version", "")) != local.version:
+                    continue
+                revision = _manifestRevision(app.get("manifest_revision", 1))
+                if revision <= _manifestRevision(
+                    local.metadata.get("manifest_revision", 1)
+                ):
+                    continue
+                manifest = dict(local.metadata)
+                manifest.update(
+                    {
+                        field: str(app.get(field, "") or "")
+                        for field in (
+                            "name",
+                            "developer",
+                            "description",
+                            "icon_url",
+                            "announcement",
+                        )
+                    }
+                )
+                manifest["open_action"] = app.get("open_action")
+                manifest["presets"] = _presetList(app.get("presets"))
+                manifest["manifest_revision"] = revision
+                path = local.path / MANIFEST_NAME
+                temporary = local.path / f"{MANIFEST_NAME}.{uuid.uuid4().hex}.tmp"
+                try:
+                    temporary.write_text(
+                        json.dumps(manifest, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    temporary.replace(path)
+                except OSError:
+                    temporary.unlink(missing_ok=True)
+                    continue
+                synced += 1
+            if synced:
+                # 清单在应用目录里面改写，Program 目录的修改时间不变，缓存得手动作废。
+                self._installedCache = None
+                self._installedStamp = None
+                self._installedCopies = {}
+        return synced
+
     def mergeInstalled(self, apps: Iterable[dict]) -> list[dict]:
         installed = self.installed()
         result = []
@@ -1103,14 +1164,12 @@ class ApplicationStore:
             item["architecture_supported"] = bool(
                 package and package.get("enabled")
             )
+            # 只有版本号决定要不要重新下载；同版本的目录信息变化由
+            # syncInstalledMetadata() 直接写进本机清单。
             item["update_available"] = bool(
                 local
                 and item["architecture_supported"]
-                and (
-                    isUpdateAvailable(local.version, str(item.get("version", "")))
-                    or _manifestRevision(item.get("manifest_revision", 1))
-                        > item["installed_manifest_revision"]
-                )
+                and isUpdateAvailable(local.version, str(item.get("version", "")))
             )
             result.append(item)
         for local in installed.values():

@@ -297,6 +297,10 @@ class CatalogWorker(QObject):
             payload = self.store.fetchCatalog()
             if self._cancelEvent.is_set():
                 return
+            try:
+                self.store.syncInstalledMetadata(payload.get("apps"))
+            except Exception:
+                logger.exception("同步已安装应用的目录信息失败")
             self.finished.emit(payload, {}, "")
         except Exception as error:
             if not self._cancelEvent.is_set():

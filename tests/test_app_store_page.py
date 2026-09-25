@@ -110,6 +110,9 @@ class _BlockingCatalogStore:
         self.release.wait()
         return {"apps": [], "ads": []}
 
+    def syncInstalledMetadata(self, _apps):
+        return 0
+
 
 class _SlowImageStore:
     def __init__(self):
@@ -122,6 +125,9 @@ class _SlowImageStore:
             "apps": [{"id": 1, "icon_url": "https://example.test/icon.png"}],
             "ads": [],
         }
+
+    def syncInstalledMetadata(self, _apps):
+        return 0
 
     def imagePath(self, _url):
         self.imageStarted.set()
@@ -2476,6 +2482,31 @@ class AppStorePageTest(TestCase):
         self.page._backToOverview()
 
         self.assertIsNone(self.page.allGrid.itemAtPosition(0, 0))
+
+    def testCatalogWorkerSyncsInstalledMetadataBeforeReporting(self):
+        payload = {"apps": [{"id": 1, "version": "1.0"}], "ads": []}
+        store = Mock()
+        store.fetchCatalog.return_value = payload
+        order = []
+        store.syncInstalledMetadata.side_effect = lambda apps: order.append(("sync", apps))
+        worker = CatalogWorker(store)
+        worker.finished.connect(lambda *_result: order.append(("finished",)))
+
+        worker.run()
+
+        self.assertEqual(order, [("sync", payload["apps"]), ("finished",)])
+
+    def testCatalogStillLoadsWhenMetadataSyncFails(self):
+        store = Mock()
+        store.fetchCatalog.return_value = {"apps": [], "ads": []}
+        store.syncInstalledMetadata.side_effect = OSError("disk full")
+        worker = CatalogWorker(store)
+        results = []
+        worker.finished.connect(lambda *result: results.append(result))
+
+        worker.run()
+
+        self.assertEqual(results, [({"apps": [], "ads": []}, {}, "")])
 
     def testCanceledCatalogWorkerDoesNotEmitLateResult(self):
         store = _BlockingCatalogStore()
