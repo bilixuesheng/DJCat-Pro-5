@@ -22,7 +22,6 @@ from qfluentwidgets import (
     CardWidget,
     CheckBox,
     ComboBox,
-    FlowLayout,
     IconWidget,
     LineEdit,
     MessageBoxBase,
@@ -33,7 +32,6 @@ from qfluentwidgets import (
     SpinBox,
     StrongBodyLabel,
     SubtitleLabel,
-    ToggleToolButton,
     ToolButton,
 )
 from qfluentwidgets import FluentIcon as FIF
@@ -48,6 +46,7 @@ from app.common.home_cards import (
     save_icon_image,
     validate_action,
 )
+from app.view.components.icon_grid import IconGrid, IconGridItem
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.tool_tip import setFluentToolTip
 
@@ -665,19 +664,13 @@ class IconPickerDialog(_ResponsiveMessageBox):
         self.contentLayout = QVBoxLayout(self.contentWidget)
         self.contentLayout.setContentsMargins(4, 4, 4, 4)
         self.contentLayout.setSpacing(12)
-        self.gridWidget = QWidget(self.contentWidget)
-        self.gridWidget.setStyleSheet("background: transparent;")
-        self.gridWidget.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Fixed,
-        )
-        self.grid = FlowLayout(self.gridWidget, needAni=False, isTight=True)
-        self.grid.setContentsMargins(8, 8, 8, 8)
+        self.gridWidget = IconGrid(self.contentWidget)
         self.scrollArea.setWidget(self.contentWidget)
-        self._buttons = []
         self._selected = {"type": "fluent", "name": "APPLICATION"}
         self._external_image = None
+        self._external_images = []
         self.sourceCombo.currentIndexChanged.connect(self._sourceChanged)
+        self.gridWidget.iconClicked.connect(self._onIconClicked)
         self.searchEdit.textChanged.connect(self._filterIcons)
         self.browseButton.clicked.connect(self._browse)
         toolbar = QHBoxLayout()
@@ -702,35 +695,30 @@ class IconPickerDialog(_ResponsiveMessageBox):
         self._sourceChanged()
 
     def _renderFluentIcons(self):
-        self._clearGrid()
-        for name, icon in FIF.__members__.items():
-            button = ToggleToolButton(icon, self.gridWidget)
-            setFluentToolTip(button, name)
-            button.setAccessibleName(name)
-            button.clicked.connect(lambda _checked=False, name=name: self._selectFluent(name))
-            self.grid.addWidget(button)
-            self._buttons.append(button)
+        self._external_images = []
+        self.gridWidget.setItems(
+            [
+                IconGridItem(name, icon, name)
+                for name, icon in FIF.__members__.items()
+            ]
+        )
+        self.gridWidget.setFilterText(self.searchEdit.text())
         self._refreshGridLayout()
         name = self._selected.get("name", "APPLICATION")
         self._selectFluent(name if name in FIF.__members__ else "APPLICATION")
 
     def _clearGrid(self):
-        self.grid.removeAllWidgets()
-        for button in self._buttons:
-            button.deleteLater()
-        self._buttons.clear()
+        self._external_images = []
+        self.gridWidget.setItems([])
 
     def _refreshGridLayout(self):
-        self.grid.invalidate()
         width = max(1, self.scrollArea.viewport().width() - 8)
-        self.gridWidget.setFixedHeight(self.grid.heightForWidth(width))
-        self.gridWidget.updateGeometry()
+        self.gridWidget.setFixedHeight(self.gridWidget.heightForWidth(width))
         self.contentWidget.updateGeometry()
-        self.grid.activate()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self, "grid"):
+        if hasattr(self, "gridWidget"):
             self.widget.layout().activate()
             self._refreshGridLayout()
 
@@ -753,18 +741,21 @@ class IconPickerDialog(_ResponsiveMessageBox):
             self._refreshGridLayout()
 
     def _filterIcons(self, text):
-        query = text.strip().lower()
-        for button in self._buttons:
-            button.setVisible(not query or query in button.toolTip().lower())
+        self.gridWidget.setFilterText(text)
         self._refreshGridLayout()
+
+    def _onIconClicked(self, index):
+        if self._external_images:
+            self._selectImage(self._external_images[index], index)
+        else:
+            self._selectFluent(self.gridWidget.items()[index].key)
 
     def _selectFluent(self, name):
         self._selected = {"type": "fluent", "name": name}
         self._external_image = None
         self.previewIcon.setIcon(getattr(FIF, name, FIF.APPLICATION))
         self.previewLabel.setText(name)
-        for button in self._buttons:
-            button.setChecked(button.toolTip() == name)
+        self.gridWidget.setCheckedIndex(self.gridWidget.indexOfKey(name))
 
     def _browse(self):
         image_source = self.sourceCombo.currentIndex() == 1
@@ -787,29 +778,24 @@ class IconPickerDialog(_ResponsiveMessageBox):
 
             InfoBar.error("图标读取失败", str(error), duration=3000, position=InfoBarPosition.TOP, parent=self)
             return
-        self._clearGrid()
-        for index, image in enumerate(images):
-            button = ToggleToolButton(
-                QIcon(QPixmap.fromImage(image)), self.gridWidget
-            )
-            setFluentToolTip(button, f"图标 {index + 1}")
-            button.clicked.connect(
-                lambda _checked=False, image=image, button=button: self._selectImage(image, button)
-            )
-            self.grid.addWidget(button)
-            self._buttons.append(button)
+        self.gridWidget.setItems(
+            [
+                IconGridItem(str(index), QIcon(QPixmap.fromImage(image)), f"图标 {index + 1}")
+                for index, image in enumerate(images)
+            ]
+        )
+        self._external_images = list(images)
         self._refreshGridLayout()
-        self._selectImage(images[0], self._buttons[0])
+        self._selectImage(images[0], 0)
 
-    def _selectImage(self, image, selected_button=None):
+    def _selectImage(self, image, index=None):
         self._external_image = image.copy()
         self._selected = {"type": "image"}
         self.previewIcon.setIcon(QIcon(QPixmap.fromImage(image)))
         self.previewLabel.setText(
-            selected_button.toolTip() if selected_button else "自定义图标"
+            self.gridWidget.items()[index].toolTip if index is not None else "自定义图标"
         )
-        for button in self._buttons:
-            button.setChecked(button is selected_button)
+        self.gridWidget.setCheckedIndex(index)
 
     def selected(self):
         return deepcopy(self._selected), self._external_image.copy() if self._external_image else None

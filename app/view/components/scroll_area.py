@@ -1,4 +1,5 @@
 import sys
+import weakref
 
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
@@ -47,6 +48,19 @@ def setTouchScrollSuppressed(viewport, suppressed: bool, restoreDistance=None):
     return restoreDistance
 
 
+# 自绘多个可按区域的控件（不是 QAbstractButton）登记在这里，起滑时和按钮一样被取消按压。
+_touchPressTargets = weakref.WeakSet()
+
+
+def registerTouchPressTarget(widget) -> None:
+    """Let a custom-painted widget drop its pressed cell when a touch turns into a scroll.
+
+    The widget must provide ``cancelTouchPress()``. Buttons need no registration:
+    the guard finds every pressed ``QAbstractButton`` under the scroll area.
+    """
+    _touchPressTargets.add(widget)
+
+
 class _TouchScrollGuard(QObject):
     def __init__(self, application):
         super().__init__(application)
@@ -80,6 +94,12 @@ class _TouchScrollGuard(QObject):
         for button in scrollArea.findChildren(QAbstractButton):
             if button.isDown():
                 button.setDown(False)
+        for target in tuple(_touchPressTargets):
+            try:
+                if scrollArea.isAncestorOf(target):
+                    target.cancelTouchPress()
+            except RuntimeError:
+                _touchPressTargets.discard(target)
 
     def eventFilter(self, obj, event):
         eventType = event.type()

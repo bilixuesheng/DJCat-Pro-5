@@ -3,12 +3,14 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QGraphicsDropShadowEffect, QWidget
+from PySide6.QtWidgets import QWidget
 from qfluentwidgets import isDarkTheme, qconfig
 
 from app.config.cfg import cfg
+from app.platform.shadow_effect import SilhouetteShadowEffect
 
 WINDOW_SHADOW_MARGIN = 12
+WINDOW_CORNER_RADIUS = 8
 # 倒计时和全屏时钟的默认背景（配置值"主题色"，设置页显示为"默认黑色"）不论主题都是黑底。
 TIMER_THEME_BACKGROUND = QColor("black")
 
@@ -80,7 +82,7 @@ class WindowBackground(QWidget):
     def setRoundedWindow(self, enabled: bool, shadow: bool = True) -> None:
         """``shadow=False`` keeps the rounded corners for in-page previews,
         which sit inside a scroll area and must not cast a window shadow."""
-        self._cornerRadius = 8 if enabled else 0
+        self._cornerRadius = WINDOW_CORNER_RADIUS if enabled else 0
         self.setBorderVisible(enabled)
         if not shadow:
             self.setGraphicsEffect(None)
@@ -88,8 +90,9 @@ class WindowBackground(QWidget):
             return
         shadow = self.graphicsEffect()
         if enabled and shadow is None:
-            # 阴影只作用于背景，避免时间每秒更新时重新处理全部子控件。
-            shadow = QGraphicsDropShadowEffect(self)
+            # 阴影只作用于背景，避免时间每秒更新时重新处理全部子控件。轮廓阴影只在
+            # 窗口尺寸变化时模糊一次：原版效果在窗口化投送滚动正文时每帧都要重新模糊整窗。
+            shadow = SilhouetteShadowEffect(WINDOW_CORNER_RADIUS, self)
             shadow.setBlurRadius(WINDOW_SHADOW_MARGIN * self.devicePixelRatioF())
             shadow.setOffset(0, 0)
             shadow.setColor(QColor(0, 0, 0, 100))

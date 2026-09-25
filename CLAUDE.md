@@ -34,11 +34,13 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 **`app/platform/animation_timer.py` 独占 Qt 全局 Animation Tick 间隔。** View 和业务模块不直接调用 Qt 私有动画 API；私有符号不可用时保留 Qt 默认行为。
 
-**`app/platform/menu_animation.py` 独占 QFluentWidgets 的 Menu Reveal 适配。** 它只替换 `DROP_DOWN` 和 `PULL_UP` 两种动画管理器；其他动画类型及页面组件不再分别接管菜单动画。
+**`app/platform/menu_animation.py` 独占 QFluentWidgets 的 Menu Reveal 适配。** 它只替换 `DROP_DOWN` 和 `PULL_UP` 两种动画管理器，并把 `RoundMenu.setShadowEffect` 换成 Silhouette Shadow；其他动画类型及页面组件不再分别接管菜单动画。菜单展开期间不再暂停弹窗卡片的阴影：卡片阴影已是缓存的轮廓阴影，暂停和恢复反而各引起一次整卡重绘，并让阴影闪一下。Tray Menu 的 `AcrylicMenu` 不走 `RoundMenu.__init__`，不受影响。
+
+**`app/platform/shadow_effect.py` 独占 Silhouette Shadow。** `QGraphicsDropShadowEffect` 每次重绘都把整棵子树离屏重画再重新模糊，悬停菜单项、光标闪烁、上层弹窗的任何重绘（下层卡片在蒙层底下跟着重画）都会触发。弹窗卡片（圆角 10）、菜单面板（圆角 9）和 Projection／Exam Countdown／Fullscreen Clock 的窗口化背景（圆角 8）都是不透明圆角矩形，阴影只取决于尺寸，因此 `SilhouetteShadowEffect` 按尺寸只模糊一次（跨实例共享、有上限），按颜色只着色一次，控件本身直接画、不走离屏副本。模糊仍交给 Qt 自己的 `QGraphicsDropShadowEffect` 生成，与原版逐像素相差不超过 2 个色阶；和原版一样模糊半径按设备像素、偏移按逻辑像素。它是 `QGraphicsDropShadowEffect` 的子类，`color`、`blurRadius`、`offset` 属性和属性动画照常可用。新的不透明圆角容器要阴影时用它，不要再直接挂 `QGraphicsDropShadowEffect`。
 
 **`app/platform/icon_cache.py` 独占 QFluentWidgets SVG 图标的解析缓存。** 组件库每次绘制图标都新建 `QSvgRenderer` 从资源重新解析，透明背景页面滚动时每帧都要重绘所有可见图标（offscreen 实测单个图标 130 µs 对缓存后的 21 µs）。它替换 `drawSvgIcon` 和 `writeSvg`，只缓存内容不会变的来源——`:/` 资源路径和 SVG 源码字节，磁盘路径照旧每次读取；两份缓存各有上限。页面不得自己另建图标缓存。
 
-**`app/platform/dialog_animation.py` 独占 QFluentWidgets 蒙层弹窗的公共适配。** 它复用阴影效果并接管 `showEvent` 和 `done`，在淡入淡出期间暂停阴影以避免 1 ms Animation Tick 下的逐帧模糊重算；淡入结束后用 `color` 属性动画将阴影 alpha 从 0 渐变到目标值，此时无外层不透明度效果只剩一层阴影，不掉帧。弹窗中的下拉框仍属于 Menu Reveal；页面不得重复修补组件库或改变原有动画曲线。
+**`app/platform/dialog_animation.py` 独占 QFluentWidgets 蒙层弹窗的公共适配。** 它为卡片装上 Silhouette Shadow 并接管 `showEvent` 和 `done`，在淡入淡出期间暂停阴影（沿用原有观感）；淡入结束后用 `color` 属性动画将阴影 alpha 从 0 渐变到目标值，此时无外层不透明度效果只剩一层阴影，不掉帧。弹窗中的下拉框仍属于 Menu Reveal；页面不得重复修补组件库或改变原有动画曲线。
 
 **`app/view/components/setting_section.py` 独占设置页的层级导航。** Setting Section 的下钻、返回、面包屑对应的 Setting Route，以及层级之间的推移动画都由它提供；页面只负责装配内容。推移沿用 `SlideNavigationTransitionInfo`：进入下一级时旧页左移出场、新页自右入场，返回时反向，两页共用同一条 `cubic-bezier(0,0,0,1)` 曲线和 300 ms 时长并交叉淡入淡出。"旧页原地淡出"是 `FromBottom`（顶层切换）的特征，横向照搬会让两页脱节。位移 150 px 是设备无关像素，不得再乘 `devicePixelRatio`——Qt 的部件坐标本就是设备无关像素，乘了等于缩放两次；`main_window.py` 的 `BORDER_WIDTH` 要乘是因为它喂给原生命中测试，吃的是物理像素。动画期间只改 `pos` 和不透明度，不碰布局。推移的是两页的快照：起步时各 `grab()` 一次，真页面在推移期间隐藏，结束后才显示；不得再给整页 `ScrollArea` 挂 `QGraphicsOpacityEffect`——每个 Animation Tick 都会把两页整棵子树重绘一遍（offscreen 实测每帧 20 ms 对快照的 1.7 ms）。
 
@@ -171,6 +173,8 @@ Storage Migration 的安全约束：
 
 **ImageCache** 拥有应用图片和临时 Package 所在缓存根目录的清理互斥。存在下载或安装操作时拒绝清缓存；设置页只发出用户意图并显示 `ImageCache.size()`。
 
+Custom Home Card 的图标选择器用 `app/view/components/icon_grid.py` 的 `IconGrid` 一个控件绘制整个图标库（175 项），不为每个图标建 `ToggleToolButton`：逐个建按钮要各自抛光样式表、装提示过滤器、进 FlowLayout，打开弹窗要卡约 0.34 s。`IconGrid` 按 `ToggleToolButton` 的样式表配色和 FlowLayout 的排布绘制，背景状态和图标都按设备像素缓存成位图；提示沿用 QFluentWidgets `ToolTip`。自绘的可按区域控件通过 `scroll_area.registerTouchPressTarget()` 登记，触控起滑时与按钮一样被取消按压。
+
 Application 图标允许使用 PNG、JPEG、WebP、GIF、BMP、SVG 和 ICO。`ImageCache` 保留普通图片已识别的 URL 文件后缀；ICO 在临时文件中由 Pillow 读取最大尺寸帧并规范化为 PNG，再原子替换到 `.png` 缓存路径。Application Store、主页和 Tray Menu 只复用规范化后的路径，不应各自承担 ICO 解码兼容。
 
 ### Projection 渲染
@@ -195,7 +199,7 @@ Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` �
 
 Busy Glow 的约束在 `docs/adr/0002-busy-glow-custom-paint.md` 里有完整理由，改动前先读：重绘自限 60 Hz（全局 1 ms Animation Tick 下这是必需的自我限流，不是疏忽）；已长出的部分是以底边中点为中心的一段连续圆弧，不是两条对称的臂（两条臂会在起笔点和会合点叠出亮疙瘩），入场窗口乘进渐变 alpha，不另画遮罩；锥形渐变按周长弧长而非原始角度参数化，几何变化时在 `resizeEvent` 重建，动画期间只转相位、改 alpha；光晕是到边线距离的平滑函数，在 `HALO_PIXEL` 倍的低分辨率缓冲里画、平滑放大贴回，只有边线按设备像素描——不要退回多遍宽笔叠加（浅色背景上能数出台阶），也不要把光晕改回按设备像素画（开销随 DPR² 增长，150% 缩放起就超出 60 Hz 预算）；深色主题光晕按 `Plus` 加性合成、边线正常叠加，深浅主题是两套配方而不是同一套调亮度。
 
-Busy Glow 只表示"正在进行"，不表示完成度。对话框那张卡上挂着 `QGraphicsDropShadowEffect`，而 graphics effect 会因任意子控件重绘而整棵子树重新栅格化，所以光晕启动时用 `dialog_animation.fadeDialogShadow()` 把卡片阴影渐隐、结束时渐回。
+Busy Glow 只表示"正在进行"，不表示完成度。光晕启动时用 `dialog_animation.fadeDialogShadow()` 把卡片阴影渐隐、结束时渐回。这原本是为了避开 `QGraphicsDropShadowEffect` 随子控件重绘整卡重新模糊；卡片阴影换成 Silhouette Shadow 后这项开销已经没有，渐隐保留为既有观感。
 
 内联整理必须保存开始时的标题和正文快照；完成后投送完整结果，用户取消时先停止接收迟到信号，再立即投送快照正文。
 
@@ -209,6 +213,7 @@ Busy Glow 只表示"正在进行"，不表示完成度。对话框那张卡上�
 | `app/platform/` | Windows 单实例/IPC、唤起窗口、开机启动及 Qt 运行时适配 |
 | `app/platform/animation_timer.py` | Qt 全局 Animation Tick 间隔的私有 API 适配和安全回退 |
 | `app/platform/dialog_animation.py` | QFluentWidgets 蒙层弹窗的阴影复用和淡入淡出阴影暂停 |
+| `app/platform/shadow_effect.py` | Silhouette Shadow：按尺寸缓存模糊的圆角矩形投影 |
 | `app/platform/menu_animation.py` | QFluentWidgets 全局 Menu Reveal 管理器适配，不改变原版展开视觉 |
 | `app/platform/icon_cache.py` | QFluentWidgets SVG 图标解析缓存，只缓存资源路径和源码 |
 | `app/platform/screens.py` | 取窗口所在屏幕，绕开 PySide 把 QScreen 挂成控件子对象的返回值启发式 |
@@ -319,7 +324,7 @@ PySide6 6.10 没有绑定 `QAnimationDriver`，DJCat 因此把 Qt 私有 `QUnifi
 
 Menu Reveal 是另一层独立优化：保留 QFluentWidgets 原始的 250 ms 时长、`OutQuad` 缓动、窗口位移、逐帧遮罩和阴影，只把每次属性变化触发的 viewport 强制刷新合并为动画结束时的一次。上游同一个方法里还负责同步 `WA_UnderMouse` 和 `HoverEnter`，这部分必须留在逐帧执行，否则展开途中光标下的菜单项不会高亮。逐帧遮罩按位移去重：位移不足一像素时遮罩完全相同，跳过不改变展开轨迹，但不能改成按时间采样遮罩——遮罩滞后于窗口位置会让内容错位。不能改成只淡入、删除遮罩或阴影，也不能把 `NONE`、`FADE_IN_DROP_DOWN` 等其他管理器替换成下拉实现。
 
-带蒙层的 `MaskDialogBase` 的 200 ms 淡入和 100 ms 淡出由 `QGraphicsOpacityEffect` 驱动；`app/platform/dialog_animation.py` 接管 `showEvent` 和 `done`，在不透明度动画期间暂停 `QGraphicsDropShadowEffect`（`setEnabled(False)`）。淡入结束后移除 `QGraphicsOpacityEffect`，将阴影 `color` alpha 从 0 渐变到目标值（150 ms / `OutCubic`）；此阶段只有一层阴影效果，即使 1 ms tick 也不掉帧。淡出直接禁用阴影后开始不透明度动画。不能改用 `setWindowOpacity`：`MaskDialogBase` 调用 `setWindowFlags(Qt.FramelessWindowHint)` 后窗口类型退回 `Qt::Widget`，带父窗口时 `isWindow()` 为假，`QWidget::setWindowOpacity()` 直接返回，动画会静默失效。也不能通过缩短动画、改变蒙层透明度或永久删除阴影换取性能。
+带蒙层的 `MaskDialogBase` 的 200 ms 淡入和 100 ms 淡出由 `QGraphicsOpacityEffect` 驱动；`app/platform/dialog_animation.py` 接管 `showEvent` 和 `done`，在不透明度动画期间暂停 `QGraphicsDropShadowEffect`（`setEnabled(False)`）。淡入结束后移除 `QGraphicsOpacityEffect`，将阴影 `color` alpha 从 0 渐变到目标值（150 ms / `OutCubic`）；渐变只重新着色缓存的模糊结果，即使 1 ms tick 也不掉帧（原版 `QGraphicsDropShadowEffect` 在这 150 ms 里每帧都要重新模糊整张卡）。淡出直接禁用阴影后开始不透明度动画。不能改用 `setWindowOpacity`：`MaskDialogBase` 调用 `setWindowFlags(Qt.FramelessWindowHint)` 后窗口类型退回 `Qt::Widget`，带父窗口时 `isWindow()` 为假，`QWidget::setWindowOpacity()` 直接返回，动画会静默失效。也不能通过缩短动画、改变蒙层透明度或永久删除阴影换取性能。
 
 ## Code shape
 
