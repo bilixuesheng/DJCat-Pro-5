@@ -1404,75 +1404,15 @@ def adminSettings():
         return _adminResponse("AI 配置已保存", "success", "adminSettings")
 
 
-def _conversionLogRows(status="all", page=1, perPage=20):
-    _cleanupConversionLogs()
-    offset = (page - 1) * perPage
-    with closing(_connect()) as database:
-        if status == "all":
-            total = database.execute(
-                "SELECT COUNT(*) FROM conversion_logs"
-            ).fetchone()[0]
-            rows = database.execute(
-                """
-                SELECT cl.id, cl.machine_id, cl.input_content, cl.output_content,
-                       cl.custom_style, cl.created_at, cl.status,
-                       m.id AS machine_number
-                FROM conversion_logs cl
-                LEFT JOIN machines m ON m.machine_id = cl.machine_id
-                ORDER BY cl.created_at DESC
-                LIMIT ? OFFSET ?
-                """,
-                (perPage, offset),
-            ).fetchall()
-        else:
-            total = database.execute(
-                "SELECT COUNT(*) FROM conversion_logs WHERE status = ?",
-                (status,),
-            ).fetchone()[0]
-            rows = database.execute(
-                """
-                SELECT cl.id, cl.machine_id, cl.input_content, cl.output_content,
-                       cl.custom_style, cl.created_at, cl.status,
-                       m.id AS machine_number
-                FROM conversion_logs cl
-                LEFT JOIN machines m ON m.machine_id = cl.machine_id
-                WHERE cl.status = ?
-                ORDER BY cl.created_at DESC
-                LIMIT ? OFFSET ?
-                """,
-                (status, perPage, offset),
-            ).fetchall()
-    logs = []
-    for row in rows:
-        code = f"DJ-{row['machine_number']:06d}" if row["machine_number"] else ""
-        logs.append({
-            "id": row["id"],
-            "machine_code": code,
-            "input_content": row["input_content"],
-            "output_content": row["output_content"],
-            "custom_style": row["custom_style"],
-            "created_at": row["created_at"],
-            "status": row["status"],
-        })
-    totalPages = max(1, (total + perPage - 1) // perPage)
-    return logs, total, totalPages
+_CONVERSION_LOG_SELECT = """
+    SELECT cl.id, cl.input_content, cl.output_content, cl.custom_style,
+           cl.created_at, cl.status, m.id AS machine_number
+    FROM conversion_logs cl
+    LEFT JOIN machines m ON m.machine_id = cl.machine_id
+"""
 
 
-def _getConversionLog(logId):
-    with closing(_connect()) as database:
-        row = database.execute(
-            """
-            SELECT cl.id, cl.machine_id, cl.input_content, cl.output_content,
-                   cl.custom_style, cl.created_at, cl.status,
-                   m.id AS machine_number
-            FROM conversion_logs cl
-            LEFT JOIN machines m ON m.machine_id = cl.machine_id
-            WHERE cl.id = ?
-            """,
-            (logId,),
-        ).fetchone()
-    if not row:
-        return None
+def _conversionLog(row):
     return {
         "id": row["id"],
         "machine_code": (
@@ -1484,6 +1424,30 @@ def _getConversionLog(logId):
         "created_at": row["created_at"],
         "status": row["status"],
     }
+
+
+def _conversionLogRows(status="all", page=1, perPage=20):
+    _cleanupConversionLogs()
+    offset = (page - 1) * perPage
+    where, parameters = ("", ()) if status == "all" else ("WHERE cl.status = ?", (status,))
+    with closing(_connect()) as database:
+        total = database.execute(
+            f"SELECT COUNT(*) FROM conversion_logs cl {where}", parameters
+        ).fetchone()[0]
+        rows = database.execute(
+            f"{_CONVERSION_LOG_SELECT} {where} ORDER BY cl.created_at DESC LIMIT ? OFFSET ?",
+            (*parameters, perPage, offset),
+        ).fetchall()
+    totalPages = max(1, (total + perPage - 1) // perPage)
+    return [_conversionLog(row) for row in rows], total, totalPages
+
+
+def _getConversionLog(logId):
+    with closing(_connect()) as database:
+        row = database.execute(
+            f"{_CONVERSION_LOG_SELECT} WHERE cl.id = ?", (logId,)
+        ).fetchone()
+    return _conversionLog(row) if row else None
 
 
 def _updateConversionLogStatus(logId, status):
@@ -1714,32 +1678,14 @@ def adminConversionLogAddSubmit(logId):
 def adminConversionLogReview():
     with closing(_connect()) as database:
         row = database.execute(
-            """
-            SELECT cl.id, cl.machine_id, cl.input_content, cl.output_content,
-                   cl.custom_style, cl.created_at, cl.status,
-                   m.id AS machine_number
-            FROM conversion_logs cl
-            LEFT JOIN machines m ON m.machine_id = cl.machine_id
-            WHERE cl.status = 'pending'
-            ORDER BY cl.created_at ASC
-            LIMIT 1
-            """,
+            f"{_CONVERSION_LOG_SELECT} WHERE cl.status = 'pending' "
+            "ORDER BY cl.created_at ASC LIMIT 1"
         ).fetchone()
     if not row:
         return _adminResponse(
             "没有待审批的记录", "info", "adminConversionLogs"
         )
-    log = {
-        "id": row["id"],
-        "machine_code": (
-            f"DJ-{row['machine_number']:06d}" if row["machine_number"] else ""
-        ),
-        "input_content": row["input_content"],
-        "output_content": row["output_content"],
-        "custom_style": row["custom_style"],
-        "created_at": row["created_at"],
-        "status": row["status"],
-    }
+    log = _conversionLog(row)
     pendingCount = 0
     with closing(_connect()) as database:
         pendingCount = database.execute(
