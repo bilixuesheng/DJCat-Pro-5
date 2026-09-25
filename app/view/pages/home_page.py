@@ -397,49 +397,14 @@ class HomePage(ScrollArea):
         self.vBoxLayout.addWidget(self.cardsWidget)
 
         self.all_cards = {
-            "全屏投送": ActionCard(
-                FIF.FULL_SCREEN,
-                "全屏投送",
-                "将信息以大字全屏展示",
-                self.cardsWidget,
-            ),
-            "考试倒计时": ActionCard(
-                FIF.CALENDAR,
-                "考试倒计时",
-                "设定考试时长并全屏显示倒计时",
-                self.cardsWidget,
-            ),
-            "全屏时钟": ActionCard(
-                FIF.STOP_WATCH,
-                "全屏时钟",
-                "全屏显示当前系统时间",
-                self.cardsWidget,
-            ),
-            "定时播报": ActionCard(
-                FIF.MEGAPHONE,
-                "定时播报",
-                "设置每日定点语音播报时间或播放音频",
-                self.cardsWidget,
-            ),
-            "自动任务": ActionCard(
-                FIF.HISTORY,
-                "自动任务",
-                "按时间或软件行为执行主页卡片和自定义动作",
-                self.cardsWidget,
-            ),
-            "定时关机": ActionCard(
-                FIF.POWER_BUTTON,
-                "定时关机",
-                "设置指定时间提示或自动关闭计算机",
-                self.cardsWidget,
-            )
+            name: ActionCard(icon, name, description, self.cardsWidget)
+            for name, (icon, description) in DEFAULT_CARD_INFO.items()
         }
         for name, card in self.all_cards.items():
             card.setRemovable(True)
-            if name in DEFAULT_CARD_INFO:
-                card.deleteButton.clicked.connect(
-                    lambda _checked=False, cardName=name: self._removeDefaultCard(cardName)
-                )
+            card.deleteButton.clicked.connect(
+                lambda _checked=False, cardName=name: self._removeDefaultCard(cardName)
+            )
             card.dragStarted.connect(self._startCardDrag)
             card.dragMoved.connect(self._moveCard)
             card.dragFinished.connect(self._finishCardDrag)
