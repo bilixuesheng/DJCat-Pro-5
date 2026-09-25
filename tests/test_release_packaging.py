@@ -68,7 +68,7 @@ def test_installer_is_single_language_and_architecture_aware():
 def test_pre_release_number_is_preserved_in_windows_file_version(monkeypatch):
     monkeypatch.setattr(deploy, "VERSION", "5.0.0-pre.22")
 
-    args = deploy.build_args()
+    args = deploy.buildArgs()
 
     assert "--file-version=5.0.0.22" in args
     assert "--product-version=5.0.0.22" in args
@@ -77,20 +77,20 @@ def test_pre_release_number_is_preserved_in_windows_file_version(monkeypatch):
 def test_kb_release_uses_base_version_for_windows_file_version(monkeypatch):
     monkeypatch.setattr(deploy, "VERSION", "5.1.4-kb20260914")
 
-    args = deploy.build_args()
+    args = deploy.buildArgs()
 
     assert "--file-version=5.1.4.0" in args
     assert "--product-version=5.1.4.0" in args
 
 
 def test_windows_build_includes_ico_normalizer():
-    assert "--include-package=PIL" in deploy.build_args()
+    assert "--include-package=PIL" in deploy.buildArgs()
 
 
 def test_build_bundles_qt_chinese_translation_where_the_app_looks_for_it():
     from app.config.paths import ASSET_DIR, QT_TRANSLATIONS_DIR
 
-    args = [arg for arg in deploy.build_args() if "qtbase_zh_CN.qm" in arg]
+    args = [arg for arg in deploy.buildArgs() if "qtbase_zh_CN.qm" in arg]
 
     assert len(args) == 1
     source, target = args[0].removeprefix("--include-data-files=").rsplit("=", 1)

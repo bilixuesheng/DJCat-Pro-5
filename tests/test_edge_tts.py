@@ -14,7 +14,7 @@ from app.common.edge_tts import (
 )
 from app.view.pages.schedule_page import ChineseVoiceLoader, createTaskForm
 from app.view.windows.main_window import MainWindow
-from deploy import build_args
+from deploy import buildArgs
 
 
 class EdgeTtsVoiceTest(TestCase):
@@ -260,4 +260,4 @@ class EdgeTtsVoiceTest(TestCase):
         window.player.play.assert_not_called()
 
     def testWindowsBuildExplicitlyIncludesEdgeTtsPackage(self):
-        self.assertIn("--include-package=edge_tts", build_args())
+        self.assertIn("--include-package=edge_tts", buildArgs())
