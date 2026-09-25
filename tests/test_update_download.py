@@ -1545,7 +1545,6 @@ class UpdateWindowLifecycleTest(TestCase):
         self.assertTrue(run.dialog.shown)
         run.infoBar.close.assert_called_once_with()
         self.assertIsNone(self.window._updateApplyWorker)
-        self.assertIsNone(self.window._updateApplyThread)
         self.assertIsNone(self.window._updateApplyDialog)
 
     def testUpdateApplyFlattensASingleTopLevelDirectory(self):

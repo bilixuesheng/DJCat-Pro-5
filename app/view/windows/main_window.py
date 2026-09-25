@@ -365,12 +365,10 @@ class MainWindow(MSFluentWindow):
         self._pendingUpdateNotification = None
         self._downloadStateToolTip = None
         self._downloadWorker = None
-        self._downloadThread = None
         self._pendingDownloadProgress = None
         self._downloadVersion = ""
         self._quitAfterDownload = False
         self._updateApplyWorker = None
-        self._updateApplyThread = None
         self._updateApplyDialog = None
         self._navigationTarget = None
         self._pendingNavigation = None
@@ -379,7 +377,6 @@ class MainWindow(MSFluentWindow):
         self._quitRequested = False
         self._quitTaskIds = set()
         self.machineRegistrationWorker = None
-        self.machineRegistrationThread = None
 
         # MSFluentWindow 固定使用弹出式页面栈，快照过渡可避免目标页在动画前闪现。
         oldView = self.stackedWidget.view
@@ -480,16 +477,14 @@ class MainWindow(MSFluentWindow):
             return
         self.machineRegistrationWorker = MachineRegistrationWorker()
         self.machineRegistrationWorker.finished.connect(self._onMachineRegistered)
-        self.machineRegistrationThread = threading.Thread(
+        threading.Thread(
             target=self.machineRegistrationWorker.run,
             daemon=True,
-        )
-        self.machineRegistrationThread.start()
+        ).start()
 
     def _onMachineRegistered(self, machineCode):
         worker = self.machineRegistrationWorker
         self.machineRegistrationWorker = None
-        self.machineRegistrationThread = None
         if worker is not None:
             worker.deleteLater()
         if machineCode and not self._resourcesShutdown:
@@ -1592,11 +1587,7 @@ class MainWindow(MSFluentWindow):
         )
         self._downloadWorker.retrying.connect(self._onUpdateDownloadRetrying)
         self._downloadWorker.finished.connect(self._onUpdateDownloadFinished)
-        self._downloadThread = threading.Thread(
-            target=self._downloadWorker.run,
-            daemon=True,
-        )
-        self._downloadThread.start()
+        threading.Thread(target=self._downloadWorker.run, daemon=True).start()
 
     def _queueUpdateDownloadProgress(self, downloaded, total, speed, threads):
         self._pendingDownloadProgress = (downloaded, total, speed, threads)
@@ -1683,7 +1674,6 @@ class MainWindow(MSFluentWindow):
         self._downloadProgressTimer.stop()
         worker = self._downloadWorker
         self._downloadWorker = None
-        self._downloadThread = None
         if worker is not None:
             worker.deleteLater()
 
@@ -1759,7 +1749,6 @@ class MainWindow(MSFluentWindow):
         thread = threading.Thread(target=worker.run, daemon=True)
         self._updateApplyDialog = dialog
         self._updateApplyWorker = worker
-        self._updateApplyThread = thread
         worker.finished.connect(self._onUpdateApplyFinished)
         dialog.show()
         try:
@@ -1771,7 +1760,6 @@ class MainWindow(MSFluentWindow):
         worker = self._updateApplyWorker
         dialog = self._updateApplyDialog
         self._updateApplyWorker = None
-        self._updateApplyThread = None
         self._updateApplyDialog = None
         if worker is not None:
             worker.deleteLater()
