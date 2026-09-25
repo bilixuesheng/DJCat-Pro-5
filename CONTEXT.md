@@ -123,7 +123,7 @@ _Avoid_: downloaded application、Package
 _Avoid_: Home Action、Shell action
 
 **Application Launch**:
-从 Application Store 打开一个 Installed Application 或它的 Application Preset 时，对其 Open Action 或 Preset Action 的一次后台执行。同一 Application 同时至多有一次 Application Launch。启动新程序只确认进程已创建，不要求出现可见窗口；再次打开仍在运行的同一程序时才尝试唤起已有窗口。
+从 Application Store、Application Home Card 或对应的 Tray Card Shortcut 打开一个 Installed Application 或它的 Application Preset 时，对其 Open Action 或 Preset Action 的一次后台执行。同一 Application 同时至多有一次 Application Launch。启动新程序只确认进程已创建，不要求出现可见窗口；再次打开仍在运行的同一程序时才尝试唤起已有窗口。
 _Avoid_: Application Update、install、等待程序窗口
 
 **Application Preset**:

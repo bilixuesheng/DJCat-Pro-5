@@ -162,12 +162,6 @@ class AppStorePageTest(TestCase):
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.qtApp.processEvents()
 
-    def _waitForLaunches(self, timeout=2):
-        deadline = time.monotonic() + timeout
-        while self.page._launching and time.monotonic() < deadline:
-            QTest.qWait(10)
-        self.assertEqual(self.page._launching, set())
-
     def _allContentCenterX(self):
         margins = self.page.allPage.layout().contentsMargins()
         return (margins.left() + self.page.allPage.width() - margins.right()) // 2
@@ -1060,7 +1054,7 @@ class AppStorePageTest(TestCase):
         self.assertLess(openButton.minimumHeight(), openButton.maximumHeight())
         self.assertTrue(openButton.isEnabled())
         openButton.click()
-        self._waitForLaunches()
+        self._waitForLaunch()
         self.page.store.executeAction.assert_called_once_with(
             installed, installedAction
         )
@@ -1117,7 +1111,7 @@ class AppStorePageTest(TestCase):
 
         self.assertTrue(openButton.isEnabled())
         openButton.click()
-        self._waitForLaunches()
+        self._waitForLaunch()
         self.page.store.executeAction.assert_called_once_with(installed, action)
 
     def testCatalogPresetRejectsUnapprovedUriScheme(self):
@@ -1195,7 +1189,7 @@ class AppStorePageTest(TestCase):
             self.page._onAppAction(app)
         finally:
             release.set()
-        self._waitForLaunches()
+        self._waitForLaunch()
 
         self.page.store.executeAction.assert_called_once_with(installed, action)
         self.assertEqual(card.actionButton.text(), "打开")
@@ -1208,7 +1202,7 @@ class AppStorePageTest(TestCase):
 
         with patch.object(InfoBar, "error") as error:
             self.page._openPreset(app, app["presets"][0])
-            self._waitForLaunches()
+            self._waitForLaunch()
 
         self.page.store.executeAction.assert_not_called()
         self.assertEqual(error.call_args.args[:2], ("无法打开预设", "请先安装应用后再打开预设。"))
@@ -1678,6 +1672,7 @@ class AppStorePageTest(TestCase):
                 "action": {"type": "program", "target": "new.exe"},
             }
         )
+        self._waitForLaunch()
 
         self.page.store.executeAction.assert_called_once_with(installed)
 
@@ -1687,17 +1682,20 @@ class AppStorePageTest(TestCase):
         self.page.store.installed.return_value = {1: installed}
         self.page.store.executeAction.return_value = False
 
-        self.assertFalse(
-            self.page.executePinnedCard(
-                {
-                    "app_id": 1,
-                    "preset_id": 0,
-                    "title": "Ghost Downloader",
-                    "description": "下载工具",
-                    "action": {"type": "url", "target": "https://example.test"},
-                }
-            )
+        failed = QSignalSpy(self.page.pinnedCardFailed)
+
+        self.page.executePinnedCard(
+            {
+                "app_id": 1,
+                "preset_id": 0,
+                "title": "Ghost Downloader",
+                "description": "下载工具",
+                "action": {"type": "url", "target": "https://example.test"},
+            }
         )
+        self._waitForLaunch()
+
+        self.assertEqual(failed.count(), 1)
 
     def testPresetPinnedCardUsesMatchingInstalledPresetAction(self):
         installed = SimpleNamespace(
@@ -1739,6 +1737,7 @@ class AppStorePageTest(TestCase):
                 "action": {"type": "program", "target": "old.exe"},
             }
         )
+        self._waitForLaunch()
 
         self.page.store.executeAction.assert_called_once_with(
             installed,
@@ -1761,6 +1760,7 @@ class AppStorePageTest(TestCase):
                 "action": action,
             }
         )
+        self._waitForLaunch()
 
         self.page.store.executeAction.assert_called_once_with(installed, action)
 
@@ -1791,6 +1791,7 @@ class AppStorePageTest(TestCase):
                 },
             }
         )
+        self._waitForLaunch()
 
         self.page.store.executeAction.assert_called_once_with(
             installed, currentAction
@@ -1827,8 +1828,64 @@ class AppStorePageTest(TestCase):
                     },
                 }
             )
+            self._waitForLaunch()
 
         self.page.store.executeAction.assert_not_called()
+
+    def testPinnedCardRunsOutsideTheGuiThread(self):
+        # 主页和托盘上的应用卡片同样不在界面线程上读安装清单、建进程：
+        # 安装或卸载持锁枚举进程时，点一下就会让整个窗口卡住。
+        installed = object()
+        started = threading.Event()
+        release = threading.Event()
+
+        def execute(*_args):
+            started.set()
+            release.wait(1)
+            return True
+
+        self.page.store = Mock()
+        self.page.store.installed.return_value = {1: installed}
+        self.page.store.executeAction.side_effect = execute
+        failed = QSignalSpy(self.page.pinnedCardFailed)
+        item = {
+            "app_id": 1,
+            "preset_id": 0,
+            "title": "Demo",
+            "description": "",
+            "action": {"type": "program", "target": "demo.exe"},
+        }
+        try:
+            before = time.monotonic()
+            self.page.executePinnedCard(item)
+            self.assertLess(time.monotonic() - before, 0.2)
+            self.assertTrue(started.wait(1))
+            self.page.executePinnedCard(item)
+        finally:
+            release.set()
+        self._waitForLaunch()
+
+        self.page.store.executeAction.assert_called_once_with(installed)
+        self.assertEqual(failed.count(), 0)
+
+    def testPinnedCardWaitsForPackageOperationInsteadOfRunning(self):
+        self.page.store = Mock()
+        self.page._installing.add(1)
+        failed = QSignalSpy(self.page.pinnedCardFailed)
+
+        with patch.object(InfoBar, "warning") as warning:
+            self.page.executePinnedCard(
+                {
+                    "app_id": 1,
+                    "preset_id": 0,
+                    "action": {"type": "program", "target": "demo.exe"},
+                }
+            )
+
+        self.page.store.installed.assert_not_called()
+        self.page.store.executeAction.assert_not_called()
+        self.assertEqual(failed.count(), 1)
+        self.assertEqual(warning.call_args.args[0], "应用暂时无法打开")
 
     def testCatalogRefreshKeepsPinnedActionAndCachedIconUntilReplacementLoads(self):
         item = cfg.pinnedHomeCards

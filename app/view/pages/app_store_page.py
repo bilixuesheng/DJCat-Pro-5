@@ -905,8 +905,17 @@ class AdvertisementOverlay(QWidget):
         super().mouseReleaseEvent(event)
 
 
+class _PinnedCardNotice(Exception):
+    def __init__(self, level, title, message):
+        super().__init__(message)
+        self.level = level
+        self.title = title
+
+
 class AppStorePage(QWidget):
     pinnedCardsChanged = Signal(object)
+    pinnedCardFailed = Signal()
+    _pinnedCardFinished = Signal(int, bool, str, str, str)
     _launchFailed = Signal(str)
     _launchFinished = Signal(int, str, str)
     _downloadProgressSignal = Signal(int, int, int)
@@ -963,6 +972,7 @@ class AppStorePage(QWidget):
         self._downloadRetrySignal.connect(self._showDownloadRetry)
         self._downloadFinishedSignal.connect(self._onDownloadFinished)
         self._launchFinished.connect(self._onLaunchFinished)
+        self._pinnedCardFinished.connect(self._onPinnedCardFinished)
         self._installFinished.connect(self._onInstallFinished)
         self._uninstallFinished.connect(self._onUninstallFinished)
         self.setObjectName("AppStorePage")
@@ -2797,64 +2807,148 @@ class AppStorePage(QWidget):
         self.pinnedCardsChanged.emit(cards)
 
     def executePinnedCard(self, item):
-        noticeParent = self.window()
+        """Run an Application Home Card without blocking the GUI thread.
+
+        Reading the installed manifests waits on the store lock, which an
+        update or uninstall holds while it enumerates processes, and creating
+        the process can stall on antivirus scans; the result arrives through
+        `pinnedCardFailed` instead of a return value.
+        """
         cards = normalize_pinned_cards([item])
         if not cards:
-            InfoBar.warning("预设卡片无效", "请重新固定这张主页卡片。", duration=3000, position=InfoBarPosition.BOTTOM_RIGHT, parent=noticeParent)
-            return False
+            self._showPinnedCardNotice(
+                "warning", "预设卡片无效", "请重新固定这张主页卡片。"
+            )
+            self.pinnedCardFailed.emit()
+            return
         item = cards[0]
         appId = item["app_id"]
-        installed = self.store.installed().get(appId)
-        if not installed:
-            InfoBar.warning("应用尚未安装", "请先安装对应应用后再使用主页预设卡片。", duration=3000, position=InfoBarPosition.BOTTOM_RIGHT, parent=noticeParent)
-            return False
+        if appId in self._launching:
+            return
+        if self._isBusy(appId):
+            self._showPinnedCardNotice(
+                "warning",
+                "应用暂时无法打开",
+                "应用正在下载、安装或卸载，请完成后再试。",
+            )
+            self.pinnedCardFailed.emit()
+            return
+        # 目录只在界面线程里读写，先在这里取出，后台线程不碰它。
+        catalogLoaded = self._catalogLoaded
+        catalogPreset = None
+        if item["preset_id"] != DIRECT_APPLICATION_PRESET_ID and catalogLoaded:
+            catalogPreset = self._currentCatalogPreset(appId, item["preset_id"])
+        self._launching.add(appId)
+        self._downloadStates[appId] = "打开中"
+        self._updateVisibleCardState(appId)
+        self._updateDetailAction()
         try:
+            thread = threading.Thread(
+                target=self._executePinnedCardInBackground,
+                args=(item, catalogLoaded, catalogPreset),
+                daemon=True,
+            )
+            with self._fileOperationLock:
+                self._fileOperationThreads.add(thread)
+            try:
+                thread.start()
+            except Exception:
+                with self._fileOperationLock:
+                    self._fileOperationThreads.discard(thread)
+                raise
+        except Exception as error:
+            self._onPinnedCardFinished(
+                appId, False, "error", "执行预设失败", str(error)
+            )
+
+    def _executePinnedCardInBackground(self, item, catalogLoaded, catalogPreset):
+        appId = item["app_id"]
+        succeeded = False
+        level = title = message = ""
+        try:
+            installed = self.store.installed().get(appId)
+            if not installed:
+                raise _PinnedCardNotice(
+                    "warning",
+                    "应用尚未安装",
+                    "请先安装对应应用后再使用主页预设卡片。",
+                )
             if item["preset_id"] == DIRECT_APPLICATION_PRESET_ID:
                 result = self.store.executeAction(installed)
             else:
-                localPreset = next(
-                    (
-                        preset
-                        for preset in installed.metadata.get("presets", [])
-                        if isinstance(preset, dict)
-                        and str(preset.get("id", ""))
-                        == str(item["preset_id"])
-                    ),
-                    None,
+                action = self._pinnedPresetAction(
+                    item, installed, catalogLoaded, catalogPreset
                 )
-                action = None
-                if self._catalogLoaded:
-                    catalogPreset = self._currentCatalogPreset(
-                        appId, item["preset_id"]
-                    )
-                    if catalogPreset is not None:
-                        catalogAction = self._catalogExternalAction(catalogPreset)
-                        if catalogAction is not None:
-                            action = catalogAction
-                        elif (
-                            isinstance(catalogPreset.get("action"), dict)
-                            and catalogPreset["action"].get("type") == "program"
-                            and isinstance(localPreset, dict)
-                        ):
-                            action = localPreset.get("action")
-                elif isinstance(localPreset, dict):
-                    action = localPreset.get("action")
-                if not isinstance(action, dict) and not self._catalogLoaded:
-                    action = self._catalogExternalAction(item)
-                if not isinstance(action, dict):
-                    InfoBar.warning(
-                        "主页卡片已失效",
-                        "请在应用详情中重新固定这张预设卡片。",
-                        duration=3000,
-                        position=InfoBarPosition.BOTTOM_RIGHT,
-                        parent=noticeParent,
-                    )
-                    return False
                 result = self.store.executeAction(installed, action)
-            return bool(result)
+            succeeded = bool(result)
+        except _PinnedCardNotice as notice:
+            level, title, message = notice.level, notice.title, str(notice)
         except (ApplicationStoreError, OSError, ValueError) as error:
-            InfoBar.error("执行预设失败", str(error), duration=4000, position=InfoBarPosition.BOTTOM_RIGHT, parent=noticeParent)
-            return False
+            level, title, message = "error", "执行预设失败", str(error)
+        except Exception as error:
+            logger.exception("主页应用卡片执行失败")
+            level, title, message = "error", "执行预设失败", str(error)
+        finally:
+            with self._fileOperationLock:
+                self._fileOperationThreads.discard(threading.current_thread())
+        if not self._shuttingDown:
+            self._pinnedCardFinished.emit(appId, succeeded, level, title, message)
+
+    def _pinnedPresetAction(self, item, installed, catalogLoaded, catalogPreset):
+        localPreset = next(
+            (
+                preset
+                for preset in installed.metadata.get("presets", [])
+                if isinstance(preset, dict)
+                and str(preset.get("id", "")) == str(item["preset_id"])
+            ),
+            None,
+        )
+        action = None
+        if catalogLoaded:
+            if catalogPreset is not None:
+                catalogAction = self._catalogExternalAction(catalogPreset)
+                if catalogAction is not None:
+                    action = catalogAction
+                elif (
+                    isinstance(catalogPreset.get("action"), dict)
+                    and catalogPreset["action"].get("type") == "program"
+                    and isinstance(localPreset, dict)
+                ):
+                    action = localPreset.get("action")
+        elif isinstance(localPreset, dict):
+            action = localPreset.get("action")
+        if not isinstance(action, dict) and not catalogLoaded:
+            action = self._catalogExternalAction(item)
+        if not isinstance(action, dict):
+            raise _PinnedCardNotice(
+                "warning",
+                "主页卡片已失效",
+                "请在应用详情中重新固定这张预设卡片。",
+            )
+        return action
+
+    def _onPinnedCardFinished(self, appId, succeeded, level, title, message):
+        if self._shuttingDown or appId not in self._launching:
+            return
+        self._launching.discard(appId)
+        self._downloadStates.pop(appId, None)
+        self._updateVisibleCardState(appId)
+        self._updateDetailAction()
+        if message:
+            self._showPinnedCardNotice(level, title, message)
+        if not succeeded:
+            self.pinnedCardFailed.emit()
+
+    def _showPinnedCardNotice(self, level, title, message):
+        show = InfoBar.warning if level == "warning" else InfoBar.error
+        show(
+            title,
+            message,
+            duration=3000 if level == "warning" else 4000,
+            position=InfoBarPosition.BOTTOM_RIGHT,
+            parent=self.window(),
+        )
 
     def refreshPinnedCards(self):
         cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)

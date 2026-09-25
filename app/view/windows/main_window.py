@@ -279,6 +279,7 @@ class LazySettingPage(LazyPage):
 
 class LazyAppStorePage(LazyPage):
     pinnedCardsChanged = Signal(object)
+    pinnedCardFailed = Signal()
 
     def __init__(self, parent=None):
         super().__init__("AppStorePage", parent)
@@ -289,6 +290,7 @@ class LazyAppStorePage(LazyPage):
 
         page = AppStorePage(self)
         page.pinnedCardsChanged.connect(self.pinnedCardsChanged)
+        page.pinnedCardFailed.connect(self.pinnedCardFailed)
         if self._searchText:
             page.setSearchText(self._searchText)
         return page
@@ -303,7 +305,7 @@ class LazyAppStorePage(LazyPage):
             self.page.setSearchText(text)
 
     def executePinnedCard(self, item):
-        return self.ensureLoaded().executePinnedCard(item)
+        self.ensureLoaded().executePinnedCard(item)
 
     def shutdown(self):
         if self.page is not None:
@@ -1128,6 +1130,8 @@ class MainWindow(MSFluentWindow):
             self.homePage.all_cards["定时关机"].clicked.connect(self._navToShutdown)
 
         self.appStorePage.pinnedCardsChanged.connect(self._setPinnedHomeCards)
+        # 应用卡片在后台启动，失败时才弹出主窗口，让用户看到提示。
+        self.appStorePage.pinnedCardFailed.connect(self._showMainWindow)
         self.settingPage.appStoreCacheCleared.connect(
             self._onAppStoreCacheCleared
         )
@@ -1197,8 +1201,7 @@ class MainWindow(MSFluentWindow):
         self._setPinnedHomeCards(cards)
 
     def _onPinnedHomeCardClicked(self, item):
-        if self.appStorePage.executePinnedCard(item) is False:
-            self._showMainWindow()
+        self.appStorePage.executePinnedCard(item)
 
     def _onPinnedHomeCardRemoved(self, item):
         normalized = normalize_pinned_cards([item])
