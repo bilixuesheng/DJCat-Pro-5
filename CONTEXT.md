@@ -127,7 +127,7 @@ _Avoid_: Home Action、Shell action
 _Avoid_: Application Update、install、等待程序窗口
 
 **Application Preset**:
-归属于一个 Application 的命名 Preset Action，由服务端维护标题、说明和顺序。用户将它固定到主页后才产生 Application Home Card。
+归属于一个 Application 的命名 Preset Action，由服务端维护标题、说明和顺序。用户将它固定到主页后才产生 Application Home Card。从详情页和从 Application Home Card 打开遵循同一规则：Application Catalog 已加载时，Catalog 不再列出的 Preset 失效，可直接执行的网址或协议以 Catalog 为准，程序及其他协议以本机 Installed Application 记录为准；Catalog 尚未加载时先用本机记录，其次用固定时保存的网址或协议。
 _Avoid_: Custom Home Card、template、default setting
 
 **Application Home Card**:

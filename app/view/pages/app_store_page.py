@@ -2262,7 +2262,14 @@ class AppStorePage(QWidget):
             if preset is None:
                 self.store.executeAction(local or app)
             else:
-                self.store.executeAction(local, self._presetAction(local, preset))
+                if local is None:
+                    raise ApplicationStoreError("请先安装应用后再打开预设。")
+                action = self._presetAction(
+                    local.metadata.get("presets") or [], preset.get("id"), preset
+                )
+                if action is None:
+                    raise ApplicationStoreError("请先更新应用，再打开这个预设。")
+                self.store.executeAction(local, action)
         except Exception as error:
             errorMessage = str(error)
         finally:
@@ -2271,23 +2278,34 @@ class AppStorePage(QWidget):
         if not self._shuttingDown:
             self._launchFinished.emit(appId, errorMessage, errorTitle)
 
-    def _presetAction(self, installed, preset):
-        if installed is None:
-            raise ApplicationStoreError("请先安装应用后再打开预设。")
-        installedPreset = next(
+    def _presetAction(self, localPresets, presetId, catalogPreset, catalogLoaded=True):
+        """The action a preset runs, from the detail page and a Home Card alike.
+
+        Once the catalog is loaded it decides: a preset it no longer lists is
+        gone, and a link it may run directly comes from it, so a fixed link
+        takes effect at once. Programs and other protocols run from the
+        installed manifest, which matches the files on disk. Before the catalog
+        loads, the installed manifest comes first and the link saved with the
+        card second. Returns None when the preset cannot run.
+        """
+        localAction = next(
             (
-                item
-                for item in installed.metadata.get("presets", [])
-                if str(item.get("id", "")) == str(preset.get("id", ""))
+                preset.get("action")
+                for preset in localPresets
+                if isinstance(preset, dict)
+                and str(preset.get("id", "")) == str(presetId)
             ),
             None,
         )
-        action = installedPreset.get("action") if installedPreset else None
-        if not isinstance(action, dict):
-            action = self._catalogExternalAction(preset)
-        if not isinstance(action, dict):
-            raise ApplicationStoreError("请先更新应用，再打开这个预设。")
-        return action
+        if not catalogLoaded:
+            candidates = (localAction, self._catalogExternalAction(catalogPreset))
+        elif catalogPreset is None:
+            return None
+        else:
+            candidates = (self._catalogExternalAction(catalogPreset), localAction)
+        return next(
+            (action for action in candidates if isinstance(action, dict)), None
+        )
 
     def _onLaunchFinished(self, appId, error, errorTitle="无法打开应用"):
         if self._shuttingDown or appId not in self._launching:
@@ -2538,10 +2556,6 @@ class AppStorePage(QWidget):
             )
             return
         pinned = self._pinnedKeys()
-        installedPresetIds = {
-            str(preset.get("id", ""))
-            for preset in app.get("installed_presets", []) or []
-        }
         for preset in presets:
             item = CardWidget(self.presetGroup)
             row = QHBoxLayout(item)
@@ -2558,8 +2572,10 @@ class AppStorePage(QWidget):
             row.addLayout(copy, 1)
             key = (int(app["id"]), int(preset["id"]))
             available = bool(app.get("installed")) and (
-                str(preset.get("id", "")) in installedPresetIds
-                or self._catalogExternalAction(preset) is not None
+                self._presetAction(
+                    app.get("installed_presets") or [], preset.get("id"), preset
+                )
+                is not None
             )
             busy = self._isBusy(key[0])
             openButton = PushButton(FIF.PLAY, "打开", item)
@@ -2782,9 +2798,18 @@ class AppStorePage(QWidget):
             if item["preset_id"] == DIRECT_APPLICATION_PRESET_ID:
                 result = self.store.executeAction(installed)
             else:
-                action = self._pinnedPresetAction(
-                    item, installed, catalogLoaded, catalogPreset
+                action = self._presetAction(
+                    installed.metadata.get("presets") or [],
+                    item["preset_id"],
+                    catalogPreset if catalogLoaded else item,
+                    catalogLoaded,
                 )
+                if action is None:
+                    raise _PinnedCardNotice(
+                        "warning",
+                        "主页卡片已失效",
+                        "请在应用详情中重新固定这张预设卡片。",
+                    )
                 result = self.store.executeAction(installed, action)
             succeeded = bool(result)
         except _PinnedCardNotice as notice:
@@ -2799,40 +2824,6 @@ class AppStorePage(QWidget):
                 self._fileOperationThreads.discard(threading.current_thread())
         if not self._shuttingDown:
             self._pinnedCardFinished.emit(appId, succeeded, level, title, message)
-
-    def _pinnedPresetAction(self, item, installed, catalogLoaded, catalogPreset):
-        localPreset = next(
-            (
-                preset
-                for preset in installed.metadata.get("presets", [])
-                if isinstance(preset, dict)
-                and str(preset.get("id", "")) == str(item["preset_id"])
-            ),
-            None,
-        )
-        action = None
-        if catalogLoaded:
-            if catalogPreset is not None:
-                catalogAction = self._catalogExternalAction(catalogPreset)
-                if catalogAction is not None:
-                    action = catalogAction
-                elif (
-                    isinstance(catalogPreset.get("action"), dict)
-                    and catalogPreset["action"].get("type") == "program"
-                    and isinstance(localPreset, dict)
-                ):
-                    action = localPreset.get("action")
-        elif isinstance(localPreset, dict):
-            action = localPreset.get("action")
-        if not isinstance(action, dict) and not catalogLoaded:
-            action = self._catalogExternalAction(item)
-        if not isinstance(action, dict):
-            raise _PinnedCardNotice(
-                "warning",
-                "主页卡片已失效",
-                "请在应用详情中重新固定这张预设卡片。",
-            )
-        return action
 
     def _onPinnedCardFinished(self, appId, succeeded, level, title, message):
         if self._shuttingDown or appId not in self._launching:

@@ -1067,6 +1067,33 @@ class AppStorePageTest(TestCase):
             installed, installedAction
         )
 
+    def testDetailPresetOpensTheCatalogLinkOverTheInstalledOne(self):
+        catalogAction = {"type": "url", "target": "https://example.test/new"}
+        installedAction = {"type": "url", "target": "https://example.test/old"}
+        app = _apps(1)[0] | {
+            "id": 7,
+            "installed": True,
+            "presets": [{"id": 11, "title": "打开主页", "action": catalogAction}],
+            "installed_presets": [
+                {"id": 11, "title": "打开主页", "action": installedAction}
+            ],
+        }
+        installed = SimpleNamespace(metadata={"presets": app["installed_presets"]})
+        self.page.store.installed = Mock(return_value={7: installed})
+        self.page.store.executeAction = Mock()
+
+        self.page._renderPresets(app)
+        next(
+            button
+            for button in self.page.presetGroup.findChildren(PushButton)
+            if button.text() == "打开"
+        ).click()
+        self._waitForLaunch()
+
+        self.page.store.executeAction.assert_called_once_with(
+            installed, catalogAction
+        )
+
     def testDetailPresetOpenIsDisabledUntilInstalledPresetExists(self):
         app = _apps(1)[0] | {
             "id": 7,
@@ -1743,6 +1770,32 @@ class AppStorePageTest(TestCase):
         self.page.store.executeAction.assert_called_once_with(
             installed,
             {"type": "program", "target": "new.exe"},
+        )
+
+    def testPinnedCardRunsAnInstalledProtocolTheCatalogCannotRunDirectly(self):
+        installedAction = {"type": "uri", "target": "steam://run/1"}
+        installed = SimpleNamespace(
+            metadata={"presets": [{"id": 7, "action": installedAction}]}
+        )
+        self.page.store = Mock()
+        self.page.store.installed.return_value = {1: installed}
+        self.page.catalog = [
+            {"id": 1, "presets": [{"id": 7, "action": dict(installedAction)}]}
+        ]
+
+        self.page.executePinnedCard(
+            {
+                "app_id": 1,
+                "preset_id": 7,
+                "title": "启动游戏",
+                "description": "",
+                "action": installedAction,
+            }
+        )
+        self._waitForLaunch()
+
+        self.page.store.executeAction.assert_called_once_with(
+            installed, installedAction
         )
 
     def testColdStartPinnedCatalogUriUsesStoredSafeAction(self):
