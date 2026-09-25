@@ -115,7 +115,7 @@ _Avoid_: 软件、程序（仅保留在既有 UI 文案中）、package
 _Avoid_: Application、Client Installer、binary
 
 **Installed Application**:
-已由 Application Store 安装并可被 DJCat 识别的 Application。版本落后于 Application Catalog 中同 ID 的 Application 时形成 Application Update。
+已由 Application Store 安装并可被 DJCat 识别的 Application。版本落后于 Application Catalog 中同 ID 的 Application 时形成 Application Update。只有版本变化才形成 Application Update；同一版本下名称、简介、图标、公告、Open Action 或 Application Preset 的变化只同步到本机记录，不重新下载 Package。
 _Avoid_: downloaded application、Package
 
 **Application Action**:
@@ -123,7 +123,7 @@ _Avoid_: downloaded application、Package
 _Avoid_: Home Action、Shell action
 
 **Application Launch**:
-从 Application Store 打开一个 Installed Application 时，对其 Open Action 的一次后台执行。启动新程序只确认进程已创建，不要求出现可见窗口；再次打开仍在运行的同一程序时才尝试唤起已有窗口。
+从 Application Store、Application Home Card 或对应的 Tray Card Shortcut 打开一个 Installed Application 或它的 Application Preset 时，对其 Open Action 或 Preset Action 的一次后台执行。同一 Application 同时至多有一次 Application Launch。启动新程序只确认进程已创建，不要求出现可见窗口；再次打开仍在运行的同一程序时才尝试唤起已有窗口。
 _Avoid_: Application Update、install、等待程序窗口
 
 **Application Preset**:
