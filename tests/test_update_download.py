@@ -1248,30 +1248,11 @@ class UpdateWindowLifecycleTest(TestCase):
 
         parent.requestQuit.assert_called_once_with()
 
-    def testOnlyLatestOverlappingUpdateCheckCanChangeTheUi(self):
-        firstWorker = Mock()
-        secondWorker = Mock()
-        self.window._updateRequestId = 2
-        self.window._updateJobs = {
-            1: (firstWorker, Mock(), False),
-            2: (secondWorker, Mock(), True),
-        }
-
-        with patch.object(self.window, "_onUpdateChecked") as checked:
-            self.window._onUpdateCheckFinished(1, {"latest_version": "1"}, "")
-            checked.assert_not_called()
-            self.window._onUpdateCheckFinished(2, {"latest_version": "2"}, "")
-
-        firstWorker.deleteLater.assert_called_once_with()
-        secondWorker.deleteLater.assert_called_once_with()
-        checked.assert_called_once_with({"latest_version": "2"}, "", True)
-        self.assertEqual(self.window._updateJobs, {})
-
-    def testUpdateWorkerCarriesItsRequestIdToCompletion(self):
+    def testUpdateWorkerEmitsTheResponse(self):
         response = Mock()
         response.json.return_value = {"latest_version": "9999.0.0"}
         results = []
-        worker = UpdateWorker(17)
+        worker = UpdateWorker()
         worker.finished.connect(lambda *args: results.append(args))
 
         with patch.object(requests, "get", return_value=response):
@@ -1279,7 +1260,7 @@ class UpdateWindowLifecycleTest(TestCase):
 
         self.assertEqual(
             results,
-            [(17, {"latest_version": "9999.0.0"}, "")],
+            [({"latest_version": "9999.0.0"}, "")],
         )
         response.close.assert_called_once_with()
 
@@ -1287,7 +1268,7 @@ class UpdateWindowLifecycleTest(TestCase):
         response = Mock()
         response.json.return_value = {"latest_version": "9999.0.0"}
         results = []
-        worker = UpdateWorker(18)
+        worker = UpdateWorker()
         worker.finished.connect(lambda *args: results.append(args))
 
         with (
@@ -1308,7 +1289,7 @@ class UpdateWindowLifecycleTest(TestCase):
         self.assertEqual(sleep.call_count, 3)
         self.assertEqual(
             results,
-            [(18, {"latest_version": "9999.0.0"}, "")],
+            [({"latest_version": "9999.0.0"}, "")],
         )
         response.close.assert_called_once_with()
 
@@ -1316,7 +1297,7 @@ class UpdateWindowLifecycleTest(TestCase):
         response = Mock()
         response.json.return_value = []
         results = []
-        worker = UpdateWorker(19)
+        worker = UpdateWorker()
         worker.finished.connect(lambda *args: results.append(args))
 
         with (
@@ -1325,8 +1306,8 @@ class UpdateWindowLifecycleTest(TestCase):
         ):
             worker.run()
 
-        self.assertEqual(results[0][:2], (19, {}))
-        self.assertIn("格式无效", results[0][2])
+        self.assertEqual(results[0][0], {})
+        self.assertIn("格式无效", results[0][1])
         response.close.assert_called_once_with()
 
     def testUpdateWorkerRejectsHttpInIntermediateRedirect(self):
@@ -1335,7 +1316,7 @@ class UpdateWindowLifecycleTest(TestCase):
         response.history = [Mock(url="http://mirror.example.test/beta/")]
         response.json.return_value = {"latest_version": "9999.0.0"}
         results = []
-        worker = UpdateWorker(20)
+        worker = UpdateWorker()
         worker.finished.connect(lambda *args: results.append(args))
 
         with (
@@ -1344,8 +1325,8 @@ class UpdateWindowLifecycleTest(TestCase):
         ):
             worker.run()
 
-        self.assertEqual(results[0][:2], (20, {}))
-        self.assertIn("必须保持 HTTPS", results[0][2])
+        self.assertEqual(results[0][0], {})
+        self.assertIn("必须保持 HTTPS", results[0][1])
         response.close.assert_called_once_with()
 
     def testMalformedRemoteVersionIsRejectedBeforeShowingUpdate(self):
@@ -1400,9 +1381,8 @@ class UpdateWindowLifecycleTest(TestCase):
         checkBar = Mock()
         checkBar.close.side_effect = lambda: order.append("close")
         worker = Mock()
-        self.window._updateRequestId = 1
         self.window._updateCheckInfoBar = checkBar
-        self.window._updateJobs = {1: (worker, Mock(), True)}
+        self.window._updateJob = (worker, True)
 
         with patch.object(
             self.window,
@@ -1410,7 +1390,6 @@ class UpdateWindowLifecycleTest(TestCase):
             side_effect=lambda *_: order.append("result"),
         ):
             self.window._onUpdateCheckFinished(
-                1,
                 {"latest_version": "9999.0.0"},
                 "",
             )
@@ -1438,10 +1417,9 @@ class UpdateWindowLifecycleTest(TestCase):
 
         self.assertEqual(workerFactory.call_count, 1)
         self.assertEqual(threadFactory.call_count, 1)
-        self.assertEqual(len(self.window._updateJobs), 1)
-        self.assertTrue(next(iter(self.window._updateJobs.values()))[2])
+        self.assertEqual(self.window._updateJob, (worker, True))
         self.assertIsNotNone(self.window._updateCheckInfoBar)
-        self.window._updateJobs.clear()
+        self.window._updateJob = None
 
     def testUpdateDialogIsScheduledForDeletionAfterClosing(self):
         dialog = Mock()

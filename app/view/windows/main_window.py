@@ -95,13 +95,9 @@ class CustomSplashScreen(SplashScreen):
 
 
 class UpdateWorker(QObject):
-    finished = Signal(int, dict, str)
+    finished = Signal(dict, str)
 
     RETRY_COUNT = 3
-
-    def __init__(self, requestId):
-        super().__init__()
-        self.requestId = requestId
 
     def run(self):
         import requests
@@ -116,11 +112,11 @@ class UpdateWorker(QObject):
                 data = response.json()
                 if not isinstance(data, dict):
                     raise ValueError("更新接口返回格式无效")
-                self.finished.emit(self.requestId, data, "")
+                self.finished.emit(data, "")
                 return
             except (requests.RequestException, ValueError) as error:
                 if retry == self.RETRY_COUNT:
-                    self.finished.emit(self.requestId, {}, str(error))
+                    self.finished.emit({}, str(error))
                     return
                 time.sleep(1)
             finally:
@@ -377,8 +373,7 @@ class MainWindow(MSFluentWindow):
         self._updateApplyDialog = None
         self._navigationTarget = None
         self._pendingNavigation = None
-        self._updateRequestId = 0
-        self._updateJobs = {}
+        self._updateJob = None
         self._resourcesShutdown = False
         self._quitRequested = False
         self._quitTaskIds = set()
@@ -1426,31 +1421,22 @@ class MainWindow(MSFluentWindow):
                     current
                 )
             )
-        if self._updateJobs:
-            requestId = self._updateRequestId
-            worker, thread, wasManual = self._updateJobs[requestId]
-            self._updateJobs[requestId] = (
-                worker,
-                thread,
-                wasManual or manual,
-            )
+        if self._updateJob is not None:
+            worker, wasManual = self._updateJob
+            self._updateJob = (worker, wasManual or manual)
             return
-        self._updateRequestId += 1
-        requestId = self._updateRequestId
-        worker = UpdateWorker(requestId)
-        thread = threading.Thread(target=worker.run, daemon=True)
-        self._updateJobs[requestId] = (worker, thread, manual)
+        worker = UpdateWorker()
+        self._updateJob = (worker, manual)
         worker.finished.connect(self._onUpdateCheckFinished)
-        thread.start()
+        threading.Thread(target=worker.run, daemon=True).start()
 
-    def _onUpdateCheckFinished(self, requestId, data, error):
-        job = self._updateJobs.pop(requestId, None)
+    def _onUpdateCheckFinished(self, data, error):
+        job, self._updateJob = self._updateJob, None
         if job is None:
             return
-
-        worker, _, manual = job
+        worker, manual = job
         worker.deleteLater()
-        if requestId != self._updateRequestId or self._resourcesShutdown:
+        if self._resourcesShutdown:
             return
         if manual:
             self._closeUpdateCheckInfoBar()
@@ -1854,7 +1840,6 @@ class MainWindow(MSFluentWindow):
         self._audioTaskQueue.clear()
         self._audioTaskActive = False
         self._activeAudioKind = ""
-        self._updateRequestId += 1
         self._pendingNavigation = None
         self.stackedWidget.view._stopAnimation()
         self._navigationTarget = None
