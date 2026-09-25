@@ -20,9 +20,7 @@ from app.common.application_icon import applicationIcon, trayHomeIcon
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
 
-
-
-# 三类任务总开关在建菜单和刷新时共用同一组名称与图标，集中在这里，改名时不会再漏掉某一处。
+# 三类任务总开关：建菜单和刷新文字共用这一份名称与图标。
 TRAY_TASK_ACTIONS = (
     (
         "broadcastAction",

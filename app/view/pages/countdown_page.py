@@ -87,7 +87,6 @@ class CountdownWindow(FramelessWindow):
         )
         self.background.lower()
         self.background.setGeometry(self.contentsRect())
-        # 固定布局窗口，任何模式下都不允许边缘拉伸
         self.setResizeEnabled(False)
 
         self.is_windowed = False
@@ -396,7 +395,6 @@ class CountdownWindow(FramelessWindow):
         self.titleLabel.setVisible(not self.is_windowed)
 
         if self.is_windowed:
-            # 窗口化只保留时间与角落操作按钮，彻底折叠中间控件所占空间
             self._setControlsVisible(False, animated=False)
             self.controlsWidget.hide()
             self.showNormal()

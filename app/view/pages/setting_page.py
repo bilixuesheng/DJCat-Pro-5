@@ -1230,8 +1230,6 @@ class SettingPage(QWidget):
         application.aboutToQuit.connect(lambda: migrateAppData(target))
         application.quit()
 
-    # ----- Setting Route -----
-
     def routeFor(self, key: str) -> list[str]:
         route = []
         while key is not None:
@@ -1282,8 +1280,6 @@ class SettingPage(QWidget):
             return
         view.scrollToCard(card)
         self.highlight.showOn(card)
-
-    # ----- Setting Suggestion -----
 
     @staticmethod
     def _cardTarget(card):

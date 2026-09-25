@@ -106,13 +106,12 @@ UPDATER_BACKUP_NAME = "updater.exe.old"
 
 
 def restoreUpdaterBinary(directory: Path = APP_DIR) -> bool:
-    """Reconcile updater.exe with the backup the updater leaves behind.
+    """Reconcile updater.exe with the updater.exe.old an older updater leaves.
 
-    The updater renames its own running binary before overwriting it, because a
-    running executable cannot be replaced in place. A copy that then fails leaves
-    the backup as the only surviving updater, so deleting it unconditionally
-    would make every later Client Update fail on a missing updater with nothing
-    left to recover from. Returns True when the backup had to be promoted back.
+    Older updaters renamed their own running binary before overwriting it; when
+    that copy failed, the backup was the only surviving updater, so it must be
+    promoted rather than deleted. Only needed for the one Client Update from
+    such a version. Returns True when the backup had to be promoted back.
     """
     backup = directory / UPDATER_BACKUP_NAME
     if not backup.is_file():

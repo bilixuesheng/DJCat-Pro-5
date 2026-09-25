@@ -41,8 +41,8 @@ class BannerWidget(QWidget):
         super().__init__(parent=parent)
         self.setFixedHeight(300)
 
-        self._cached_pixmap = None  # 预渲染的最终图片
-        self._cache_size = None     # 缓存对应的窗口尺寸
+        self._cached_pixmap = None
+        self._cache_size = None
         self._source_pixmap = None
 
         self.vBoxLayout = QVBoxLayout(self)
@@ -58,7 +58,7 @@ class BannerWidget(QWidget):
 
     def _onConfigChanged(self):
         self._invalidate_cache()
-        self.update()  # 触发布局重绘
+        self.update()
 
     def get_image_path(self):
         source = cfg.bannerImageSource.value

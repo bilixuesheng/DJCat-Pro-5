@@ -589,7 +589,7 @@ class WindowTextPreview(SettingPreviewCard):
             cfg.windowTitle.value.strip() or APP_NAME,
         )
 
-        # 最小化、最大化、关闭：画成真实标题栏上的三个字形而不是三根等长横线。
+        # 最小化、最大化、关闭
         glyphPen = QPen(_textColor(dark), 1.2)
         painter.setPen(glyphPen)
         centerY = rect.center().y()

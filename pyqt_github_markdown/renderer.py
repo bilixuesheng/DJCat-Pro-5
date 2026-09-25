@@ -81,7 +81,7 @@ class MarkdownRenderer:
 
     def buildHeading(self, node: SyntaxTreeNode, theme: Theme) -> QLabel:
         label = QLabel(inlineHtmlOf(node, theme.inlineCode))
-        label.setObjectName(node.tag)  # h1 .. h6
+        label.setObjectName(node.tag)
         _setupTextLabel(label)
         return label
 
@@ -183,7 +183,7 @@ class MarkdownRenderer:
     def _taskBox(self, checked: bool) -> QCheckBox:
         box = QCheckBox()
         box.setChecked(checked)
-        box.setEnabled(False)  # read-only display in v1
+        box.setEnabled(False)
         return box
 
     def _buildRule(self) -> QFrame:

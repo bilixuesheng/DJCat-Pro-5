@@ -582,7 +582,6 @@ class AdvertisementFrame(QWidget):
         super().leaveEvent(event)
 
 
-# 横幅上压文字的暗色渐变：原设计从 38% 高度开始变暗；文字块更高时提前到标题上方 24 px。
 AD_SCRIM_START = 0.38
 AD_SCRIM_LEAD_PX = 24
 
@@ -1812,7 +1811,7 @@ class AppStorePage(ScrollArea):
         overlayHeight = self.adOverlay.height()
         if overlayHeight <= 0:
             return
-        # 只提前、不推后：文字块矮时保持原设计的起点，下半部仍整片压暗。
+        # 只提前、不推后：文字块矮时仍从 AD_SCRIM_START 起压暗。
         start = round(
             max(0.0, min(AD_SCRIM_START, (self.adTitle.y() - AD_SCRIM_LEAD_PX) / overlayHeight)),
             2,

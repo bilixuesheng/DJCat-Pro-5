@@ -65,8 +65,6 @@ class IconGrid(QWidget):
         self._toolTipTimer.timeout.connect(self._showToolTip)
         registerTouchPressTarget(self)
 
-    # ----- items -----
-
     def setItems(self, items: list[IconGridItem]) -> None:
         self._items = list(items)
         self._icons.clear()
@@ -141,8 +139,6 @@ class IconGrid(QWidget):
         position = row * columns + column
         return self._visible[position] if position < len(self._visible) else None
 
-    # ----- geometry -----
-
     @staticmethod
     def _columns(width: int) -> int:
         usable = width - 2 * GRID_MARGIN + CELL_SPACING
@@ -167,8 +163,6 @@ class IconGrid(QWidget):
 
     def minimumSizeHint(self) -> QSize:
         return QSize(CELL_SIZE.width() + 2 * GRID_MARGIN, 2 * GRID_MARGIN)
-
-    # ----- painting -----
 
     def paintEvent(self, event) -> None:
         exposed = event.rect()
@@ -262,8 +256,6 @@ class IconGrid(QWidget):
         self._icons[key] = pixmap
         return pixmap
 
-    # ----- interaction -----
-
     def cancelTouchPress(self) -> None:
         if self._pressed is None:
             return
@@ -325,8 +317,6 @@ class IconGrid(QWidget):
     def hideEvent(self, event) -> None:
         self._resetPointerState()
         super().hideEvent(event)
-
-    # ----- tooltip -----
 
     def _showToolTip(self) -> None:
         index = self._toolTipIndex

@@ -877,8 +877,8 @@ class HomePage(ScrollArea):
         for card in self.all_cards.values():
             card.setEditing(self._editing_cards)
 
-        # 编辑态由排序手势独占触控：卡片自己吃掉 TouchBegin，页面滚动则调高拖动阈值
-        # 让它起不了手。不能改回抓放手势——那正是会在手势管理器里留残留的循环。
+        # 编辑态由排序手势独占触控：卡片自己吃掉 TouchBegin，页面只调高拖动阈值、
+        # 不释放手势——抓了又放会在 Qt 的手势管理器里留下残留，之后创建窗口时崩溃。
         self.setTouchScrollSuppressed(self._editing_cards)
         if not self._editing_cards:
             self._saveCardOrder()

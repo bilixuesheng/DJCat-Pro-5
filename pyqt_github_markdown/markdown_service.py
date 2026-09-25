@@ -4,7 +4,7 @@ from markdown_it.tree import SyntaxTreeNode
 
 class MarkdownService:
     def __init__(self):
-        # html=False: raw HTML is rendered as escaped text, never interpreted (v1 safety boundary).
+        # html=False: raw HTML is rendered as escaped text, never interpreted.
         self._md = MarkdownIt("commonmark", {"html": False, "linkify": True})
         self._md.enable(["table", "strikethrough", "linkify"])
 

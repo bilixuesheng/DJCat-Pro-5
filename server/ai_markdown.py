@@ -347,7 +347,7 @@ def _refreshHolidayCache():
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (cache,),
         )
-        # 旧版按 nager.at 只存了放假日期，语义不同，不再读取。
+        # 旧的 holiday_cache 只存放假日期、没有补班日，不能当作这份日历用。
         database.execute("DELETE FROM settings WHERE key = 'holiday_cache'")
         database.commit()
     return bool(loadedYears)
@@ -1000,7 +1000,7 @@ def _saveConversionLog(machineId, inputContent, outputContent, customStyle):
                 (machineId, inputContent, outputContent, customStyle, _nowIso()),
             )
             database.commit()
-        # 每天至多真正执行一次；只挂在记录页上，管理员不来看就永远不清。
+        # 挂在写入路径上（每天至多执行一次）：管理员不打开记录页也要清。
         _cleanupConversionLogs()
     except sqlite3.Error:
         pass
@@ -1852,7 +1852,6 @@ def adminPromptExampleDelete(exampleId):
 @_loginRequired
 def adminPromptExamplesReorder():
     _checkCsrf()
-    # 与应用市场各目录一样，接收 admin.js 共享排序表提交的 item_id / expected_item_id。
     try:
         orderedIds = [int(value) for value in request.form.getlist("item_id")]
         originalIds = [

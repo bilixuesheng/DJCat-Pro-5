@@ -5,9 +5,8 @@ from PySide6.QtGui import QIcon
 from app.config.cfg import cfg
 from app.config.paths import ASSET_DIR
 
-# 设置页的几处预览在 paintEvent 里取图标，推移动画期间逐帧重绘。每次新建 QIcon
-# 都要把整张图重新解码一遍（默认 256 px 的 logo 约 2.9 ms，自定义大图更久），
-# 复用同一个对象只需 0.01 ms。键里带上文件修改时间，同一路径换了图也能生效。
+# 设置页的几处预览在 paintEvent 里取图标，每次新建 QIcon 都会把整张图重新解码，
+# 所以复用同一个对象。键里带上文件修改时间，同一路径换了图也能生效。
 _icons: dict[tuple, QIcon] = {}
 
 

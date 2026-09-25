@@ -289,12 +289,11 @@ class FloatingMiniWindow(QWidget):
                 return False
             elif event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 self._isDragging = False
-                # 记录点击位置相对窗口左上角的偏移量，修复跳跃问题
                 self._dragPos = event.globalPosition().toPoint() - self.pos()
-                return True # 拦截事件，避免直接触发点击
+                return True
             elif event.type() == QEvent.Type.MouseMove and event.buttons() == Qt.MouseButton.LeftButton:
                 if not self._dragPos.isNull():
-                    # 移动距离超过 3 像素才判定为拖拽 (防手抖误触)
+                    # 手抖不算拖动
                     if (event.globalPosition().toPoint() - self.pos() - self._dragPos).manhattanLength() > 3:
                         self._isDragging = True
                     self.move(event.globalPosition().toPoint() - self._dragPos)
