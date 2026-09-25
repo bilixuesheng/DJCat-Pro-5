@@ -50,6 +50,11 @@ from app.view.windows.main_window import (
 )
 
 
+def downloadWorker(url, target, **kwargs):
+    kwargs.setdefault("validator", lambda _path: None)
+    return UpdateDownloadWorker(url, target, **kwargs)
+
+
 class FakeResponse:
     def __init__(
         self,
@@ -393,7 +398,7 @@ class UpdateDownloadTest(TestCase):
 
     def testDeclaredOversizedDownloadIsRejectedBeforeAllocation(self):
         with tempfile.TemporaryDirectory() as tempDir:
-            worker = UpdateDownloadWorker(
+            worker = downloadWorker(
                 DOWNLOAD_URL,
                 Path(tempDir) / "update.exe",
                 maxBytes=1024,
@@ -415,7 +420,7 @@ class UpdateDownloadTest(TestCase):
         with tempfile.TemporaryDirectory() as tempDir:
             path = Path(tempDir) / "update.exe.part"
             path.write_bytes(b"MZ-test")
-            worker = UpdateDownloadWorker(
+            worker = downloadWorker(
                 DOWNLOAD_URL,
                 Path(tempDir) / "update.exe",
                 expectedSha256="0" * 64,
@@ -426,7 +431,7 @@ class UpdateDownloadTest(TestCase):
 
     def testCancelDuringValidatorDoesNotPublishDownloadedFile(self):
         with tempfile.TemporaryDirectory() as tempDir:
-            worker = UpdateDownloadWorker(
+            worker = downloadWorker(
                 DOWNLOAD_URL,
                 Path(tempDir) / "update.exe",
             )
@@ -448,29 +453,9 @@ class UpdateDownloadTest(TestCase):
 
             self.assertFalse(worker.targetPath.exists())
 
-    def testChecksumDownloadStreamsAndStopsAtFourKilobytes(self):
-        response = FakeResponse([b"a" * 4096, b"b"])
-        with tempfile.TemporaryDirectory() as tempDir:
-            worker = UpdateDownloadWorker(
-                DOWNLOAD_URL,
-                Path(tempDir) / "update.exe",
-                checksumUrl=f"{DOWNLOAD_URL}.sha256",
-            )
-            with (
-                patch(
-                    "app.common.update_download.requests.get",
-                    return_value=response,
-                ) as get,
-                self.assertRaisesRegex(OSError, "校验文件过大"),
-            ):
-                worker._fetchChecksum()
-
-        self.assertTrue(get.call_args.kwargs["stream"])
-        self.assertTrue(response.closed)
-
     def testUnknownLengthDownloadStopsAtSizeLimit(self):
         with tempfile.TemporaryDirectory() as tempDir:
-            worker = UpdateDownloadWorker(
+            worker = downloadWorker(
                 DOWNLOAD_URL,
                 Path(tempDir) / "update.exe",
                 maxBytes=4,
@@ -501,7 +486,7 @@ class UpdateDownloadTest(TestCase):
 
         with tempfile.TemporaryDirectory() as tempDir:
             target = Path(tempDir) / "Updata" / "DJCat-Pro.exe"
-            worker = UpdateDownloadWorker(DOWNLOAD_URL, target)
+            worker = downloadWorker(DOWNLOAD_URL, target)
             progress = []
             results = []
             worker.progressChanged.connect(lambda *args: progress.append(args))
@@ -532,7 +517,7 @@ class UpdateDownloadTest(TestCase):
 
         with tempfile.TemporaryDirectory() as tempDir:
             target = Path(tempDir) / "Updata" / "DJCat-Pro.exe"
-            worker = UpdateDownloadWorker(DOWNLOAD_URL, target)
+            worker = downloadWorker(DOWNLOAD_URL, target)
             retries = []
             results = []
             worker.retrying.connect(lambda *args: retries.append(args))
@@ -562,7 +547,7 @@ class UpdateDownloadTest(TestCase):
     def testCanceledDownloadDeletesPartialAndFinalFilesBeforeFinishing(self):
         with tempfile.TemporaryDirectory() as tempDir:
             target = Path(tempDir) / "Updata" / "DJCat-Pro.exe"
-            worker = UpdateDownloadWorker(DOWNLOAD_URL, target)
+            worker = downloadWorker(DOWNLOAD_URL, target)
 
             def chunks():
                 yield b"MZ-partial"
@@ -641,11 +626,15 @@ class UpdateDownloadTest(TestCase):
             with tempfile.TemporaryDirectory() as tempDir:
                 target = Path(tempDir) / "Updata" / "DJCat-Pro.exe"
                 url = f"http://127.0.0.1:{server.server_port}/DJCat-Pro.exe"
-                worker = UpdateDownloadWorker(url, target)
+                worker = downloadWorker(url, target)
                 results = []
                 worker.finished.connect(lambda *args: results.append(args))
 
-                worker.run()
+                # 本地测试服务器只有 HTTP。
+                with patch.object(
+                    updateDownloadModule, "isHttpsResponseChain", return_value=True
+                ):
+                    worker.run()
 
                 self.assertEqual(target.read_bytes(), content)
                 self.assertEqual(results, [(str(target), "", False)])
@@ -661,7 +650,7 @@ class UpdateDownloadTest(TestCase):
 
     def testConcurrentDownloadsShareAGlobalWorkerLimit(self):
         with tempfile.TemporaryDirectory() as tempDir:
-            worker = UpdateDownloadWorker(
+            worker = downloadWorker(
                 DOWNLOAD_URL,
                 Path(tempDir) / "update.exe",
             )
@@ -729,7 +718,7 @@ class UpdateDownloadTest(TestCase):
         )
 
         with tempfile.TemporaryDirectory() as tempDir:
-            worker = UpdateDownloadWorker(
+            worker = downloadWorker(
                 DOWNLOAD_URL,
                 Path(tempDir) / "update.exe",
             )
@@ -758,7 +747,7 @@ class UpdateDownloadTest(TestCase):
             for _ in range(MAX_RETRIES)
         ]
         with tempfile.TemporaryDirectory() as tempDir:
-            worker = UpdateDownloadWorker(
+            worker = downloadWorker(
                 DOWNLOAD_URL,
                 Path(tempDir) / "update.exe",
             )
@@ -788,10 +777,9 @@ class UpdateDownloadTest(TestCase):
             url=insecureUrl,
         )
         with tempfile.TemporaryDirectory() as tempDir:
-            worker = UpdateDownloadWorker(
+            worker = downloadWorker(
                 DOWNLOAD_URL,
                 Path(tempDir) / "update.exe",
-                requireHttps=True,
             )
             worker.partialPath.touch()
             worker.partialPath.write_bytes(b"\0\0")
@@ -814,10 +802,9 @@ class UpdateDownloadTest(TestCase):
         response = FakeResponse([b"MZ"], contentLength=2)
         response.history = [Mock(url="http://mirror.example.test/update.exe")]
         with tempfile.TemporaryDirectory() as tempDir:
-            worker = UpdateDownloadWorker(
+            worker = downloadWorker(
                 DOWNLOAD_URL,
                 Path(tempDir) / "update.exe",
-                requireHttps=True,
             )
             with patch(
                 "app.common.update_download.requests.get",
@@ -845,7 +832,7 @@ class UpdateDownloadTest(TestCase):
     def testCancelWaitsForOpenPartialFileBeforeFinishing(self):
         with tempfile.TemporaryDirectory() as tempDir:
             app = QApplication.instance() or QApplication([])
-            worker = UpdateDownloadWorker(
+            worker = downloadWorker(
                 DOWNLOAD_URL,
                 Path(tempDir) / "update.exe",
             )
@@ -902,7 +889,7 @@ class UpdateDownloadTest(TestCase):
             errors.append(error)
 
     def testSlowestSegmentSplitKeepsCompleteNonOverlappingCoverage(self):
-        worker = UpdateDownloadWorker(DOWNLOAD_URL, Path("DJCat-Pro.exe"))
+        worker = downloadWorker(DOWNLOAD_URL, Path("DJCat-Pro.exe"))
         total = 64 * 1024 * 1024
         worker._segments = worker._buildSegments(total, INITIAL_THREAD_COUNT)
 
@@ -991,15 +978,11 @@ class UpdateWindowLifecycleTest(TestCase):
         self.assertEqual(self.window._downloadStateToolTip.suitablePosCalls, 1)
         workerFactory.assert_called_once()
         self.assertEqual(workerFactory.call_args.args[0], DOWNLOAD_URL)
-        self.assertTrue(workerFactory.call_args.kwargs["requireHttps"])
-        # Client Update 下载的是 ZIP；不显式给校验器就会落到默认的 PE 头校验，
-        # 每次下载完都被判成"不是有效的安装程序"。
         self.assertIs(
             workerFactory.call_args.kwargs.get("validator"),
             validateClientUpdateZip,
         )
         self.assertEqual(workerFactory.call_args.kwargs["maxBytes"], 1024**3)
-        self.assertNotIn("checksumUrl", workerFactory.call_args.kwargs)
 
     def testUpdateAlwaysUsesBucketInstaller(self):
         worker = DownloadWorkerStub("", Path())

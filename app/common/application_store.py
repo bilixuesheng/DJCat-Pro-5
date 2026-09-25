@@ -1186,7 +1186,6 @@ def downloadWorker(app: dict, store: ApplicationStore):
         store.downloadUrl(app),
         target,
         validator=validateZip,
-        requireHttps=True,
         maxBytes=MAX_ZIP_COMPRESSED,
         expectedSha256=expectedSha256 or None,
     )

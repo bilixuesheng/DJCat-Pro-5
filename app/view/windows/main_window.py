@@ -1608,7 +1608,6 @@ class MainWindow(MSFluentWindow):
             DOWNLOAD_URL,
             UPDATE_ZIP_PATH,
             validator=validateClientUpdateZip,
-            requireHttps=True,
             maxBytes=MAX_UPDATE_BYTES,
         )
         self._downloadWorker.progressChanged.connect(

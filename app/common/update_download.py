@@ -255,32 +255,21 @@ class UpdateDownloadWorker(QObject):
         self,
         url: str,
         targetPath: Path,
-        validator: Callable[[Path], None] | None = None,
-        requireHttps: bool = False,
+        validator: Callable[[Path], None],
         maxBytes: int | None = None,
         expectedSha256: str | None = None,
-        checksumUrl: str | None = None,
     ):
         super().__init__()
         self.url = url
         self.targetPath = Path(targetPath)
-        self.validator = validator or self._validateExecutable
-        self.requireHttps = requireHttps
+        self.validator = validator
         if maxBytes is not None and maxBytes <= 0:
             raise ValueError("下载大小上限必须大于 0")
         self.maxBytes = maxBytes
         expectedSha256 = str(expectedSha256 or "").strip().lower()
         if expectedSha256 and not _SHA256.fullmatch(expectedSha256):
             raise ValueError("SHA-256 校验值无效")
-        checksumUrl = str(checksumUrl or "").strip()
-        try:
-            checksumScheme = urlparse(checksumUrl).scheme.lower() if checksumUrl else ""
-        except ValueError:
-            checksumScheme = ""
-        if checksumUrl and checksumScheme != "https":
-            raise ValueError("校验文件链接必须使用 HTTPS")
         self._expectedSha256 = expectedSha256 or None
-        self.checksumUrl = checksumUrl or None
         self.partialPath = self.targetPath.with_suffix(
             f"{self.targetPath.suffix}.part"
         )
@@ -354,12 +343,8 @@ class UpdateDownloadWorker(QObject):
         self._removeFile(self.targetPath)
 
     def _downloadAttempt(self) -> str:
-        if self._expectedSha256 is None and self.checksumUrl:
-            self._expectedSha256 = self._fetchChecksum()
         effectiveUrl, total, supportsRange = self._probeDownload()
         self._ensureSizeAllowed(total)
-        if self.requireHttps and urlparse(effectiveUrl).scheme.lower() != "https":
-            raise OSError("下载链接必须保持 HTTPS")
         if self._cancelEvent.is_set():
             raise DownloadCanceled()
 
@@ -388,37 +373,6 @@ class UpdateDownloadWorker(QObject):
         self.partialPath.replace(self.targetPath)
         return str(self.targetPath)
 
-    def _fetchChecksum(self) -> str:
-        response = requests.get(
-            self.checksumUrl,
-            timeout=REQUEST_TIMEOUT,
-            stream=True,
-        )
-        self._trackResponse(response)
-        try:
-            self._ensureResponseHttps(response, self.checksumUrl)
-            response.raise_for_status()
-            contentLength = str(response.headers.get("Content-Length", ""))
-            if contentLength.isdigit() and int(contentLength) > 4096:
-                raise OSError("校验文件过大")
-            content = bytearray()
-            for chunk in response.iter_content(chunk_size=1024):
-                if self._cancelEvent.is_set():
-                    raise DownloadCanceled()
-                if not chunk:
-                    continue
-                content.extend(chunk)
-                if len(content) > 4096:
-                    raise OSError("校验文件过大")
-            fields = bytes(content).decode("ascii").split(maxsplit=1)
-            value = fields[0].lower() if fields else ""
-            if not _SHA256.fullmatch(value):
-                raise OSError("校验文件格式无效")
-            return value
-        finally:
-            self._untrackResponse(response)
-            response.close()
-
     def _validateChecksum(self, path: Path) -> None:
         if self._expectedSha256 is None:
             return
@@ -432,7 +386,7 @@ class UpdateDownloadWorker(QObject):
             raise OSError("下载文件 SHA-256 校验失败")
 
     def _ensureResponseHttps(self, response, requestedUrl: str) -> None:
-        if self.requireHttps and not isHttpsResponseChain(response, requestedUrl):
+        if not isHttpsResponseChain(response, requestedUrl):
             raise OSError("下载链接必须保持 HTTPS")
 
     def _probeDownload(self) -> tuple[str, int, bool]:
@@ -852,9 +806,3 @@ class UpdateDownloadWorker(QObject):
             path.unlink()
         except FileNotFoundError:
             pass
-
-    @staticmethod
-    def _validateExecutable(path: Path) -> None:
-        with path.open("rb") as file:
-            if file.read(2) != b"MZ":
-                raise ValueError("下载文件不是有效的 Windows 安装程序")
