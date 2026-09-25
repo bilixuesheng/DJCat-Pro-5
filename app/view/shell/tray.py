@@ -133,8 +133,7 @@ class AcrylicMenu(RoundMenu):
         self.windowEffect.addMenuShadowEffect(self.winId())
         self.windowEffect.addShadowEffect(self.winId())
         self.windowEffect.enableBlurBehindWindow(self.winId())
-        is_dark = isDarkTheme() if cfg.customThemeMode.value == "System" else cfg.customThemeMode.value == "Dark"
-        self.windowEffect.setAcrylicEffect(self.winId(), "00000030" if is_dark else "FFFFFF30")
+        self.windowEffect.setAcrylicEffect(self.winId(), "00000030" if isDarkTheme() else "FFFFFF30")
         self.adjustPosition()
         self.raise_()
         self.activateWindow()

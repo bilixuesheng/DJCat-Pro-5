@@ -140,11 +140,7 @@ class _VerticalButtonMixin:
         self.updateStyle()
 
     def updateStyle(self):
-        dark = self.force_dark or (
-            isDarkTheme()
-            if cfg.customThemeMode.value == "System"
-            else cfg.customThemeMode.value == "Dark"
-        )
+        dark = self.force_dark or isDarkTheme()
         if self._primary:
             normal = qconfig.themeColor.value.name()
             hover = qconfig.themeColor.value.lighter(108).name()
@@ -206,11 +202,7 @@ class _VerticalButtonMixin:
             )
 
     def _foregroundColor(self):
-        dark = self.force_dark or (
-            isDarkTheme()
-            if cfg.customThemeMode.value == "System"
-            else cfg.customThemeMode.value == "Dark"
-        )
+        dark = self.force_dark or isDarkTheme()
         return QColor("white") if self._primary or dark else QColor("black")
 
 
@@ -344,7 +336,7 @@ class BroadcastWindow(FramelessWindow):
         )
         self.background.lower()
         self.background.setGeometry(self.contentsRect())
-        cfg.customThemeMode.valueChanged.connect(self.background.refresh)
+        qconfig.themeChanged.connect(self.background.refresh)
 
         self.vBoxLayout = QVBoxLayout(self)
         self.vBoxLayout.setContentsMargins(40, 20, 40, 0)
@@ -395,7 +387,7 @@ class BroadcastWindow(FramelessWindow):
         self.btn_close.clicked.connect(self._onClose)
 
     def _applyStyle(self):
-        is_dark = isDarkTheme() if cfg.customThemeMode.value == "System" else cfg.customThemeMode.value == "Dark"
+        is_dark = isDarkTheme()
         text_color = "white" if is_dark else "black"
         margin = WINDOW_SHADOW_MARGIN if self.is_windowed else 0
         self.setContentsMargins(margin, margin, margin, margin)

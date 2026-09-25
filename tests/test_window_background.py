@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QWidget
-from qfluentwidgets import qconfig
+from qfluentwidgets import Theme, qconfig
 
 from app.config.cfg import WINDOW_BACKGROUND_MODES, WINDOW_BACKGROUND_SCALE_MODES, cfg
 from app.view.components.setting_preview import (
@@ -54,9 +54,9 @@ class WindowBackgroundTest(TestCase):
             cfg.fullscreenClockBackgroundColor,
             cfg.fullscreenClockBackgroundImagePath,
             cfg.fullscreenClockBackgroundScaleMode,
-            cfg.customThemeMode,
         )
         self.values = [(item, item.value) for item in self.items]
+        self.addCleanup(qconfig.set, qconfig.themeMode, qconfig.themeMode.value, False)
 
     def tearDown(self):
         for item, value in self.values:
@@ -150,10 +150,10 @@ class WindowBackgroundTest(TestCase):
         accent = QColor(49, 101, 49)
         qconfig.set(qconfig.themeColor, accent, False)
 
-        cfg.set(cfg.customThemeMode, "Light", save=False)
+        qconfig.set(qconfig.themeMode, Theme.LIGHT, False)
         self.assertEqual(projectionTitleColor(), accent)
 
-        cfg.set(cfg.customThemeMode, "Dark", save=False)
+        qconfig.set(qconfig.themeMode, Theme.DARK, False)
         background = projectionThemeBackground()
         self.assertLess(contrast(accent, background), 3)
         self.assertGreaterEqual(contrast(projectionTitleColor(), background), 4.5)
@@ -187,9 +187,9 @@ class WindowBackgroundTest(TestCase):
             preview = previews[kind]
             return preview.grab().toImage().pixelColor(20, preview.height() // 2)
 
-        for theme, projection in (("Light", "#ffffff"), ("Dark", "#202020")):
+        for theme, projection in ((Theme.LIGHT, "#ffffff"), (Theme.DARK, "#202020")):
             with self.subTest(theme=theme):
-                cfg.set(cfg.customThemeMode, theme, save=False)
+                qconfig.set(qconfig.themeMode, theme, False)
                 self.assertEqual(pixel(PROJECTION_CONTENT).name(), projection)
                 self.assertEqual(pixel(COUNTDOWN_CONTENT).name(), "#000000")
 
