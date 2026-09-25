@@ -1,0 +1,121 @@
+name: Bug 报告
+description: 提交 Bug 报告
+title: "[Bug] "
+labels:
+  - "bug"
+body:
+- type: checkboxes
+  id: no-duplicate
+  attributes:
+    label: 检查清单
+    options:
+      - label: 我已搜索现有 Issue，确认没有重复
+        required: true
+
+- type: textarea
+  id: description
+  attributes:
+    label: 描述
+    description: 简述你遇到的问题
+  validations:
+    required: true
+
+- type: textarea
+  id: repro-steps
+  attributes:
+    label: 复现步骤
+    render: markdown
+    placeholder: |
+      1. 打开电教猫
+      2. 进入 '...'
+      3. 点击 '...'
+      4. 出现问题
+  validations:
+    required: true
+
+- type: textarea
+  id: expected-behavior
+  attributes:
+    label: 预期行为
+    render: markdown
+
+- type: textarea
+  id: screenshots
+  attributes:
+    label: 截图
+
+- type: input
+  id: djcat-version
+  attributes:
+    label: 电教猫版本
+    description: 设置 → 关于 中查看
+    placeholder: "例: v5.1.5"
+  validations:
+    required: true
+
+- type: dropdown
+  id: distribution
+  attributes:
+    label: 下载形态
+    options:
+      - 安装程序（Setup.exe）
+      - 免安装压缩包（.zip）
+      - 从源码运行
+  validations:
+    required: true
+
+- type: dropdown
+  id: storage-mode
+  attributes:
+    label: 存储模式
+    description: 设置 → 应用 中查看
+    options:
+      - 便携模式
+      - 安装模式
+      - 不清楚
+  validations:
+    required: true
+
+- type: dropdown
+  id: restore-software
+  attributes:
+    label: 是否装有冰点还原等系统还原软件
+    options:
+      - 否
+      - 是
+      - 不清楚
+  validations:
+    required: true
+
+- type: dropdown
+  id: os
+  attributes:
+    label: 操作系统
+    options:
+      - Windows 10
+      - Windows 11
+  validations:
+    required: true
+
+- type: input
+  id: os-detail
+  attributes:
+    label: 系统版本详情
+    description: 按 Win + R 运行 winver 查看
+    placeholder: "例: 24H2 Build 26100"
+  validations:
+    required: true
+
+- type: textarea
+  id: log-info
+  attributes:
+    label: 日志
+    description: 粘贴报错内容，或在 设置 → 关于 → 错误日志 打开文件夹，上传对应日期的 djcatpro日志_YYYY-MM-DD.log
+  validations:
+    required: true
+
+- type: textarea
+  id: additional-context
+  attributes:
+    label: 备注
+    render: markdown
