@@ -15,7 +15,7 @@ from functools import wraps
 from pathlib import Path
 from urllib.parse import urlparse
 
-from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request
+from flask import Blueprint, abort, jsonify, redirect, render_template, request
 
 ARCHITECTURES = ("x86_64", "arm64")
 _INSTALL_DIR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}$")
@@ -598,17 +598,6 @@ def _reorderItems(database, kind, ids, expectedIds, appId=None):
     return True
 
 
-def _formErrors(errors, renderer):
-    message = "；".join(errors)
-    if request.headers.get("X-Requested-With") == "XMLHttpRequest" or (
-        request.accept_mimetypes.best == "application/json"
-    ):
-        return jsonify(message=message, category="error"), 400
-    for error in errors:
-        flash(error, "error")
-    return renderer(), 400
-
-
 def register_app_store(
     app,
     *,
@@ -622,6 +611,41 @@ def register_app_store(
 
     _ensureSchema(connect)
     blueprint = Blueprint("app_store", __name__)
+
+    def formErrors(errors, renderer):
+        return admin_response("；".join(errors), "error", None, 400, renderer=renderer)
+
+    def saveOrder(kind, label, endpoint, appId=None):
+        check_csrf()
+        urlValues = {"app_id": appId} if appId is not None else None
+        ids = _requestedOrder()
+        expectedIds = _requestedExpectedOrder()
+        if ids is None or expectedIds is None:
+            return admin_response(
+                f"{label}顺序无效", "error", endpoint, 400, url_values=urlValues
+            )
+        _ensureSchema(connect)
+        with closing(connect()) as database:
+            database.execute("BEGIN IMMEDIATE")
+            if not _reorderItems(database, kind, ids, expectedIds, appId):
+                database.rollback()
+                return admin_response(
+                    f"{label}顺序已过期，请刷新后重试",
+                    "error",
+                    endpoint,
+                    409,
+                    url_values=urlValues,
+                )
+            if appId is not None and ids != expectedIds:
+                database.execute(
+                    "UPDATE market_applications "
+                    "SET manifest_revision = manifest_revision + 1 WHERE id = ?",
+                    (appId,),
+                )
+            database.commit()
+        return admin_response(
+            f"{label}顺序已更新", "success", endpoint, url_values=urlValues
+        )
 
     def apiRoute(view):
         @wraps(view)
@@ -884,7 +908,7 @@ def register_app_store(
             if values["install_dir"] != existing["install_dir"]:
                 errors.append("已发布软件不能直接修改安装目录，请新建软件或执行迁移")
         if errors:
-            return _formErrors(errors, lambda: _renderApp(appId, submitted))
+            return formErrors(errors, lambda: _renderApp(appId, submitted))
         _ensureSchema(connect)
         with closing(connect()) as database:
             try:
@@ -913,7 +937,7 @@ def register_app_store(
                 ).fetchone()
                 if duplicate:
                     database.rollback()
-                    return _formErrors(
+                    return formErrors(
                         ["安装目录已被其他软件使用"],
                         lambda: _renderApp(appId, submitted),
                     )
@@ -1030,7 +1054,7 @@ def register_app_store(
                 database.commit()
             except sqlite3.IntegrityError as error:
                 database.rollback()
-                return _formErrors(
+                return formErrors(
                     [f"保存失败：{error}"],
                     lambda: _renderApp(appId, submitted),
                 )
@@ -1058,19 +1082,7 @@ def register_app_store(
     @blueprint.post("/admin/app-store/apps/order")
     @login_required
     def adminOrderApps():
-        check_csrf()
-        ids = _requestedOrder()
-        expectedIds = _requestedExpectedOrder()
-        if ids is None or expectedIds is None:
-            return admin_response("软件顺序无效", "error", "app_store.adminApps", 400)
-        _ensureSchema(connect)
-        with closing(connect()) as database:
-            database.execute("BEGIN IMMEDIATE")
-            if not _reorderItems(database, "applications", ids, expectedIds):
-                database.rollback()
-                return admin_response("软件顺序已过期，请刷新后重试", "error", "app_store.adminApps", 409)
-            database.commit()
-        return admin_response("软件顺序已更新", "success", "app_store.adminApps")
+        return saveOrder("applications", "软件", "app_store.adminApps")
 
     def _renderPresets(appId=None):
         if appId is None and request.args.get("app_id"):
@@ -1258,7 +1270,7 @@ def register_app_store(
                 "action_target": request.form.get("preset_action_target", "").strip(),
                 "action_arguments": request.form.get("preset_action_arguments", ""),
             }
-            return _formErrors(
+            return formErrors(
                 errors,
                 lambda: _renderPresetForm(appId, presetId, submitted),
             )
@@ -1369,44 +1381,7 @@ def register_app_store(
     @blueprint.post("/admin/app-store/presets/<int:app_id>/order")
     @login_required
     def adminOrderPresets(app_id):
-        check_csrf()
-        ids = _requestedOrder()
-        expectedIds = _requestedExpectedOrder()
-        if ids is None or expectedIds is None:
-            return admin_response(
-                "预设卡片顺序无效",
-                "error",
-                "app_store.adminPresets",
-                400,
-                url_values={"app_id": app_id},
-            )
-        _ensureSchema(connect)
-        with closing(connect()) as database:
-            database.execute("BEGIN IMMEDIATE")
-            if not _reorderItems(
-                database, "presets", ids, expectedIds, app_id
-            ):
-                database.rollback()
-                return admin_response(
-                    "预设卡片顺序已过期，请刷新后重试",
-                    "error",
-                    "app_store.adminPresets",
-                    409,
-                    url_values={"app_id": app_id},
-                )
-            if ids != expectedIds:
-                database.execute(
-                    "UPDATE market_applications "
-                    "SET manifest_revision = manifest_revision + 1 WHERE id = ?",
-                    (app_id,),
-                )
-            database.commit()
-        return admin_response(
-            "预设卡片顺序已更新",
-            "success",
-            "app_store.adminPresets",
-            url_values={"app_id": app_id},
-        )
+        return saveOrder("presets", "预设卡片", "app_store.adminPresets", app_id)
 
     @blueprint.route("/admin/app-store/ads/", methods=["GET", "POST"])
     @login_required
@@ -1499,7 +1474,7 @@ def register_app_store(
                 "button_url": request.form.get("button_url", "").strip(),
                 "enabled": bool(request.form.get("enabled")),
             }
-            return _formErrors(
+            return formErrors(
                 [error], lambda: _renderAd(adId, submitted)
             )
         title, description, imageUrl, appId, buttonUrl, sortOrder, enabled = values
@@ -1516,7 +1491,7 @@ def register_app_store(
                     "button_url": buttonUrl,
                     "enabled": bool(enabled),
                 }
-                return _formErrors(
+                return formErrors(
                     ["绑定的软件不存在"],
                     lambda: _renderAd(adId, submitted),
                 )
@@ -1576,24 +1551,7 @@ def register_app_store(
     @blueprint.post("/admin/app-store/ads/order")
     @login_required
     def adminOrderAds():
-        check_csrf()
-        ids = _requestedOrder()
-        expectedIds = _requestedExpectedOrder()
-        if ids is None or expectedIds is None:
-            return admin_response("广告顺序无效", "error", "app_store.adminAds", 400)
-        _ensureSchema(connect)
-        with closing(connect()) as database:
-            database.execute("BEGIN IMMEDIATE")
-            if not _reorderItems(database, "advertisements", ids, expectedIds):
-                database.rollback()
-                return admin_response(
-                    "广告顺序已过期，请刷新后重试",
-                    "error",
-                    "app_store.adminAds",
-                    409,
-                )
-            database.commit()
-        return admin_response("广告顺序已更新", "success", "app_store.adminAds")
+        return saveOrder("advertisements", "广告", "app_store.adminAds")
 
     @blueprint.get("/admin/app-store/recommendations/")
     @login_required
@@ -1686,30 +1644,6 @@ def register_app_store(
     @blueprint.post("/admin/app-store/recommendations/order")
     @login_required
     def adminOrderRecommendations():
-        check_csrf()
-        ids = _requestedOrder()
-        expectedIds = _requestedExpectedOrder()
-        if ids is None or expectedIds is None:
-            return admin_response(
-                "推荐顺序无效",
-                "error",
-                "app_store.adminRecommendations",
-                400,
-            )
-        _ensureSchema(connect)
-        with closing(connect()) as database:
-            database.execute("BEGIN IMMEDIATE")
-            if not _reorderItems(database, "recommendations", ids, expectedIds):
-                database.rollback()
-                return admin_response(
-                    "推荐顺序已过期，请刷新后重试",
-                    "error",
-                    "app_store.adminRecommendations",
-                    409,
-                )
-            database.commit()
-        return admin_response(
-            "推荐顺序已更新", "success", "app_store.adminRecommendations"
-        )
+        return saveOrder("recommendations", "推荐", "app_store.adminRecommendations")
 
     app.register_blueprint(blueprint)
