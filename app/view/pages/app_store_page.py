@@ -77,6 +77,7 @@ from app.view.components.tool_tip import setFluentToolTip
 
 SHUTDOWN_WAIT_SECONDS = 0.5
 ALL_APPS_PAGE_SIZE = 6
+APPLICATION_CARD_HEIGHT = 168
 CONTENT_MARGINS = (12, 8, 20, 24)
 _LIVE_CATALOG_URI_SCHEMES = frozenset({"classisland"})
 _packageOperationReleaseLock = threading.Lock()
@@ -519,7 +520,7 @@ class ApplicationCard(CardWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setClickEnabled(True)
-        self.setFixedHeight(168)
+        self.setFixedHeight(APPLICATION_CARD_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.appId = None
@@ -907,9 +908,9 @@ class AdvertisementOverlay(QWidget):
 class AppStorePage(QWidget):
     pinnedCardsChanged = Signal(object)
     _launchFailed = Signal(str)
-    _launchFinished = Signal(int, str)
+    _launchFinished = Signal(int, str, str)
     _downloadProgressSignal = Signal(int, int, int)
-    _downloadRetrySignal = Signal(str)
+    _downloadRetrySignal = Signal(str, str)
     _downloadFinishedSignal = Signal(object, str, str, bool)
     _uninstallFinished = Signal(int, object, str)
 
@@ -1517,7 +1518,8 @@ class AppStorePage(QWidget):
         if self.currentApp:
             current = next((app for app in self._mergedApps() if app["id"] == self.currentApp["id"]), None)
             if current:
-                self._showDetail(current)
+                # 正在看的详情就地换成新目录的数据，不把两栏滚回顶部。
+                self._populateDetail(current)
             else:
                 self._backToOverview()
 
@@ -1799,6 +1801,25 @@ class AppStorePage(QWidget):
             return
         self._reflowGrid(self.installedGrid)
         self._reflowGrid(self.allGrid)
+        self._reserveAllGridHeight()
+
+    def _reserveAllGridHeight(self):
+        # 最后一页卡片少时网格变矮，分页按钮会往上跳，翻页的横移会把这一跳放大。
+        # 只有一页时不预留，免得凭空多出一片空白。
+        height = 0
+        if (
+            self.categoryPivot.currentRouteKey() == "all"
+            and self.pager.count() > 1
+        ):
+            rows = -(-ALL_APPS_PAGE_SIZE // self._columnCount())
+            margins = self.allGrid.contentsMargins()
+            height = (
+                rows * APPLICATION_CARD_HEIGHT
+                + (rows - 1) * self.allGrid.verticalSpacing()
+                + margins.top()
+                + margins.bottom()
+            )
+        self.allGridWidget.setMinimumHeight(height)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1889,6 +1910,7 @@ class AppStorePage(QWidget):
             self.pagerBar.setVisible(paginated and bool(apps))
             self._updatePagerButtons()
             self._renderAllPage(apps)
+            self._reserveAllGridHeight()
             self._updateAllEmptyState(apps)
         finally:
             self.pager.blockSignals(False)
@@ -2094,6 +2116,12 @@ class AppStorePage(QWidget):
             self.adTimer.start()
 
     def _showDetail(self, app):
+        self._populateDetail(app)
+        self.detailLeftScroll.verticalScrollBar().setValue(0)
+        self.presetScroll.verticalScrollBar().setValue(0)
+        self.stack.setCurrentWidget(self.detail)
+
+    def _populateDetail(self, app):
         self.currentApp = app
         self._pauseAds()
         self.detailName.setText(str(app.get("name", "")))
@@ -2114,9 +2142,6 @@ class AppStorePage(QWidget):
         )
         self._updateDetailAction()
         self._renderPresets(app)
-        self.detailLeftScroll.verticalScrollBar().setValue(0)
-        self.presetScroll.verticalScrollBar().setValue(0)
-        self.stack.setCurrentWidget(self.detail)
 
     def _backToOverview(self):
         self.currentApp = None
@@ -2215,26 +2240,7 @@ class AppStorePage(QWidget):
         if app.get("installed") and (
             not app.get("update_available") or not allowUpdate
         ):
-            self._launching.add(appId)
-            self._downloadStates[appId] = "打开中"
-            self._updateVisibleCardState(appId)
-            self._updateDetailAction()
-            try:
-                thread = threading.Thread(
-                    target=self._launchInBackground,
-                    args=(app,),
-                    daemon=True,
-                )
-                with self._fileOperationLock:
-                    self._fileOperationThreads.add(thread)
-                try:
-                    thread.start()
-                except Exception:
-                    with self._fileOperationLock:
-                        self._fileOperationThreads.discard(thread)
-                    raise
-            except Exception as error:
-                self._onLaunchFinished(appId, str(error))
+            self._startLaunch(app)
             return
         try:
             self.store.downloadSlots.acquire()
@@ -2261,7 +2267,9 @@ class AppStorePage(QWidget):
             )
         )
         worker.retrying.connect(
-            lambda _try, _total, message: self._downloadRetrySignal.emit(message)
+            lambda _try, _total, message, name=str(app.get("name", "")): self._downloadRetrySignal.emit(
+                name, message
+            )
         )
         worker.finished.connect(
             lambda path, error, canceled, appData=app: self._downloadFinishedSignal.emit(
@@ -2282,21 +2290,76 @@ class AppStorePage(QWidget):
         self._updateVisibleCardState(appId)
         self._updateDetailAction()
 
-    def _launchInBackground(self, app):
+    def _isBusy(self, appId):
+        return (
+            appId in self._downloadJobs
+            or appId in self._launching
+            or appId in self._installing
+            or appId in self._uninstalling
+        )
+
+    def _startLaunch(self, app, preset=None):
+        # 打开应用和打开预设共用"打开中"：卡片、详情按钮和预设按钮一起禁用，
+        # 同一应用不会并发出第二次启动。
+        appId = int(app["id"])
+        self._launching.add(appId)
+        self._downloadStates[appId] = "打开中"
+        self._updateVisibleCardState(appId)
+        self._updateDetailAction()
+        errorTitle = "无法打开应用" if preset is None else "无法打开预设"
+        try:
+            thread = threading.Thread(
+                target=self._launchInBackground,
+                args=(app, preset, errorTitle),
+                daemon=True,
+            )
+            with self._fileOperationLock:
+                self._fileOperationThreads.add(thread)
+            try:
+                thread.start()
+            except Exception:
+                with self._fileOperationLock:
+                    self._fileOperationThreads.discard(thread)
+                raise
+        except Exception as error:
+            self._onLaunchFinished(appId, str(error), errorTitle)
+
+    def _launchInBackground(self, app, preset=None, errorTitle="无法打开应用"):
         appId = int(app["id"])
         errorMessage = ""
         try:
             local = self.store.installed().get(appId)
-            self.store.executeAction(local or app)
+            if preset is None:
+                self.store.executeAction(local or app)
+            else:
+                self.store.executeAction(local, self._presetAction(local, preset))
         except Exception as error:
             errorMessage = str(error)
         finally:
             with self._fileOperationLock:
                 self._fileOperationThreads.discard(threading.current_thread())
         if not self._shuttingDown:
-            self._launchFinished.emit(appId, errorMessage)
+            self._launchFinished.emit(appId, errorMessage, errorTitle)
 
-    def _onLaunchFinished(self, appId, error):
+    def _presetAction(self, installed, preset):
+        if installed is None:
+            raise ApplicationStoreError("请先安装应用后再打开预设。")
+        installedPreset = next(
+            (
+                item
+                for item in installed.metadata.get("presets", [])
+                if str(item.get("id", "")) == str(preset.get("id", ""))
+            ),
+            None,
+        )
+        action = installedPreset.get("action") if installedPreset else None
+        if not isinstance(action, dict):
+            action = self._catalogExternalAction(preset)
+        if not isinstance(action, dict):
+            raise ApplicationStoreError("请先更新应用，再打开这个预设。")
+        return action
+
+    def _onLaunchFinished(self, appId, error, errorTitle="无法打开应用"):
         if self._shuttingDown or appId not in self._launching:
             return
         self._launching.discard(appId)
@@ -2305,7 +2368,7 @@ class AppStorePage(QWidget):
         self._updateDetailAction()
         if error:
             InfoBar.error(
-                "无法打开应用",
+                errorTitle,
                 error,
                 duration=4000,
                 position=InfoBarPosition.BOTTOM_RIGHT,
@@ -2338,8 +2401,9 @@ class AppStorePage(QWidget):
         if self.currentApp and int(self.currentApp["id"]) == appId:
             self._updateDetailAction()
 
-    def _showDownloadRetry(self, message):
-        InfoBar.warning("下载重试", message, duration=2000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
+    def _showDownloadRetry(self, name, message):
+        title = f"{name} 下载重试" if name else "下载重试"
+        InfoBar.warning(title, message, duration=2000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
 
     def _onDownloadFinished(self, app, path, error, canceled):
         if self._shuttingDown:
@@ -2581,6 +2645,8 @@ class AppStorePage(QWidget):
                 tooltip = "取消固定"
             elif available:
                 tooltip = "固定到主页"
+            elif not app.get("installed"):
+                tooltip = "请先安装应用"
             else:
                 tooltip = "请先更新应用"
             pin.setAccessibleName(tooltip)
@@ -2591,6 +2657,9 @@ class AppStorePage(QWidget):
             )
             row.addWidget(pin)
             self.presetCards.addWidget(item)
+            # 固定、取消固定和目录刷新都会整组重建预设卡片。新卡片要等排队的
+            # 显示事件才算可见，在那之前布局把整栏当成空的，滚动位置被夹回顶部。
+            item.show()
 
     @staticmethod
     def _catalogExternalAction(preset):
@@ -2649,54 +2718,8 @@ class AppStorePage(QWidget):
         return self._catalogExternalAction(preset)
 
     def _openPreset(self, app, preset):
-        appId = int(app["id"])
-        if (
-            appId in self._downloadJobs
-            or appId in self._launching
-            or appId in self._installing
-            or appId in self._uninstalling
-        ):
-            return
-        installed = self.store.installed().get(appId)
-        if installed is None:
-            InfoBar.warning(
-                "应用尚未安装",
-                "请先安装应用后再打开预设。",
-                duration=3000,
-                position=InfoBarPosition.BOTTOM_RIGHT,
-                parent=self.window(),
-            )
-            return
-        installedPreset = next(
-            (
-                item
-                for item in installed.metadata.get("presets", [])
-                if str(item.get("id", "")) == str(preset.get("id", ""))
-            ),
-            None,
-        )
-        action = installedPreset.get("action") if installedPreset else None
-        if not isinstance(action, dict):
-            action = self._catalogExternalAction(preset)
-        if not isinstance(action, dict):
-            InfoBar.warning(
-                "预设不可用",
-                "请先更新应用，再打开这个预设。",
-                duration=3000,
-                position=InfoBarPosition.BOTTOM_RIGHT,
-                parent=self.window(),
-            )
-            return
-        try:
-            self.store.executeAction(installed, action)
-        except (ApplicationStoreError, OSError, ValueError) as error:
-            InfoBar.error(
-                "无法打开预设",
-                str(error),
-                duration=4000,
-                position=InfoBarPosition.BOTTOM_RIGHT,
-                parent=self.window(),
-            )
+        if not self._isBusy(int(app["id"])):
+            self._startLaunch(app, preset)
 
     def _pinnedKeys(self):
         return {

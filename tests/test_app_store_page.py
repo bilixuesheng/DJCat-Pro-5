@@ -151,6 +151,12 @@ class AppStorePageTest(TestCase):
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.qtApp.processEvents()
 
+    def _waitForLaunches(self, timeout=2):
+        deadline = time.monotonic() + timeout
+        while self.page._launching and time.monotonic() < deadline:
+            QTest.qWait(10)
+        self.assertEqual(self.page._launching, set())
+
     def _allContentCenterX(self):
         margins = self.page.allPage.layout().contentsMargins()
         return (margins.left() + self.page.allPage.width() - margins.right()) // 2
@@ -1043,6 +1049,7 @@ class AppStorePageTest(TestCase):
         self.assertLess(openButton.minimumHeight(), openButton.maximumHeight())
         self.assertTrue(openButton.isEnabled())
         openButton.click()
+        self._waitForLaunches()
         self.page.store.executeAction.assert_called_once_with(
             installed, installedAction
         )
@@ -1099,6 +1106,7 @@ class AppStorePageTest(TestCase):
 
         self.assertTrue(openButton.isEnabled())
         openButton.click()
+        self._waitForLaunches()
         self.page.store.executeAction.assert_called_once_with(installed, action)
 
     def testCatalogPresetRejectsUnapprovedUriScheme(self):
@@ -1127,6 +1135,149 @@ class AppStorePageTest(TestCase):
         )
 
         self.assertFalse(openButton.isEnabled())
+
+    def _presetApp(self):
+        action = {"type": "program", "target": "preset.exe"}
+        return _apps(1)[0] | {
+            "id": 7,
+            "installed": True,
+            "open_action": {"type": "program", "target": "app.exe"},
+            "presets": [
+                {"id": 11, "title": "预设", "description": "", "action": action}
+            ],
+            "installed_presets": [{"id": 11, "title": "预设", "action": action}],
+        }, action
+
+    def testPresetOpenRunsOutsideTheGuiThreadAndSharesLaunchState(self):
+        # 预设和"打开"一样是一次启动：不在界面线程上建进程，并与卡片、详情按钮
+        # 共用"打开中"，连点不会再起第二次。
+        app, action = self._presetApp()
+        installed = SimpleNamespace(metadata={"presets": app["installed_presets"]})
+        started = threading.Event()
+        release = threading.Event()
+
+        def execute(*_args):
+            started.set()
+            release.wait(1)
+
+        self.page.store.installed = Mock(return_value={7: installed})
+        self.page.store.executeAction = Mock(side_effect=execute)
+        self.page._renderGrid(self.page.installedGrid, [app], True)
+        card = self.page.installedGrid.itemAtPosition(0, 0).widget()
+        self.page.currentApp = app
+        self.page._renderPresets(app)
+        openButton = next(
+            button
+            for button in self.page.presetGroup.findChildren(PushButton)
+            if button.text() == "打开"
+        )
+        try:
+            before = time.monotonic()
+            openButton.click()
+            self.assertLess(time.monotonic() - before, 0.2)
+            self.assertTrue(started.wait(1))
+
+            self.assertEqual(card.actionButton.text(), "打开中")
+            self.assertEqual(self.page.detailAction.text(), "打开中")
+            self.assertFalse(openButton.isEnabled())
+            self.page._openPreset(app, app["presets"][0])
+            self.page._onAppAction(app)
+        finally:
+            release.set()
+        self._waitForLaunches()
+
+        self.page.store.executeAction.assert_called_once_with(installed, action)
+        self.assertEqual(card.actionButton.text(), "打开")
+        self.assertTrue(openButton.isEnabled())
+
+    def testPresetOpenFailureIsReportedAsPresetError(self):
+        app, _action = self._presetApp()
+        self.page.store.installed = Mock(return_value={})
+        self.page.store.executeAction = Mock()
+
+        with patch.object(InfoBar, "error") as error:
+            self.page._openPreset(app, app["presets"][0])
+            self._waitForLaunches()
+
+        self.page.store.executeAction.assert_not_called()
+        self.assertEqual(error.call_args.args[:2], ("无法打开预设", "请先安装应用后再打开预设。"))
+
+    def testPresetPinAsksToInstallBeforeUpdate(self):
+        app, _action = self._presetApp()
+        app = app | {"installed": False, "installed_presets": []}
+
+        self.page._renderPresets(app)
+
+        pin = self.page.presetGroup.findChildren(ToggleToolButton)[0]
+        self.assertFalse(pin.isEnabled())
+        self.assertEqual(pin.accessibleName(), "请先安装应用")
+
+    def testCatalogRefreshKeepsDetailScrollPosition(self):
+        app = _apps(1)[0] | {
+            "id": 7,
+            "installed": True,
+            "description": "很长的软件简介。" * 120,
+            "presets": [
+                {
+                    "id": index,
+                    "title": f"预设 {index}",
+                    "description": "固定到主页后执行这个动作",
+                    "action": {"type": "program", "target": "app.exe"},
+                }
+                for index in range(12)
+            ],
+        }
+        self.page.catalog = [app]
+        self.page.resize(900, 420)
+        self.page.show()
+        self.page._showDetail(app)
+        self._settleTransitions()
+        leftBar = self.page.detailLeftScroll.verticalScrollBar()
+        presetBar = self.page.presetScroll.verticalScrollBar()
+        leftBar.setValue(60)
+        presetBar.setValue(80)
+
+        self.page._onCatalogLoaded({"apps": [app], "ads": []}, {}, "")
+        self.qtApp.processEvents()
+
+        self.assertIs(self.page.stack.currentWidget(), self.page.detail)
+        self.assertEqual(leftBar.value(), 60)
+        self.assertEqual(presetBar.value(), 80)
+
+    def testShortLastPageKeepsPagerInPlace(self):
+        self.page.catalog = _apps(8)
+        self.page.resize(1000, 700)
+        self.page.show()
+        self.page.pivot.setCurrentItem("all")
+        self.page._switchCatalogTab(1)
+        self.page.categoryPivot.setCurrentItem("all")
+        self.page._switchCategory(1)
+        self._settleTransitions()
+        pagerTop = self.page.pagerBar.y()
+
+        self.page._changePage(1)
+        self._settleTransitions()
+
+        self.assertEqual(self.page.allGrid.count(), 2)
+        self.assertEqual(self.page.pagerBar.y(), pagerTop)
+
+    def testSinglePageReservesNoBlankGridSpace(self):
+        self.page.catalog = _apps(2)
+        self.page.resize(1000, 700)
+        self.page.categoryPivot.setCurrentItem("all")
+        self.page._switchCategory(1)
+
+        self.assertEqual(self.page.allGridWidget.minimumHeight(), 0)
+
+    def testDownloadRetryNamesTheApplication(self):
+        with patch.object(InfoBar, "warning") as warning:
+            self.page._downloadRetrySignal.emit("Ghost Downloader", "连接超时")
+            self.qtApp.processEvents()
+
+        self.assertEqual(
+            warning.call_args.args[:2],
+            ("Ghost Downloader 下载重试", "连接超时"),
+        )
 
     def testDetailHidesCatalogRefreshButton(self):
         self.page.stack.setAnimationEnabled(False)
