@@ -467,7 +467,9 @@ class AIAdminTest(TestCase):
         self.client.post("/ai/markdown/register", json={"machine_id": "b" * 64})
         self.client.post("/ai/markdown/register", json={"machine_id": "a" * 64})
         machineId = ai_markdown._machineId("a" * 64)
-        ai_markdown._claim(machineId, 2)
+        ai_markdown._claimRequest(
+            machineId, 2, ai_markdown._today(), ai_markdown._dailyLimit()
+        )
         dashboard = self._login()
 
         search = self._machinesPage("?q=DJ-000002&sort=code").get_data(as_text=True)
@@ -485,7 +487,9 @@ class AIAdminTest(TestCase):
         self.assertEqual(reset.status_code, 200)
         self.assertEqual(ai_markdown._remaining(machineId), 15)
 
-        ai_markdown._claim(machineId, 1)
+        ai_markdown._claimRequest(
+            machineId, 1, ai_markdown._today(), ai_markdown._dailyLimit()
+        )
         self.client.post(
             "/admin/ai/markdown/reset-all",
             base_url="https://dash.djcatpro.top",

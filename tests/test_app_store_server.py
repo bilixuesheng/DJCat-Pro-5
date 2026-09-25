@@ -92,7 +92,6 @@ class AppStoreServerTest(TestCase):
     def _createPreset(self, appId=1, title="打开应用", **overrides):
         data = {
             "csrf_token": self._csrf(),
-            "preset_app_id": str(appId),
             "preset_title": title,
             "preset_description": "启动软件",
             "preset_action_type": "program",
@@ -101,7 +100,7 @@ class AppStoreServerTest(TestCase):
         }
         data.update(overrides)
         response = self.client.post(
-            "/admin/app-store/presets/",
+            f"/admin/app-store/presets/{appId}/new",
             base_url="https://dash.djcatpro.top",
             data=data,
         )
@@ -328,12 +327,11 @@ class AppStoreServerTest(TestCase):
             },
         )
         missingPreset = self.client.post(
-            "/admin/app-store/presets/999",
+            "/admin/app-store/presets/1/items/999",
             base_url="https://dash.djcatpro.top",
             headers={"Accept": "application/json"},
             data={
                 "csrf_token": self._csrf(),
-                "preset_app_id": "1",
                 "preset_title": "Missing",
                 "preset_action_type": "program",
                 "preset_action_target": "demo.exe",
@@ -395,11 +393,10 @@ class AppStoreServerTest(TestCase):
     def testAdminCanManageAppAndPublicDownloadIncrementsCount(self):
         self._createApp()
         preset = self.client.post(
-            "/admin/app-store/presets/",
+            "/admin/app-store/presets/1/new",
             base_url="https://dash.djcatpro.top",
             data={
                 "csrf_token": self._csrf(),
-                "preset_app_id": "1",
                 "preset_title": "打开",
                 "preset_description": "启动",
                 "preset_action_type": "program",
@@ -458,11 +455,10 @@ class AppStoreServerTest(TestCase):
         self.assertIn("--minimized", selectedBody)
 
         edited = self.client.post(
-            "/admin/app-store/presets/1",
+            "/admin/app-store/presets/1/items/1",
             base_url="https://dash.djcatpro.top",
             data={
                 "csrf_token": self._csrf(),
-                "preset_app_id": "1",
                 "preset_title": "打开网页",
                 "preset_description": "访问文档",
                 "preset_action_type": "url",
@@ -502,7 +498,7 @@ class AppStoreServerTest(TestCase):
             1,
         )
         deleted = self.client.post(
-            "/admin/app-store/presets/1",
+            "/admin/app-store/presets/1/items/1",
             base_url="https://dash.djcatpro.top",
             data={"csrf_token": self._csrf(), "delete": "1"},
         )
@@ -685,12 +681,11 @@ class AppStoreServerTest(TestCase):
     def testPresetRejectsUnsafeTargets(self):
         self._createApp()
         response = self.client.post(
-            "/admin/app-store/presets/",
+            "/admin/app-store/presets/1/new",
             base_url="https://dash.djcatpro.top",
             headers={"Accept": "application/json"},
             data={
                 "csrf_token": self._csrf(),
-                "preset_app_id": "1",
                 "preset_title": "危险动作",
                 "preset_action_type": "program",
                 "preset_action_target": "../demo.exe",
@@ -701,12 +696,11 @@ class AppStoreServerTest(TestCase):
     def testPresetRejectsWindowsPathDisguisedAsUri(self):
         self._createApp()
         response = self.client.post(
-            "/admin/app-store/presets/",
+            "/admin/app-store/presets/1/new",
             base_url="https://dash.djcatpro.top",
             headers={"Accept": "application/json"},
             data={
                 "csrf_token": self._csrf(),
-                "preset_app_id": "1",
                 "preset_title": "危险动作",
                 "preset_action_type": "uri",
                 "preset_action_target": r"C:\Windows\System32\calc.exe",

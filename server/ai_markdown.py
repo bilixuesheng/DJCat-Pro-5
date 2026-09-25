@@ -638,7 +638,7 @@ def _recoverStaleRequests():
     return len(rows)
 
 
-def _rollupOldRequests(force=False):
+def _rollupOldRequests():
     cutoff = (
         datetime.now(TIMEZONE).date() - timedelta(days=REQUEST_LOG_RETENTION_DAYS)
     ).isoformat()
@@ -647,16 +647,15 @@ def _rollupOldRequests(force=False):
         marker = database.execute(
             "SELECT value FROM settings WHERE key = 'request_log_rollup_day'"
         ).fetchone()
-        if not force and marker and marker[0] == today:
+        if marker and marker[0] == today:
             return 0
         database.execute("BEGIN IMMEDIATE")
-        if not force:
-            marker = database.execute(
-                "SELECT value FROM settings WHERE key = 'request_log_rollup_day'"
-            ).fetchone()
-            if marker and marker[0] == today:
-                database.commit()
-                return 0
+        marker = database.execute(
+            "SELECT value FROM settings WHERE key = 'request_log_rollup_day'"
+        ).fetchone()
+        if marker and marker[0] == today:
+            database.commit()
+            return 0
         candidate = database.execute(
             """
             SELECT 1 FROM request_log
@@ -768,19 +767,6 @@ def _claimInTransaction(database, machineId, cost, day, limit):
     return limit - count - cost
 
 
-def _claim(machineId, cost, day=None, limit=None):
-    day = day or _today()
-    limit = limit or _dailyLimit()
-    with closing(_connect()) as database:
-        database.execute("BEGIN IMMEDIATE")
-        remaining = _claimInTransaction(database, machineId, cost, day, limit)
-        if remaining < 0:
-            database.rollback()
-            return -1
-        database.commit()
-    return remaining
-
-
 def _claimRequest(machineId, cost, day, limit):
     _recoverStaleRequests()
     with closing(_connect()) as database:
@@ -798,19 +784,6 @@ def _claimRequest(machineId, cost, day, limit):
         )
         database.commit()
     return remaining, cursor.lastrowid
-
-
-def _refund(machineId, cost, day=None):
-    day = day or _today()
-    with closing(_connect()) as database:
-        database.execute(
-            """
-            UPDATE usage SET count = count - ?
-            WHERE day = ? AND machine_id = ? AND count >= ?
-            """,
-            (cost, day, machineId, cost),
-        )
-        database.commit()
 
 
 def _error(message, status):
@@ -1160,7 +1133,6 @@ def _dashboardStats():
                 COUNT(*) AS requests,
                 COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS success,
                 COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
-                COALESCE(SUM(CASE WHEN status IN ('success', 'processing') THEN cost ELSE 0 END), 0) AS consumed,
                 COALESCE(SUM(CASE WHEN day = ? THEN 1 ELSE 0 END), 0) AS today_requests,
                 COALESCE(SUM(CASE WHEN day = ? AND status = 'success' THEN 1 ELSE 0 END), 0) AS today_success,
                 COALESCE(SUM(CASE WHEN day = ? AND status = 'failed' THEN 1 ELSE 0 END), 0) AS today_failed,
@@ -1173,8 +1145,7 @@ def _dashboardStats():
             """
             SELECT COALESCE(SUM(requests), 0) AS requests,
                    COALESCE(SUM(success), 0) AS success,
-                   COALESCE(SUM(failed), 0) AS failed,
-                   COALESCE(SUM(consumed), 0) AS consumed
+                   COALESCE(SUM(failed), 0) AS failed
             FROM request_daily_stats
             """
         ).fetchone()
@@ -1200,7 +1171,6 @@ def _dashboardStats():
         "consumed": consumed,
         "today": today,
         "all": allData,
-        "all_consumed": recentStats["consumed"] + summaryStats["consumed"],
         "market": market,
     }
 
@@ -1939,7 +1909,6 @@ def adminResetMachine(alias):
     )
 
 
-@app.post("/admin/ai/markdown/machines/reset-all")
 @app.post("/admin/ai/markdown/reset-all")
 @_loginRequired
 def adminResetAll():

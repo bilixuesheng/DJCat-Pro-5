@@ -394,15 +394,11 @@ def marketplaceStats(connect, day):
         adCount = database.execute(
             "SELECT COUNT(*) FROM market_advertisements WHERE enabled = 1"
         ).fetchone()[0]
-        presetCount = database.execute(
-            "SELECT COUNT(*) FROM market_presets"
-        ).fetchone()[0]
     return {
         "today_downloads": todayDownloads,
         "downloads": totalDownloads,
         "apps": appCount,
         "ads": adCount,
-        "presets": presetCount,
     }
 
 
@@ -1197,16 +1193,6 @@ def register_app_store(
             else _renderPresetForm(app_id, preset_id)
         )
 
-    @blueprint.post("/admin/app-store/presets/")
-    @login_required
-    def adminCreatePresetLegacy():
-        return _savePreset(None, None)
-
-    @blueprint.post("/admin/app-store/presets/<int:preset_id>")
-    @login_required
-    def adminPresetLegacy(preset_id):
-        return _savePreset(None, preset_id)
-
     def _savePreset(appId, presetId):
         check_csrf()
         if request.form.get("delete"):
@@ -1217,14 +1203,7 @@ def register_app_store(
                     "SELECT app_id FROM market_presets WHERE id = ?",
                     (presetId,),
                 ).fetchone()
-                if row is None:
-                    return admin_response(
-                        "预设卡片不存在",
-                        "error",
-                        "app_store.adminPresets",
-                        404,
-                    )
-                if appId is not None and row["app_id"] != appId:
+                if row is None or row["app_id"] != appId:
                     return admin_response(
                         "预设卡片不存在",
                         "error",
@@ -1255,14 +1234,7 @@ def register_app_store(
             request.form.get("preset_action_target"),
             request.form.get("preset_action_arguments", ""),
         )
-        if appId is None:
-            try:
-                appId = int(request.form.get("preset_app_id"))
-            except (TypeError, ValueError):
-                appId = None
         errors = []
-        if appId is None:
-            errors.append("请选择软件")
         if not title:
             errors.append("卡片标题不能为空")
         if len(title) > 80:
@@ -1276,27 +1248,19 @@ def register_app_store(
                 if actionType == "url"
                 else "预设卡片动作配置无效"
             )
-        redirectValues = {"app_id": appId} if appId else None
+        redirectValues = {"app_id": appId}
         if errors:
-            if appId is not None:
-                submitted = {
-                    "id": presetId,
-                    "title": title,
-                    "description": description,
-                    "action_type": actionType,
-                    "action_target": request.form.get(
-                        "preset_action_target", ""
-                    ).strip(),
-                    "action_arguments": request.form.get(
-                        "preset_action_arguments", ""
-                    ),
-                }
-                return _formErrors(
-                    errors,
-                    lambda: _renderPresetForm(appId, presetId, submitted),
-                )
-            return admin_response(
-                "；".join(errors), "error", "app_store.adminPresets", 400
+            submitted = {
+                "id": presetId,
+                "title": title,
+                "description": description,
+                "action_type": actionType,
+                "action_target": request.form.get("preset_action_target", "").strip(),
+                "action_arguments": request.form.get("preset_action_arguments", ""),
+            }
+            return _formErrors(
+                errors,
+                lambda: _renderPresetForm(appId, presetId, submitted),
             )
         _ensureSchema(connect)
         with closing(connect()) as database:

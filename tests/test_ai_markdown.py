@@ -737,8 +737,8 @@ class AIMarkdownTest(unittest.TestCase):
                 )
                 database.commit()
 
-            self.assertEqual(ai_markdown._rollupOldRequests(force=True), 1)
-            self.assertEqual(ai_markdown._rollupOldRequests(force=True), 0)
+            self.assertEqual(ai_markdown._rollupOldRequests(), 1)
+            self.assertEqual(ai_markdown._rollupOldRequests(), 0)
 
             stats = ai_markdown._dashboardStats()
             machines = ai_markdown._machineRows()
@@ -749,13 +749,16 @@ class AIMarkdownTest(unittest.TestCase):
                 remainingUsage = database.execute(
                     "SELECT COUNT(*) FROM usage WHERE day = ?", (oldDay,)
                 ).fetchone()[0]
+                rolledUpConsumed = database.execute(
+                    "SELECT SUM(consumed) FROM request_daily_stats"
+                ).fetchone()[0]
 
             self.assertEqual(remainingLogs, 0)
             self.assertEqual(remainingUsage, 0)
             self.assertEqual(stats["all"]["ai_requests"], 2)
             self.assertEqual(stats["all"]["ai_success"], 1)
             self.assertEqual(stats["all"]["ai_failed"], 1)
-            self.assertEqual(stats["all_consumed"], 2)
+            self.assertEqual(rolledUpConsumed, 2)
             self.assertEqual(machines[0]["requests"], 2)
 
     def testReplacingDatabaseAtSamePathReinitializesSchema(self):
@@ -832,8 +835,12 @@ class AIMarkdownTest(unittest.TestCase):
             patch.object(ai_markdown, "_quotaCost", return_value=2),
         ):
             machineId = ai_markdown._machineId("a" * 64)
-            for _ in range(14):
-                ai_markdown._claim(machineId, 1)
+            with closing(ai_markdown._connect()) as database:
+                database.execute(
+                    "INSERT INTO usage (day, machine_id, count) VALUES (?, ?, 14)",
+                    (ai_markdown._today(), machineId),
+                )
+                database.commit()
             response = ai_markdown.app.test_client().post(
                 "/ai/markdown",
                 json={"content": "作业", "machine_id": "a" * 64},
@@ -885,13 +892,20 @@ class AIMarkdownTest(unittest.TestCase):
             ),
         ):
             machineId = ai_markdown._machineId("a" * 64)
+            day = ai_markdown._today()
+            limit = ai_markdown._dailyLimit()
+            claims = [
+                ai_markdown._claimRequest(machineId, 2, day, limit) for _ in range(7)
+            ]
             self.assertEqual(
-                [ai_markdown._claim(machineId, 2) for _ in range(7)],
+                [remaining for remaining, _ in claims],
                 [13, 11, 9, 7, 5, 3, 1],
             )
-            self.assertEqual(ai_markdown._claim(machineId, 2), -1)
+            self.assertEqual(
+                ai_markdown._claimRequest(machineId, 2, day, limit), (-1, None)
+            )
             self.assertEqual(ai_markdown._remaining(machineId), 1)
-            ai_markdown._refund(machineId, 2)
+            ai_markdown._requestFinished(claims[-1][1], False, machineId, 2, day)
             self.assertEqual(ai_markdown._remaining(machineId), 3)
 
 
