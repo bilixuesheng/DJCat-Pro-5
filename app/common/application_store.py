@@ -233,7 +233,7 @@ def _externalProcessEnvironment() -> dict[str, str]:
     return externalProcessEnvironment(globals().get("__compiled__"))
 
 
-def _activateProcessWindow(process, stopEvent=None, onFailure=None):
+def _activateProcessWindow(process, stopEvent=None):
     pid = getattr(process, "pid", None)
     if os.name != "nt" or type(pid) is not int or pid <= 0:
         return None
@@ -342,18 +342,6 @@ def _activateProcessWindow(process, stopEvent=None, onFailure=None):
                 if time.monotonic() - exitedAt >= 2:
                     break
             stopEvent.wait(0.1)
-
-        if stopEvent.is_set() or onFailure is None:
-            return
-        exitCode = process.poll()
-        if exitCode is not None and exitCode != 0:
-            message = "程序启动后立即退出，可能已有实例正在运行"
-        else:
-            return
-        try:
-            onFailure(message)
-        except RuntimeError:
-            pass
 
     worker = threading.Thread(target=activate, daemon=True)
     worker.start()
@@ -683,7 +671,6 @@ class ApplicationStore:
         apiBaseUrl: str | None = None,
         programDir: Path = PROGRAM_DIR,
         cache: ImageCache | None = None,
-        onLaunchFailure=None,
     ):
         self.apiBaseUrl = (apiBaseUrl or os.environ.get("DJCATAI_API_BASE_URL", "https://api.djcatpro.top")).rstrip("/") + "/"
         self.programDir = Path(programDir).resolve()
@@ -694,7 +681,6 @@ class ApplicationStore:
         self._launchedProcesses = {}
         self._activationStop = threading.Event()
         self._activationThreads = {}
-        self._onLaunchFailure = onLaunchFailure
         self._installedLock = threading.RLock()
         self._installedCache = None
         self._installedStamp = None
@@ -708,7 +694,6 @@ class ApplicationStore:
         for worker in set(self._activationThreads.values()):
             worker.join(max(0, deadline - time.monotonic()))
         self._activationThreads.clear()
-        self._onLaunchFailure = None
         if self._cleanupThread is not None:
             self._cleanupThread.join(max(0, deadline - time.monotonic()))
 
@@ -781,11 +766,7 @@ class ApplicationStore:
         worker = self._activationThreads.get(pid)
         if worker is not None and worker.is_alive():
             return
-        worker = _activateProcessWindow(
-            process,
-            self._activationStop,
-            self._onLaunchFailure,
-        )
+        worker = _activateProcessWindow(process, self._activationStop)
         if worker is not None:
             self._activationThreads[pid] = worker
 

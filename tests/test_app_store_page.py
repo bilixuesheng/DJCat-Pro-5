@@ -1013,13 +1013,6 @@ class AppStorePageTest(TestCase):
         finally:
             setattr(item, "_ConfigItem__value", oldValue)
 
-    def testBackgroundLaunchFailureIsShownOnTheVisibleWindow(self):
-        with patch.object(InfoBar, "error") as showError:
-            self.page._launchFailed.emit("程序启动后立即退出")
-
-        showError.assert_called_once()
-        self.assertIs(showError.call_args.kwargs["parent"], self.page.window())
-
     def testInstalledApplicationWithoutOpenActionCannotBePinned(self):
         app = _apps(1)[0] | {
             "id": 1,

@@ -762,7 +762,6 @@ class AdvertisementOverlay(QWidget):
 
 class AppStorePage(ScrollArea):
     pinnedCardsChanged = Signal(object)
-    _launchFailed = Signal(str)
     _launchFinished = Signal(int, str)
     _downloadProgressSignal = Signal(int, int, int)
     _downloadRetrySignal = Signal(str)
@@ -771,8 +770,7 @@ class AppStorePage(ScrollArea):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._launchFailed.connect(self._onLaunchFailed)
-        self.store = ApplicationStore(onLaunchFailure=self._launchFailed.emit)
+        self.store = ApplicationStore()
         self._catalog = []
         self._mergedCatalog = None
         self.ads = []
@@ -2026,17 +2024,6 @@ class AppStorePage(ScrollArea):
     def _onDetailAction(self):
         if self.currentApp:
             self._onAppAction(self.currentApp)
-
-    def _onLaunchFailed(self, message):
-        if self._shuttingDown:
-            return
-        InfoBar.error(
-            "应用未打开",
-            message,
-            duration=5000,
-            position=InfoBarPosition.BOTTOM_RIGHT,
-            parent=self.window(),
-        )
 
     def _onAppAction(self, app, allowUpdate=True):
         appId = int(app["id"])
