@@ -134,6 +134,9 @@ class FullscreenClockTest(TestCase):
 
 
 class FullscreenClockMigrationTest(TestCase):
+    def setUp(self):
+        isolateCfg(self)
+
     def testExistingHomeCardsGainClockOnceAfterCountdown(self):
         legacy = ["全屏投送", "考试倒计时", "定时关机", "定时播报"]
         cfg.set(cfg.homeCardOrder, legacy, save=False)
