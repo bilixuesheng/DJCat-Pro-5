@@ -1542,21 +1542,8 @@ class AppStorePage(ScrollArea):
 
     def _setCardState(self, card, app, installedPage=False):
         appId = int(app["id"])
-        state = self._downloadStates.get(appId)
-        supported = bool(app.get("architecture_supported"))
+        actionText, enabled = self._actionState(app, showUpdate=installedPage)
         hasOpenAction = isinstance(self._installedOpenAction(app), dict)
-        if state:
-            actionText = state
-            enabled = False
-        elif installedPage and app.get("update_available"):
-            actionText = "更新"
-            enabled = supported
-        elif app.get("installed"):
-            actionText = "打开" if hasOpenAction else "未配置打开动作"
-            enabled = hasOpenAction
-        else:
-            actionText = "下载" if supported else "不支持"
-            enabled = supported
         directKey = (appId, DIRECT_APPLICATION_PRESET_ID)
         card.setState(
             actionText,
@@ -1564,19 +1551,35 @@ class AppStorePage(ScrollArea):
             enabled,
             hasOpenAction,
             directKey in self._pinnedKeys(),
-            removeEnabled=installedPage and not bool(state),
+            removeEnabled=installedPage and appId not in self._downloadStates,
         )
+        self._applyProgress(card, appId)
+
+    def _actionState(self, app, showUpdate):
+        """Text and enabled state of an app's main button, shared by card and detail."""
+        state = self._downloadStates.get(int(app["id"]))
+        if state:
+            return state, False
+        supported = bool(app.get("architecture_supported"))
+        if showUpdate and app.get("update_available"):
+            return "更新", supported
+        if app.get("installed"):
+            hasOpenAction = isinstance(self._installedOpenAction(app), dict)
+            return ("打开" if hasOpenAction else "未配置打开动作"), hasOpenAction
+        return ("下载" if supported else "不支持"), supported
+
+    def _applyProgress(self, button, appId):
         if (
             appId in self._launching
             or appId in self._installing
             or appId in self._uninstalling
         ):
-            card.setProgress(indeterminate=True)
+            button.setProgress(indeterminate=True)
         elif appId in self._downloadJobs:
             progress = self._downloadProgress.get(appId, 0)
-            card.setProgress(progress, indeterminate=not progress)
+            button.setProgress(progress, indeterminate=not progress)
         else:
-            card.setProgress()
+            button.setProgress()
 
     def _renderGrid(self, layout, apps, installedPage=False):
         cards = []
@@ -1971,43 +1974,11 @@ class AppStorePage(ScrollArea):
         if not self.currentApp:
             return
         appId = int(self.currentApp["id"])
-        supported = bool(self.currentApp.get("architecture_supported"))
-        hasOpenAction = isinstance(
-            self._installedOpenAction(self.currentApp), dict
-        )
-        if appId in self._downloadStates:
-            self.detailAction.setText(self._downloadStates[appId])
-        elif self.currentApp.get("update_available"):
-            self.detailAction.setText("更新")
-        elif self.currentApp.get("installed"):
-            self.detailAction.setText(
-                "打开"
-                if hasOpenAction
-                else "未配置打开动作"
-            )
-        else:
-            self.detailAction.setText("下载" if supported else "不支持")
-        # Keep the detail action in lockstep with cards so an unavailable
-        # architecture cannot enable a download that will fail after a click.
-        if self.currentApp.get("installed") and not self.currentApp.get(
-            "update_available"
-        ):
-            actionEnabled = hasOpenAction
-        else:
-            actionEnabled = supported
-        self.detailAction.setEnabled(not self._isBusy(appId) and actionEnabled)
-        if (
-            appId in self._launching
-            or appId in self._installing
-            or appId in self._uninstalling
-        ):
-            self.detailAction.setProgress(indeterminate=True)
-        elif appId in self._downloadJobs:
-            progress = self._downloadProgress.get(appId, 0)
-            self.detailAction.setProgress(progress, indeterminate=not progress)
-        else:
-            self.detailAction.setProgress()
         busy = self._isBusy(appId)
+        actionText, enabled = self._actionState(self.currentApp, showUpdate=True)
+        self.detailAction.setText(actionText)
+        self.detailAction.setEnabled(enabled and not busy)
+        self._applyProgress(self.detailAction, appId)
         for openButton, pinButton, available, pinned in self._presetActionButtons:
             openButton.setEnabled(available and not busy)
             pinButton.setEnabled((available or pinned) and not busy)
