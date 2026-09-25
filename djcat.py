@@ -98,10 +98,12 @@ def main():
     from app.config.cfg import cfg, migrateConfig
     from app.config.paths import CONFIG_PATH
     from app.platform.dialog_animation import optimizeFluentDialogs
+    from app.platform.icon_cache import cacheFluentSvgIcons
     from app.platform.menu_animation import optimizeFluentMenus
 
     optimizeFluentDialogs()
     optimizeFluentMenus()
+    cacheFluentSvgIcons()
 
     installTranslators(app)
 

@@ -47,12 +47,33 @@ def setRevealPainting(widget: QWidget, enabled: bool) -> None:
         widget.setGraphicsEffect(effect)
 
 
+# 一个过滤器可能管着整列设置卡片的全部标签；上限只防止反复改文字时无限增长。
+_ELIDE_CACHE_LIMIT = 256
+
+
 class LabelElideFilter(QObject):
     def __init__(self, parent=None, maximumLines=None):
         super().__init__(parent)
         self.maximumLines = maximumLines
+        self._cache = {}
 
     def displayLines(self, label: QLabel) -> list[str]:
+        # 滚动透明背景的页面时每帧都会重绘全部标签，多行省略要跑一次 QTextLayout；
+        # 结果只取决于文字、宽度和字体，缓存起来滚动时就只剩绘制。
+        key = (
+            label.text(),
+            label.contentsRect().width(),
+            label.font().key(),
+            self.maximumLines,
+        )
+        lines = self._cache.get(key)
+        if lines is None:
+            if len(self._cache) >= _ELIDE_CACHE_LIMIT:
+                self._cache.clear()
+            lines = self._cache[key] = tuple(self._elide(label))
+        return list(lines)
+
+    def _elide(self, label: QLabel) -> list[str]:
         metrics = label.fontMetrics()
         width = label.contentsRect().width()
         if self.maximumLines is None:

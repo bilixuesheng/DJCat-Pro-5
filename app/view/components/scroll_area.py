@@ -23,6 +23,30 @@ WHEEL_SCROLL_DURATION_MS = 250
 SUPPRESSED_DRAG_START_DISTANCE = 1000.0
 
 
+def setTouchScrollSuppressed(viewport, suppressed: bool, restoreDistance=None):
+    """Make a grabbed viewport's scroller inert, or bring it back.
+
+    Returns the drag threshold to pass back as ``restoreDistance`` when lifting
+    the suppression. Views outside ``ScrollArea`` (Projection body, nested
+    scroll areas) use this instead of ``QScroller.ungrabGesture``: releasing and
+    re-grabbing is the cycle that leaves stale targets in Qt's gesture manager.
+    """
+    scroller = QScroller.scroller(viewport)
+    scroller.stop()
+    properties = scroller.scrollerProperties()
+    metric = QScrollerProperties.ScrollMetric.DragStartDistance
+    if suppressed:
+        # 记下当前值再抬高，恢复时才不会把别处调过的阈值一并抹掉。
+        current = properties.scrollMetric(metric)
+        if current < SUPPRESSED_DRAG_START_DISTANCE:
+            restoreDistance = current
+        properties.setScrollMetric(metric, SUPPRESSED_DRAG_START_DISTANCE)
+    elif restoreDistance is not None:
+        properties.setScrollMetric(metric, restoreDistance)
+    scroller.setScrollerProperties(properties)
+    return restoreDistance
+
+
 class _TouchScrollGuard(QObject):
     def __init__(self, application):
         super().__init__(application)
@@ -145,17 +169,11 @@ class ScrollArea(FluentScrollArea):
             return
         if not suppressed and self._dragStartDistance is None:
             return
-        scroller = QScroller.scroller(self.viewport())
-        scroller.stop()
-        properties = scroller.scrollerProperties()
-        metric = QScrollerProperties.ScrollMetric.DragStartDistance
-        if suppressed:
-            # 记下当前值再抬高，恢复时才不会把别处调过的阈值一并抹掉。
-            self._dragStartDistance = properties.scrollMetric(metric)
-            properties.setScrollMetric(metric, SUPPRESSED_DRAG_START_DISTANCE)
-        else:
-            properties.setScrollMetric(metric, self._dragStartDistance)
-        scroller.setScrollerProperties(properties)
+        self._dragStartDistance = setTouchScrollSuppressed(
+            self.viewport(),
+            suppressed,
+            self._dragStartDistance,
+        )
         self.isTouchScrollSuppressed = suppressed
 
     def grabTouchGesture(self):

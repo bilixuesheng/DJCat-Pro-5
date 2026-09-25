@@ -143,7 +143,8 @@ class WindowBackground(QWidget):
         if not path or width <= 0 or height <= 0:
             return None
         source = self._sourceImage(path)
-        key = (self._sourceKey, width, height, self._scaleModeItem.value)
+        ratio = self.devicePixelRatioF()
+        key = (self._sourceKey, width, height, ratio, self._scaleModeItem.value)
         if key == self._cachedKey:
             return self._cachedPixmap
         if source is None:
@@ -151,6 +152,9 @@ class WindowBackground(QWidget):
             self._cachedPixmap = None
             return None
 
+        # 按物理像素缩放，最后标上设备像素比；按逻辑尺寸缩放会在 150%/200% 下被放大发虚。
+        # 缓存键带上设备像素比，窗口换到不同缩放的屏幕时才会重建。
+        width, height = max(1, round(width * ratio)), max(1, round(height * ratio))
         target = QPixmap(width, height)
         target.fill(Qt.GlobalColor.transparent)
         painter = QPainter(target)
@@ -180,6 +184,7 @@ class WindowBackground(QWidget):
                 y = (height - scaled.height()) // 2
             painter.drawPixmap(x, y, scaled)
         painter.end()
+        target.setDevicePixelRatio(ratio)
 
         self._cachedKey = key
         self._cachedPixmap = target

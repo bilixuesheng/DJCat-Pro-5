@@ -36,9 +36,11 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 **`app/platform/menu_animation.py` 独占 QFluentWidgets 的 Menu Reveal 适配。** 它只替换 `DROP_DOWN` 和 `PULL_UP` 两种动画管理器；其他动画类型及页面组件不再分别接管菜单动画。
 
+**`app/platform/icon_cache.py` 独占 QFluentWidgets SVG 图标的解析缓存。** 组件库每次绘制图标都新建 `QSvgRenderer` 从资源重新解析，透明背景页面滚动时每帧都要重绘所有可见图标（offscreen 实测单个图标 130 µs 对缓存后的 21 µs）。它替换 `drawSvgIcon` 和 `writeSvg`，只缓存内容不会变的来源——`:/` 资源路径和 SVG 源码字节，磁盘路径照旧每次读取；两份缓存各有上限。页面不得自己另建图标缓存。
+
 **`app/platform/dialog_animation.py` 独占 QFluentWidgets 蒙层弹窗的公共适配。** 它复用阴影效果并接管 `showEvent` 和 `done`，在淡入淡出期间暂停阴影以避免 1 ms Animation Tick 下的逐帧模糊重算；淡入结束后用 `color` 属性动画将阴影 alpha 从 0 渐变到目标值，此时无外层不透明度效果只剩一层阴影，不掉帧。弹窗中的下拉框仍属于 Menu Reveal；页面不得重复修补组件库或改变原有动画曲线。
 
-**`app/view/components/setting_section.py` 独占设置页的层级导航。** Setting Section 的下钻、返回、面包屑对应的 Setting Route，以及层级之间的推移动画都由它提供；页面只负责装配内容。推移沿用 `SlideNavigationTransitionInfo`：进入下一级时旧页左移出场、新页自右入场，返回时反向，两页共用同一条 `cubic-bezier(0,0,0,1)` 曲线和 300 ms 时长并交叉淡入淡出。"旧页原地淡出"是 `FromBottom`（顶层切换）的特征，横向照搬会让两页脱节。位移 150 px 是设备无关像素，不得再乘 `devicePixelRatio`——Qt 的部件坐标本就是设备无关像素，乘了等于缩放两次；`main_window.py` 的 `BORDER_WIDTH` 要乘是因为它喂给原生命中测试，吃的是物理像素。动画期间只改 `pos` 和不透明度，不碰布局。
+**`app/view/components/setting_section.py` 独占设置页的层级导航。** Setting Section 的下钻、返回、面包屑对应的 Setting Route，以及层级之间的推移动画都由它提供；页面只负责装配内容。推移沿用 `SlideNavigationTransitionInfo`：进入下一级时旧页左移出场、新页自右入场，返回时反向，两页共用同一条 `cubic-bezier(0,0,0,1)` 曲线和 300 ms 时长并交叉淡入淡出。"旧页原地淡出"是 `FromBottom`（顶层切换）的特征，横向照搬会让两页脱节。位移 150 px 是设备无关像素，不得再乘 `devicePixelRatio`——Qt 的部件坐标本就是设备无关像素，乘了等于缩放两次；`main_window.py` 的 `BORDER_WIDTH` 要乘是因为它喂给原生命中测试，吃的是物理像素。动画期间只改 `pos` 和不透明度，不碰布局。推移的是两页的快照：起步时各 `grab()` 一次，真页面在推移期间隐藏，结束后才显示；不得再给整页 `ScrollArea` 挂 `QGraphicsOpacityEffect`——每个 Animation Tick 都会把两页整棵子树重绘一遍（offscreen 实测每帧 20 ms 对快照的 1.7 ms）。
 
 **设置页搜索只产出 Setting Suggestion。** 页面本身不筛选、不折叠、不重排；建议只按 Setting Card 的标题匹配，条件隐藏的卡片不参与，跨 Section 重名的标题才补完整 Route 前缀。`SettingPage` 提供 `searchSuggestions()` 和 `navigateToRoute()`，弹窗由 MainWindow 拥有——搜索框属于标题栏，设置页不得反向持有它。选中建议后清空搜索框、跳到目标 Route、滚动到卡片并描一圈主题色边框，绝不改写用户的前置设置来让隐藏卡片现身。
 
@@ -48,7 +50,7 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 **`ScrollArea` 统一仲裁单指触控滚动与子控件点击。** 从按钮、下拉框或卡片上起滑时，移动达到系统拖动阈值后必须取消该触控序列的按压和释放，不能在滚动结束时触发原控件；未达到阈值的短按仍按正常点击处理。页面不得各自复制这套判定。HomePage 进入卡片编辑态时由排序手势独占触控，并依靠卡片拖动的边缘自动滚动跨越视口；退出编辑态后恢复页面触控滚动。
 
-需要让出触控的模式调用 `ScrollArea.setTouchScrollSuppressed()`，它把拖动阈值抬到手指够不到的距离，不释放手势；页面不得自己 `QScroller.ungrabGesture()`，那就是上一条禁止的抓放循环。落在卡片上的触控本就由卡片在编辑态 `WA_AcceptTouchEvents` 并吃掉 `TouchBegin` 拿走，抑制只负责空白处不再起滚动。
+需要让出触控的模式调用 `ScrollArea.setTouchScrollSuppressed()`，它把拖动阈值抬到手指够不到的距离，不释放手势；页面不得自己 `QScroller.ungrabGesture()`，那就是上一条禁止的抓放循环。不是 `ScrollArea` 的 viewport（Projection 正文的 `QTextEdit`、`MarkdownView`）用 `scroll_area.setTouchScrollSuppressed(viewport, ...)` 做同一件事；Application Store 进入详情页时外层页面同样只抑制、不释放。注意 `QScroller.grabGesture()` 对已抓过的 viewport 会先自行 ungrab 再重抓，重复调用它本身就是一次抓放循环。落在卡片上的触控本就由卡片在编辑态 `WA_AcceptTouchEvents` 并吃掉 `TouchBegin` 拿走，抑制只负责空白处不再起滚动。
 
 **Tray Menu 不拥有 Home Card。** 它只根据 HomePage 提供的入口快照重建菜单，并把稳定 key 交回 MainWindow/HomePage 执行。
 
@@ -180,14 +182,14 @@ Projection 的两种正文渲染器必须保持这些共同约束：
 - 左侧和顶部正文起点一致。大字号 `MarkdownView` 的内容边距固定为 4 px，与 `QTextDocument.documentMargin()` 默认值一致；普通更新日志的 MarkdownView 保留渲染器默认边距。
 - 纯文本和 Markdown 正文控件都延伸到 Projection 窗口底边；外层布局不保留底部空隙，内容自身的 4 px 边距不受影响。
 - 纯文本与大字号 Markdown 正文共享 96% 行高；Markdown 顶层块之间不额外留白，普通更新日志保留默认块间距。
-- 全屏时纯文本和 Markdown 都使用 QFluentWidgets `SmoothScrollDelegate`，并在 viewport 上注册 `QScroller.TouchGesture`，支持鼠标滚轮和平滑单指触控；窗口化时正文不响应滚轮或拖动滚动，只能操作垂直滚动条，正文区域的鼠标或触控拖动用于移动 Projection 窗口。
+- 全屏时纯文本和 Markdown 都使用 QFluentWidgets `SmoothScrollDelegate`，并在 viewport 上注册 `QScroller.TouchGesture`（构造时各抓一次；切到窗口化只抬高拖动阈值，不 ungrab），支持鼠标滚轮和平滑单指触控；窗口化时正文不响应滚轮或拖动滚动，只能操作垂直滚动条，正文区域的鼠标或触控拖动用于移动 Projection 窗口。
 - Projection 关闭文本选择，手指拖动用于滚动而不是选择文字。
 - Projection 切换正文类型或关闭时释放旧正文控件，并立即取消其远程 Markdown 图片下载；返回编辑时仍从独立的 Projection 内容快照恢复。
 - 全屏时 Markdown 正文未处理的鼠标按压和拖动必须在 `MarkdownView` 边界停止，不能冒泡到外层无边框 Projection 窗口；窗口化时由 Projection 统一接管正文拖动，但短按链接和操作按钮仍需保持可用。
 
 Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` 会覆盖整个窗口背景。窗口化时的 `1 px #808080` 边界线必须由该组件在主题色、纯色或图片绘制完成后最后绘制；全屏时不绘制。不得恢复为父窗口 QSS 边框，否则背景子控件会再次把它盖住。配置值 `主题色` 是历史名称，不是强调色：Projection 取跟随深浅主题的窗口底色（`projectionThemeBackground()`），Exam Countdown 和 Fullscreen Clock 不论主题都铺黑底；设置页把它分别显示为"跟随主题"和"默认黑色"，存储值不变，预览与真实窗口共用同一个底色函数。
 
-Projection、Exam Countdown 与 Fullscreen Clock 的窗口化背景、图片裁剪和边框共用 8 px 圆角；首次显示前启用透明窗口表面，不依赖 Win11 系统圆角。Qt 阴影只附着在背景组件上，四周各留 12 px 透明空间，Exam Countdown 与 Fullscreen Clock 的可见内容仍为 600 × 190，Projection 初始可见尺寸仍为可用屏幕的一半；字体、布局与角落按钮按 `contentsRect()` 定位，不能把阴影空间算进正文尺寸。切回全屏（含保留任务栏模式）时清除透明边距、圆角、边框和阴影，背景重新铺满窗口。Projection 保留窗口化缩放：Windows 命中测试使用消息中的坐标，按 DPI 转为背景局部坐标，在可见圆角边界内侧 12 px、外侧 2 px 的圆角区域判断四边及四角，不将透明阴影外沿作为边框。圆角外的空白和角落按钮不触发缩放；全屏禁用缩放。
+背景图片按物理像素缩放后标上设备像素比，缓存键包含设备像素比，与主页横幅同理。Projection、Exam Countdown 与 Fullscreen Clock 的窗口化背景、图片裁剪和边框共用 8 px 圆角；首次显示前启用透明窗口表面，不依赖 Win11 系统圆角。Qt 阴影只附着在背景组件上，四周各留 12 px 透明空间，Exam Countdown 与 Fullscreen Clock 的可见内容仍为 600 × 190，Projection 初始可见尺寸仍为可用屏幕的一半；字体、布局与角落按钮按 `contentsRect()` 定位，不能把阴影空间算进正文尺寸。切回全屏（含保留任务栏模式）时清除透明边距、圆角、边框和阴影，背景重新铺满窗口。Projection 保留窗口化缩放：Windows 命中测试使用消息中的坐标，按 DPI 转为背景局部坐标，在可见圆角边界内侧 12 px、外侧 2 px 的圆角区域判断四边及四角，不将透明阴影外沿作为边框。圆角外的空白和角落按钮不触发缩放；全屏禁用缩放。
 
 **`app/view/components/busy_glow.py` 独占 Busy Glow。** AI Markdown 对话框和 Projection 编辑器内联整理的输入框共用同一个 `BusyGlowOverlay`；它是输入框的兄弟层而不是子控件，因此光带能同时向框内和框外渗开，并且不碰输入框的样式表——QFluentWidgets 的 TextEdit 外观正是靠 widget 级 `setStyleSheet` 装上去的，改写它会连滚动条一起换成 Qt 原生外观。不要回到 QSS 渐变边框：样式表分别绘制边框各边，粗渐变在圆角处必然斜向拼接。
 
@@ -208,6 +210,7 @@ Busy Glow 只表示"正在进行"，不表示完成度。对话框那张卡上�
 | `app/platform/animation_timer.py` | Qt 全局 Animation Tick 间隔的私有 API 适配和安全回退 |
 | `app/platform/dialog_animation.py` | QFluentWidgets 蒙层弹窗的阴影复用和淡入淡出阴影暂停 |
 | `app/platform/menu_animation.py` | QFluentWidgets 全局 Menu Reveal 管理器适配，不改变原版展开视觉 |
+| `app/platform/icon_cache.py` | QFluentWidgets SVG 图标解析缓存，只缓存资源路径和源码 |
 | `app/platform/screens.py` | 取窗口所在屏幕，绕开 PySide 把 QScreen 挂成控件子对象的返回值启发式 |
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
@@ -246,6 +249,7 @@ set working directory
   → SingletonApplication (Windows single instance + IPC)
   → unlockQtAnimations (before any QWidget animation is created)
   → optimizeFluentDialogs + optimizeFluentMenus (before MainWindow or its popups are created)
+  → cacheFluentSvgIcons (before any QFluentWidgets icon is painted)
   → installTranslators (Qt qtbase + QFluentWidgets Chinese strings)
   → configure logging and clear stale Client Update files
   → qconfig.load(CONFIG_PATH, cfg)

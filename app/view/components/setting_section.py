@@ -15,10 +15,9 @@ from PySide6.QtCore import (
     Qt,
     Signal,
 )
-from PySide6.QtGui import QPainter, QPen
+from PySide6.QtGui import QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
-    QGraphicsOpacityEffect,
     QHBoxLayout,
     QVBoxLayout,
     QWidget,
@@ -386,16 +385,25 @@ class SettingSectionStack(QWidget):
                 outgoing.hide()
             return
 
+        # 推移的是两页的快照，不是真页面：给整页 ScrollArea 挂不透明度效果时，
+        # 每个 Animation Tick 都要把整棵子树（含设置预览）重新栅格化进离屏缓冲，
+        # 两页各一遍。快照在起步时各截一次，之后每帧只贴两张图。
+        outgoingSnapshot = self._snapshot(outgoing)
+        incomingSnapshot = self._snapshot(incoming)
+        outgoing.hide()
+        incoming.hide()
+
         # 两页共用同一条曲线和时长，否则推移途中会彼此错开、不再像相邻的两页。
         direction = 1 if isBack else -1
         self._animate(
+            outgoingSnapshot,
             outgoing,
             fadeIn=False,
             slideFrom=0,
             slideTo=direction * SLIDE_DISTANCE,
-            hideOnFinish=True,
         )
         self._animate(
+            incomingSnapshot,
             incoming,
             fadeIn=True,
             slideFrom=-direction * SLIDE_DISTANCE,
@@ -408,37 +416,43 @@ class SettingSectionStack(QWidget):
             transition.group.stop()
             self._finishTransition(transition)
 
+    def _snapshot(self, view: SettingSectionView) -> "_SectionSnapshot":
+        snapshot = _SectionSnapshot(view.grab(), self)
+        snapshot.setGeometry(self.rect())
+        snapshot.show()
+        snapshot.raise_()
+        return snapshot
+
     def _animate(
         self,
+        snapshot: "_SectionSnapshot",
         view: SettingSectionView,
         *,
         fadeIn: bool,
         slideFrom: int,
         slideTo: int,
-        hideOnFinish: bool = False,
     ) -> None:
         curve = decelerateCurve()
-        effect = QGraphicsOpacityEffect(view)
-        view.setGraphicsEffect(effect)
         group = QParallelAnimationGroup(self)
 
-        opacity = QPropertyAnimation(effect, QByteArray(b"opacity"), group)
+        snapshot.setOpacity(0.0 if fadeIn else 1.0)
+        opacity = QPropertyAnimation(snapshot, QByteArray(b"opacity"), group)
         opacity.setDuration(SLIDE_DURATION_MS)
         opacity.setEasingCurve(curve)
         opacity.setStartValue(0.0 if fadeIn else 1.0)
         opacity.setEndValue(1.0 if fadeIn else 0.0)
         group.addAnimation(opacity)
 
-        view.move(slideFrom, 0)
+        snapshot.move(slideFrom, 0)
         # 只动 pos 和 opacity：1 ms 的 Animation Tick 下逐帧重排会把开销放大十几倍。
-        move = QPropertyAnimation(view, QByteArray(b"pos"), group)
+        move = QPropertyAnimation(snapshot, QByteArray(b"pos"), group)
         move.setDuration(SLIDE_DURATION_MS)
         move.setEasingCurve(curve)
         move.setStartValue(QPoint(slideFrom, 0))
         move.setEndValue(QPoint(slideTo, 0))
         group.addAnimation(move)
 
-        transition = _Transition(group, view, hideOnFinish)
+        transition = _Transition(group, snapshot, view, showOnFinish=fadeIn)
         group.finished.connect(
             lambda: self._finishTransition(transition)
         )
@@ -452,10 +466,38 @@ class SettingSectionStack(QWidget):
         transition.settle()
 
     def resizeEvent(self, event) -> None:
+        # 快照按起步时的尺寸截取，尺寸变了就直接落到末态，让真页面按新尺寸排版。
+        self.stopAnimations()
         for view in self._views.values():
             if not view.isHidden():
                 view.resize(self.size())
         super().resizeEvent(event)
+
+
+class _SectionSnapshot(QWidget):
+    """A frozen image of a section that slides and fades in the section's place."""
+
+    def __init__(self, pixmap: QPixmap, parent=None):
+        super().__init__(parent)
+        self._pixmap = pixmap
+        self._opacity = 1.0
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+    def getOpacity(self) -> float:
+        return self._opacity
+
+    def setOpacity(self, value: float) -> None:
+        self._opacity = value
+        self.update()
+
+    opacity = Property(float, getOpacity, setOpacity)
+
+    def paintEvent(self, event) -> None:
+        if self._opacity <= 0.0:
+            return
+        painter = QPainter(self)
+        painter.setOpacity(self._opacity)
+        painter.drawPixmap(0, 0, self._pixmap)
 
 
 class _Transition:
@@ -464,17 +506,23 @@ class _Transition:
     def __init__(
         self,
         group: QParallelAnimationGroup,
+        snapshot: _SectionSnapshot,
         view: SettingSectionView,
-        hideOnFinish: bool,
+        showOnFinish: bool,
     ):
         self.group = group
+        self.snapshot = snapshot
         self.view = view
-        self.hideOnFinish = hideOnFinish
+        self.showOnFinish = showOnFinish
 
     def settle(self) -> None:
-        self.view.setGraphicsEffect(None)
+        self.snapshot.hide()
+        self.snapshot.deleteLater()
         self.view.move(0, 0)
-        if self.hideOnFinish:
+        if self.showOnFinish:
+            self.view.show()
+            self.view.raise_()
+        else:
             self.view.hide()
         # 动画组挂在 stack 名下，不主动释放就会随每次下钻和返回一直累积。
         self.group.deleteLater()

@@ -620,6 +620,25 @@ class AppStorePageTest(TestCase):
 
         self.assertLessEqual(len(self.page.findChildren(QWidget)), baseline + 2)
 
+    def testDetailNavigationSuppressesOuterTouchScrollWithoutReleasingIt(self):
+        app = _apps(1)[0]
+        self.page.stack.setAnimationEnabled(False)
+        self.page.show()
+
+        # 抓了又放的循环会在 Qt 的手势管理器里留下残留，之后建任意窗口都可能崩。
+        with patch.object(QScroller, "ungrabGesture") as ungrab, patch.object(
+            QScroller, "grabGesture"
+        ) as grab:
+            for _ in range(3):
+                self.page._showDetail(app)
+                self.assertTrue(self.page.isTouchScrollSuppressed)
+                self.page._backToOverview()
+                self.assertFalse(self.page.isTouchScrollSuppressed)
+
+        ungrab.assert_not_called()
+        grab.assert_not_called()
+        self.assertGreater(QScroller.grabbedGesture(self.page.viewport()).value, 0)
+
     def testDetailContentIsReadyBeforeThePageSwitch(self):
         app = _apps(1)[0]
         app["name"] = "Fresh application"
