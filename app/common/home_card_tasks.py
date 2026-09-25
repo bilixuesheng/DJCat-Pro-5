@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.common.home_cards import new_id, normalize_action
+from app.common.home_cards import new_id, normalize_actions
 
 EXISTING_HOME_CARD_TASK = "existing"
 CUSTOM_HOME_CARD_TASK = "custom"
@@ -66,23 +66,6 @@ def _weeks(value) -> list[int]:
     return weeks
 
 
-def _actions(value) -> list[dict]:
-    actions = [
-        action
-        for action in (
-            normalize_action(item)
-            for item in (value if isinstance(value, list) else [])
-        )
-        if action is not None
-    ]
-    actionIds = set()
-    for action in actions:
-        if action["id"] in actionIds:
-            action["id"] = new_id()
-        actionIds.add(action["id"])
-    return actions
-
-
 def normalize_home_card_tasks(value) -> list[dict]:
     tasks = []
     taskIds = set()
@@ -117,7 +100,7 @@ def normalize_home_card_tasks(value) -> list[dict]:
                 "operation": operation,
                 "targetKey": _text(raw.get("targetKey")),
                 "targetTitle": _text(raw.get("targetTitle"))[:40],
-                "actions": _actions(raw.get("actions", [])),
+                "actions": normalize_actions(raw.get("actions", [])),
                 "enabled": _enabled(raw.get("enabled", True)),
             }
         )

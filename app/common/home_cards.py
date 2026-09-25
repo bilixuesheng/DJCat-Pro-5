@@ -72,6 +72,24 @@ def normalize_action(value: dict | None) -> dict | None:
     return action
 
 
+def normalize_actions(value) -> list[dict]:
+    """Valid actions of one Action Sequence, with action IDs made unique."""
+    actions = [
+        action
+        for action in (
+            normalize_action(item)
+            for item in (value if isinstance(value, list) else [])
+        )
+        if action is not None
+    ]
+    actionIds = set()
+    for action in actions:
+        if action["id"] in actionIds:
+            action["id"] = new_id()
+        actionIds.add(action["id"])
+    return actions
+
+
 def normalize_custom_cards(value) -> list[dict]:
     result = []
     card_ids = set()
@@ -79,14 +97,7 @@ def normalize_custom_cards(value) -> list[dict]:
         if not isinstance(raw, dict):
             continue
         title = _text(raw.get("title"))
-        rawActions = raw.get("actions", [])
-        if not isinstance(rawActions, list):
-            continue
-        actions = [
-            action
-            for action in (normalize_action(item) for item in rawActions)
-            if action is not None
-        ]
+        actions = normalize_actions(raw.get("actions", []))
         if not title or not actions:
             continue
         icon = raw.get("icon") if isinstance(raw.get("icon"), dict) else {}
@@ -102,11 +113,6 @@ def normalize_custom_cards(value) -> list[dict]:
         if card_id in card_ids:
             card_id = new_id()
         card_ids.add(card_id)
-        action_ids = set()
-        for action in actions:
-            if action["id"] in action_ids:
-                action["id"] = new_id()
-            action_ids.add(action["id"])
         result.append(
             {
                 "id": card_id,
