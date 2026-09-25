@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
 )
 
 from app.view.components.markdown_view import MarkdownView
-from app.view.components.scroll_area import SUPPRESSED_DRAG_START_DISTANCE
 from app.view.pages.broadcast_page import BroadcastWindow
 from app.view.windows.main_window import UpdateDialog
 from pyqt_github_markdown.blocks import BlockQuote, CodeBlock, ListBlock, TableBlock
@@ -597,40 +596,43 @@ class MarkdownRendererTest(TestCase):
         self.assertNotEqual(window.pos(), startPosition)
         self.assertTrue(window._contentDragFilterInstalled)
 
-    def testBroadcastTogglesBodyTouchScrollingWithoutReleasingGesture(self):
+    def testFullscreenBroadcastRestoresBodyTouchScrolling(self):
         window = BroadcastWindow()
         self.addCleanup(window.close)
-        viewports = (window.contentEdit.viewport(), window.markdownView.viewport())
-        metric = QScrollerProperties.ScrollMetric.DragStartDistance
+        viewports = (
+            window.contentEdit.viewport(),
+            window.markdownView.viewport(),
+        )
 
         def dragStartDistances():
             return [
-                QScroller.scroller(viewport).scrollerProperties().scrollMetric(metric)
+                QScroller.scroller(viewport)
+                .scrollerProperties()
+                .scrollMetric(QScrollerProperties.ScrollMetric.DragStartDistance)
                 for viewport in viewports
             ]
 
-        with (
-            patch.object(QScroller, "grabGesture") as grabGesture,
-            patch.object(QScroller, "ungrabGesture") as ungrabGesture,
-        ):
-            window.is_windowed = True
-            window._updateContentInteraction()
-            self.assertEqual(
-                dragStartDistances(),
-                [SUPPRESSED_DRAG_START_DISTANCE] * 2,
-            )
-            self.assertTrue(window._contentDragFilterInstalled)
+        original = dragStartDistances()
+        # 抓了又放的循环会在 Qt 的手势管理器里留下残留，之后建任意窗口都可能崩；
+        # 切换窗口化只能调拖动阈值。
+        with patch.object(QScroller, "grabGesture") as grabGesture, patch.object(
+            QScroller, "ungrabGesture"
+        ) as ungrabGesture:
+            for _ in range(3):
+                window.is_windowed = True
+                window._updateContentInteraction()
+                self.assertTrue(window._contentDragFilterInstalled)
+                self.assertTrue(
+                    all(distance > 1.0 for distance in dragStartDistances())
+                )
 
-            window.is_windowed = False
-            window._updateContentInteraction()
+                window.is_windowed = False
+                window._updateContentInteraction()
+                self.assertFalse(window._contentDragFilterInstalled)
+                self.assertEqual(dragStartDistances(), original)
 
         grabGesture.assert_not_called()
         ungrabGesture.assert_not_called()
-        self.assertEqual(
-            dragStartDistances(),
-            [QScrollerProperties().scrollMetric(metric)] * 2,
-        )
-        self.assertFalse(window._contentDragFilterInstalled)
         for viewport in viewports:
             self.assertGreater(QScroller.grabbedGesture(viewport).value, 0)
 

@@ -106,7 +106,19 @@ class WindowBackgroundTest(TestCase):
             for mode in WINDOW_BACKGROUND_SCALE_MODES:
                 cfg.set(cfg.broadcastBackgroundScaleMode, mode, save=False)
                 self.app.processEvents()
-                self.assertEqual(background._image().size(), background.size())
+                self.assertEqual(
+                    background._image().deviceIndependentSize().toSize(),
+                    background.size(),
+                )
+
+            # 高缩放屏上按物理像素缩放，否则整张背景图会被放大发虚。
+            with patch.object(background, "devicePixelRatioF", return_value=2.0):
+                image = background._image()
+            self.assertEqual(image.size(), background.size() * 2)
+            self.assertEqual(image.devicePixelRatio(), 2.0)
+            self.assertEqual(
+                image.deviceIndependentSize().toSize(), background.size()
+            )
 
     def testDefaultBackgroundIsNamedForWhatEachWindowPaints(self):
         page = SettingPage()

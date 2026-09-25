@@ -56,7 +56,7 @@ from app.config.paths import ASSET_DIR
 from app.platform.screens import screenFor
 from app.view.components.busy_glow import BusyGlowOverlay
 from app.view.components.markdown_view import MarkdownView
-from app.view.components.scroll_area import suppressTouchScroll
+from app.view.components.scroll_area import setTouchScrollSuppressed
 from app.view.components.window_background import (
     WINDOW_SHADOW_MARGIN,
     WindowBackground,
@@ -325,6 +325,7 @@ class BroadcastWindow(FramelessWindow):
         self._contentDragOffset = QPoint()
         self._contentDragMoved = False
         self._contentDragFilter = _BroadcastContentDragFilter(self)
+        self._contentDragDistances = {}
         self._closeFlyout = None
         self.background = WindowBackground(
             cfg.broadcastBackgroundMode,
@@ -540,8 +541,14 @@ class BroadcastWindow(FramelessWindow):
 
     def _updateContentInteraction(self):
         application = QApplication.instance()
+        # 两个正文 viewport 在构造时各抓一次触控手势，之后只调拖动阈值让出触控：
+        # 抓了又放会在 Qt 的手势管理器里留下残留，之后创建窗口时崩溃。
         for viewport in self._contentViewports():
-            suppressTouchScroll(viewport, self.is_windowed)
+            self._contentDragDistances[viewport] = setTouchScrollSuppressed(
+                viewport,
+                self.is_windowed,
+                self._contentDragDistances.get(viewport),
+            )
         if self.is_windowed:
             if application is not None and not self._contentDragFilterInstalled:
                 application.installEventFilter(self._contentDragFilter)

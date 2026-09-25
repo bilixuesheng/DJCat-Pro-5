@@ -38,6 +38,7 @@ def application():
 
 @pytest.fixture
 def optimizedMenus(monkeypatch):
+    monkeypatch.setattr(RoundMenu, "setShadowEffect", RoundMenu.setShadowEffect)
     for animationType in (
         MenuAnimationType.DROP_DOWN,
         MenuAnimationType.PULL_UP,
@@ -213,3 +214,20 @@ def test_optimized_animation_matches_original_geometry_and_mask(
     optimized.ani.stop()
     originalMenu.close()
     optimizedMenu.close()
+
+
+def test_menu_panel_shadow_is_blurred_once_not_on_every_hover(
+    application, optimizedMenus
+):
+    from app.platform.shadow_effect import SilhouetteShadowEffect
+
+    menu = RoundMenu()
+    shadow = menu.view.graphicsEffect()
+
+    # 原版阴影在悬停任一项时都要把整块面板离屏重画再模糊。
+    assert isinstance(shadow, SilhouetteShadowEffect)
+    assert shadow is menu.shadowEffect
+    assert shadow.blurRadius() == 30
+    assert shadow.offset().y() == 8
+    assert shadow.color().alpha() == 30
+    menu.deleteLater()
