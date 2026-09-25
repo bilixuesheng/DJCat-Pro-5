@@ -34,7 +34,7 @@ class FullscreenClockTest(TestCase):
         self.tempDir.cleanup()
 
     def testDisplaysCurrentSystemTimeWithoutCountdownControls(self):
-        self.window._updateTime()
+        self.window._refreshTime()
 
         self.assertEqual(self.window.titleLabel.text(), "当前时间")
         self.assertRegex(self.window.timeLabel.text(), r"^\d{2} : \d{2} : \d{2}$")

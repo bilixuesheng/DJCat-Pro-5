@@ -2,14 +2,11 @@ import math
 import time
 
 from PySide6.QtCore import QPropertyAnimation, QSize, Qt, QTime, QTimer, QUrl, Signal
-from PySide6.QtGui import QFontMetrics
 from PySide6.QtMultimedia import QSoundEffect
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsOpacityEffect,
     QHBoxLayout,
-    QLabel,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -25,24 +22,13 @@ from qfluentwidgets import (
     TitleLabel,
     ToolButton,
 )
-from qframelesswindow import FramelessWindow
 
 from app.config.cfg import cfg
 from app.config.paths import ASSET_DIR
-from app.platform.screens import screenFor
 from app.view.components.scroll_area import ScrollArea
-from app.view.components.setting_card_group import QWIDGETSIZE_MAX
 from app.view.components.task_picker import TouchTimePicker
-from app.view.components.window_background import (
-    TIMER_THEME_BACKGROUND,
-    WINDOW_SHADOW_MARGIN,
-    WindowBackground,
-)
-from app.view.pages.broadcast_page import (
-    VerticalButton,
-    showActionConfirmation,
-    showCloseConfirmation,
-)
+from app.view.pages.broadcast_page import VerticalButton, showActionConfirmation
+from app.view.pages.timer_window import TimerWindow
 
 DEFAULT_TITLE = "距离考试结束还剩"
 DEFAULT_END_TITLE = "考试结束"
@@ -68,28 +54,21 @@ class FormCard(SettingCard):
         self.hBoxLayout.addSpacing(16)
 
 
-class CountdownWindow(FramelessWindow):
-    closeClicked = Signal()
+class CountdownWindow(TimerWindow):
+    backgroundItems = (
+        cfg.countdownBackgroundMode,
+        cfg.countdownBackgroundColor,
+        cfg.countdownBackgroundImagePath,
+        cfg.countdownBackgroundScaleMode,
+    )
+    actionPositionItem = cfg.countdownActionButtonPosition
+    topmostInWindowedItem = cfg.countdownTopmostInWindowed
+    topmostInFullscreenItem = cfg.countdownTopmostInFullscreen
+    showTaskbarItem = cfg.showTaskbarInCountdown
+    confirmCloseItem = cfg.confirmBeforeCloseCountdown
+    closeMessage = "关闭后不会保存倒计时进度。"
 
     def __init__(self):
-        super().__init__()
-        self.setObjectName("CountdownWindow")
-        self.titleBar.hide()
-        # 首次显示前启用透明表面，Win10 也由 Qt 绘制圆角。
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.background = WindowBackground(
-            cfg.countdownBackgroundMode,
-            cfg.countdownBackgroundColor,
-            cfg.countdownBackgroundImagePath,
-            cfg.countdownBackgroundScaleMode,
-            lambda: TIMER_THEME_BACKGROUND,
-            self,
-        )
-        self.background.lower()
-        self.background.setGeometry(self.contentsRect())
-        self.setResizeEnabled(False)
-
-        self.is_windowed = False
         self.voice_enabled = True
         self.initial_seconds = 0
         self.remaining = 0
@@ -97,19 +76,22 @@ class CountdownWindow(FramelessWindow):
         self.title_text = DEFAULT_TITLE
         self.end_title_text = DEFAULT_END_TITLE
         self._played15 = False
-        self._moved = False
         self._controls_visible = False
-        self._closeFlyout = None
         self._resetFlyout = None
+        super().__init__()
 
-        self.titleLabel = QLabel(self)
-        self.timeLabel = QLabel(self)
-        for label in (self.titleLabel, self.timeLabel):
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            label.setStyleSheet("color: white; background: transparent;")
-            # 大字体的文本宽度不能反过来撑大窗口最小尺寸
-            label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.btn_reset = VerticalButton(FIF.SYNC, "重置", force_dark=True)
+        self.btn_pause.clicked.connect(self._onPause)
+        self.btn_rewind.clicked.connect(lambda: self._onAdjust(10))
+        self.btn_forward.clicked.connect(lambda: self._onAdjust(-30))
+        self.btn_reset.clicked.connect(self.resetCountdown)
 
+        self.timer.setInterval(1000)
+        self.timer.timeout.connect(self._tickCountdown)
+        self._deadline = None
+        self.sound = QSoundEffect(self)
+
+    def _createControls(self):
         self.controlsWidget = QWidget(self)
         controlsLayout = QHBoxLayout(self.controlsWidget)
         # 全屏模式的控件间距放在控件自身内部；窗口化隐藏控件时会一起折叠
@@ -152,43 +134,15 @@ class CountdownWindow(FramelessWindow):
         self.hideControlsTimer.setSingleShot(True)
         self.hideControlsTimer.setInterval(10_000)
         self.hideControlsTimer.timeout.connect(lambda: self._setControlsVisible(False))
+        return (self.controlsWidget,)
 
-        self.vBoxLayout = QVBoxLayout(self)
-        self.vBoxLayout.setContentsMargins(40, 20, 40, 20)
-        self.vBoxLayout.addStretch(1)
-        self.vBoxLayout.addWidget(self.titleLabel)
-        self.vBoxLayout.addStretch(1)
-        self.vBoxLayout.addWidget(self.timeLabel)
-        self.vBoxLayout.addWidget(self.controlsWidget)
-        self.vBoxLayout.addStretch(2)
+    def _cornerButtons(self):
+        return [self.btn_reset, *super()._cornerButtons()]
 
-        self.btnContainer = QWidget(self)
-        self.btnLayout = QHBoxLayout(self.btnContainer)
-        self.btnLayout.setContentsMargins(0, 0, 0, 0)
-        self.btnLayout.setSpacing(12)
-        self.btn_reset = VerticalButton(FIF.SYNC, "重置", force_dark=True)
-        self.btn_win = VerticalButton(FIF.COPY, "窗口化", force_dark=True)
-        self.btn_close = VerticalButton(
-            FIF.CLOSE,
-            "关闭",
-            primary=True,
-            force_dark=True,
-        )
-
-        self.btn_pause.clicked.connect(self._onPause)
-        self.btn_rewind.clicked.connect(lambda: self._onAdjust(10))
-        self.btn_forward.clicked.connect(lambda: self._onAdjust(-30))
-        self.btn_reset.clicked.connect(self.resetCountdown)
-        self.btn_win.clicked.connect(self.toggleWindowMode)
-        self.btn_close.clicked.connect(self._onClose)
-
-        self.timer = QTimer(self)
-        self.timer.setInterval(1000)
-        self.timer.setTimerType(Qt.TimerType.PreciseTimer)
-        self.timer.timeout.connect(self._tickCountdown)
-        self._deadline = None
-
-        self.sound = QSoundEffect(self)
+    def _setControlsShown(self, shown):
+        if not shown:
+            self._setControlsVisible(False, animated=False)
+        self.controlsWidget.setVisible(shown)
 
     def startCountdown(self, title, seconds, voice_enabled, end_title=DEFAULT_END_TITLE):
         self.title_text = title
@@ -200,7 +154,7 @@ class CountdownWindow(FramelessWindow):
         self._played15 = False
         self.titleLabel.setText(title)
         self.btn_pause.setIcon(FIF.PAUSE)
-        self._updateDisplay()
+        self._refreshTime()
         self._setControlsVisible(False, animated=False)
 
         self.is_windowed = False
@@ -214,7 +168,7 @@ class CountdownWindow(FramelessWindow):
         self.remaining = self.initial_seconds
         self.titleLabel.setText(self.title_text)
         self.btn_pause.setIcon(FIF.PAUSE)
-        self._updateDisplay()
+        self._refreshTime()
         self._startTimer()
 
     def resetCountdown(self):
@@ -269,7 +223,7 @@ class CountdownWindow(FramelessWindow):
     def _setRemaining(self, value):
         prev = self.remaining
         self.remaining = max(0, value)
-        self._updateDisplay()
+        self._refreshTime()
 
         if self.ended and self.remaining > 0:
             self.ended = False
@@ -292,7 +246,7 @@ class CountdownWindow(FramelessWindow):
             if self.voice_enabled:
                 self._playSound("end.wav")
 
-    def _updateDisplay(self):
+    def _refreshTime(self):
         hours, rest = divmod(self.remaining, 3600)
         minutes, seconds = divmod(rest, 60)
         separator = "\u2009:\u2009" if self.is_windowed else " : "
@@ -334,129 +288,6 @@ class CountdownWindow(FramelessWindow):
             self.controlsWidget.setEnabled(False)
         self.btn_pause.update()
 
-    def _setupCornerButtons(self):
-        while self.btnLayout.count():
-            item = self.btnLayout.takeAt(0)
-            if item.widget():
-                self.btnLayout.removeWidget(item.widget())
-
-        widgets = [self.btn_reset, self.btn_win, self.btn_close]
-        if cfg.countdownActionButtonPosition.value == "左下角":
-            widgets.reverse()
-        for w in widgets:
-            self.btnLayout.addWidget(w)
-
-        for button in (self.btn_reset, self.btn_win, self.btn_close):
-            button.setWindowed(self.is_windowed)
-            button.updateStyle()
-        self.btn_win.icon_enum = FIF.FULL_SCREEN if self.is_windowed else FIF.COPY
-        self.btn_win.updateStyle()
-
-        self.btnContainer.adjustSize()
-        self._updateBtnPosition()
-
-    def _updateBtnPosition(self):
-        margin = self.btnLayout.spacing()
-        rect = self.contentsRect()
-        if cfg.countdownActionButtonPosition.value == "左下角":
-            target_x = rect.left() + margin
-        else:
-            target_x = rect.right() + 1 - self.btnContainer.width() - margin
-        target_y = rect.bottom() + 1 - self.btnContainer.height() - margin
-        self.btnContainer.move(target_x, target_y)
-        self.btnContainer.raise_()
-
-    def toggleWindowMode(self):
-        self.is_windowed = not self.is_windowed
-        self._updateDisplay()
-        self._setupCornerButtons()
-        self._applyWindowState()
-
-    def _applyWindowState(self):
-        is_top = (
-            cfg.countdownTopmostInWindowed.value
-            if self.is_windowed
-            else cfg.countdownTopmostInFullscreen.value
-        )
-        flags = (
-            Qt.WindowType.Tool
-            | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.NoDropShadowWindowHint
-        )
-        if is_top:
-            flags |= Qt.WindowType.WindowStaysOnTopHint
-        self.setWindowFlags(flags)
-
-        margin = WINDOW_SHADOW_MARGIN if self.is_windowed else 0
-        self.setContentsMargins(margin, margin, margin, margin)
-        self.background.setRoundedWindow(self.is_windowed)
-        self.background.setGeometry(self.contentsRect())
-        self.setStyleSheet("CountdownWindow { background-color: transparent; }")
-        self.titleLabel.setVisible(not self.is_windowed)
-
-        if self.is_windowed:
-            self._setControlsVisible(False, animated=False)
-            self.controlsWidget.hide()
-            self.showNormal()
-            rect = screenFor(self).availableGeometry()
-            # 底部只留角落操作按钮自身的高度，时间区域不再为隐藏控件留空
-            self.vBoxLayout.setContentsMargins(16, 12, 16, 56)
-            # 先按目标高度缩小字体，否则旧字体的最小尺寸会钳制 resize
-            self._applyFonts(190)
-            self.setFixedSize(600 + 2 * margin, 190 + 2 * margin)
-            self.move(rect.center() - self.rect().center())
-        else:
-            self.controlsWidget.show()
-            self.vBoxLayout.setContentsMargins(40, 20, 40, 20)
-            self.setMinimumSize(0, 0)
-            self.setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX)
-            if cfg.showTaskbarInCountdown.value:
-                self.showNormal()
-                self.setGeometry(screenFor(self).availableGeometry())
-            else:
-                self.showFullScreen()
-
-        self.show()
-        self.raise_()
-        self.activateWindow()
-
-    def _applyFonts(self, h):
-        font = self.titleLabel.font()
-        font.setPixelSize(max(16, h // 14))
-        font.setBold(True)
-        self.titleLabel.setFont(font)
-        font = self.timeLabel.font()
-        size = max(32, h // 2 if self.is_windowed else h * 9 // 40)
-        font.setPixelSize(size)
-        font.setBold(True)
-        # 窗口化宽度固定，超宽时按比例缩小字号到刚好放得下
-        if self.is_windowed:
-            width = QFontMetrics(font).horizontalAdvance(self.timeLabel.text())
-            margins = self.vBoxLayout.contentsMargins()
-            avail = self.contentsRect().width() - margins.left() - margins.right()
-            if width > avail:
-                font.setPixelSize(max(32, size * avail // width))
-        self.timeLabel.setFont(font)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.background.setGeometry(self.contentsRect())
-        self._applyFonts(self.contentsRect().height())
-        self._updateBtnPosition()
-
-    def mousePressEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton:
-            self._dragPos = e.globalPosition().toPoint() - self.pos()
-            self._moved = False
-        super().mousePressEvent(e)
-
-    def mouseMoveEvent(self, e):
-        if self.is_windowed and e.buttons() == Qt.MouseButton.LeftButton:
-            if (e.globalPosition().toPoint() - self.pos() - self._dragPos).manhattanLength() > 3:
-                self._moved = True
-            self.move(e.globalPosition().toPoint() - self._dragPos)
-        super().mouseMoveEvent(e)
-
     def mouseReleaseEvent(self, e):
         if (
             not self.is_windowed
@@ -466,30 +297,14 @@ class CountdownWindow(FramelessWindow):
             self._setControlsVisible(not self._controls_visible)
         super().mouseReleaseEvent(e)
 
-    def _onClose(self):
-        if not cfg.confirmBeforeCloseCountdown.value:
-            self.close()
-            return
-        if self._closeFlyout is not None:
-            return
-        self._closeFlyout = showCloseConfirmation(
-            self,
-            self.btn_close,
-            "关闭后不会保存倒计时进度。",
-        )
-
     def closeEvent(self, event):
-        for name in ("_closeFlyout", "_resetFlyout"):
-            flyout = getattr(self, name)
-            if flyout is not None:
-                flyout.hide()
-                flyout.deleteLater()
-                setattr(self, name, None)
-        self.timer.stop()
+        if self._resetFlyout is not None:
+            self._resetFlyout.hide()
+            self._resetFlyout.deleteLater()
+            self._resetFlyout = None
         self.hideControlsTimer.stop()
         self._controlsAnim.stop()
         self.sound.stop()
-        self.closeClicked.emit()
         super().closeEvent(event)
 
 

@@ -51,14 +51,14 @@ class CountdownWindowTest(TestCase):
         self.assertEqual(self.window.timeLabel.font().pixelSize(), 95)
 
         self.window.remaining = 3723
-        self.window._updateDisplay()
+        self.window._refreshTime()
         self.assertEqual(
             self.window.timeLabel.text(),
             "1\u2009:\u20092\u2009:\u20093",
         )
 
         self.window.remaining = 86399
-        self.window._updateDisplay()
+        self.window._refreshTime()
         margins = self.window.vBoxLayout.contentsMargins()
         available = (
             self.window.contentsRect().width()

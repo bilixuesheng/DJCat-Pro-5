@@ -113,6 +113,17 @@ def showActionConfirmation(
     return flyout
 
 
+def placeCornerButtons(container, rect, atLeft):
+    """Pin the corner action buttons inside rect, one layout spacing from its edges."""
+    margin = container.layout().spacing()
+    if atLeft:
+        x = rect.left() + margin
+    else:
+        x = rect.right() + 1 - container.width() - margin
+    container.move(x, rect.bottom() + 1 - container.height() - margin)
+    container.raise_()
+
+
 def showCloseConfirmation(window, target, warning):
     return showActionConfirmation(
         window,
@@ -448,16 +459,11 @@ class BroadcastWindow(FramelessWindow):
         self._updateBtnPosition()
 
     def _updateBtnPosition(self):
-        margin = self.btnLayout.spacing()
-        rect = self.contentsRect()
-        if cfg.broadcastActionButtonPosition.value == "左下角":
-            target_x = rect.left() + margin
-        else:
-            target_x = rect.right() + 1 - self.btnContainer.width() - margin
-
-        target_y = rect.bottom() + 1 - self.btnContainer.height() - margin
-        self.btnContainer.move(target_x, target_y)
-        self.btnContainer.raise_()
+        placeCornerButtons(
+            self.btnContainer,
+            self.contentsRect(),
+            cfg.broadcastActionButtonPosition.value == "左下角",
+        )
 
     def startBroadcast(self):
         self.is_windowed = False

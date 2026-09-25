@@ -225,6 +225,7 @@ Busy Glow 只表示"正在进行"，不表示完成度。光晕启动时用 `dia
 | `app/view/pages/` | 页面、临时展示窗口和页面级 worker 编排 |
 | `app/view/pages/home_card_task_page.py` | Home Card Task 的懒加载编辑页面；不拥有调度计时器 |
 | `app/view/components/task_page.py` | 三类 Scheduled Task 页面共用的列表页、任务卡片与新建对话框外壳；各页面只提供表单、数据映射和摘要 |
+| `app/view/pages/timer_window.py` | Exam Countdown 与 Fullscreen Clock 共用的窗口：背景、全屏／窗口化切换、字号、角落按钮与关闭确认；子类只给配置项和各自的时间与控件 |
 | `app/view/components/` | 多页面复用的 Markdown、背景、滚动和设置卡片组件 |
 | `app/view/components/busy_glow.py` | Busy Glow 的几何、配色和绘制；不知道 AI Markdown 的业务规则 |
 | `app/view/components/setting_section.py` | Setting Section 的下钻容器、导航行、推移动画和命中高亮 |
