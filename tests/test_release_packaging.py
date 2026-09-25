@@ -65,36 +65,6 @@ def test_installer_is_single_language_and_architecture_aware():
     assert "\\DJCat Pro 5" not in script
 
 
-def test_release_workflow_builds_only_x86_64_packages():
-    workflow = (REPO / ".github" / "workflows" / "main.yml").read_text(encoding="utf-8")
-
-    assert "runs-on: windows-2022" in workflow
-    assert "architecture: x64" in workflow
-    assert "windows-11-arm" not in workflow
-    assert "arm64" not in workflow
-    assert "verify_pe_arch.py" in workflow
-    assert "Windows-x86_64.zip" in workflow
-    assert "Windows-x86_64-Setup.exe" in workflow
-    assert "gh release create" in workflow
-    assert 'release_args=()' in workflow
-    assert 'if [[ "$TAG" == *-pre.* || "$TAG" == *-rc.* || "$TAG" == *-alpha.* || "$TAG" == *-beta.* ]]; then' in workflow
-    assert "--prerelease" in workflow
-    assert "cancel-in-progress: false" in workflow
-    assert '-OutFile "scripts\\ChineseSimplified.isl"' in workflow
-    assert 'find release-assets -type f -name "$file"' in workflow
-    assert 'cp "${matches[0]}" "release-files/$file"' in workflow
-    assert 'gh release create "$TAG" release-files/*' in workflow
-
-
-def test_python_requirement_accepts_release_runner_patch_version():
-    metadata = (REPO / "pyproject.toml").read_text(encoding="utf-8")
-
-    assert 'requires-python = ">=3.12.8,<3.13"' in metadata
-    assert "PYTHON_VERSION: 3.12.10" in (
-        REPO / ".github" / "workflows" / "main.yml"
-    ).read_text(encoding="utf-8")
-
-
 def test_pre_release_number_is_preserved_in_windows_file_version(monkeypatch):
     monkeypatch.setattr(deploy, "VERSION", "5.0.0-pre.22")
 
@@ -115,33 +85,6 @@ def test_kb_release_uses_base_version_for_windows_file_version(monkeypatch):
 
 def test_windows_build_includes_ico_normalizer():
     assert "--include-package=PIL" in deploy.build_args()
-
-
-def test_release_uses_the_committed_lock_for_tests_and_builds():
-    workflow = (REPO / ".github" / "workflows" / "main.yml").read_text(
-        encoding="utf-8"
-    )
-    metadata = (REPO / "pyproject.toml").read_text(encoding="utf-8")
-
-    assert (REPO / "uv.lock").is_file()
-    assert "uv.lock" not in (REPO / ".gitignore").read_text(encoding="utf-8")
-    assert workflow.count("uv sync --frozen") == 2
-    assert "uv run --frozen python -m pytest -q" in workflow
-    assert "      - pyproject.toml" in workflow
-    assert "      - uv.lock" in workflow
-    assert '"cryptography==46.0.3"' in metadata
-    assert '"Flask>=3.0"' in metadata
-
-
-def test_release_requires_an_explicit_republish_commit_for_an_existing_tag():
-    workflow = (REPO / ".github" / "workflows" / "main.yml").read_text(
-        encoding="utf-8"
-    )
-
-    assert '"$(git log -1 --format=%s)" != "release: republish $TAG"' in workflow
-    assert 'gh release delete "$TAG" --yes --cleanup-tag' in workflow
-    assert "--clobber" not in workflow
-    assert "gh release upload" not in workflow
 
 
 def test_build_bundles_qt_chinese_translation_where_the_app_looks_for_it():

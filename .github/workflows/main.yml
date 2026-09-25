@@ -109,41 +109,7 @@ jobs:
 
   test-windows:
     needs: prepare
-    runs-on: windows-2022
-    steps:
-      - name: Checkout release source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.prepare.outputs.source_sha }}
-
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          architecture: x64
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          version: "0.12.1"
-          enable-cache: true
-
-      # 每条命令单独一步：pwsh 的多行 run 块不会因中间的命令失败而中断，整步只看
-      # 最后一条的退出码，并在一起时 pytest 失败会被后面成功的 node --check 盖掉。
-      - name: Install dependencies
-        run: uv sync --frozen
-
-      - name: Run tests
-        # offscreen 平台在 Windows 上只从这里找字体，找不到时字形全是等宽方框。
-        env:
-          QT_QPA_FONTDIR: C:\Windows\Fonts
-        run: uv run --frozen python -m pytest -q
-
-      - name: Compile sources
-        run: uv run --frozen python -m compileall -q app server tests
-
-      - name: Check admin script syntax
-        run: node --check server/static/admin.js
+    uses: ./.github/workflows/tests.yml
 
   build-windows:
     needs: [ prepare, test-windows ]
@@ -187,12 +153,16 @@ jobs:
       - name: Verify executable architecture
         run: uv run --frozen python scripts/verify_pe_arch.py dist/djcat.dist/djcat.exe x86_64
 
+      # 每条原生命令单独一步：pwsh 的多行 run 块只看最后一条命令的退出码。
+      - name: Configure updater
+        run: cmake -B build-updater -G "Visual Studio 17 2022" -A x64 tools/updater
+
       - name: Build updater
+        run: cmake --build build-updater --config Release
+
+      - name: Bundle updater
         shell: pwsh
-        run: |
-          cmake -B build-updater -G "Visual Studio 17 2022" -A x64 tools/updater
-          cmake --build build-updater --config Release
-          Copy-Item build-updater/Release/updater.exe dist/djcat.dist/
+        run: Copy-Item build-updater/Release/updater.exe dist/djcat.dist/
 
       - name: Build portable ZIP and installer
         shell: pwsh
