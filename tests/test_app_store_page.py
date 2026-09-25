@@ -798,6 +798,60 @@ class AppStorePageTest(TestCase):
         self.assertEqual(self.page.allGrid.count(), 6)
         self.assertTrue(self.page.allGridWidget.isVisible())
 
+    def testAllApplicationsEmptyStateOffersRetryAfterLoadFailure(self):
+        self.page._catalogLoaded = False
+        self.page.resize(900, 600)
+        self.page.show()
+        self.page.pivot.setCurrentItem("all")
+        self.page._switchCatalogTab(1)
+
+        with patch.object(self.page, "_loadCatalog") as loadCatalog:
+            self.page._onCatalogLoaded({}, {}, "无法连接服务器")
+            self.assertFalse(self.page.allEmpty.isHidden())
+            self.assertEqual(self.page.allEmpty.titleLabel.text(), "应用目录加载失败")
+            self.assertEqual(self.page.allEmpty.actionButton.text(), "重试")
+            self.assertTrue(self.page.pagerBar.isHidden())
+            self.page.allEmpty.actionButton.click()
+
+        loadCatalog.assert_called_once_with()
+
+    def testAllApplicationsEmptyStateWhileLoadingHasNoAction(self):
+        self.page._catalogLoaded = False
+        self.page._catalogLoading = True
+        self.page._renderAll()
+
+        self.assertFalse(self.page.allEmpty.isHidden())
+        self.assertEqual(self.page.allEmpty.titleLabel.text(), "正在加载应用目录")
+        self.assertTrue(self.page.allEmpty.actionButton.isHidden())
+
+    def testAllApplicationsSearchEmptyStateClearsSearch(self):
+        apps = _apps(3)
+        for app in apps:
+            app["recommended"] = True
+        self.page.catalog = apps
+        self.page.pivot.setCurrentItem("all")
+        self.page._switchCatalogTab(1)
+        self.page.setSearchText("not-found")
+
+        self.assertFalse(self.page.allEmpty.isHidden())
+        self.assertEqual(self.page.allEmpty.titleLabel.text(), "未找到匹配的应用")
+        self.page.allEmpty.actionButton.click()
+
+        self.assertEqual(self.page.searchText, "")
+        self.assertTrue(self.page.allEmpty.isHidden())
+
+    def testEmptyRecommendationsPointToAllApplications(self):
+        self.page.catalog = _apps(2)
+        self.page._renderAll()
+
+        self.assertEqual(self.page.allEmpty.titleLabel.text(), "暂无推荐应用")
+        self.page.allEmpty.actionButton.click()
+        self._settleTransitions()
+
+        self.assertEqual(self.page.categoryPivot.currentRouteKey(), "all")
+        self.assertTrue(self.page.allEmpty.isHidden())
+        self.assertEqual(self.page.allGrid.count(), 2)
+
     def testRepeatedDetailNavigationReleasesTransientPresetWidgets(self):
         app = _apps(1)[0] | {
             "installed": True,

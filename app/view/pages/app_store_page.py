@@ -925,6 +925,7 @@ class AppStorePage(QWidget):
         self.searchText = ""
         self._catalogLoading = False
         self._catalogLoaded = False
+        self._catalogError = ""
         self._catalogThread = None
         self._catalogWorker = None
         self._imageJobs = {}
@@ -956,6 +957,7 @@ class AppStorePage(QWidget):
         self._currentPage = 0
         self._categoryIndex = 0
         self._renderingAll = False
+        self._allEmptyAction = None
         self._downloadProgressSignal.connect(self._queueDownloadProgress)
         self._downloadRetrySignal.connect(self._showDownloadRetry)
         self._downloadFinishedSignal.connect(self._onDownloadFinished)
@@ -1091,6 +1093,10 @@ class AppStorePage(QWidget):
         self.categoryPivot.addItem("all", "全部", lambda: self._switchCategory(1))
         self.categoryPivot.setCurrentItem("recommended")
         allLayout.addWidget(self.categoryPivot)
+        self.allEmpty = EmptyStateCard(self.allPage)
+        self.allEmpty.actionRequested.connect(self._handleAllEmptyAction)
+        self.allEmpty.hide()
+        allLayout.addWidget(self.allEmpty)
         self.allGridWidget, self.allGrid = self._createGrid(self.allPage)
         allLayout.addWidget(self.allGridWidget)
         self.allGridSlide = GridSlideTransition(self.allGridWidget)
@@ -1291,6 +1297,14 @@ class AppStorePage(QWidget):
             return
         self._showAllApplications()
 
+    def _handleAllEmptyAction(self):
+        if self._allEmptyAction is not None:
+            self._allEmptyAction()
+
+    def _showAllCategory(self):
+        self.categoryPivot.setCurrentItem("all")
+        self._switchCategory(1)
+
     def setSearchText(self, text: str):
         self.searchText = text.strip().lower()
         if self.currentApp is not None:
@@ -1413,8 +1427,11 @@ class AppStorePage(QWidget):
         if self._shuttingDown or self._catalogLoading:
             return
         self._catalogLoading = True
+        self._catalogError = ""
         self.refreshButton.setEnabled(False)
         self.checkUpdatesButton.setEnabled(False)
+        if not self.catalog:
+            self._renderAll()
         worker = CatalogWorker(self.store)
         self._catalogWorker = worker
         thread = threading.Thread(target=worker.run, daemon=True)
@@ -1427,8 +1444,10 @@ class AppStorePage(QWidget):
         if self._shuttingDown:
             return
         if error:
+            self._catalogError = error
             self._mergedCatalog = None
             self._renderInstalled()
+            self._renderAll()
             InfoBar.error("应用目录加载失败", error, duration=5000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
             return
         self._catalogLoaded = True
@@ -1850,9 +1869,10 @@ class AppStorePage(QWidget):
             if self.pager.currentIndex() != self._currentPage:
                 self.pager.setCurrentIndex(self._currentPage)
             self.pager.setVisible(paginated)
-            self.pagerBar.setVisible(paginated)
+            self.pagerBar.setVisible(paginated and bool(apps))
             self._updatePagerButtons()
             self._renderAllPage(apps)
+            self._updateAllEmptyState(apps)
         finally:
             self.pager.blockSignals(False)
             self._renderingAll = False
@@ -1863,6 +1883,39 @@ class AppStorePage(QWidget):
             start = self._currentPage * ALL_APPS_PAGE_SIZE
             apps = apps[start : start + ALL_APPS_PAGE_SIZE]
         self._renderGrid(self.allGrid, apps)
+
+    def _updateAllEmptyState(self, apps):
+        self.allEmpty.setVisible(not apps)
+        if apps:
+            self._allEmptyAction = None
+            return
+        if self.searchText:
+            content = (
+                "未找到匹配的应用",
+                "试试其他关键词，或清除搜索查看全部应用。",
+                "清除搜索",
+            )
+            action = self._clearSearch
+        elif not self.catalog and self._catalogError:
+            content = ("应用目录加载失败", self._catalogError, "重试")
+            action = self._loadCatalog
+        elif not self._catalogLoaded and self._catalogLoading:
+            content = ("正在加载应用目录", "请稍候，加载完成后会显示在这里。", "")
+            action = None
+        elif self.categoryPivot.currentRouteKey() == "recommended" and any(
+            app.get("catalog_available", True) for app in self._mergedApps()
+        ):
+            content = (
+                "暂无推荐应用",
+                "切换到“全部”查看所有可用的应用。",
+                "查看全部",
+            )
+            action = self._showAllCategory
+        else:
+            content = ("暂无可用应用", "应用目录还是空的，稍后再来看看。", "")
+            action = None
+        self.allEmpty.setContent(*content)
+        self._allEmptyAction = action
 
     def _onPageChanged(self, index):
         if self._renderingAll or index == self._currentPage:
