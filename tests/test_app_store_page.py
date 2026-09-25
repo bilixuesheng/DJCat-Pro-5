@@ -159,6 +159,7 @@ class AppStorePageTest(TestCase):
         animations = (
             self.page.stack._aniGroup,
             self.page.catalogStack._aniGroup,
+            self.page.allScroll.delegate.vScrollBar.ani,
         )
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline and (
@@ -789,6 +790,10 @@ class AppStorePageTest(TestCase):
         self.page._switchCategory(1)
         self._settleTransitions()
 
+        scrollBar = self.page.allScroll.verticalScrollBar()
+        scrollBar.setValue(scrollBar.maximum())
+        self.assertGreater(scrollBar.value(), self.page.categoryPivot.y())
+
         self.page._changePage(1)
 
         self.assertTrue(self.page.allGridSlide.isRunning())
@@ -797,6 +802,7 @@ class AppStorePageTest(TestCase):
         self.assertEqual(self.page._currentPage, 1)
         self.assertEqual(self.page.allGrid.count(), 6)
         self.assertTrue(self.page.allGridWidget.isVisible())
+        self.assertEqual(scrollBar.value(), self.page.categoryPivot.y())
 
     def testAllApplicationsEmptyStateOffersRetryAfterLoadFailure(self):
         self.page._catalogLoaded = False
@@ -1970,7 +1976,7 @@ class AppStorePageTest(TestCase):
         self.assertEqual(self.page.searchText, "")
         self.assertEqual(self.page.pivot.currentRouteKey(), "installed")
 
-    def testCategorySwitchSlidesGridAndKeepsScrollPosition(self):
+    def testCategorySwitchSlidesGridAndScrollsBackToListStart(self):
         apps = _apps(18)
         for app in apps:
             app["recommended"] = True
@@ -1981,8 +1987,7 @@ class AppStorePageTest(TestCase):
         self.page._switchCatalogTab(1)
         self._settleTransitions()
         scrollBar = self.page.allScroll.verticalScrollBar()
-        scrollBar.setValue(80)
-        before = scrollBar.value()
+        scrollBar.setValue(self.page.categoryPivot.y() + 80)
 
         self.page.categoryPivot.setCurrentItem("all")
         self.page._switchCategory(1)
@@ -1990,8 +1995,30 @@ class AppStorePageTest(TestCase):
         self.assertTrue(self.page.allGridSlide.isRunning())
         self._settleTransitions()
         self.assertTrue(self.page.allGridWidget.isVisible())
-        self.assertEqual(scrollBar.value(), before)
+        self.assertEqual(scrollBar.value(), self.page.categoryPivot.y())
         self.assertEqual(self.page.allGrid.count(), 6)
+
+    def testPageChangeLeavesScrollAloneWhileListStartIsVisible(self):
+        self.page.catalog = _apps(14)
+        self.page.ads = [{"id": 1, "title": "Ad", "image_url": ""}]
+        self.page.resize(700, 420)
+        self.page.show()
+        self.page.pivot.setCurrentItem("all")
+        self.page._switchCatalogTab(1)
+        self.page._prepareAds()
+        self.page.categoryPivot.setCurrentItem("all")
+        self.page._switchCategory(1)
+        self._settleTransitions()
+        scrollBar = self.page.allScroll.verticalScrollBar()
+        self.assertGreater(self.page.categoryPivot.y(), 40)
+        scrollBar.setValue(self.page.categoryPivot.y() - 40)
+        before = scrollBar.value()
+
+        self.page._changePage(1)
+        self._settleTransitions()
+
+        self.assertEqual(self.page._currentPage, 1)
+        self.assertEqual(scrollBar.value(), before)
 
     def testCategorySwitchStopsTabTouchScroller(self):
         self.page.allScroll.grabTouchGesture()

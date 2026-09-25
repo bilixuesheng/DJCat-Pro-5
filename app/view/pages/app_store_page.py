@@ -1261,10 +1261,6 @@ class AppStorePage(QWidget):
         changed = index != self._categoryIndex
         forward = index > self._categoryIndex
         self._categoryIndex = index
-        # 惯性滚动不停下，分类换完后会被它拖回原来的位置。没抓过手势就没有惯性，
-        # 也别用 QScroller.scroller() 顺手建出一个。
-        if self.allScroll.isTouchGestureGrabbed:
-            QScroller.scroller(self.allScroll.viewport()).stop()
 
         def change():
             self._currentPage = 0
@@ -1272,8 +1268,29 @@ class AppStorePage(QWidget):
 
         if changed:
             self.allGridSlide.run(change, forward)
+            self._scrollAllToListStart()
         else:
             change()
+
+    def _scrollAllToListStart(self):
+        """Bring the category bar back into view after the list content changed.
+
+        Only scrolls up: when the start of the list is still on screen the new
+        page is already readable where it is, and scrolling to the very top
+        would put the banner, not the list, in front of the user.
+        """
+        # 惯性滚动不停下，会把页面拖回原来的位置。没抓过手势就没有惯性，
+        # 也别用 QScroller.scroller() 顺手建出一个。
+        if self.allScroll.isTouchGestureGrabbed:
+            QScroller.scroller(self.allScroll.viewport()).stop()
+        target = self.categoryPivot.y()
+        if self.allScroll.verticalScrollBar().value() <= target:
+            return
+        smoothBar = getattr(getattr(self.allScroll, "delegate", None), "vScrollBar", None)
+        if smoothBar is not None:
+            smoothBar.scrollTo(target)
+        else:
+            self.allScroll.verticalScrollBar().setValue(target)
 
     def _showAllApplications(self):
         searchEdit = getattr(self.window(), "searchEdit", None)
@@ -1928,6 +1945,7 @@ class AppStorePage(QWidget):
             self._renderAllPage()
 
         self.allGridSlide.run(change, forward)
+        self._scrollAllToListStart()
 
     def _changePage(self, offset):
         self.pager.setCurrentIndex(self._currentPage + offset)
