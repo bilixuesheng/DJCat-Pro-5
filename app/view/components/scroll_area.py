@@ -23,6 +23,27 @@ WHEEL_SCROLL_DURATION_MS = 250
 SUPPRESSED_DRAG_START_DISTANCE = 1000.0
 
 
+def suppressTouchScroll(viewport: QWidget, suppressed: bool) -> None:
+    """Stop a grabbed viewport scrolling under touch without releasing it.
+
+    A mode that needs touch for something else must not give the gesture back
+    and take it again: that is the grab/release cycle which leaves stale
+    targets in Qt's gesture manager. Raising the drag threshold out of reach
+    makes the scroller inert and is fully reversible.
+    """
+    scroller = QScroller.scroller(viewport)
+    scroller.stop()
+    properties = scroller.scrollerProperties()
+    metric = QScrollerProperties.ScrollMetric.DragStartDistance
+    distance = (
+        SUPPRESSED_DRAG_START_DISTANCE
+        if suppressed
+        else QScrollerProperties().scrollMetric(metric)
+    )
+    properties.setScrollMetric(metric, distance)
+    scroller.setScrollerProperties(properties)
+
+
 class _TouchScrollGuard(QObject):
     def __init__(self, application):
         super().__init__(application)
@@ -126,36 +147,14 @@ class ScrollArea(FluentScrollArea):
         self._tuneScrollAnimations()
         self.isTouchGestureGrabbed = False
         self.isTouchScrollSuppressed = False
-        # 不在这里碰 QScroller.scroller()：它会顺手建出一个 scroller，
-        # 连从不打开、因而从不抓手势的 Section 也会多一个。
-        self._dragStartDistance = None
         if grabTouch:
             self.grabTouchGesture()
         self._touchScrollGuard = _TouchScrollGuard.instance()
 
     def setTouchScrollSuppressed(self, suppressed: bool) -> None:
-        """Stop the page scrolling under touch without releasing the gesture.
-
-        A mode that needs touch for something else (card sorting) must not give
-        the gesture back and take it again: that is the grab/release cycle which
-        leaves stale targets in Qt's gesture manager. Raising the drag threshold
-        out of reach makes the scroller inert and is fully reversible.
-        """
         if suppressed == self.isTouchScrollSuppressed:
             return
-        if not suppressed and self._dragStartDistance is None:
-            return
-        scroller = QScroller.scroller(self.viewport())
-        scroller.stop()
-        properties = scroller.scrollerProperties()
-        metric = QScrollerProperties.ScrollMetric.DragStartDistance
-        if suppressed:
-            # 记下当前值再抬高，恢复时才不会把别处调过的阈值一并抹掉。
-            self._dragStartDistance = properties.scrollMetric(metric)
-            properties.setScrollMetric(metric, SUPPRESSED_DRAG_START_DISTANCE)
-        else:
-            properties.setScrollMetric(metric, self._dragStartDistance)
-        scroller.setScrollerProperties(properties)
+        suppressTouchScroll(self.viewport(), suppressed)
         self.isTouchScrollSuppressed = suppressed
 
     def grabTouchGesture(self):

@@ -620,6 +620,20 @@ class AppStorePageTest(TestCase):
 
         self.assertLessEqual(len(self.page.findChildren(QWidget)), baseline + 2)
 
+    def testDetailSuppressesPageTouchScrollWithoutReleasingGesture(self):
+        self.page.stack.setAnimationEnabled(False)
+        with (
+            patch.object(QScroller, "grabGesture") as grabGesture,
+            patch.object(QScroller, "ungrabGesture") as ungrabGesture,
+        ):
+            self.page._showDetail(_apps(1)[0])
+            self.assertTrue(self.page.isTouchScrollSuppressed)
+            self.page._backToOverview()
+
+        self.assertFalse(self.page.isTouchScrollSuppressed)
+        grabGesture.assert_not_called()
+        ungrabGesture.assert_not_called()
+
     def testDetailContentIsReadyBeforeThePageSwitch(self):
         app = _apps(1)[0]
         app["name"] = "Fresh application"

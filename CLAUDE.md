@@ -48,7 +48,7 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 **`ScrollArea` 统一仲裁单指触控滚动与子控件点击。** 从按钮、下拉框或卡片上起滑时，移动达到系统拖动阈值后必须取消该触控序列的按压和释放，不能在滚动结束时触发原控件；未达到阈值的短按仍按正常点击处理。页面不得各自复制这套判定。HomePage 进入卡片编辑态时由排序手势独占触控，并依靠卡片拖动的边缘自动滚动跨越视口；退出编辑态后恢复页面触控滚动。
 
-需要让出触控的模式调用 `ScrollArea.setTouchScrollSuppressed()`，它把拖动阈值抬到手指够不到的距离，不释放手势；页面不得自己 `QScroller.ungrabGesture()`，那就是上一条禁止的抓放循环。落在卡片上的触控本就由卡片在编辑态 `WA_AcceptTouchEvents` 并吃掉 `TouchBegin` 拿走，抑制只负责空白处不再起滚动。
+需要让出触控的模式调用 `ScrollArea.setTouchScrollSuppressed()`（不是项目 `ScrollArea` 的 viewport，如 Projection 正文，用 `suppressTouchScroll()`），它把拖动阈值抬到手指够不到的距离，不释放手势；页面不得自己 `QScroller.ungrabGesture()`，那就是上一条禁止的抓放循环。落在卡片上的触控本就由卡片在编辑态 `WA_AcceptTouchEvents` 并吃掉 `TouchBegin` 拿走，抑制只负责空白处不再起滚动。
 
 **Tray Menu 不拥有 Home Card。** 它只根据 HomePage 提供的入口快照重建菜单，并把稳定 key 交回 MainWindow/HomePage 执行。
 

@@ -56,6 +56,7 @@ from app.config.paths import ASSET_DIR
 from app.platform.screens import screenFor
 from app.view.components.busy_glow import BusyGlowOverlay
 from app.view.components.markdown_view import MarkdownView
+from app.view.components.scroll_area import suppressTouchScroll
 from app.view.components.window_background import (
     WINDOW_SHADOW_MARGIN,
     WindowBackground,
@@ -547,19 +548,13 @@ class BroadcastWindow(FramelessWindow):
 
     def _updateContentInteraction(self):
         application = QApplication.instance()
+        for viewport in self._contentViewports():
+            suppressTouchScroll(viewport, self.is_windowed)
         if self.is_windowed:
-            for viewport in self._contentViewports():
-                QScroller.scroller(viewport).stop()
-                QScroller.ungrabGesture(viewport)
             if application is not None and not self._contentDragFilterInstalled:
                 application.installEventFilter(self._contentDragFilter)
                 self._contentDragFilterInstalled = True
         else:
-            for viewport in self._contentViewports():
-                QScroller.grabGesture(
-                    viewport,
-                    QScroller.ScrollerGestureType.TouchGesture,
-                )
             self._removeContentDragFilter()
 
     def _contentViewports(self):
