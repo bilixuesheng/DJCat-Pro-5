@@ -1,5 +1,3 @@
-import os
-import sys
 import threading
 import time
 from pathlib import Path
@@ -7,8 +5,6 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import (
     QAbstractAnimation,
@@ -154,7 +150,7 @@ def _apps(count):
 class AppStorePageTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.qtApp = QApplication.instance() or QApplication(sys.argv)
+        cls.qtApp = QApplication.instance()
 
     def setUp(self):
         with patch("app.view.pages.app_store_page.ApplicationStore", return_value=_Store()):
@@ -1071,6 +1067,33 @@ class AppStorePageTest(TestCase):
             installed, installedAction
         )
 
+    def testDetailPresetOpensTheCatalogLinkOverTheInstalledOne(self):
+        catalogAction = {"type": "url", "target": "https://example.test/new"}
+        installedAction = {"type": "url", "target": "https://example.test/old"}
+        app = _apps(1)[0] | {
+            "id": 7,
+            "installed": True,
+            "presets": [{"id": 11, "title": "打开主页", "action": catalogAction}],
+            "installed_presets": [
+                {"id": 11, "title": "打开主页", "action": installedAction}
+            ],
+        }
+        installed = SimpleNamespace(metadata={"presets": app["installed_presets"]})
+        self.page.store.installed = Mock(return_value={7: installed})
+        self.page.store.executeAction = Mock()
+
+        self.page._renderPresets(app)
+        next(
+            button
+            for button in self.page.presetGroup.findChildren(PushButton)
+            if button.text() == "打开"
+        ).click()
+        self._waitForLaunch()
+
+        self.page.store.executeAction.assert_called_once_with(
+            installed, catalogAction
+        )
+
     def testDetailPresetOpenIsDisabledUntilInstalledPresetExists(self):
         app = _apps(1)[0] | {
             "id": 7,
@@ -1435,13 +1458,6 @@ class AppStorePageTest(TestCase):
         finally:
             setattr(item, "_ConfigItem__value", oldValue)
 
-    def testBackgroundLaunchFailureIsShownOnTheVisibleWindow(self):
-        with patch.object(InfoBar, "error") as showError:
-            self.page._launchFailed.emit("程序启动后立即退出")
-
-        showError.assert_called_once()
-        self.assertIs(showError.call_args.kwargs["parent"], self.page.window())
-
     def testInstalledApplicationWithoutOpenActionCannotBePinned(self):
         app = _apps(1)[0] | {
             "id": 1,
@@ -1754,6 +1770,32 @@ class AppStorePageTest(TestCase):
         self.page.store.executeAction.assert_called_once_with(
             installed,
             {"type": "program", "target": "new.exe"},
+        )
+
+    def testPinnedCardRunsAnInstalledProtocolTheCatalogCannotRunDirectly(self):
+        installedAction = {"type": "uri", "target": "steam://run/1"}
+        installed = SimpleNamespace(
+            metadata={"presets": [{"id": 7, "action": installedAction}]}
+        )
+        self.page.store = Mock()
+        self.page.store.installed.return_value = {1: installed}
+        self.page.catalog = [
+            {"id": 1, "presets": [{"id": 7, "action": dict(installedAction)}]}
+        ]
+
+        self.page.executePinnedCard(
+            {
+                "app_id": 1,
+                "preset_id": 7,
+                "title": "启动游戏",
+                "description": "",
+                "action": installedAction,
+            }
+        )
+        self._waitForLaunch()
+
+        self.page.store.executeAction.assert_called_once_with(
+            installed, installedAction
         )
 
     def testColdStartPinnedCatalogUriUsesStoredSafeAction(self):
@@ -2714,15 +2756,12 @@ class AppStorePageTest(TestCase):
             with patch(
                 "app.view.pages.app_store_page.threading.Thread",
                 side_effect=RuntimeError("thread construction failed"),
-            ), patch(
-                "app.view.pages.app_store_page.endAppStorePackageOperation"
-            ) as endOperation, patch.object(InfoBar, "error") as showError:
+            ), patch.object(InfoBar, "error") as showError:
                 self.page._onDownloadFinished(app, str(package), "", False)
 
             self.assertFalse(package.exists())
 
         self.page.store.downloadSlots.release.assert_called_once_with()
-        endOperation.assert_called_once_with()
         showError.assert_called_once()
         self.assertNotIn(appId, self.page._downloadJobs)
         self.assertNotIn(appId, self.page._installing)
@@ -2756,31 +2795,25 @@ class AppStorePageTest(TestCase):
         self.page.store.downloadSlots = Mock()
         self.page._downloadJobs[app["id"]] = (thread, worker)
         slotReleased = threading.Event()
-        operationEnded = threading.Event()
         self.page.store.downloadSlots.release.side_effect = slotReleased.set
 
         try:
             with patch(
                 "app.view.pages.app_store_page.SHUTDOWN_WAIT_SECONDS",
                 0.01,
-            ), patch(
-                "app.view.pages.app_store_page.endAppStorePackageOperation",
-                side_effect=operationEnded.set,
-            ) as endOperation:
+            ):
                 self.page.shutdown()
                 self.page.shutdown()
 
                 self.assertTrue(worker.canceled.is_set())
                 self.assertTrue(thread.is_alive())
                 self.assertFalse(slotReleased.is_set())
-                self.assertFalse(operationEnded.is_set())
 
                 worker.release.set()
-                self.assertTrue(operationEnded.wait(1))
+                self.assertTrue(slotReleased.wait(1))
                 QTest.qWait(20)
 
             self.page.store.downloadSlots.release.assert_called_once_with()
-            endOperation.assert_called_once_with()
         finally:
             worker.release.set()
             thread.join(1)
@@ -2791,7 +2824,6 @@ class AppStorePageTest(TestCase):
         installStarted = threading.Event()
         allowInstallToFinish = threading.Event()
         slotReleased = threading.Event()
-        operationEnded = threading.Event()
         installThread = None
         self.page.store.downloadSlots = Mock()
         self.page.store.downloadSlots.release.side_effect = slotReleased.set
@@ -2810,10 +2842,7 @@ class AppStorePageTest(TestCase):
                 with patch(
                     "app.view.pages.app_store_page.SHUTDOWN_WAIT_SECONDS",
                     0.01,
-                ), patch(
-                    "app.view.pages.app_store_page.endAppStorePackageOperation",
-                    side_effect=operationEnded.set,
-                ) as endOperation:
+                ):
                     self.page._onDownloadFinished(
                         app,
                         str(package),
@@ -2831,14 +2860,12 @@ class AppStorePageTest(TestCase):
 
                     self.assertTrue(installThread.is_alive())
                     self.assertFalse(slotReleased.is_set())
-                    self.assertFalse(operationEnded.is_set())
 
                     allowInstallToFinish.set()
-                    self.assertTrue(operationEnded.wait(1))
+                    self.assertTrue(slotReleased.wait(1))
                     self.page._onInstallFinished(appId, None, "")
 
                 self.page.store.downloadSlots.release.assert_called_once_with()
-                endOperation.assert_called_once_with()
             finally:
                 allowInstallToFinish.set()
                 if installThread is not None:

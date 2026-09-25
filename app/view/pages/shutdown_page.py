@@ -1,11 +1,8 @@
-from copy import deepcopy
-
-from PySide6.QtCore import QRect, Qt, QTime, QTimer, Signal
+from PySide6.QtCore import QRect, Qt, QTime, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
-    QLabel,
     QVBoxLayout,
     QWidget,
 )
@@ -13,26 +10,24 @@ from qfluentwidgets import (
     BodyLabel,
     LineEdit,
     MessageBoxBase,
-    PickerColumnFormatter,
     PillPushButton,
     PushButton,
     SpinBox,
-    SubtitleLabel,
     SwitchButton,
     TitleLabel,
-    ToolButton,
 )
 from qfluentwidgets import FluentIcon as FIF
 
 from app.config.cfg import cfg
-from app.view.components.scroll_area import ScrollArea
-from app.view.components.setting_card_group import SettingMaterialCard
+from app.view.components.task_page import (
+    ScheduledTaskCard,
+    ScheduledTaskDialog,
+    ScheduledTaskPage,
+)
 from app.view.components.task_picker import (
-    TaskExpandSettingCard,
+    SecondsFormatter,
     TaskFormSettingCard,
-    TaskMasterSwitch,
     TouchTimePicker,
-    configure_task_expand_card,
 )
 
 DEFAULT_PROMPT_TITLE = "Windows 即将关闭你的计算机"
@@ -45,19 +40,7 @@ SHUTDOWN_RESULT = 1
 SKIP_RESULT = 2
 
 
-class SecondsFormatter(PickerColumnFormatter):
-    def encode(self, value):
-        return str(value) + "秒"
-
-    def decode(self, value: str):
-        return int(value[:-1])
-
-
-class ShutdownSettingCard(TaskFormSettingCard):
-    pass
-
-
-def create_shutdown_form(parent, initialData=None):
+def createShutdownForm(parent, initialData=None):
     form = QWidget(parent)
     layout = QVBoxLayout(form)
     layout.setContentsMargins(0, 0, 0, 0)
@@ -80,7 +63,7 @@ def create_shutdown_form(parent, initialData=None):
     nameInput.setText(data.get("name", ""))
     nameInput.setPlaceholderText("任务名称（例如：每日关机）")
     layout.addWidget(
-        ShutdownSettingCard(
+        TaskFormSettingCard(
             FIF.EDIT,
             "任务名称",
             "设置该关机任务的标题",
@@ -95,7 +78,7 @@ def create_shutdown_form(parent, initialData=None):
     taskTime = QTime.fromString(data.get("time", ""), "HH:mm:ss")
     timePicker.setTime(taskTime if taskTime.isValid() else now)
     layout.addWidget(
-        ShutdownSettingCard(
+        TaskFormSettingCard(
             FIF.ALBUM,
             "关机时间",
             "设置触发关机任务的时间",
@@ -116,7 +99,7 @@ def create_shutdown_form(parent, initialData=None):
         weekButtons.append(button)
         weekLayout.addWidget(button)
     layout.addWidget(
-        ShutdownSettingCard(
+        TaskFormSettingCard(
             FIF.CALENDAR,
             "重复频率",
             "选择在一周中的哪几天执行",
@@ -129,7 +112,7 @@ def create_shutdown_form(parent, initialData=None):
     notifySwitch = SwitchButton(form)
     notifySwitch.setChecked(data.get("notify", True))
     layout.addWidget(
-        ShutdownSettingCard(
+        TaskFormSettingCard(
             FIF.INFO,
             "提示关机",
             "到时间后先显示关机提醒",
@@ -142,7 +125,7 @@ def create_shutdown_form(parent, initialData=None):
     titleInput = LineEdit(form)
     titleInput.setText(data.get("promptTitle", DEFAULT_PROMPT_TITLE))
     titleInput.setPlaceholderText(DEFAULT_PROMPT_TITLE)
-    titleCard = ShutdownSettingCard(
+    titleCard = TaskFormSettingCard(
         FIF.FONT,
         "提示大标题",
         "设置关机提醒的大标题",
@@ -155,7 +138,7 @@ def create_shutdown_form(parent, initialData=None):
     messageInput = LineEdit(form)
     messageInput.setText(data.get("promptMessage", DEFAULT_PROMPT_MESSAGE))
     messageInput.setPlaceholderText(DEFAULT_PROMPT_MESSAGE)
-    messageCard = ShutdownSettingCard(
+    messageCard = TaskFormSettingCard(
         FIF.MESSAGE,
         "提示正文",
         "设置关机提醒的正文",
@@ -167,7 +150,7 @@ def create_shutdown_form(parent, initialData=None):
 
     skipSwitch = SwitchButton(form)
     skipSwitch.setChecked(data.get("allowSkip", True))
-    skipCard = ShutdownSettingCard(
+    skipCard = TaskFormSettingCard(
         FIF.CANCEL,
         "本次不关机",
         "在提醒中显示“本次不关机”按钮",
@@ -181,7 +164,7 @@ def create_shutdown_form(parent, initialData=None):
     waitSpin.setRange(5, 300)
     waitSpin.setSuffix(" 秒")
     waitSpin.setValue(data.get("waitSeconds", 30))
-    waitCard = ShutdownSettingCard(
+    waitCard = TaskFormSettingCard(
         FIF.STOP_WATCH,
         "等待操作时间",
         "无操作时自动关机前等待的时间",
@@ -202,7 +185,7 @@ def create_shutdown_form(parent, initialData=None):
     return form, widgets
 
 
-def shutdown_task_data(widgets):
+def shutdownTaskData(widgets):
     return {
         "name": widgets["nameInput"].text() or "未命名任务",
         "time": widgets["timePicker"].getTime().toString("HH:mm:ss"),
@@ -221,88 +204,26 @@ def shutdown_task_data(widgets):
     }
 
 
-class AddShutdownTaskDialog(MessageBoxBase):
+class AddShutdownTaskDialog(ScheduledTaskDialog):
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.titleLabel = SubtitleLabel("添加关机任务", self)
-        self.scrollArea = ScrollArea(self.widget)
-        self.scrollArea.setWidgetResizable(True)
-        self.scrollArea.enableTransparentBackground()
-        self.formWidget, self.formWidgets = create_shutdown_form(self)
-        self.scrollArea.setWidget(self.formWidget)
-        self.scrollArea.setMinimumHeight(180)
-        self.scrollArea.setMaximumHeight(280)
-
-        self.viewLayout.addWidget(self.titleLabel)
-        self.viewLayout.addSpacing(10)
-        self.viewLayout.addWidget(self.scrollArea)
-        self.widget.setMinimumWidth(580)
-
-    def get_data(self):
-        return {**shutdown_task_data(self.formWidgets), "enabled": True}
+        super().__init__(
+            "添加关机任务",
+            lambda form, _scrollArea: createShutdownForm(form),
+            shutdownTaskData,
+            parent,
+        )
 
 
-class ShutdownTaskCard(SettingMaterialCard):
-    deleteClicked = Signal(dict)
-    dataChanged = Signal()
+class ShutdownTaskCard(ScheduledTaskCard):
+    ICON = FIF.POWER_BUTTON
 
     def __init__(self, data, parent=None):
-        super().__init__(parent)
-        self.data = data
-        name = data.get("name") or "未命名任务"
-        time = data.get("time") or "00:00:00"
-        self.data.update({"name": name, "time": time})
-        self.expandCard = TaskExpandSettingCard(
-            FIF.POWER_BUTTON,
-            name,
-            f"关机时间：{time}",
-            self,
-        )
-        self.paintFilter = self.applyExpandCardMaterial(self.expandCard)
-        self.expandBehavior = configure_task_expand_card(self.expandCard)
+        data["name"] = data.get("name") or "未命名任务"
+        data["time"] = data.get("time") or "00:00:00"
+        super().__init__(data, parent)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.expandCard)
-
-        self.titleLabel = None
-        self.timeLabel = None
-        for label in self.findChildren(QLabel):
-            if label.text() == name:
-                self.titleLabel = label
-            elif label.text() == f"关机时间：{time}":
-                self.timeLabel = label
-
-        self.enableSwitch = SwitchButton(self)
-        self.enableSwitch.setChecked(data.get("enabled", True))
-        self.enableSwitch.checkedChanged.connect(self._onEnabledChanged)
-        self.expandCard.addWidget(self.enableSwitch)
-
-        self.formWidget, self.formWidgets = create_shutdown_form(self, data)
-        self.formHeightTimer = QTimer(self)
-        self.formHeightTimer.setSingleShot(True)
-        self.formHeightTimer.setInterval(10)
-        self.formHeightTimer.timeout.connect(
-            self.expandCard._adjustViewSize
-        )
-        self._bindForm()
-
-        deleteButton = PushButton(FIF.DELETE, "删除任务", self)
-        deleteButton.clicked.connect(lambda: self.deleteClicked.emit(self.data))
-        buttonLayout = QHBoxLayout()
-        buttonLayout.addStretch(1)
-        buttonLayout.addWidget(deleteButton)
-        buttonLayout.setContentsMargins(16, 0, 16, 0)
-
-        containerLayout = QVBoxLayout()
-        containerLayout.setContentsMargins(0, 0, 0, 16)
-        containerLayout.addWidget(self.formWidget)
-        containerLayout.addSpacing(10)
-        containerLayout.addLayout(buttonLayout)
-
-        container = QWidget(self)
-        container.setLayout(containerLayout)
-        self.expandCard.viewLayout.addWidget(container)
+    def _createForm(self):
+        return createShutdownForm(self, self.data)
 
     def _bindForm(self):
         widgets = self.formWidgets
@@ -311,160 +232,41 @@ class ShutdownTaskCard(SettingMaterialCard):
         for button in widgets["weekButtons"]:
             button.clicked.connect(self._saveData)
         widgets["notifySwitch"].checkedChanged.connect(self._saveData)
-        widgets["notifySwitch"].checkedChanged.connect(
-            self._refreshFormHeight
-        )
+        widgets["notifySwitch"].checkedChanged.connect(self._refreshFormHeight)
         widgets["titleInput"].textChanged.connect(self._saveData)
         widgets["messageInput"].textChanged.connect(self._saveData)
         widgets["skipSwitch"].checkedChanged.connect(self._saveData)
         widgets["waitSpin"].valueChanged.connect(self._saveData)
 
-    def _refreshFormHeight(self):
-        self.expandCard._adjustViewSize()
-        self.formHeightTimer.start()
+    def _formData(self):
+        return shutdownTaskData(self.formWidgets)
 
-    def _onEnabledChanged(self, checked):
-        self.data["enabled"] = checked
-        self._saveData()
-
-    def _saveData(self, *args):
-        self.data.update(shutdown_task_data(self.formWidgets))
-        if self.titleLabel:
-            self.titleLabel.setText(self.data["name"])
-        if self.timeLabel:
-            self.timeLabel.setText(f"关机时间：{self.data['time']}")
-        self.dataChanged.emit()
+    def _summary(self):
+        return f"关机时间：{self.data['time']}"
 
 
-class ShutdownPage(QWidget):
-    backSignal = Signal()
-
+class ShutdownPage(ScheduledTaskPage):
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(30, 30, 30, 30)
-
-        header = QHBoxLayout()
-        self.backButton = ToolButton(FIF.RETURN, self)
-        self.backButton.clicked.connect(self.backSignal.emit)
-        self.titleLabel = TitleLabel("定时关机", self)
-        self.masterSwitch = TaskMasterSwitch(cfg.shutdownTasksEnabled, self)
-        self.addButton = ToolButton(FIF.ADD, self)
-        self.addButton.clicked.connect(self._addTask)
-        header.addWidget(self.backButton)
-        header.addWidget(self.titleLabel)
-        header.addStretch(1)
-        header.addWidget(self.masterSwitch)
-        header.addSpacing(8)
-        header.addWidget(self.addButton)
-        self.layout.addLayout(header)
-
-        self.scrollArea = ScrollArea(self)
-        self.scrollArea.setWidgetResizable(True)
-        self.scrollArea.enableTransparentBackground()
-        self.view = QWidget(self.scrollArea)
-        contentLayout = QVBoxLayout(self.view)
-        contentLayout.setContentsMargins(0, 0, 0, 0)
-
-        self.cardLayout = QVBoxLayout()
-        self.cardLayout.setSpacing(10)
-        contentLayout.addLayout(self.cardLayout)
-
-        self.emptyLabel = SubtitleLabel("还没有设置关机任务哦 ~", self.view)
-        self.emptyLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.emptyLabel.setStyleSheet("color: gray;")
-        contentLayout.addWidget(
-            self.emptyLabel,
-            1,
-            Qt.AlignmentFlag.AlignCenter,
+        super().__init__(
+            "定时关机",
+            "还没有设置关机任务哦 ~",
+            cfg.shutdownTasks,
+            cfg.shutdownTasksEnabled,
+            parent,
         )
-        contentLayout.addStretch(1)
 
-        self.scrollArea.setWidget(self.view)
-        self.layout.addWidget(self.scrollArea, 1)
-        self.saveTimer = QTimer(self)
-        self.saveTimer.setSingleShot(True)
-        self.saveTimer.setInterval(300)
-        self.saveTimer.timeout.connect(self.flushPendingSave)
-        self._savePending = False
-        self._loadTasks()
-        cfg.shutdownTasks.valueChanged.connect(self._onTasksChanged)
-        cfg.shutdownTasksEnabled.valueChanged.connect(
-            self._setTaskControlsEnabled
-        )
-        self._setTaskControlsEnabled(cfg.shutdownTasksEnabled.value)
+    def _createCard(self, task):
+        return ShutdownTaskCard(task, self.view)
 
-    def _onTasksChanged(self, tasks):
-        if tasks != self.current_tasks:
-            self._loadTasks()
-
-    def _loadTasks(self):
-        while self.cardLayout.count():
-            widget = self.cardLayout.takeAt(0).widget()
-            if widget:
-                widget.deleteLater()
-
-        self.current_tasks = deepcopy(cfg.shutdownTasks.value)
-        self.emptyLabel.setVisible(not self.current_tasks)
-        for index, task in enumerate(self.current_tasks):
-            card = ShutdownTaskCard(task, self.view)
-            card.deleteClicked.connect(self._removeTask)
-            card.dataChanged.connect(
-                lambda taskIndex=index, taskCard=card: self._updateTask(
-                    taskIndex,
-                    taskCard.data,
-                )
-            )
-            card.setEnabled(cfg.shutdownTasksEnabled.value)
-            self.cardLayout.addWidget(card)
-
-    def _setTaskControlsEnabled(self, enabled):
-        self.addButton.setEnabled(enabled)
-        for index in range(self.cardLayout.count()):
-            widget = self.cardLayout.itemAt(index).widget()
-            if widget is not None:
-                widget.setEnabled(enabled)
-
-    def _addTask(self):
-        self.flushPendingSave()
-        dialog = AddShutdownTaskDialog(self.window())
-        try:
-            if dialog.exec():
-                self.current_tasks.insert(0, dialog.get_data())
-                cfg.set(cfg.shutdownTasks, self.current_tasks)
-                self._loadTasks()
-        finally:
-            dialog.deleteLater()
-
-    def _updateTask(self, index, data):
-        self.current_tasks[index] = data
-        self._savePending = True
-        self.saveTimer.start()
-
-    def flushPendingSave(self):
-        if not self._savePending:
-            return
-        self._savePending = False
-        self.saveTimer.stop()
-        cfg.set(cfg.shutdownTasks, self.current_tasks)
-
-    def _removeTask(self, data):
-        self.saveTimer.stop()
-        self._savePending = False
-        self.current_tasks.remove(data)
-        cfg.set(cfg.shutdownTasks, self.current_tasks)
-        self._loadTasks()
-
-    def hideEvent(self, event):
-        self.flushPendingSave()
-        super().hideEvent(event)
+    def _createDialog(self):
+        return AddShutdownTaskDialog(self.window())
 
 
 class ShutdownPromptDialog(MessageBoxBase):
     def __init__(self, task, parent=None):
         super().__init__(parent)
         self.setMaskColor(QColor(0, 0, 0, 180))
-        self.remaining_seconds = max(1, int(task.get("waitSeconds", 30)))
+        self.remainingSeconds = max(1, int(task.get("waitSeconds", 30)))
         self.titleLabel = TitleLabel(
             task.get("promptTitle") or DEFAULT_PROMPT_TITLE,
             self,
@@ -504,19 +306,19 @@ class ShutdownPromptDialog(MessageBoxBase):
 
     def _updateCountdown(self):
         self.countdownLabel.setText(
-            f"{self.remaining_seconds} 秒后将自动关机"
+            f"{self.remainingSeconds} 秒后将自动关机"
         )
 
     def _onTimeout(self):
-        self.remaining_seconds -= 1
-        if self.remaining_seconds <= 0:
+        self.remainingSeconds -= 1
+        if self.remainingSeconds <= 0:
             self.timer.stop()
             self.accept()
             return
         self._updateCountdown()
 
 
-def show_shutdown_prompt(task):
+def showShutdownPrompt(task):
     overlay = QWidget()
     overlay.setWindowFlags(
         Qt.WindowType.Tool

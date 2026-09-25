@@ -28,7 +28,6 @@ from app.view.components.setting_card_group import SettingMaterialCard
 from app.view.components.window_background import (
     TIMER_THEME_BACKGROUND,
     WindowBackground,
-    followsDarkTheme,
     projectionThemeBackground,
     projectionTitleColor,
 )
@@ -111,12 +110,11 @@ class WindowBackgroundPreview(WindowBackground):
         if actionPositionItem is not None:
             actionPositionItem.valueChanged.connect(self._onActionPositionChanged)
         if projection:
-            cfg.customThemeMode.valueChanged.connect(self._invalidate)
             qconfig.themeChanged.connect(self._invalidate)
 
     def _darkFurniture(self) -> bool:
         """投送窗口的文字和按钮跟随深浅主题；倒计时和时钟始终是黑底上的白字。"""
-        return self._contentKind != PROJECTION_CONTENT or followsDarkTheme()
+        return self._contentKind != PROJECTION_CONTENT or isDarkTheme()
 
     def _onActionPositionChanged(self, *_args) -> None:
         self.update()
@@ -591,7 +589,7 @@ class WindowTextPreview(SettingPreviewCard):
             cfg.windowTitle.value.strip() or APP_NAME,
         )
 
-        # 最小化、最大化、关闭：画成真实标题栏上的三个字形而不是三根等长横线。
+        # 最小化、最大化、关闭
         glyphPen = QPen(_textColor(dark), 1.2)
         painter.setPen(glyphPen)
         centerY = rect.center().y()

@@ -21,6 +21,7 @@ from qfluentwidgets import (
     BodyLabel,
     ExpandSettingCard,
     MessageBoxBase,
+    PickerColumnFormatter,
     SettingCard,
     SwitchButton,
     TimePicker,
@@ -55,6 +56,14 @@ class TaskMasterSwitch(QWidget):
     def _syncChecked(self, checked):
         with QSignalBlocker(self.switchButton):
             self.switchButton.setChecked(checked)
+
+
+class SecondsFormatter(PickerColumnFormatter):
+    def encode(self, value):
+        return str(value) + "秒"
+
+    def decode(self, value: str):
+        return int(value[:-1])
 
 
 class TouchTimePicker(TimePicker):
@@ -321,5 +330,5 @@ class TaskExpandCardBehavior(QObject):
         painter.drawLine(1, y, widget.width() - 1, y)
 
 
-def configure_task_expand_card(expandCard):
+def configureTaskExpandCard(expandCard):
     return TaskExpandCardBehavior(expandCard)

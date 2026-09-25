@@ -233,7 +233,7 @@ def _externalProcessEnvironment() -> dict[str, str]:
     return externalProcessEnvironment(globals().get("__compiled__"))
 
 
-def _activateProcessWindow(process, stopEvent=None, onFailure=None):
+def _activateProcessWindow(process, stopEvent=None):
     pid = getattr(process, "pid", None)
     if os.name != "nt" or type(pid) is not int or pid <= 0:
         return None
@@ -276,6 +276,8 @@ def _activateProcessWindow(process, stopEvent=None, onFailure=None):
             finally:
                 ctypes.windll.kernel32.CloseHandle(handle)
 
+        # Ghost Downloader 3 启动后不显示主窗口，按可见窗口枚举找不到它；它留有一个
+        # 隐藏的 GhostDownloaderIPC 窗口，收到 WM_USER+1 才显示主窗口。
         def wakeGhostIpc(allowFallback):
             try:
                 window = user32.FindWindowW("GhostDownloaderIPC", None)
@@ -341,34 +343,20 @@ def _activateProcessWindow(process, stopEvent=None, onFailure=None):
                     break
             stopEvent.wait(0.1)
 
-        if stopEvent.is_set() or onFailure is None:
-            return
-        exitCode = process.poll()
-        if exitCode is not None and exitCode != 0:
-            message = "程序启动后立即退出，可能已有实例正在运行"
-        else:
-            return
-        try:
-            onFailure(message)
-        except RuntimeError:
-            pass
-
     worker = threading.Thread(target=activate, daemon=True)
     worker.start()
     return worker
 
 
 def _assertNoLinks(root: Path) -> None:
-    isJunction = getattr(root, "is_junction", lambda: False)()
-    if root.is_symlink() or isJunction:
+    if root.is_symlink() or root.is_junction():
         raise ApplicationStoreError("现有安装目录包含链接，已停止覆盖安装")
     if not root.exists():
         return
     for directory, directories, files in os.walk(root, followlinks=False):
         for name in (*directories, *files):
             path = Path(directory) / name
-            isJunction = getattr(path, "is_junction", lambda: False)()
-            if path.is_symlink() or isJunction:
+            if path.is_symlink() or path.is_junction():
                 raise ApplicationStoreError("现有安装目录包含链接，已停止覆盖安装")
 
 
@@ -634,45 +622,41 @@ class ImageCache:
 
 
 appStoreImageCache = ImageCache()
-_packageOperationLock = threading.Lock()
-_activePackageOperations = 0
-
-
-def beginAppStorePackageOperation() -> None:
-    global _activePackageOperations
-    with _packageOperationLock:
-        _activePackageOperations += 1
-
-
-def endAppStorePackageOperation() -> None:
-    global _activePackageOperations
-    with _packageOperationLock:
-        _activePackageOperations = max(0, _activePackageOperations - 1)
-
-
-def clearAppStoreCache() -> None:
-    with _packageOperationLock:
-        if _activePackageOperations:
-            raise ApplicationStoreError(
-                "有应用正在下载或安装，请完成后再清理缓存"
-            )
-        appStoreImageCache.clear()
 
 
 class DownloadSlots:
-    """Small shared limiter used by every marketplace download action."""
+    """Limits concurrent Package downloads.
+
+    A slot is held from the start of a download until its Package is installed
+    or discarded, so an occupied slot also means the cache must not be cleared.
+    """
 
     def __init__(self, maximum: int = 3):
         self.maximum = maximum
         self.active = 0
+        self._lock = threading.Lock()
 
     def acquire(self) -> None:
-        if self.active >= self.maximum:
-            raise DownloadLimitError("同时最多下载 3 个应用")
-        self.active += 1
+        with self._lock:
+            if self.active >= self.maximum:
+                raise DownloadLimitError("同时最多下载 3 个应用")
+            self.active += 1
 
     def release(self) -> None:
-        self.active = max(0, self.active - 1)
+        with self._lock:
+            self.active = max(0, self.active - 1)
+
+
+packageSlots = DownloadSlots()
+
+
+def clearAppStoreCache() -> None:
+    with packageSlots._lock:
+        if packageSlots.active:
+            raise ApplicationStoreError(
+                "有应用正在下载或安装，请完成后再清理缓存"
+            )
+        appStoreImageCache.clear()
 
 
 class ApplicationStore:
@@ -681,18 +665,16 @@ class ApplicationStore:
         apiBaseUrl: str | None = None,
         programDir: Path = PROGRAM_DIR,
         cache: ImageCache | None = None,
-        onLaunchFailure=None,
     ):
         self.apiBaseUrl = (apiBaseUrl or os.environ.get("DJCATAI_API_BASE_URL", "https://api.djcatpro.top")).rstrip("/") + "/"
         self.programDir = Path(programDir).resolve()
         self.programDir.mkdir(parents=True, exist_ok=True)
         self.cache = cache or appStoreImageCache
         self.architecture = clientArchitecture()
-        self.downloadSlots = DownloadSlots()
+        self.downloadSlots = packageSlots
         self._launchedProcesses = {}
         self._activationStop = threading.Event()
         self._activationThreads = {}
-        self._onLaunchFailure = onLaunchFailure
         self._installedLock = threading.RLock()
         self._installedCache = None
         self._installedStamp = None
@@ -706,7 +688,6 @@ class ApplicationStore:
         for worker in set(self._activationThreads.values()):
             worker.join(max(0, deadline - time.monotonic()))
         self._activationThreads.clear()
-        self._onLaunchFailure = None
         if self._cleanupThread is not None:
             self._cleanupThread.join(max(0, deadline - time.monotonic()))
 
@@ -779,11 +760,7 @@ class ApplicationStore:
         worker = self._activationThreads.get(pid)
         if worker is not None and worker.is_alive():
             return
-        worker = _activateProcessWindow(
-            process,
-            self._activationStop,
-            self._onLaunchFailure,
-        )
+        worker = _activateProcessWindow(process, self._activationStop)
         if worker is not None:
             self._activationThreads[pid] = worker
 
@@ -939,14 +916,11 @@ class ApplicationStore:
                         key=lambda path: path.name.casefold(),
                     )
                     for directory in directories:
-                        isJunction = getattr(
-                            directory, "is_junction", lambda: False
-                        )()
                         if (
                             directory.name.startswith(".")
                             or not directory.is_dir()
                             or directory.is_symlink()
-                            or isJunction
+                            or directory.is_junction()
                         ):
                             continue
                         manifestPath = directory / MANIFEST_NAME
@@ -998,12 +972,12 @@ class ApplicationStore:
         with self._installedLock:
             return self._applicationRunning(local.path)
 
-    def uninstall(self, appOrInstallDir: dict | InstalledApplication | str) -> None:
+    def uninstall(self, appOrInstallDir: dict | InstalledApplication) -> None:
         appId = None
         if isinstance(appOrInstallDir, InstalledApplication):
             installDir = appOrInstallDir.installDir
             appId = appOrInstallDir.appId
-        elif isinstance(appOrInstallDir, dict):
+        else:
             local = None
             try:
                 appId = int(appOrInstallDir.get("id"))
@@ -1011,8 +985,6 @@ class ApplicationStore:
             except (TypeError, ValueError):
                 pass
             installDir = local.installDir if local else appOrInstallDir.get("install_dir")
-        else:
-            installDir = appOrInstallDir
         installDir = _safeInstallDir(installDir)
         target = _underRoot(self.programDir / installDir, self.programDir)
         tombstones = []
@@ -1285,7 +1257,6 @@ def downloadWorker(app: dict, store: ApplicationStore):
         store.downloadUrl(app),
         target,
         validator=validateZip,
-        requireHttps=True,
         maxBytes=MAX_ZIP_COMPRESSED,
         expectedSha256=expectedSha256 or None,
     )
@@ -1300,10 +1271,8 @@ __all__ = [
     "InstalledApplication",
     "UnsafeArchiveError",
     "clientArchitecture",
-    "beginAppStorePackageOperation",
     "clearAppStoreCache",
     "downloadWorker",
-    "endAppStorePackageOperation",
     "isUpdateAvailable",
     "appStoreImageCache",
     "validateZip",

@@ -1,32 +1,29 @@
-import os
 import tempfile
 from pathlib import Path
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
 from app.common.edge_tts import (
     DEFAULT_EDGE_VOICE,
     EdgeSpeechWorker,
-    cleanup_edge_speech_files,
-    filter_chinese_voices,
-    synthesize_edge_speech,
+    cleanupEdgeSpeechFiles,
+    filterChineseVoices,
+    synthesizeEdgeSpeech,
 )
-from app.view.pages.schedule_page import ChineseVoiceLoader, create_task_form
+from app.view.pages.schedule_page import ChineseVoiceLoader, createTaskForm
 from app.view.windows.main_window import MainWindow
-from deploy import build_args
+from deploy import buildArgs
 
 
 class EdgeTtsVoiceTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def testVoiceFilterKeepsOnlyChineseLocales(self):
-        voices = filter_chinese_voices(
+        voices = filterChineseVoices(
             [
                 {
                     "ShortName": "en-US-EmmaNeural",
@@ -62,14 +59,14 @@ class EdgeTtsVoiceTest(TestCase):
             stale.write_bytes(b"stale")
             keep.write_bytes(b"keep")
 
-            self.assertEqual(cleanup_edge_speech_files(root), [])
+            self.assertEqual(cleanupEdgeSpeechFiles(root), [])
 
             self.assertFalse(stale.exists())
             self.assertTrue(keep.exists())
 
     @patch.object(ChineseVoiceLoader, "start")
     def testEdgeTtsSelectionShowsVoicePickerAndPersistsVoice(self, start_loader):
-        form, widgets = create_task_form(None)
+        form, widgets = createTaskForm(None)
         self.addCleanup(form.deleteLater)
 
         self.assertTrue(widgets["voiceCard"].isHidden())
@@ -82,7 +79,7 @@ class EdgeTtsVoiceTest(TestCase):
 
     @patch.object(ChineseVoiceLoader, "start")
     def testLoadedVoiceListRestoresSavedChineseVoice(self, start_loader):
-        form, widgets = create_task_form(
+        form, widgets = createTaskForm(
             None,
             {
                 "name": "测试任务",
@@ -98,7 +95,7 @@ class EdgeTtsVoiceTest(TestCase):
             },
         )
         self.addCleanup(form.deleteLater)
-        voices = filter_chinese_voices(
+        voices = filterChineseVoices(
             [
                 {
                     "ShortName": "zh-CN-XiaoxiaoNeural",
@@ -134,7 +131,7 @@ class EdgeTtsVoiceTest(TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output_path = Path(directory) / "speech.mp3"
             with patch("edge_tts.Communicate", CommunicateStub):
-                synthesize_edge_speech(
+                synthesizeEdgeSpeech(
                     "测试播报",
                     "zh-TW-HsiaoChenNeural",
                     output_path,
@@ -152,7 +149,7 @@ class EdgeTtsVoiceTest(TestCase):
         )
 
         with patch(
-            "app.common.edge_tts.synthesize_edge_speech",
+            "app.common.edge_tts.synthesizeEdgeSpeech",
             side_effect=RuntimeError("offline"),
         ):
             worker.run()
@@ -171,7 +168,7 @@ class EdgeTtsVoiceTest(TestCase):
             worker.cancel()
 
         with patch(
-            "app.common.edge_tts.synthesize_edge_speech",
+            "app.common.edge_tts.synthesizeEdgeSpeech",
             side_effect=synthesize,
         ):
             worker.run()
@@ -207,16 +204,16 @@ class EdgeTtsVoiceTest(TestCase):
 
     def testCompletedSynthesisUsesSavedRepeatAndVolume(self):
         window = MagicMock()
-        window._edge_tts_request_id = 4
+        window._edgeTtsRequestId = 4
         worker = MagicMock()
-        window._edge_tts_jobs = {4: (worker, MagicMock(), 3, 55)}
+        window._edgeTtsJobs = {4: (worker, MagicMock(), 3, 55)}
 
         MainWindow._onEdgeTtsReady(window, 4, "/tmp/edge-result.mp3", "")
 
         window._setBroadcastVolume.assert_called_once_with(55)
         window._cleanupEdgeTtsFile.assert_called_once_with()
-        self.assertEqual(window._edge_tts_temp_path, "/tmp/edge-result.mp3")
-        self.assertEqual(window.current_play_repeats, 2)
+        self.assertEqual(window._edgeTtsTempPath, "/tmp/edge-result.mp3")
+        self.assertEqual(window.currentPlayRepeats, 2)
         source = window.player.setSource.call_args.args[0]
         self.assertEqual(source.toLocalFile(), "/tmp/edge-result.mp3")
         window.player.play.assert_called_once_with()
@@ -224,10 +221,10 @@ class EdgeTtsVoiceTest(TestCase):
 
     def testCancelPendingSynthesisKeepsJobsUntilCompletion(self):
         window = MagicMock()
-        window._edge_tts_request_id = 4
+        window._edgeTtsRequestId = 4
         firstWorker = MagicMock()
         secondWorker = MagicMock()
-        window._edge_tts_jobs = {
+        window._edgeTtsJobs = {
             3: (firstWorker, MagicMock(), 1, 100),
             4: (secondWorker, MagicMock(), 1, 100),
         }
@@ -237,21 +234,21 @@ class EdgeTtsVoiceTest(TestCase):
 
         MainWindow._cancelPendingEdgeTts(window)
 
-        self.assertEqual(window._edge_tts_request_id, 5)
-        self.assertEqual(set(window._edge_tts_jobs), {3, 4})
+        self.assertEqual(window._edgeTtsRequestId, 5)
+        self.assertEqual(set(window._edgeTtsJobs), {3, 4})
         firstWorker.cancel.assert_called_once_with()
         secondWorker.cancel.assert_called_once_with()
 
         MainWindow._onEdgeTtsReady(window, 3, "", "")
 
-        self.assertEqual(set(window._edge_tts_jobs), {4})
+        self.assertEqual(set(window._edgeTtsJobs), {4})
         firstWorker.deleteLater.assert_called_once_with()
 
     @patch("app.view.windows.main_window.InfoBar.error")
     def testSynthesisFailureShowsNetworkError(self, show_error):
         window = MagicMock()
-        window._edge_tts_request_id = 5
-        window._edge_tts_jobs = {5: (MagicMock(), MagicMock(), 1, 100)}
+        window._edgeTtsRequestId = 5
+        window._edgeTtsJobs = {5: (MagicMock(), MagicMock(), 1, 100)}
 
         MainWindow._onEdgeTtsReady(window, 5, "", "offline")
 
@@ -263,4 +260,4 @@ class EdgeTtsVoiceTest(TestCase):
         window.player.play.assert_not_called()
 
     def testWindowsBuildExplicitlyIncludesEdgeTtsPackage(self):
-        self.assertIn("--include-package=edge_tts", build_args())
+        self.assertIn("--include-package=edge_tts", buildArgs())

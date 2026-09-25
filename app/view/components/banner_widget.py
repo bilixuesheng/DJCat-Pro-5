@@ -41,9 +41,9 @@ class BannerWidget(QWidget):
         super().__init__(parent=parent)
         self.setFixedHeight(300)
 
-        self._cached_pixmap = None  # 预渲染的最终图片
-        self._cache_size = None     # 缓存对应的窗口尺寸
-        self._source_pixmap = None
+        self._cachedPixmap = None
+        self._cacheSize = None
+        self._sourcePixmap = None
 
         self.vBoxLayout = QVBoxLayout(self)
         self.galleryLabel = QLabel('主页', self)
@@ -57,10 +57,10 @@ class BannerWidget(QWidget):
         cfg.bannerScaleMode.valueChanged.connect(self._onConfigChanged)
 
     def _onConfigChanged(self):
-        self._invalidate_cache()
-        self.update()  # 触发布局重绘
+        self._invalidateCache()
+        self.update()
 
-    def get_image_path(self):
+    def getImagePath(self):
         source = cfg.bannerImageSource.value
         if source in BANNER_IMAGE_PRESETS:
             return str(ASSET_DIR / BANNER_IMAGE_PRESETS[source])
@@ -72,16 +72,16 @@ class BannerWidget(QWidget):
             ASSET_DIR / BANNER_IMAGE_PRESETS[DEFAULT_BANNER_IMAGE_SOURCE]
         )
 
-    def _invalidate_cache(self):
-        self._cached_pixmap = None
-        self._cache_size = None
+    def _invalidateCache(self):
+        self._cachedPixmap = None
+        self._cacheSize = None
 
-    def _create_cached_pixmap(self, width, height):
-        img_path = self.get_image_path()
-        if not os.path.exists(img_path):
+    def _createCachedPixmap(self, width, height):
+        imgPath = self.getImagePath()
+        if not os.path.exists(imgPath):
             return None
 
-        pixmap = self._source_image(img_path)
+        pixmap = self._sourceImage(imgPath)
         if pixmap is None:
             return None
         mode = cfg.bannerScaleMode.value
@@ -89,24 +89,24 @@ class BannerWidget(QWidget):
         ratio = self.devicePixelRatioF()
         w, h = max(1, round(width * ratio)), max(1, round(height * ratio))
 
-        temp_pixmap = QPixmap(w, h)
-        temp_pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(temp_pixmap)
+        tempPixmap = QPixmap(w, h)
+        tempPixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(tempPixmap)
         painter.setRenderHints(QPainter.RenderHint.SmoothPixmapTransform)
 
         if mode == "拉伸":
-            source_pix = pixmap.scaled(w, h, Qt.AspectRatioMode.IgnoreAspectRatio,
+            sourcePix = pixmap.scaled(w, h, Qt.AspectRatioMode.IgnoreAspectRatio,
                                        Qt.TransformationMode.SmoothTransformation)
-            draw_x, draw_y = 0, 0
+            drawX, drawY = 0, 0
         else:
-            source_pix = pixmap.scaled(w, h, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            sourcePix = pixmap.scaled(w, h, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                                        Qt.TransformationMode.SmoothTransformation)
-            draw_x = (w - source_pix.width()) // 2
-            if mode == "缩放(上)": draw_y = 0
-            elif mode == "缩放(下)": draw_y = h - source_pix.height()
-            else: draw_y = (h - source_pix.height()) // 2
+            drawX = (w - sourcePix.width()) // 2
+            if mode == "缩放(上)": drawY = 0
+            elif mode == "缩放(下)": drawY = h - sourcePix.height()
+            else: drawY = (h - sourcePix.height()) // 2
 
-        painter.drawPixmap(draw_x, draw_y, source_pix)
+        painter.drawPixmap(drawX, drawY, sourcePix)
 
         brightness = cfg.bannerBrightness.value
         if brightness < 100:
@@ -121,12 +121,12 @@ class BannerWidget(QWidget):
         painter.fillRect(0, 0, w, h, gradient)
         painter.end()
 
-        temp_pixmap.setDevicePixelRatio(ratio)
-        return temp_pixmap
+        tempPixmap.setDevicePixelRatio(ratio)
+        return tempPixmap
 
-    def _source_image(self, path):
-        self._source_pixmap = _loadSourceImage(path)
-        return self._source_pixmap
+    def _sourceImage(self, path):
+        self._sourcePixmap = _loadSourceImage(path)
+        return self._sourcePixmap
 
     def paintEvent(self, e):
         super().paintEvent(e)
@@ -141,16 +141,16 @@ class BannerWidget(QWidget):
         painter.setClipPath(path)
 
         key = (w, h, self.devicePixelRatioF())
-        if self._cached_pixmap is None or self._cache_size != key:
-            self._cached_pixmap = self._create_cached_pixmap(w, h)
-            self._cache_size = key
+        if self._cachedPixmap is None or self._cacheSize != key:
+            self._cachedPixmap = self._createCachedPixmap(w, h)
+            self._cacheSize = key
 
-        if self._cached_pixmap:
-            painter.drawPixmap(0, 0, self._cached_pixmap)
+        if self._cachedPixmap:
+            painter.drawPixmap(0, 0, self._cachedPixmap)
         else:
             painter.fillPath(path, qconfig.themeColor.value)
 
     def resizeEvent(self, event):
-        self._invalidate_cache()
+        self._invalidateCache()
         super().resizeEvent(event)
 

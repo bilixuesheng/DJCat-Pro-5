@@ -1,9 +1,8 @@
 import sys
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QIcon, QPainter
 from PySide6.QtWidgets import (
-    QApplication,
     QHBoxLayout,
     QMenu,
     QProxyStyle,
@@ -21,9 +20,7 @@ from app.common.application_icon import applicationIcon, trayHomeIcon
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
 
-
-
-# 三类任务总开关在建菜单和刷新时共用同一组名称与图标，集中在这里，改名时不会再漏掉某一处。
+# 三类任务总开关：建菜单和刷新文字共用这一份名称与图标。
 TRAY_TASK_ACTIONS = (
     (
         "broadcastAction",
@@ -133,8 +130,7 @@ class AcrylicMenu(RoundMenu):
         self.windowEffect.addMenuShadowEffect(self.winId())
         self.windowEffect.addShadowEffect(self.winId())
         self.windowEffect.enableBlurBehindWindow(self.winId())
-        is_dark = isDarkTheme() if cfg.customThemeMode.value == "System" else cfg.customThemeMode.value == "Dark"
-        self.windowEffect.setAcrylicEffect(self.winId(), "00000030" if is_dark else "FFFFFF30")
+        self.windowEffect.setAcrylicEffect(self.winId(), "00000030" if isDarkTheme() else "FFFFFF30")
         self.adjustPosition()
         self.raise_()
         self.activateWindow()
@@ -158,6 +154,10 @@ class AcrylicMenu(RoundMenu):
         super()._onItemClicked(item)
 
 class SystemTrayIcon(QSystemTrayIcon):
+    showRequested = Signal()
+    homeCardTriggered = Signal(str)
+    quitRequested = Signal()
+
     def __init__(self, parent=None, homeCards=None):
         super().__init__(parent=parent)
         self._updateApplicationIcon()
@@ -208,7 +208,7 @@ class SystemTrayIcon(QSystemTrayIcon):
             "主页",
             menu,
         )
-        self.showAction.triggered.connect(self._onShowActionTriggered)
+        self.showAction.triggered.connect(self.showRequested)
         menu.addAction(self.showAction)
 
         for name, showItem, enabledItem, label, icon in TRAY_TASK_ACTIONS:
@@ -243,7 +243,7 @@ class SystemTrayIcon(QSystemTrayIcon):
 
         menu.addSeparator()
         self.quitAction = Action(FIF.CLOSE, "退出程序", menu)
-        self.quitAction.triggered.connect(self._onQuitActionTriggered)
+        self.quitAction.triggered.connect(self.quitRequested)
         menu.addAction(self.quitAction)
 
         self.menu = menu
@@ -255,26 +255,9 @@ class SystemTrayIcon(QSystemTrayIcon):
     def _cardAction(self, entry, parent):
         action = Action(entry["icon"], entry["title"], parent)
         action.triggered.connect(
-            lambda _checked=False, key=entry["key"]: self._onHomeCardTriggered(key)
+            lambda _checked=False, key=entry["key"]: self.homeCardTriggered.emit(key)
         )
         return action
-
-    def _onHomeCardTriggered(self, key: str) -> None:
-        parent = self.parent()
-        handler = getattr(parent, "_onTrayHomeCardTriggered", None)
-        if handler is not None:
-            handler(key)
-
-    def _onShowActionTriggered(self):
-        parent = self.parent()
-        if parent:
-            showMainWindow = getattr(parent, "_showMainWindow", None)
-            if callable(showMainWindow):
-                showMainWindow()
-                return
-            parent.show()
-            parent.raise_()
-            parent.activateWindow()
 
     def _refreshTaskActions(self, _value=None):
         for name, _showItem, enabledItem, label, icon in TRAY_TASK_ACTIONS:
@@ -291,17 +274,9 @@ class SystemTrayIcon(QSystemTrayIcon):
     def _toggleTasks(configItem):
         cfg.set(configItem, not configItem.value)
 
-    def _onQuitActionTriggered(self):
-        if self.parent():
-            requestQuit = getattr(self.parent(), "requestQuit", None)
-            if requestQuit is not None:
-                requestQuit()
-                return
-        QApplication.quit()
-
     def onTrayIconClick(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             if cfg.trayLeftClickAction.value == "ShowMenu":
                 self.menu.exec(QCursor.pos())
             else:
-                self._onShowActionTriggered()
+                self.showRequested.emit()

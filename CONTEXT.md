@@ -127,7 +127,7 @@ _Avoid_: Home Action、Shell action
 _Avoid_: Application Update、install、等待程序窗口
 
 **Application Preset**:
-归属于一个 Application 的命名 Preset Action，由服务端维护标题、说明和顺序。用户将它固定到主页后才产生 Application Home Card。
+归属于一个 Application 的命名 Preset Action，由服务端维护标题、说明和顺序。用户将它固定到主页后才产生 Application Home Card。从详情页和从 Application Home Card 打开遵循同一规则：Application Catalog 已加载时，Catalog 不再列出的 Preset 失效，可直接执行的网址或协议以 Catalog 为准，程序及其他协议以本机 Installed Application 记录为准；Catalog 尚未加载时先用本机记录，其次用固定时保存的网址或协议。
 _Avoid_: Custom Home Card、template、default setting
 
 **Application Home Card**:
@@ -197,7 +197,7 @@ _Avoid_: sample、template、system prompt（Prompt Example 是提示词的一�
 ### 更新
 
 **Client Update**:
-DJCat Pro 5 自身的新版本，通过专用更新信息和 Windows 安装程序交付。它独立于 Application Store，不使用 Application Catalog 或 Package。
+DJCat Pro 5 自身的新版本，通过专用更新信息和更新 ZIP 交付，DJCat 退出后由独立的更新器整目录替换程序目录。它独立于 Application Store，不使用 Application Catalog 或 Package。
 _Avoid_: Application Update；不加限定地称 update
 
 **Client Version**:

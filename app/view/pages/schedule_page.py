@@ -1,7 +1,6 @@
 import os
 import threading
 import weakref
-from copy import deepcopy
 from typing import ClassVar
 
 from PySide6.QtCore import QObject, Qt, QTime, QTimer, Signal
@@ -17,41 +16,25 @@ from qfluentwidgets import (
     InfoBar,
     InfoBarPosition,
     LineEdit,
-    MessageBoxBase,
-    PickerColumnFormatter,
     PillPushButton,
     PushButton,
     Slider,
     SpinBox,
-    SubtitleLabel,
-    SwitchButton,
-    TitleLabel,
-    ToolButton,
 )
 from qfluentwidgets import FluentIcon as FIF
 
-from app.common.edge_tts import DEFAULT_EDGE_VOICE, load_chinese_voices
+from app.common.edge_tts import DEFAULT_EDGE_VOICE, loadChineseVoices
 from app.config.cfg import cfg
-from app.view.components.scroll_area import ScrollArea
-from app.view.components.setting_card_group import SettingMaterialCard
-from app.view.components.task_picker import (
-    TaskExpandSettingCard,
-    TaskFormSettingCard,
-    TaskMasterSwitch,
-    TouchTimePicker,
-    configure_task_expand_card,
+from app.view.components.task_page import (
+    ScheduledTaskCard,
+    ScheduledTaskDialog,
+    ScheduledTaskPage,
 )
-
-
-class SecondsFormatter(PickerColumnFormatter):
-    def encode(self, value):
-        return str(value) + "秒"
-
-    def decode(self, value: str):
-        return int(value[:-1])
-
-class BroadcastSettingCard(TaskFormSettingCard):
-    pass
+from app.view.components.task_picker import (
+    SecondsFormatter,
+    TaskFormSettingCard,
+    TouchTimePicker,
+)
 
 
 class ChineseVoiceLoader(QObject):
@@ -106,7 +89,7 @@ class ChineseVoiceLoader(QObject):
     @staticmethod
     def _fetch():
         try:
-            return load_chinese_voices(), ""
+            return loadChineseVoices(), ""
         except Exception as exception:
             return [], str(exception)
 
@@ -121,15 +104,15 @@ class ChineseVoiceLoader(QObject):
         self._emit(*self._fetch())
 
 
-def create_task_form(parent_widget, initial_data=None):
-    form = QWidget(parent_widget)
+def createTaskForm(parentWidget, initialData=None):
+    form = QWidget(parentWidget)
     layout = QVBoxLayout(form)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(2)
 
-    default_time = QTime.currentTime()
-    data = initial_data or {
-        "name": "", "time": default_time.toString("HH:mm:ss"),
+    defaultTime = QTime.currentTime()
+    data = initialData or {
+        "name": "", "time": defaultTime.toString("HH:mm:ss"),
         "weeks": [0,1,2,3,4,5,6], "type": "预设: 12:30报时",
         "content": "", "file": "", "repeat": 3,
         "voice": DEFAULT_EDGE_VOICE,
@@ -140,13 +123,13 @@ def create_task_form(parent_widget, initial_data=None):
     nameInput = LineEdit(form)
     nameInput.setText(data["name"])
     nameInput.setPlaceholderText("任务名称 (例如: 中午报时)")
-    layout.addWidget(BroadcastSettingCard(FIF.EDIT, "任务名称", "设置该播报任务的标题", nameInput, form))
+    layout.addWidget(TaskFormSettingCard(FIF.EDIT, "任务名称", "设置该播报任务的标题", nameInput, form))
     widgets['nameInput'] = nameInput
 
     timePicker = TouchTimePicker(form, showSeconds=True)
     timePicker.setColumnFormatter(2, SecondsFormatter())
-    timePicker.setTime(QTime.fromString(data["time"], "HH:mm:ss") if data["time"] else default_time)
-    layout.addWidget(BroadcastSettingCard(FIF.ALBUM, "播报时间", "设置触发的具体时间(时:分:秒)", timePicker, form))
+    timePicker.setTime(QTime.fromString(data["time"], "HH:mm:ss") if data["time"] else defaultTime)
+    layout.addWidget(TaskFormSettingCard(FIF.ALBUM, "播报时间", "设置触发的具体时间(时:分:秒)", timePicker, form))
     widgets['timePicker'] = timePicker
 
     weekWidget = QWidget()
@@ -159,7 +142,7 @@ def create_task_form(parent_widget, initial_data=None):
         btn.setChecked(i in data["weeks"])
         weekBtns.append(btn)
         weekLayout.addWidget(btn)
-    layout.addWidget(BroadcastSettingCard(FIF.CALENDAR, "重复频率", "选择在一周中的哪几天执行", weekWidget, form))
+    layout.addWidget(TaskFormSettingCard(FIF.CALENDAR, "重复频率", "选择在一周中的哪几天执行", weekWidget, form))
     widgets['weekBtns'] = weekBtns
 
     typeCombo = ComboBox(form)
@@ -173,13 +156,13 @@ def create_task_form(parent_widget, initial_data=None):
     ])
     typeCombo.setCurrentText(data["type"])
     typeCombo.setFixedWidth(200)
-    layout.addWidget(BroadcastSettingCard(FIF.MUSIC, "播报类型", "选择音频来源或语音合成", typeCombo, form))
+    layout.addWidget(TaskFormSettingCard(FIF.MUSIC, "播报类型", "选择音频来源或语音合成", typeCombo, form))
     widgets['typeCombo'] = typeCombo
 
     ttsInput = LineEdit(form)
     ttsInput.setText(data["content"])
     ttsInput.setPlaceholderText("输入语音合成的文字内容")
-    ttsCard = BroadcastSettingCard(FIF.CHAT, "TTS内容", "输入要被朗读的文本", ttsInput, form)
+    ttsCard = TaskFormSettingCard(FIF.CHAT, "TTS内容", "输入要被朗读的文本", ttsInput, form)
     layout.addWidget(ttsCard)
     widgets['ttsInput'] = ttsInput
 
@@ -189,7 +172,7 @@ def create_task_form(parent_widget, initial_data=None):
         "晓晓（普通话 · 女声，默认）",
         userData=data.get("voice", DEFAULT_EDGE_VOICE),
     )
-    voiceCard = BroadcastSettingCard(
+    voiceCard = TaskFormSettingCard(
         FIF.PEOPLE,
         "Edge TTS 音色",
         "仅显示中文音色；加载音色和语音播报均需要联网",
@@ -201,7 +184,7 @@ def create_task_form(parent_widget, initial_data=None):
     widgets['voiceCard'] = voiceCard
 
     fileBtn = PushButton("选择文件" if not data["file"] else os.path.basename(data["file"]), form)
-    fileCard = BroadcastSettingCard(FIF.FOLDER, "音频文件", "选择本地 mp3/wav 文件", fileBtn, form)
+    fileCard = TaskFormSettingCard(FIF.FOLDER, "音频文件", "选择本地 mp3/wav 文件", fileBtn, form)
     layout.addWidget(fileCard)
     widgets['fileBtn'] = fileBtn
     widgets['filePath'] = data["file"]
@@ -216,7 +199,7 @@ def create_task_form(parent_widget, initial_data=None):
     repeatSpin = SpinBox(form)
     repeatSpin.setRange(1, 10)
     repeatSpin.setValue(data["repeat"])
-    layout.addWidget(BroadcastSettingCard(FIF.SYNC, "重复播放", "播报执行的次数", repeatSpin, form))
+    layout.addWidget(TaskFormSettingCard(FIF.SYNC, "重复播放", "播报执行的次数", repeatSpin, form))
     widgets['repeatSpin'] = repeatSpin
 
     volumeSlider = Slider(Qt.Orientation.Horizontal, form)
@@ -235,7 +218,7 @@ def create_task_form(parent_widget, initial_data=None):
     volumeLayout.addWidget(volumeSlider)
     volumeLayout.addWidget(volumeLabel)
 
-    layout.addWidget(BroadcastSettingCard(FIF.VOLUME, "播报音量", "设置当前任务的播放音量", volumeWidget, form))
+    layout.addWidget(TaskFormSettingCard(FIF.VOLUME, "播报音量", "设置当前任务的播放音量", volumeWidget, form))
     widgets['volumeSlider'] = volumeSlider
 
     voiceLoader = ChineseVoiceLoader(form)
@@ -243,7 +226,7 @@ def create_task_form(parent_widget, initial_data=None):
     widgets['voicesLoaded'] = False
 
     def _onVoicesLoaded(voices, error):
-        selected_voice = voiceCombo.currentData() or data.get(
+        selectedVoice = voiceCombo.currentData() or data.get(
             "voice", DEFAULT_EDGE_VOICE
         )
         if voices:
@@ -251,8 +234,8 @@ def create_task_form(parent_widget, initial_data=None):
             for voice in voices:
                 voiceCombo.addItem(voice["label"], userData=voice["name"])
             voiceCombo.setFixedWidth(260)
-            selected_index = voiceCombo.findData(selected_voice)
-            voiceCombo.setCurrentIndex(max(0, selected_index))
+            selectedIndex = voiceCombo.findData(selectedVoice)
+            voiceCombo.setCurrentIndex(max(0, selectedIndex))
             widgets['voicesLoaded'] = True
             voiceCombo.setEnabled(True)
             return
@@ -270,10 +253,10 @@ def create_task_form(parent_widget, initial_data=None):
 
     def _updateVisibility(text):
         ttsCard.setVisible("TTS" in text)
-        is_edge_tts = text == "Edge TTS（需要联网）"
-        voiceCard.setVisible(is_edge_tts)
+        isEdgeTts = text == "Edge TTS（需要联网）"
+        voiceCard.setVisible(isEdgeTts)
         fileCard.setVisible(text == "本地音频")
-        if is_edge_tts and not widgets['voicesLoaded']:
+        if isEdgeTts and not widgets['voicesLoaded']:
             voiceCombo.setEnabled(False)
             voiceLoader.start()
     typeCombo.currentTextChanged.connect(_updateVisibility)
@@ -282,275 +265,83 @@ def create_task_form(parent_widget, initial_data=None):
     return form, widgets
 
 
-class AddTaskDialog(MessageBoxBase):
+def broadcastTaskData(widgets):
+    return {
+        "name": widgets["nameInput"].text() or "未命名任务",
+        "time": widgets["timePicker"].getTime().toString("HH:mm:ss"),
+        "weeks": [
+            index
+            for index, button in enumerate(widgets["weekBtns"])
+            if button.isChecked()
+        ],
+        "type": widgets["typeCombo"].currentText(),
+        "content": widgets["ttsInput"].text(),
+        "file": widgets["filePath"],
+        "repeat": widgets["repeatSpin"].value(),
+        "volume": widgets["volumeSlider"].value(),
+        "voice": widgets["voiceCombo"].currentData() or DEFAULT_EDGE_VOICE,
+    }
+
+
+class AddTaskDialog(ScheduledTaskDialog):
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.titleLabel = SubtitleLabel("添加播报任务", self)
-
-        self.scrollArea = ScrollArea(self.widget)
-        self.scrollArea.setWidgetResizable(True)
-        self.scrollArea.enableTransparentBackground()
-
-        self.formWidget, self.formWidgets = create_task_form(self)
-        self.scrollArea.setWidget(self.formWidget)
-
-        self.scrollArea.setMinimumHeight(180)
-        self.scrollArea.setMaximumHeight(280)
-
-        self.viewLayout.addWidget(self.titleLabel)
-        self.viewLayout.addSpacing(10)
-        self.viewLayout.addWidget(self.scrollArea)
-        self.widget.setMinimumWidth(580)
-
-    def get_data(self):
-        w = self.formWidgets
-        return {
-            "name": w['nameInput'].text() or "未命名任务",
-            "time": w['timePicker'].getTime().toString("HH:mm:ss"),
-            "weeks": [i for i, b in enumerate(w['weekBtns']) if b.isChecked()],
-            "type": w['typeCombo'].currentText(),
-            "content": w['ttsInput'].text(),
-            "file": w['filePath'],
-            "repeat": w['repeatSpin'].value(),
-            "volume": w['volumeSlider'].value(),
-            "voice": w['voiceCombo'].currentData() or DEFAULT_EDGE_VOICE,
-            "enabled": True
-        }
-
-
-class TaskCard(SettingMaterialCard):
-    deleteClicked = Signal(dict)
-    dataChanged = Signal()
-
-    def __init__(self, data, parent=None):
-        super().__init__(parent)
-        self.data = data
-        self.expandCard = TaskExpandSettingCard(
-            FIF.MEGAPHONE,
-            data["name"],
-            f"触发时间: {data['time']}",
-            self,
-        )
-        self.paintFilter = self.applyExpandCardMaterial(self.expandCard)
-        self.expandBehavior = configure_task_expand_card(self.expandCard)
-
-        self.cardLayout = QVBoxLayout(self)
-        self.cardLayout.setContentsMargins(0, 0, 0, 0)
-        self.cardLayout.addWidget(self.expandCard)
-
-        self._target_title_label = None
-        self._target_content_label = None
-        for lbl in self.findChildren(QLabel):
-            if lbl.text() == data["name"]:
-                self._target_title_label = lbl
-            elif lbl.text() == f"触发时间: {data['time']}":
-                self._target_content_label = lbl
-
-        self.switchBtn = SwitchButton(self)
-        self.switchBtn.setChecked(data["enabled"])
-        self.switchBtn.checkedChanged.connect(self._onEnableChanged)
-        self.expandCard.addWidget(self.switchBtn)
-
-        self.formWidget, self.formWidgets = create_task_form(self, data)
-        self.formHeightTimer = QTimer(self)
-        self.formHeightTimer.setSingleShot(True)
-        self.formHeightTimer.setInterval(10)
-        self.formHeightTimer.timeout.connect(
-            self.expandCard._adjustViewSize
+        super().__init__(
+            "添加播报任务",
+            lambda form, _scrollArea: createTaskForm(form),
+            broadcastTaskData,
+            parent,
         )
 
-        self.formWidgets['nameInput'].textChanged.connect(self._saveData)
-        self.formWidgets['timePicker'].timeChanged.connect(self._saveData)
-        for btn in self.formWidgets['weekBtns']: btn.clicked.connect(self._saveData)
-        self.formWidgets['typeCombo'].currentTextChanged.connect(self._saveData)
-        self.formWidgets['typeCombo'].currentTextChanged.connect(
-            self._refreshFormHeight
-        )
-        self.formWidgets['ttsInput'].textChanged.connect(self._saveData)
-        self.formWidgets['voiceCombo'].currentIndexChanged.connect(self._saveData)
-        self.formWidgets['repeatSpin'].valueChanged.connect(self._saveData)
-        self.formWidgets['volumeSlider'].valueChanged.connect(self._saveData)
 
-        self.formWidgets['fileBtn'].clicked.disconnect()
-        def _new_select():
-            p, _ = QFileDialog.getOpenFileName(self, "选择音频", "", "Audio (*.mp3 *.wav)")
-            if p:
-                self.formWidgets['filePath'] = p
-                self.formWidgets['fileBtn'].setText(os.path.basename(p))
-                self._saveData()
-        self.formWidgets['fileBtn'].clicked.connect(_new_select)
+class TaskCard(ScheduledTaskCard):
+    ICON = FIF.MEGAPHONE
 
-        btnLayout = QHBoxLayout()
+    def _createForm(self):
+        return createTaskForm(self, self.data)
+
+    def _bindForm(self):
+        widgets = self.formWidgets
+        widgets["nameInput"].textChanged.connect(self._saveData)
+        widgets["timePicker"].timeChanged.connect(self._saveData)
+        for button in widgets["weekBtns"]:
+            button.clicked.connect(self._saveData)
+        widgets["typeCombo"].currentTextChanged.connect(self._saveData)
+        widgets["typeCombo"].currentTextChanged.connect(self._refreshFormHeight)
+        widgets["ttsInput"].textChanged.connect(self._saveData)
+        widgets["voiceCombo"].currentIndexChanged.connect(self._saveData)
+        # 表单自己的选择文件槽先连，这里排在它之后，读到的已是新路径。
+        widgets["fileBtn"].clicked.connect(self._saveData)
+        widgets["repeatSpin"].valueChanged.connect(self._saveData)
+        widgets["volumeSlider"].valueChanged.connect(self._saveData)
+
+    def _extraButtons(self):
         self.playBtn = PushButton(FIF.PLAY, "试听配置", self)
         self.playBtn.clicked.connect(self._playTest)
-        self.delBtn = PushButton(FIF.DELETE, "删除任务", self)
-        self.delBtn.clicked.connect(lambda: self.deleteClicked.emit(self.data))
+        return (self.playBtn,)
 
-        btnLayout.addWidget(self.playBtn)
-        btnLayout.addStretch(1)
-        btnLayout.addWidget(self.delBtn)
-        btnLayout.setContentsMargins(16, 0, 16, 0)
+    def _formData(self):
+        return broadcastTaskData(self.formWidgets)
 
-        containerLayout = QVBoxLayout()
-        containerLayout.setContentsMargins(0, 0, 0, 16)
-        containerLayout.addWidget(self.formWidget)
-        containerLayout.addSpacing(10)
-        containerLayout.addLayout(btnLayout)
-
-        container = QWidget()
-        container.setLayout(containerLayout)
-        self.expandCard.viewLayout.addWidget(container)
-
-    def _refreshFormHeight(self):
-        self.expandCard._adjustViewSize()
-        self.formHeightTimer.start()
-
-    def _onEnableChanged(self, checked):
-        self.data["enabled"] = checked
-        self._saveData()
-
-    def _saveData(self, *args):
-        w = self.formWidgets
-        self.data.update({
-            "name": w['nameInput'].text() or "未命名任务",
-            "time": w['timePicker'].getTime().toString("HH:mm:ss"),
-            "weeks": [i for i, b in enumerate(w['weekBtns']) if b.isChecked()],
-            "type": w['typeCombo'].currentText(),
-            "content": w['ttsInput'].text(),
-            "file": w['filePath'],
-            "repeat": w['repeatSpin'].value(),
-            "volume": w['volumeSlider'].value(),
-            "voice": w['voiceCombo'].currentData() or DEFAULT_EDGE_VOICE,
-        })
-
-        if self._target_title_label: self._target_title_label.setText(self.data["name"])
-        if self._target_content_label: self._target_content_label.setText(f"触发时间: {self.data['time']}")
-
-        self.dataChanged.emit()
+    def _summary(self):
+        return f"触发时间: {self.data['time']}"
 
     def _playTest(self):
         from app.signal_bus import signalBus
         signalBus.testAudio.emit(self.data)
 
 
-class SchedulePage(QWidget):
-    backSignal = Signal()
+class SchedulePage(ScheduledTaskPage):
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(30, 30, 30, 30)
-
-        header = QHBoxLayout()
-        self.backBtn = ToolButton(FIF.RETURN, self)
-        self.backBtn.clicked.connect(self.backSignal.emit)
-        self.title = TitleLabel("定时播报", self)
-        self.masterSwitch = TaskMasterSwitch(cfg.broadcastTasksEnabled, self)
-        self.addBtn = ToolButton(FIF.ADD, self)
-        self.addBtn.clicked.connect(self._addTask)
-
-        header.addWidget(self.backBtn)
-        header.addWidget(self.title)
-        header.addStretch(1)
-        header.addWidget(self.masterSwitch)
-        header.addSpacing(8)
-        header.addWidget(self.addBtn)
-        self.layout.addLayout(header)
-
-        self.scrollArea = ScrollArea(self)
-        self.scrollArea.setWidgetResizable(True)
-        self.scrollArea.enableTransparentBackground()
-        self.view = QWidget(self.scrollArea)
-        contentLayout = QVBoxLayout(self.view)
-        contentLayout.setContentsMargins(0, 0, 0, 0)
-
-        self.cardLayout = QVBoxLayout()
-        self.cardLayout.setSpacing(10)
-        contentLayout.addLayout(self.cardLayout)
-
-        self.emptyLabel = SubtitleLabel("还没有设置播报任务哦 ~", self.view)
-        self.emptyLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.emptyLabel.setStyleSheet("color: gray;")
-        contentLayout.addWidget(self.emptyLabel, 1, Qt.AlignmentFlag.AlignCenter)
-
-        contentLayout.addStretch(1)
-
-        self.scrollArea.setWidget(self.view)
-        self.layout.addWidget(self.scrollArea, 1)
-        self.saveTimer = QTimer(self)
-        self.saveTimer.setSingleShot(True)
-        self.saveTimer.setInterval(300)
-        self.saveTimer.timeout.connect(self.flushPendingSave)
-        self._savePending = False
-
-        self._loadTasks()
-        cfg.broadcastTasks.valueChanged.connect(self._onTasksChanged)
-        cfg.broadcastTasksEnabled.valueChanged.connect(
-            self._setTaskControlsEnabled
+        super().__init__(
+            "定时播报",
+            "还没有设置播报任务哦 ~",
+            cfg.broadcastTasks,
+            cfg.broadcastTasksEnabled,
+            parent,
         )
-        self._setTaskControlsEnabled(cfg.broadcastTasksEnabled.value)
 
-    def _onTasksChanged(self, tasks):
-        if tasks != self.current_tasks:
-            self._loadTasks()
+    def _createCard(self, task):
+        return TaskCard(task, self.view)
 
-    def _loadTasks(self):
-        while self.cardLayout.count():
-            w = self.cardLayout.takeAt(0).widget()
-            if w: w.deleteLater()
-
-        self.current_tasks = deepcopy(cfg.broadcastTasks.value)
-
-        if not self.current_tasks:
-            self.emptyLabel.show()
-        else:
-            self.emptyLabel.hide()
-            for i, task in enumerate(self.current_tasks):
-                card = TaskCard(task, self.view)
-                card.deleteClicked.connect(self._removeTask)
-                card.dataChanged.connect(
-                    lambda idx=i, c=card: self._updateTask(idx, c.data)
-                )
-                card.setEnabled(cfg.broadcastTasksEnabled.value)
-                self.cardLayout.addWidget(card)
-
-    def _setTaskControlsEnabled(self, enabled):
-        self.addBtn.setEnabled(enabled)
-        for index in range(self.cardLayout.count()):
-            widget = self.cardLayout.itemAt(index).widget()
-            if widget is not None:
-                widget.setEnabled(enabled)
-
-    def _updateTask(self, index, updated_data):
-        self.current_tasks[index] = updated_data
-        self._savePending = True
-        self.saveTimer.start()
-
-    def flushPendingSave(self):
-        if not self._savePending:
-            return
-        self._savePending = False
-        self.saveTimer.stop()
-        cfg.set(cfg.broadcastTasks, self.current_tasks)
-
-    def _addTask(self):
-        self.flushPendingSave()
-        dialog = AddTaskDialog(self.window())
-        try:
-            if dialog.exec():
-                data = dialog.get_data()
-                self.current_tasks.insert(0, data)
-                cfg.set(cfg.broadcastTasks, self.current_tasks)
-                self._loadTasks()
-        finally:
-            dialog.deleteLater()
-
-    def _removeTask(self, data):
-        self.saveTimer.stop()
-        self._savePending = False
-        self.current_tasks.remove(data)
-        cfg.set(cfg.broadcastTasks, self.current_tasks)
-        self._loadTasks()
-
-    def hideEvent(self, event):
-        self.flushPendingSave()
-        super().hideEvent(event)
+    def _createDialog(self):
+        return AddTaskDialog(self.window())

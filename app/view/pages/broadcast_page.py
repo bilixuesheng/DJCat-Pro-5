@@ -113,6 +113,17 @@ def showActionConfirmation(
     return flyout
 
 
+def placeCornerButtons(container, rect, atLeft):
+    """Pin the corner action buttons inside rect, one layout spacing from its edges."""
+    margin = container.layout().spacing()
+    if atLeft:
+        x = rect.left() + margin
+    else:
+        x = rect.right() + 1 - container.width() - margin
+    container.move(x, rect.bottom() + 1 - container.height() - margin)
+    container.raise_()
+
+
 def showCloseConfirmation(window, target, warning):
     return showActionConfirmation(
         window,
@@ -126,11 +137,11 @@ def showCloseConfirmation(window, target, warning):
 
 
 class _VerticalButtonMixin:
-    def _initVerticalButton(self, icon_enum, text, primary, force_dark):
-        self.icon_enum = icon_enum
+    def _initVerticalButton(self, iconEnum, text, primary, forceDark):
+        self.iconEnum = iconEnum
         self._buttonText = text
         self._primary = primary
-        self.force_dark = force_dark
+        self.forceDark = forceDark
         self._windowed = False
         self.setIcon(QIcon())
         self.setText(text)
@@ -140,11 +151,7 @@ class _VerticalButtonMixin:
         self.updateStyle()
 
     def updateStyle(self):
-        dark = self.force_dark or (
-            isDarkTheme()
-            if cfg.customThemeMode.value == "System"
-            else cfg.customThemeMode.value == "Dark"
-        )
+        dark = self.forceDark or isDarkTheme()
         if self._primary:
             normal = qconfig.themeColor.value.name()
             hover = qconfig.themeColor.value.lighter(108).name()
@@ -188,7 +195,7 @@ class _VerticalButtonMixin:
             painter.setOpacity(0.63)
 
         color = self._foregroundColor()
-        icon = self.icon_enum.icon(color=color)
+        icon = self.iconEnum.icon(color=color)
         iconSize = self.iconSize()
         iconX = (self.width() - iconSize.width()) // 2
         iconY = (self.height() - iconSize.height()) // 2 if self._windowed else 9
@@ -206,39 +213,35 @@ class _VerticalButtonMixin:
             )
 
     def _foregroundColor(self):
-        dark = self.force_dark or (
-            isDarkTheme()
-            if cfg.customThemeMode.value == "System"
-            else cfg.customThemeMode.value == "Dark"
-        )
+        dark = self.forceDark or isDarkTheme()
         return QColor("white") if self._primary or dark else QColor("black")
 
 
 class _VerticalPushButton(_VerticalButtonMixin, PushButton):
-    def __init__(self, icon_enum, text, parent=None, force_dark=False):
+    def __init__(self, iconEnum, text, parent=None, forceDark=False):
         super().__init__(parent)
-        self._initVerticalButton(icon_enum, text, False, force_dark)
+        self._initVerticalButton(iconEnum, text, False, forceDark)
 
 
 class _VerticalPrimaryPushButton(_VerticalButtonMixin, PrimaryPushButton):
-    def __init__(self, icon_enum, text, parent=None, force_dark=False):
+    def __init__(self, iconEnum, text, parent=None, forceDark=False):
         super().__init__(parent)
-        self._initVerticalButton(icon_enum, text, True, force_dark)
+        self._initVerticalButton(iconEnum, text, True, forceDark)
 
 
 def VerticalButton(
-    icon_enum,
+    iconEnum,
     text,
     primary=False,
     parent=None,
-    force_dark=False,
+    forceDark=False,
 ):
     buttonType = _VerticalPrimaryPushButton if primary else _VerticalPushButton
     return buttonType(
-        icon_enum,
+        iconEnum,
         text,
         parent=parent,
-        force_dark=force_dark,
+        forceDark=forceDark,
     )
 
 
@@ -274,15 +277,15 @@ class FloatingMiniWindow(QWidget):
         qconfig.themeColor.valueChanged.connect(self._updateStyle)
 
     def _updateStyle(self):
-        theme_color = qconfig.themeColor.value.name()
+        themeColor = qconfig.themeColor.value.name()
         self.btn.setStyleSheet(f"""
             QToolButton {{
-                background-color: {theme_color};
+                background-color: {themeColor};
                 border-radius: 30px;
                 border: none;
             }}
             QToolButton:hover {{
-                background-color: {theme_color};
+                background-color: {themeColor};
             }}
         """)
         self.btn.setIcon(FIF.FULL_SCREEN.icon(color=QColor("white")))
@@ -297,12 +300,11 @@ class FloatingMiniWindow(QWidget):
                 return False
             elif event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 self._isDragging = False
-                # 记录点击位置相对窗口左上角的偏移量，修复跳跃问题
                 self._dragPos = event.globalPosition().toPoint() - self.pos()
-                return True # 拦截事件，避免直接触发点击
+                return True
             elif event.type() == QEvent.Type.MouseMove and event.buttons() == Qt.MouseButton.LeftButton:
                 if not self._dragPos.isNull():
-                    # 移动距离超过 3 像素才判定为拖拽 (防手抖误触)
+                    # 手抖不算拖动
                     if (event.globalPosition().toPoint() - self.pos() - self._dragPos).manhattanLength() > 3:
                         self._isDragging = True
                     self.move(event.globalPosition().toPoint() - self._dragPos)
@@ -325,7 +327,7 @@ class BroadcastWindow(FramelessWindow):
         self.setObjectName("BroadcastWindow")
         self.titleBar.hide()
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self._is_editing = False
+        self._isEditing = False
         self._isTracking = False
         self._contentDragFilterInstalled = False
         self._contentDragActive = False
@@ -345,7 +347,7 @@ class BroadcastWindow(FramelessWindow):
         )
         self.background.lower()
         self.background.setGeometry(self.contentsRect())
-        cfg.customThemeMode.valueChanged.connect(self.background.refresh)
+        qconfig.themeChanged.connect(self.background.refresh)
 
         self.vBoxLayout = QVBoxLayout(self)
         self.vBoxLayout.setContentsMargins(40, 20, 40, 0)
@@ -381,41 +383,41 @@ class BroadcastWindow(FramelessWindow):
         self.btnLayout.setContentsMargins(0, 0, 0, 0)
         self.btnLayout.setSpacing(12)
 
-        self.is_windowed = False
+        self.isWindowed = False
         self.miniWindow = FloatingMiniWindow(self)
         self.miniWindow.restoreSignal.connect(self.restoreFromMini)
 
-        self.btn_edit = VerticalButton(FIF.EDIT, "编辑")
-        self.btn_min = VerticalButton(FIF.MINIMIZE, "最小化")
-        self.btn_win = VerticalButton(FIF.FULL_SCREEN, "窗口化")
-        self.btn_close = VerticalButton(FIF.CLOSE, "关闭", primary=True)
+        self.btnEdit = VerticalButton(FIF.EDIT, "编辑")
+        self.btnMin = VerticalButton(FIF.MINIMIZE, "最小化")
+        self.btnWin = VerticalButton(FIF.FULL_SCREEN, "窗口化")
+        self.btnClose = VerticalButton(FIF.CLOSE, "关闭", primary=True)
 
-        self.btn_edit.clicked.connect(self._onEdit)
-        self.btn_min.clicked.connect(self.minimizeToMini)
-        self.btn_win.clicked.connect(self.toggleWindowMode)
-        self.btn_close.clicked.connect(self._onClose)
+        self.btnEdit.clicked.connect(self._onEdit)
+        self.btnMin.clicked.connect(self.minimizeToMini)
+        self.btnWin.clicked.connect(self.toggleWindowMode)
+        self.btnClose.clicked.connect(self._onClose)
 
     def _applyStyle(self):
-        is_dark = isDarkTheme() if cfg.customThemeMode.value == "System" else cfg.customThemeMode.value == "Dark"
-        text_color = "white" if is_dark else "black"
-        margin = WINDOW_SHADOW_MARGIN if self.is_windowed else 0
+        isDark = isDarkTheme()
+        textColor = "white" if isDark else "black"
+        margin = WINDOW_SHADOW_MARGIN if self.isWindowed else 0
         self.setContentsMargins(margin, margin, margin, margin)
-        self.background.setRoundedWindow(self.is_windowed)
+        self.background.setRoundedWindow(self.isWindowed)
         self.background.setGeometry(self.contentsRect())
-        self.setStyleSheet(f"BroadcastWindow {{ background-color: transparent; }} QTextEdit {{ color: {text_color}; background: transparent; }}")
+        self.setStyleSheet(f"BroadcastWindow {{ background-color: transparent; }} QTextEdit {{ color: {textColor}; background: transparent; }}")
 
-    def setContent(self, title, text, is_markdown=False):
+    def setContent(self, title, text, isMarkdown=False):
         self._applyStyle()
 
-        self.btn_edit.updateStyle()
-        self.btn_min.updateStyle()
-        self.btn_win.updateStyle()
-        self.btn_close.updateStyle()
+        self.btnEdit.updateStyle()
+        self.btnMin.updateStyle()
+        self.btnWin.updateStyle()
+        self.btnClose.updateStyle()
 
         self.titleLabel.setText(title)
         self.titleLabel.setStyleSheet(f"color: {projectionTitleColor().name()};")
 
-        if is_markdown:
+        if isMarkdown:
             self.contentEdit.clear()
             self.contentEdit.hide()
             self.markdownView.show()
@@ -442,7 +444,7 @@ class BroadcastWindow(FramelessWindow):
             item = self.btnLayout.takeAt(0)
             if item.widget(): self.btnLayout.removeWidget(item.widget())
 
-        widgets = [self.btn_edit, self.btn_min, self.btn_win, self.btn_close]
+        widgets = [self.btnEdit, self.btnMin, self.btnWin, self.btnClose]
         if cfg.broadcastActionButtonPosition.value == "左下角":
             widgets.reverse()
 
@@ -457,54 +459,49 @@ class BroadcastWindow(FramelessWindow):
         self._updateBtnPosition()
 
     def _updateBtnPosition(self):
-        margin = self.btnLayout.spacing()
-        rect = self.contentsRect()
-        if cfg.broadcastActionButtonPosition.value == "左下角":
-            target_x = rect.left() + margin
-        else:
-            target_x = rect.right() + 1 - self.btnContainer.width() - margin
-
-        target_y = rect.bottom() + 1 - self.btnContainer.height() - margin
-        self.btnContainer.move(target_x, target_y)
-        self.btnContainer.raise_()
+        placeCornerButtons(
+            self.btnContainer,
+            self.contentsRect(),
+            cfg.broadcastActionButtonPosition.value == "左下角",
+        )
 
     def startBroadcast(self):
-        self.is_windowed = False
+        self.isWindowed = False
         self.setupLayout()
         self._updateButtonsState()
         self._applyWindowState()
 
     def toggleWindowMode(self):
-        self.is_windowed = not self.is_windowed
+        self.isWindowed = not self.isWindowed
         self._updateButtonsState()
         self._applyWindowState()
 
     def _updateButtonsState(self):
-        self.btn_edit.setWindowed(self.is_windowed)
-        self.btn_min.setWindowed(self.is_windowed)
-        self.btn_win.setWindowed(self.is_windowed)
-        self.btn_close.setWindowed(self.is_windowed)
+        self.btnEdit.setWindowed(self.isWindowed)
+        self.btnMin.setWindowed(self.isWindowed)
+        self.btnWin.setWindowed(self.isWindowed)
+        self.btnClose.setWindowed(self.isWindowed)
 
-        self.btn_win.icon_enum = FIF.FULL_SCREEN if self.is_windowed else FIF.COPY
-        self.btn_win.updateStyle()
+        self.btnWin.iconEnum = FIF.FULL_SCREEN if self.isWindowed else FIF.COPY
+        self.btnWin.updateStyle()
 
         self.btnContainer.adjustSize()
         self._updateBtnPosition()
 
     def _applyWindowState(self):
-        is_top = cfg.topmostInWindowed.value if self.is_windowed else cfg.topmostInFullscreen.value
+        isTop = cfg.topmostInWindowed.value if self.isWindowed else cfg.topmostInFullscreen.value
         flags = (
             Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.NoDropShadowWindowHint
         )
-        if is_top: flags |= Qt.WindowType.WindowStaysOnTopHint
+        if isTop: flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
         # 全屏时禁用系统边缘拉伸，避免鼠标在屏幕边缘仍能调整窗口大小
-        self.setResizeEnabled(self.is_windowed)
+        self.setResizeEnabled(self.isWindowed)
         self._updateContentInteraction()
         self._applyStyle()
 
-        if self.is_windowed:
+        if self.isWindowed:
             self.showNormal()
             rect = screenFor(self).availableGeometry()
             margin = WINDOW_SHADOW_MARGIN
@@ -522,7 +519,7 @@ class BroadcastWindow(FramelessWindow):
         self.activateWindow()
 
     def nativeEvent(self, eventType, message):
-        if sys.platform == "win32" and getattr(self, "is_windowed", False):
+        if sys.platform == "win32" and getattr(self, "isWindowed", False):
             msg = MSG.from_address(int(message))
             if msg.message == win32con.WM_NCHITTEST:
                 if not self._isResizeEnabled or self.isMaximized() or self.isFullScreen():
@@ -554,10 +551,10 @@ class BroadcastWindow(FramelessWindow):
         for viewport in self._contentViewports():
             self._contentDragDistances[viewport] = setTouchScrollSuppressed(
                 viewport,
-                self.is_windowed,
+                self.isWindowed,
                 self._contentDragDistances.get(viewport),
             )
-        if self.is_windowed:
+        if self.isWindowed:
             if application is not None and not self._contentDragFilterInstalled:
                 application.installEventFilter(self._contentDragFilter)
                 self._contentDragFilterInstalled = True
@@ -610,7 +607,7 @@ class BroadcastWindow(FramelessWindow):
         self._contentDragMoved = False
 
     def _filterContentDragEvent(self, obj, event):
-        if not self.is_windowed:
+        if not self.isWindowed:
             return False
 
         eventType = event.type()
@@ -672,7 +669,7 @@ class BroadcastWindow(FramelessWindow):
         self.activateWindow()
 
     def _onEdit(self):
-        self._is_editing = True
+        self._isEditing = True
         self.close()
 
     def _onClose(self):
@@ -683,7 +680,7 @@ class BroadcastWindow(FramelessWindow):
             return
         self._closeFlyout = showCloseConfirmation(
             self,
-            self.btn_close,
+            self.btnClose,
             "关闭后可通过“导入”恢复上次投送内容。",
         )
 
@@ -696,13 +693,13 @@ class BroadcastWindow(FramelessWindow):
         self.contentEdit.clear()
         self.markdownView.clear()
         self.miniWindow.hide()
-        if self._is_editing: self.editClicked.emit()
+        if self._isEditing: self.editClicked.emit()
         else: self.closeClicked.emit()
-        self._is_editing = False
+        self._isEditing = False
         super().closeEvent(event)
 
     def mousePressEvent(self, e):
-        if self.is_windowed and e.button() == Qt.MouseButton.LeftButton:
+        if self.isWindowed and e.button() == Qt.MouseButton.LeftButton:
             source = self.childAt(e.position().toPoint())
             blocked = any(
                 source is widget or widget.isAncestorOf(source)
@@ -719,7 +716,7 @@ class BroadcastWindow(FramelessWindow):
         super().mousePressEvent(e)
 
     def mouseMoveEvent(self, e):
-        if self.is_windowed and getattr(self, '_isTracking', False):
+        if self.isWindowed and getattr(self, '_isTracking', False):
             self.move(e.globalPosition().toPoint() - self._dragPos)
         super().mouseMoveEvent(e)
 
@@ -848,7 +845,7 @@ def _streamAIMarkdown(request, emitChunk):
             response.close()
 
 
-class _InlineAIMarkdownRequest(QObject):
+class _AIMarkdownRequest(QObject):
     chunkReceived = Signal(str)
     conversionFinished = Signal(int, int, int)
     conversionFailed = Signal(str, int, int, int)
@@ -891,9 +888,6 @@ class _InlineAIMarkdownRequest(QObject):
 
 class AIMarkdownDialog(MessageBoxBase):
     quotaReceived = Signal(int, int, int, object, str)
-    chunkReceived = Signal(str)
-    conversionFinished = Signal(int, int, int)
-    conversionFailed = Signal(str, int, int, int)
 
     def __init__(self, text, parent=None):
         super().__init__(parent)
@@ -906,10 +900,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self._cost = 1
         self._peakEnabled = None
         self._quotaRequestRunning = False
-        self._cancelEvent = threading.Event()
-        self._responseLock = threading.Lock()
-        self._activeResponse = None
-        self._resultChunks = []
+        self._request = None
         self._pendingChunks = []
 
         self.titleLabel = SubtitleLabel("AI 整理 Markdown", self)
@@ -940,9 +931,6 @@ class AIMarkdownDialog(MessageBoxBase):
         self.cancelButton.setText("取消")
         self.inputEdit.textChanged.connect(self._refreshStartButton)
         self.quotaReceived.connect(self._onQuotaReceived)
-        self.chunkReceived.connect(self._appendChunk)
-        self.conversionFinished.connect(self._onConversionFinished)
-        self.conversionFailed.connect(self._onConversionFailed)
 
         self._quotaTimer = QTimer(self)
         self._quotaTimer.setInterval(30_000)
@@ -962,7 +950,7 @@ class AIMarkdownDialog(MessageBoxBase):
             self.widget.setFixedWidth(min(680, max(0, event.size().width() - 80)))
 
     def resultText(self):
-        return "".join(self._resultChunks)
+        return self._result
 
     def validate(self):
         if self._finished:
@@ -1005,22 +993,22 @@ class AIMarkdownDialog(MessageBoxBase):
     def _startConversion(self):
         self._running = True
         self._result = ""
-        self._resultChunks.clear()
         self._pendingChunks.clear()
-        self._cancelEvent.clear()
         self.inputEdit.clear()
         self.inputEdit.setReadOnly(True)
         self.yesButton.setEnabled(False)
         self.cancelButton.setEnabled(True)
         self.cancelButton.setText("取消整理")
         self._glow.start()
-        threading.Thread(target=self._streamConversion, daemon=True).start()
-
-    def _streamConversion(self):
-        _streamAIMarkdown(self, self.chunkReceived.emit)
+        request = _AIMarkdownRequest(self._source, self)
+        request.chunkReceived.connect(self._appendChunk)
+        request.conversionFinished.connect(self._onConversionFinished)
+        request.conversionFailed.connect(self._onConversionFailed)
+        request.stopped.connect(request.deleteLater)
+        self._request = request
+        request.start()
 
     def _appendChunk(self, chunk):
-        self._resultChunks.append(chunk)
         self._pendingChunks.append(chunk)
         if not self._flushTimer.isActive():
             self._flushTimer.start()
@@ -1036,11 +1024,9 @@ class AIMarkdownDialog(MessageBoxBase):
         self.inputEdit.ensureCursorVisible()
 
     def _cancelConversion(self):
-        self._cancelEvent.set()
-        with self._responseLock:
-            response = self._activeResponse
-        if response is not None:
-            response.close()
+        if self._request is not None:
+            self._request.cancel()
+            self._request = None
         self._running = False
         self._glow.stop()
 
@@ -1059,6 +1045,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self._refreshStartButton()
 
     def _onConversionFinished(self, remaining, limit, cost):
+        self._request = None
         self._flushTimer.stop()
         self._flushChunks()
         if not self._result.strip():
@@ -1081,9 +1068,9 @@ class AIMarkdownDialog(MessageBoxBase):
         self.cancelButton.setText("取消")
 
     def _onConversionFailed(self, message, remaining, limit, cost):
+        self._request = None
         self._flushTimer.stop()
         self._pendingChunks.clear()
-        self._resultChunks.clear()
         self._result = ""
         self._running = False
         if remaining >= 0:
@@ -1387,7 +1374,7 @@ class BroadcastEditPage(QWidget):
             "content": self.contentInput.toPlainText(),
             "isMarkdown": True,
         }
-        request = _InlineAIMarkdownRequest(snapshot["content"], self)
+        request = _AIMarkdownRequest(snapshot["content"], self)
         request.chunkReceived.connect(
             lambda chunk, current=request: self._appendInlineAIChunk(
                 current, chunk

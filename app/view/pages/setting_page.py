@@ -82,6 +82,14 @@ from app.view.components.setting_section import (
 PROJECTION_BACKGROUND_MODE_TEXTS = ("跟随主题", "纯色", "图片")
 TIMER_BACKGROUND_MODE_TEXTS = ("默认黑色", "纯色", "图片")
 
+
+def _backgroundItems(prefix: str) -> tuple:
+    """Mode, colour, image path and scale mode of one window's WindowBackground."""
+    return tuple(
+        getattr(cfg, f"{prefix}Background{name}")
+        for name in ("Mode", "Color", "ImagePath", "ScaleMode")
+    )
+
 CUSTOM_STYLE_PLACEHOLDER = (
     "所有关于值日的消息全部使用---与前面的任务分割开，然后使用"
     "**⚠️请值日人员到卫生区打扫⚠️**来写入之日内容。"
@@ -421,6 +429,7 @@ class SettingPage(QWidget):
         setFont(self.breadcrumbBar, 28, QFont.Weight.DemiBold)
 
     def _initCards(self) -> None:
+        self._backgroundCardSets = {}
         self.themeModeCard = ComboBoxSettingCard(
             cfg.customThemeMode,
             FluentIcon.BRUSH,
@@ -496,31 +505,17 @@ class SettingPage(QWidget):
             texts=["拉伸", "缩放(上)", "缩放(中)", "缩放(下)"],
         )
 
-        self.broadcastBackgroundModeCard = ComboBoxSettingCard(
-            cfg.broadcastBackgroundMode,
-            FluentIcon.PHOTO,
-            "背景类型",
+        (
+            self.broadcastBackgroundModeCard,
+            self.broadcastBackgroundColorCard,
+            self.broadcastBackgroundImageCard,
+            self.broadcastBackgroundScaleCard,
+        ) = self._createBackgroundCards(
+            "broadcast",
+            PROJECTION_BACKGROUND_MODE_TEXTS,
             "选择跟随主题、纯色或图片背景",
-            texts=PROJECTION_BACKGROUND_MODE_TEXTS,
-        )
-        self.broadcastBackgroundColorCard = LocalizedColorSettingCard(
-            cfg.broadcastBackgroundColor,
-            FluentIcon.PALETTE,
-            "背景颜色",
-            "纯色背景使用的颜色",
-        )
-        self.broadcastBackgroundImageCard = PushSettingCard(
-            "选择图片",
-            FluentIcon.FOLDER,
             "自定义投送背景",
             "选择全屏投送使用的本地背景图片",
-        )
-        self.broadcastBackgroundScaleCard = ComboBoxSettingCard(
-            cfg.broadcastBackgroundScaleMode,
-            FluentIcon.ZOOM_IN,
-            "图片缩放模式",
-            "设置背景图片的缩放和对齐方式",
-            texts=WINDOW_BACKGROUND_SCALE_MODES,
         )
         self.broadcastTaskbarCard = SwitchSettingCard(
             FluentIcon.APPLICATION,
@@ -595,31 +590,17 @@ class SettingPage(QWidget):
         )
         self.aiMachineCodeCard.hBoxLayout.addSpacing(16)
 
-        self.countdownBackgroundModeCard = ComboBoxSettingCard(
-            cfg.countdownBackgroundMode,
-            FluentIcon.PHOTO,
-            "背景类型",
+        (
+            self.countdownBackgroundModeCard,
+            self.countdownBackgroundColorCard,
+            self.countdownBackgroundImageCard,
+            self.countdownBackgroundScaleCard,
+        ) = self._createBackgroundCards(
+            "countdown",
+            TIMER_BACKGROUND_MODE_TEXTS,
             "选择默认黑色、纯色或图片背景",
-            texts=TIMER_BACKGROUND_MODE_TEXTS,
-        )
-        self.countdownBackgroundColorCard = LocalizedColorSettingCard(
-            cfg.countdownBackgroundColor,
-            FluentIcon.PALETTE,
-            "背景颜色",
-            "纯色背景使用的颜色",
-        )
-        self.countdownBackgroundImageCard = PushSettingCard(
-            "选择图片",
-            FluentIcon.FOLDER,
             "自定义倒计时背景",
             "选择考试倒计时使用的本地背景图片",
-        )
-        self.countdownBackgroundScaleCard = ComboBoxSettingCard(
-            cfg.countdownBackgroundScaleMode,
-            FluentIcon.ZOOM_IN,
-            "图片缩放模式",
-            "设置背景图片的缩放和对齐方式",
-            texts=WINDOW_BACKGROUND_SCALE_MODES,
         )
         self.countdownTaskbarCard = SwitchSettingCard(
             FluentIcon.APPLICATION,
@@ -665,31 +646,17 @@ class SettingPage(QWidget):
             cfg.confirmBeforeResetCountdown,
         )
 
-        self.fullscreenClockBackgroundModeCard = ComboBoxSettingCard(
-            cfg.fullscreenClockBackgroundMode,
-            FluentIcon.PHOTO,
-            "背景类型",
+        (
+            self.fullscreenClockBackgroundModeCard,
+            self.fullscreenClockBackgroundColorCard,
+            self.fullscreenClockBackgroundImageCard,
+            self.fullscreenClockBackgroundScaleCard,
+        ) = self._createBackgroundCards(
+            "fullscreenClock",
+            TIMER_BACKGROUND_MODE_TEXTS,
             "选择默认黑色、纯色或图片背景",
-            texts=TIMER_BACKGROUND_MODE_TEXTS,
-        )
-        self.fullscreenClockBackgroundColorCard = LocalizedColorSettingCard(
-            cfg.fullscreenClockBackgroundColor,
-            FluentIcon.PALETTE,
-            "背景颜色",
-            "纯色背景使用的颜色",
-        )
-        self.fullscreenClockBackgroundImageCard = PushSettingCard(
-            "选择图片",
-            FluentIcon.FOLDER,
             "自定义时钟背景",
             "选择全屏时钟使用的本地背景图片",
-        )
-        self.fullscreenClockBackgroundScaleCard = ComboBoxSettingCard(
-            cfg.fullscreenClockBackgroundScaleMode,
-            FluentIcon.ZOOM_IN,
-            "图片缩放模式",
-            "设置背景图片的缩放和对齐方式",
-            texts=WINDOW_BACKGROUND_SCALE_MODES,
         )
         self.fullscreenClockTaskbarCard = SwitchSettingCard(
             FluentIcon.APPLICATION,
@@ -781,6 +748,59 @@ class SettingPage(QWidget):
             f"© Copyright {YEAR}, {AUTHOR}. Version {VERSION}",
         )
 
+    def _createBackgroundCards(
+        self,
+        prefix: str,
+        modeTexts,
+        modeContent: str,
+        imageTitle: str,
+        imageContent: str,
+    ) -> tuple:
+        modeItem, colorItem, _imagePathItem, scaleItem = _backgroundItems(prefix)
+        cards = (
+            ComboBoxSettingCard(
+                modeItem,
+                FluentIcon.PHOTO,
+                "背景类型",
+                modeContent,
+                texts=modeTexts,
+            ),
+            LocalizedColorSettingCard(
+                colorItem,
+                FluentIcon.PALETTE,
+                "背景颜色",
+                "纯色背景使用的颜色",
+            ),
+            PushSettingCard("选择图片", FluentIcon.FOLDER, imageTitle, imageContent),
+            ComboBoxSettingCard(
+                scaleItem,
+                FluentIcon.ZOOM_IN,
+                "图片缩放模式",
+                "设置背景图片的缩放和对齐方式",
+                texts=WINDOW_BACKGROUND_SCALE_MODES,
+            ),
+        )
+        self._backgroundCardSets[prefix] = cards
+        return cards
+
+    def _addBackgroundSection(self, prefix: str, content: str, contentKind) -> None:
+        section = self._addSection(
+            f"{prefix}.background",
+            "背景",
+            FluentIcon.PALETTE,
+            content,
+            prefix,
+        )
+        section.addPreview(
+            WindowBackgroundPreview(
+                *_backgroundItems(prefix),
+                contentKind,
+                getattr(cfg, f"{prefix}ActionButtonPosition"),
+            ),
+            centered=True,
+        )
+        section.addCardList(list(self._backgroundCardSets[prefix]))
+
     def _addSection(
         self,
         key: str,
@@ -828,32 +848,7 @@ class SettingPage(QWidget):
             "投送窗口、操作按钮和关闭行为",
             ROOT_SECTION_KEY,
         )
-        broadcastBackground = self._addSection(
-            "broadcast.background",
-            "背景",
-            FluentIcon.PALETTE,
-            "投送窗口的背景、颜色和缩放",
-            "broadcast",
-        )
-        broadcastBackground.addPreview(
-            WindowBackgroundPreview(
-                cfg.broadcastBackgroundMode,
-                cfg.broadcastBackgroundColor,
-                cfg.broadcastBackgroundImagePath,
-                cfg.broadcastBackgroundScaleMode,
-                PROJECTION_CONTENT,
-                cfg.broadcastActionButtonPosition,
-            ),
-            centered=True,
-        )
-        broadcastBackground.addCardList(
-            [
-                self.broadcastBackgroundModeCard,
-                self.broadcastBackgroundColorCard,
-                self.broadcastBackgroundImageCard,
-                self.broadcastBackgroundScaleCard,
-            ]
-        )
+        self._addBackgroundSection("broadcast", "投送窗口的背景、颜色和缩放", PROJECTION_CONTENT)
         broadcast.addSubsectionTitle("窗口与显示")
         broadcast.addCardList(
             [
@@ -890,32 +885,7 @@ class SettingPage(QWidget):
             "倒计时窗口、提醒和重置行为",
             ROOT_SECTION_KEY,
         )
-        countdownBackground = self._addSection(
-            "countdown.background",
-            "背景",
-            FluentIcon.PALETTE,
-            "倒计时窗口的背景、颜色和缩放",
-            "countdown",
-        )
-        countdownBackground.addPreview(
-            WindowBackgroundPreview(
-                cfg.countdownBackgroundMode,
-                cfg.countdownBackgroundColor,
-                cfg.countdownBackgroundImagePath,
-                cfg.countdownBackgroundScaleMode,
-                COUNTDOWN_CONTENT,
-                cfg.countdownActionButtonPosition,
-            ),
-            centered=True,
-        )
-        countdownBackground.addCardList(
-            [
-                self.countdownBackgroundModeCard,
-                self.countdownBackgroundColorCard,
-                self.countdownBackgroundImageCard,
-                self.countdownBackgroundScaleCard,
-            ]
-        )
+        self._addBackgroundSection("countdown", "倒计时窗口的背景、颜色和缩放", COUNTDOWN_CONTENT)
         countdown.addSubsectionTitle("窗口与显示")
         countdown.addCardList(
             [
@@ -941,32 +911,7 @@ class SettingPage(QWidget):
             "时钟窗口、操作按钮和关闭行为",
             ROOT_SECTION_KEY,
         )
-        clockBackground = self._addSection(
-            "fullscreenClock.background",
-            "背景",
-            FluentIcon.PALETTE,
-            "时钟窗口的背景、颜色和缩放",
-            "fullscreenClock",
-        )
-        clockBackground.addPreview(
-            WindowBackgroundPreview(
-                cfg.fullscreenClockBackgroundMode,
-                cfg.fullscreenClockBackgroundColor,
-                cfg.fullscreenClockBackgroundImagePath,
-                cfg.fullscreenClockBackgroundScaleMode,
-                CLOCK_CONTENT,
-                cfg.fullscreenClockActionButtonPosition,
-            ),
-            centered=True,
-        )
-        clockBackground.addCardList(
-            [
-                self.fullscreenClockBackgroundModeCard,
-                self.fullscreenClockBackgroundColorCard,
-                self.fullscreenClockBackgroundImageCard,
-                self.fullscreenClockBackgroundScaleCard,
-            ]
-        )
+        self._addBackgroundSection("fullscreenClock", "时钟窗口的背景、颜色和缩放", CLOCK_CONTENT)
         fullscreenClock.addSubsectionTitle("窗口与显示")
         fullscreenClock.addCardList(
             [
@@ -1056,24 +1001,14 @@ class SettingPage(QWidget):
         self.breadcrumbBar.currentItemChanged.connect(self.navigateToRoute)
         self.applicationIconCard.clicked.connect(self._onChooseApplicationIconClicked)
         self.chooseImageCard.clicked.connect(self._onChooseImageClicked)
-        self.broadcastBackgroundImageCard.clicked.connect(
-            lambda: self._onChooseBackgroundImageClicked(
-                cfg.broadcastBackgroundImagePath,
-                cfg.broadcastBackgroundMode,
+        for prefix, cards in self._backgroundCardSets.items():
+            modeItem, _colorItem, imagePathItem, _scaleItem = _backgroundItems(prefix)
+            cards[2].clicked.connect(
+                lambda _=None, path=imagePathItem, mode=modeItem: (
+                    self._onChooseBackgroundImageClicked(path, mode)
+                )
             )
-        )
-        self.countdownBackgroundImageCard.clicked.connect(
-            lambda: self._onChooseBackgroundImageClicked(
-                cfg.countdownBackgroundImagePath,
-                cfg.countdownBackgroundMode,
-            )
-        )
-        self.fullscreenClockBackgroundImageCard.clicked.connect(
-            lambda: self._onChooseBackgroundImageClicked(
-                cfg.fullscreenClockBackgroundImagePath,
-                cfg.fullscreenClockBackgroundMode,
-            )
-        )
+            modeItem.valueChanged.connect(self._refreshConditionalCards)
         self.autoRunCard.checkedChanged.connect(self._onAutoRunChanged)
         self.aboutCard.clicked.connect(self._onAboutCardClicked)
         self.clearAppStoreCacheCard.clicked.connect(self._onClearAppStoreCache)
@@ -1083,11 +1018,6 @@ class SettingPage(QWidget):
         cfg.applicationIconSource.valueChanged.connect(self._refreshConditionalCards)
         cfg.bannerImageSource.valueChanged.connect(self._onBannerImageSourceChanged)
         cfg.bannerImageSource.valueChanged.connect(self._refreshConditionalCards)
-        cfg.broadcastBackgroundMode.valueChanged.connect(self._refreshConditionalCards)
-        cfg.countdownBackgroundMode.valueChanged.connect(self._refreshConditionalCards)
-        cfg.fullscreenClockBackgroundMode.valueChanged.connect(
-            self._refreshConditionalCards
-        )
         cfg.aiMarkdownMachineCode.valueChanged.connect(self._onMachineCodeChanged)
         for view in self.sectionStack.views():
             for cardList in view.cardLists():
@@ -1101,28 +1031,18 @@ class SettingPage(QWidget):
             cfg.set(cfg.bannerScaleMode, scaleMode)
 
     def _conditionalCardVisibility(self) -> dict[QWidget, bool]:
-        return {
+        visibility = {
             self.applicationIconCard: cfg.applicationIconSource.value == "自定义",
             self.chooseImageCard: cfg.bannerImageSource.value == "自定义",
-            self.broadcastBackgroundColorCard: cfg.broadcastBackgroundMode.value
-            == "纯色",
-            self.broadcastBackgroundImageCard: cfg.broadcastBackgroundMode.value
-            == "图片",
-            self.broadcastBackgroundScaleCard: cfg.broadcastBackgroundMode.value
-            == "图片",
-            self.countdownBackgroundColorCard: cfg.countdownBackgroundMode.value
-            == "纯色",
-            self.countdownBackgroundImageCard: cfg.countdownBackgroundMode.value
-            == "图片",
-            self.countdownBackgroundScaleCard: cfg.countdownBackgroundMode.value
-            == "图片",
-            self.fullscreenClockBackgroundColorCard: cfg.fullscreenClockBackgroundMode.value
-            == "纯色",
-            self.fullscreenClockBackgroundImageCard: cfg.fullscreenClockBackgroundMode.value
-            == "图片",
-            self.fullscreenClockBackgroundScaleCard: cfg.fullscreenClockBackgroundMode.value
-            == "图片",
         }
+        for prefix, (_modeCard, colorCard, imageCard, scaleCard) in (
+            self._backgroundCardSets.items()
+        ):
+            mode = _backgroundItems(prefix)[0].value
+            visibility[colorCard] = mode == "纯色"
+            visibility[imageCard] = mode == "图片"
+            visibility[scaleCard] = mode == "图片"
+        return visibility
 
     def _refreshConditionalCards(self, _value=None) -> None:
         for card, visible in self._conditionalCardVisibility().items():
@@ -1230,8 +1150,6 @@ class SettingPage(QWidget):
         application.aboutToQuit.connect(lambda: migrateAppData(target))
         application.quit()
 
-    # ----- Setting Route -----
-
     def routeFor(self, key: str) -> list[str]:
         route = []
         while key is not None:
@@ -1282,8 +1200,6 @@ class SettingPage(QWidget):
             return
         view.scrollToCard(card)
         self.highlight.showOn(card)
-
-    # ----- Setting Suggestion -----
 
     @staticmethod
     def _cardTarget(card):

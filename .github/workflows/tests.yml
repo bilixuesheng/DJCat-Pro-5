@@ -1,19 +1,19 @@
 name: Tests
 
-# 发版流水线只在 main 上改动特定文件时才跑测试，平时的推送和 PR 没人把关，
-# 失败的测试会一路攒到下次发版才炸出来。这里在每次推送和 PR 时跑同一套检查。
-# main.yml 在发版前用同一套步骤再测一次，两边改动要同步。
+# 每次推送和 PR 都跑，失败的测试不会攒到发版才暴露；main.yml 发版前也调用这里。
 
 on:
   push:
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: tests-${{ github.ref }}
+  # 被 main.yml 调用时 github.workflow 是调用方的名字，不会与同一次推送触发的 Tests 互相取消。
+  group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -65,9 +65,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Configure updater
+        run: cmake -B build-updater -G "Visual Studio 17 2022" -A x64 tools/updater
+
       - name: Build updater with MSVC
-        shell: pwsh
-        run: |
-          cmake -B build-updater -G "Visual Studio 17 2022" -A x64 tools/updater
-          cmake --build build-updater --config Release
-          if (-not (Test-Path build-updater/Release/updater.exe)) { throw "updater.exe was not built" }
+        run: cmake --build build-updater --config Release

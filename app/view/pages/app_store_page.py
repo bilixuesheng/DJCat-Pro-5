@@ -1,6 +1,6 @@
 import threading
 import time
-from queue import Empty, PriorityQueue, Queue
+from queue import Empty, Queue
 from pathlib import Path
 
 from loguru import logger
@@ -62,13 +62,11 @@ from qfluentwidgets import FluentIcon as FIF
 from app.common.application_store import (
     ApplicationStore,
     ApplicationStoreError,
-    beginAppStorePackageOperation,
     downloadWorker,
-    endAppStorePackageOperation,
 )
 from app.common.home_cards import (
     DIRECT_APPLICATION_PRESET_ID,
-    normalize_pinned_cards,
+    normalizePinnedCards,
 )
 from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
@@ -80,19 +78,10 @@ ALL_APPS_PAGE_SIZE = 6
 APPLICATION_CARD_HEIGHT = 168
 CONTENT_MARGINS = (12, 8, 20, 24)
 _LIVE_CATALOG_URI_SCHEMES = frozenset({"classisland"})
-_packageOperationReleaseLock = threading.Lock()
-
-
-def _releasePackageOperation(downloadSlots):
-    with _packageOperationReleaseLock:
-        downloadSlots.release()
-        endAppStorePackageOperation()
-
-
-def _deferPackageOperationRelease(thread, downloadSlots):
+def _releaseSlotAfterExit(thread, downloadSlots):
     def releaseAfterExit():
         thread.join()
-        _releasePackageOperation(downloadSlots)
+        downloadSlots.release()
 
     threading.Thread(
         target=releaseAfterExit,
@@ -312,13 +301,12 @@ class CatalogWorker(QObject):
 class CatalogImageWorker(QObject):
     imageLoaded = Signal(str, str)
     completed = Signal()
-    # New catalog generations must not wait behind canceled pages' queued URLs.
-    _jobs = PriorityQueue()
+    # 新一批图片开始前旧的一批总会先被取消，排在前面的旧任务出队即跳过，
+    # 所以普通先进先出队列就够了；线程是 daemon，退出程序不等图片下载。
+    _jobs = Queue()
     _poolLock = threading.Lock()
     _poolThreads = set()
     _threadSequence = 0
-    _generationSequence = 0
-    _jobSequence = 0
     _poolSize = 4
     _poolIdleTimeout = 0.5
 
@@ -331,9 +319,6 @@ class CatalogImageWorker(QObject):
             )
         )
         self._cancelEvent = threading.Event()
-        with self._poolLock:
-            type(self)._generationSequence += 1
-            self._generation = type(self)._generationSequence
 
     def cancel(self):
         self._cancelEvent.set()
@@ -363,7 +348,7 @@ class CatalogImageWorker(QObject):
         current = threading.current_thread()
         while True:
             try:
-                _priority, _jobSequence, store, url, cancelEvent, results = cls._jobs.get(
+                store, url, cancelEvent, results = cls._jobs.get(
                     timeout=cls._poolIdleTimeout
                 )
             except Empty:
@@ -393,19 +378,7 @@ class CatalogImageWorker(QObject):
                 return
             results = Queue()
             for url in self.urls:
-                with self._poolLock:
-                    type(self)._jobSequence += 1
-                    jobSequence = type(self)._jobSequence
-                self._jobs.put(
-                    (
-                        -self._generation,
-                        jobSequence,
-                        self.store,
-                        url,
-                        self._cancelEvent,
-                        results,
-                    )
-                )
+                self._jobs.put((self.store, url, self._cancelEvent, results))
             self._ensurePool()
 
             completed = 0
@@ -731,7 +704,6 @@ class AdvertisementFrame(QWidget):
         super().leaveEvent(event)
 
 
-# 横幅上压文字的暗色渐变：原设计从 38% 高度开始变暗；文字块更高时提前到标题上方 24 px。
 AD_SCRIM_START = 0.38
 AD_SCRIM_LEAD_PX = 24
 
@@ -920,7 +892,6 @@ class AppStorePage(QWidget):
     pinnedCardsChanged = Signal(object)
     pinnedCardFailed = Signal()
     _pinnedCardFinished = Signal(int, bool, str, str, str)
-    _launchFailed = Signal(str)
     _launchFinished = Signal(int, str, str)
     _downloadProgressSignal = Signal(int, int, int)
     _downloadRetrySignal = Signal(str, str)
@@ -929,8 +900,7 @@ class AppStorePage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._launchFailed.connect(self._onLaunchFailed)
-        self.store = ApplicationStore(onLaunchFailure=self._launchFailed.emit)
+        self.store = ApplicationStore()
         self._catalog = []
         self._mergedCatalog = None
         self.ads = []
@@ -1050,7 +1020,6 @@ class AppStorePage(QWidget):
             Qt.AspectRatioMode.KeepAspectRatioByExpanding
         )
         self.adFlipView.setBorderRadius(12)
-        QScroller.ungrabGesture(self.adFlipView.viewport())
         adLayout.addWidget(self.adFlipView)
         self.adOverlay = AdvertisementOverlay(self.adFlipView)
         self.allScroll = self._createTabScroll(self.allPage, grabTouch=False)
@@ -1413,12 +1382,12 @@ class AppStorePage(QWidget):
             threadAlive = thread.is_alive()
             if self._downloadJobs.pop(appId, None) is not None:
                 if threadAlive:
-                    _deferPackageOperationRelease(
+                    _releaseSlotAfterExit(
                         thread,
                         self.store.downloadSlots,
                     )
                 else:
-                    _releasePackageOperation(self.store.downloadSlots)
+                    self.store.downloadSlots.release()
             self._downloadStates.pop(appId, None)
             self._downloadProgress.pop(appId, None)
             if threadAlive:
@@ -1434,12 +1403,12 @@ class AppStorePage(QWidget):
         for appId in tuple(self._installing):
             thread = installThreads.get(appId)
             if thread is not None and thread.is_alive():
-                _deferPackageOperationRelease(
+                _releaseSlotAfterExit(
                     thread,
                     self.store.downloadSlots,
                 )
             else:
-                _releasePackageOperation(self.store.downloadSlots)
+                self.store.downloadSlots.release()
         self._installing.clear()
         with self._fileOperationLock:
             self._installThreads.clear()
@@ -1590,7 +1559,7 @@ class AppStorePage(QWidget):
             if ad.get("image_url") == url:
                 self.adFlipView.setItemImage(index, QPixmap(path))
 
-        pinnedCards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
+        pinnedCards = normalizePinnedCards(cfg.pinnedHomeCards.value)
         pinnedChanged = pinnedCards != cfg.pinnedHomeCards.value
         updatedCards = []
         for item in pinnedCards:
@@ -1621,7 +1590,7 @@ class AppStorePage(QWidget):
         self._loadCatalog()
 
     def _syncPinnedMetadata(self):
-        cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
+        cards = normalizePinnedCards(cfg.pinnedHomeCards.value)
         if not cards:
             return
         apps = {int(app["id"]): app for app in self._mergedApps()}
@@ -1710,21 +1679,8 @@ class AppStorePage(QWidget):
 
     def _setCardState(self, card, app, installedPage=False):
         appId = int(app["id"])
-        state = self._downloadStates.get(appId)
-        supported = bool(app.get("architecture_supported"))
+        actionText, enabled = self._actionState(app, showUpdate=installedPage)
         hasOpenAction = isinstance(self._installedOpenAction(app), dict)
-        if state:
-            actionText = state
-            enabled = False
-        elif installedPage and app.get("update_available"):
-            actionText = "更新"
-            enabled = supported
-        elif app.get("installed"):
-            actionText = "打开" if hasOpenAction else "未配置打开动作"
-            enabled = hasOpenAction
-        else:
-            actionText = "下载" if supported else "不支持"
-            enabled = supported
         directKey = (appId, DIRECT_APPLICATION_PRESET_ID)
         card.setState(
             actionText,
@@ -1732,19 +1688,35 @@ class AppStorePage(QWidget):
             enabled,
             hasOpenAction,
             directKey in self._pinnedKeys(),
-            removeEnabled=installedPage and not bool(state),
+            removeEnabled=installedPage and appId not in self._downloadStates,
         )
+        self._applyProgress(card, appId)
+
+    def _actionState(self, app, showUpdate):
+        """Text and enabled state of an app's main button, shared by card and detail."""
+        state = self._downloadStates.get(int(app["id"]))
+        if state:
+            return state, False
+        supported = bool(app.get("architecture_supported"))
+        if showUpdate and app.get("update_available"):
+            return "更新", supported
+        if app.get("installed"):
+            hasOpenAction = isinstance(self._installedOpenAction(app), dict)
+            return ("打开" if hasOpenAction else "未配置打开动作"), hasOpenAction
+        return ("下载" if supported else "不支持"), supported
+
+    def _applyProgress(self, button, appId):
         if (
             appId in self._launching
             or appId in self._installing
             or appId in self._uninstalling
         ):
-            card.setProgress(indeterminate=True)
+            button.setProgress(indeterminate=True)
         elif appId in self._downloadJobs:
             progress = self._downloadProgress.get(appId, 0)
-            card.setProgress(progress, indeterminate=not progress)
+            button.setProgress(progress, indeterminate=not progress)
         else:
-            card.setProgress()
+            button.setProgress()
 
     def _renderGrid(self, layout, apps, installedPage=False):
         cards = []
@@ -2037,7 +2009,7 @@ class AppStorePage(QWidget):
         overlayHeight = self.adOverlay.height()
         if overlayHeight <= 0:
             return
-        # 只提前、不推后：文字块矮时保持原设计的起点，下半部仍整片压暗。
+        # 只提前、不推后：文字块矮时仍从 AD_SCRIM_START 起压暗。
         start = round(
             max(0.0, min(AD_SCRIM_START, (self.adTitle.y() - AD_SCRIM_LEAD_PX) / overlayHeight)),
             2,
@@ -2175,54 +2147,11 @@ class AppStorePage(QWidget):
         if not self.currentApp:
             return
         appId = int(self.currentApp["id"])
-        supported = bool(self.currentApp.get("architecture_supported"))
-        hasOpenAction = isinstance(
-            self._installedOpenAction(self.currentApp), dict
-        )
-        if appId in self._downloadStates:
-            self.detailAction.setText(self._downloadStates[appId])
-        elif self.currentApp.get("update_available"):
-            self.detailAction.setText("更新")
-        elif self.currentApp.get("installed"):
-            self.detailAction.setText(
-                "打开"
-                if hasOpenAction
-                else "未配置打开动作"
-            )
-        else:
-            self.detailAction.setText("下载" if supported else "不支持")
-        # Keep the detail action in lockstep with cards so an unavailable
-        # architecture cannot enable a download that will fail after a click.
-        if self.currentApp.get("installed") and not self.currentApp.get(
-            "update_available"
-        ):
-            actionEnabled = hasOpenAction
-        else:
-            actionEnabled = supported
-        self.detailAction.setEnabled(
-            appId not in self._downloadJobs
-            and appId not in self._launching
-            and appId not in self._installing
-            and appId not in self._uninstalling
-            and actionEnabled
-        )
-        if (
-            appId in self._launching
-            or appId in self._installing
-            or appId in self._uninstalling
-        ):
-            self.detailAction.setProgress(indeterminate=True)
-        elif appId in self._downloadJobs:
-            progress = self._downloadProgress.get(appId, 0)
-            self.detailAction.setProgress(progress, indeterminate=not progress)
-        else:
-            self.detailAction.setProgress()
-        busy = (
-            appId in self._downloadJobs
-            or appId in self._launching
-            or appId in self._installing
-            or appId in self._uninstalling
-        )
+        busy = self._isBusy(appId)
+        actionText, enabled = self._actionState(self.currentApp, showUpdate=True)
+        self.detailAction.setText(actionText)
+        self.detailAction.setEnabled(enabled and not busy)
+        self._applyProgress(self.detailAction, appId)
         for openButton, pinButton, available, pinned in self._presetActionButtons:
             openButton.setEnabled(available and not busy)
             pinButton.setEnabled((available or pinned) and not busy)
@@ -2231,25 +2160,9 @@ class AppStorePage(QWidget):
         if self.currentApp:
             self._onAppAction(self.currentApp)
 
-    def _onLaunchFailed(self, message):
-        if self._shuttingDown:
-            return
-        InfoBar.error(
-            "应用未打开",
-            message,
-            duration=5000,
-            position=InfoBarPosition.BOTTOM_RIGHT,
-            parent=self.window(),
-        )
-
     def _onAppAction(self, app, allowUpdate=True):
         appId = int(app["id"])
-        if (
-            appId in self._downloadJobs
-            or appId in self._launching
-            or appId in self._installing
-            or appId in self._uninstalling
-        ):
+        if self._isBusy(appId):
             return
         if app.get("installed") and (
             not app.get("update_available") or not allowUpdate
@@ -2275,7 +2188,6 @@ class AppStorePage(QWidget):
                 worker.deleteLater()
             InfoBar.error("无法开始下载", str(error), duration=4000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
             return
-        beginAppStorePackageOperation()
         self._downloadJobs[appId] = (thread, worker)
         self._downloadStates[appId] = "下载中 0%"
         self._downloadProgress[appId] = 0
@@ -2301,7 +2213,7 @@ class AppStorePage(QWidget):
             self._downloadJobs.pop(appId, None)
             self._downloadStates.pop(appId, None)
             self._downloadProgress.pop(appId, None)
-            _releasePackageOperation(self.store.downloadSlots)
+            self.store.downloadSlots.release()
             worker.deleteLater()
             InfoBar.error("无法开始下载", str(error), duration=4000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
             return
@@ -2350,7 +2262,14 @@ class AppStorePage(QWidget):
             if preset is None:
                 self.store.executeAction(local or app)
             else:
-                self.store.executeAction(local, self._presetAction(local, preset))
+                if local is None:
+                    raise ApplicationStoreError("请先安装应用后再打开预设。")
+                action = self._presetAction(
+                    local.metadata.get("presets") or [], preset.get("id"), preset
+                )
+                if action is None:
+                    raise ApplicationStoreError("请先更新应用，再打开这个预设。")
+                self.store.executeAction(local, action)
         except Exception as error:
             errorMessage = str(error)
         finally:
@@ -2359,23 +2278,34 @@ class AppStorePage(QWidget):
         if not self._shuttingDown:
             self._launchFinished.emit(appId, errorMessage, errorTitle)
 
-    def _presetAction(self, installed, preset):
-        if installed is None:
-            raise ApplicationStoreError("请先安装应用后再打开预设。")
-        installedPreset = next(
+    def _presetAction(self, localPresets, presetId, catalogPreset, catalogLoaded=True):
+        """The action a preset runs, from the detail page and a Home Card alike.
+
+        Once the catalog is loaded it decides: a preset it no longer lists is
+        gone, and a link it may run directly comes from it, so a fixed link
+        takes effect at once. Programs and other protocols run from the
+        installed manifest, which matches the files on disk. Before the catalog
+        loads, the installed manifest comes first and the link saved with the
+        card second. Returns None when the preset cannot run.
+        """
+        localAction = next(
             (
-                item
-                for item in installed.metadata.get("presets", [])
-                if str(item.get("id", "")) == str(preset.get("id", ""))
+                preset.get("action")
+                for preset in localPresets
+                if isinstance(preset, dict)
+                and str(preset.get("id", "")) == str(presetId)
             ),
             None,
         )
-        action = installedPreset.get("action") if installedPreset else None
-        if not isinstance(action, dict):
-            action = self._catalogExternalAction(preset)
-        if not isinstance(action, dict):
-            raise ApplicationStoreError("请先更新应用，再打开这个预设。")
-        return action
+        if not catalogLoaded:
+            candidates = (localAction, self._catalogExternalAction(catalogPreset))
+        elif catalogPreset is None:
+            return None
+        else:
+            candidates = (self._catalogExternalAction(catalogPreset), localAction)
+        return next(
+            (action for action in candidates if isinstance(action, dict)), None
+        )
 
     def _onLaunchFinished(self, appId, error, errorTitle="无法打开应用"):
         if self._shuttingDown or appId not in self._launching:
@@ -2446,7 +2376,7 @@ class AppStorePage(QWidget):
         if not self._pendingProgress:
             self._progressTimer.stop()
         if canceled or error or not path:
-            _releasePackageOperation(self.store.downloadSlots)
+            self.store.downloadSlots.release()
             self._downloadStates.pop(appId, None)
             self._downloadProgress.pop(appId, None)
             self._updateVisibleCardState(appId)
@@ -2477,7 +2407,7 @@ class AppStorePage(QWidget):
                     self._fileOperationThreads.discard(thread)
                     self._installThreads.pop(appId, None)
             self._installing.discard(appId)
-            _releasePackageOperation(self.store.downloadSlots)
+            self.store.downloadSlots.release()
             self._downloadStates.pop(appId, None)
             self._downloadProgress.pop(appId, None)
             try:
@@ -2523,7 +2453,7 @@ class AppStorePage(QWidget):
         self._installing.discard(appId)
         with self._fileOperationLock:
             self._installThreads.pop(appId, None)
-        _releasePackageOperation(self.store.downloadSlots)
+        self.store.downloadSlots.release()
         self._downloadStates.pop(appId, None)
         self._downloadProgress.pop(appId, None)
         if error:
@@ -2536,12 +2466,7 @@ class AppStorePage(QWidget):
 
     def _confirmUninstall(self, app):
         appId = int(app["id"])
-        if (
-            appId in self._downloadJobs
-            or appId in self._launching
-            or appId in self._installing
-            or appId in self._uninstalling
-        ):
+        if self._isBusy(appId):
             return
         box = MessageBox("确认卸载", f"将删除 {app.get('name', '')} 的安装目录，是否继续？", self)
         try:
@@ -2631,10 +2556,6 @@ class AppStorePage(QWidget):
             )
             return
         pinned = self._pinnedKeys()
-        installedPresetIds = {
-            str(preset.get("id", ""))
-            for preset in app.get("installed_presets", []) or []
-        }
         for preset in presets:
             item = CardWidget(self.presetGroup)
             row = QHBoxLayout(item)
@@ -2651,15 +2572,12 @@ class AppStorePage(QWidget):
             row.addLayout(copy, 1)
             key = (int(app["id"]), int(preset["id"]))
             available = bool(app.get("installed")) and (
-                str(preset.get("id", "")) in installedPresetIds
-                or self._catalogExternalAction(preset) is not None
+                self._presetAction(
+                    app.get("installed_presets") or [], preset.get("id"), preset
+                )
+                is not None
             )
-            busy = (
-                key[0] in self._downloadJobs
-                or key[0] in self._launching
-                or key[0] in self._installing
-                or key[0] in self._uninstalling
-            )
+            busy = self._isBusy(key[0])
             openButton = PushButton(FIF.PLAY, "打开", item)
             openButton.setAccessibleName("打开预设")
             openButton.setEnabled(available and not busy)
@@ -2756,7 +2674,7 @@ class AppStorePage(QWidget):
     def _pinnedKeys(self):
         return {
             (item["app_id"], item["preset_id"])
-            for item in normalize_pinned_cards(cfg.pinnedHomeCards.value)
+            for item in normalizePinnedCards(cfg.pinnedHomeCards.value)
         }
 
     def _togglePin(self, app, preset):
@@ -2782,7 +2700,7 @@ class AppStorePage(QWidget):
         self._updateVisibleCardState(int(app["id"]))
 
     def _togglePinnedCard(self, app, presetId, title, description, action):
-        cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
+        cards = normalizePinnedCards(cfg.pinnedHomeCards.value)
         key = (int(app["id"]), int(presetId))
         existing = next(
             (
@@ -2818,7 +2736,7 @@ class AppStorePage(QWidget):
         the process can stall on antivirus scans; the result arrives through
         `pinnedCardFailed` instead of a return value.
         """
-        cards = normalize_pinned_cards([item])
+        cards = normalizePinnedCards([item])
         if not cards:
             self._showPinnedCardNotice(
                 "warning", "预设卡片无效", "请重新固定这张主页卡片。"
@@ -2880,9 +2798,18 @@ class AppStorePage(QWidget):
             if item["preset_id"] == DIRECT_APPLICATION_PRESET_ID:
                 result = self.store.executeAction(installed)
             else:
-                action = self._pinnedPresetAction(
-                    item, installed, catalogLoaded, catalogPreset
+                action = self._presetAction(
+                    installed.metadata.get("presets") or [],
+                    item["preset_id"],
+                    catalogPreset if catalogLoaded else item,
+                    catalogLoaded,
                 )
+                if action is None:
+                    raise _PinnedCardNotice(
+                        "warning",
+                        "主页卡片已失效",
+                        "请在应用详情中重新固定这张预设卡片。",
+                    )
                 result = self.store.executeAction(installed, action)
             succeeded = bool(result)
         except _PinnedCardNotice as notice:
@@ -2897,40 +2824,6 @@ class AppStorePage(QWidget):
                 self._fileOperationThreads.discard(threading.current_thread())
         if not self._shuttingDown:
             self._pinnedCardFinished.emit(appId, succeeded, level, title, message)
-
-    def _pinnedPresetAction(self, item, installed, catalogLoaded, catalogPreset):
-        localPreset = next(
-            (
-                preset
-                for preset in installed.metadata.get("presets", [])
-                if isinstance(preset, dict)
-                and str(preset.get("id", "")) == str(item["preset_id"])
-            ),
-            None,
-        )
-        action = None
-        if catalogLoaded:
-            if catalogPreset is not None:
-                catalogAction = self._catalogExternalAction(catalogPreset)
-                if catalogAction is not None:
-                    action = catalogAction
-                elif (
-                    isinstance(catalogPreset.get("action"), dict)
-                    and catalogPreset["action"].get("type") == "program"
-                    and isinstance(localPreset, dict)
-                ):
-                    action = localPreset.get("action")
-        elif isinstance(localPreset, dict):
-            action = localPreset.get("action")
-        if not isinstance(action, dict) and not catalogLoaded:
-            action = self._catalogExternalAction(item)
-        if not isinstance(action, dict):
-            raise _PinnedCardNotice(
-                "warning",
-                "主页卡片已失效",
-                "请在应用详情中重新固定这张预设卡片。",
-            )
-        return action
 
     def _onPinnedCardFinished(self, appId, succeeded, level, title, message):
         if self._shuttingDown or appId not in self._launching:
@@ -2955,7 +2848,7 @@ class AppStorePage(QWidget):
         )
 
     def refreshPinnedCards(self):
-        cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
+        cards = normalizePinnedCards(cfg.pinnedHomeCards.value)
         self._refreshPinStates(cards)
         self.pinnedCardsChanged.emit(cards)
 

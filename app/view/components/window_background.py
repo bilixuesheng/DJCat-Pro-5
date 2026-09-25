@@ -6,7 +6,6 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 from qfluentwidgets import isDarkTheme, qconfig
 
-from app.config.cfg import cfg
 from app.platform.shadow_effect import SilhouetteShadowEffect
 
 WINDOW_SHADOW_MARGIN = 12
@@ -15,17 +14,11 @@ WINDOW_CORNER_RADIUS = 8
 TIMER_THEME_BACKGROUND = QColor("black")
 
 
-def followsDarkTheme() -> bool:
-    """投送窗口的深浅跟随软件主题设置，"跟随系统"时再看系统。"""
-    mode = cfg.customThemeMode.value
-    return isDarkTheme() if mode == "System" else mode == "Dark"
-
-
 def projectionTitleColor() -> QColor:
     """投送标题的主题色。深色底上原始主题色往往太暗，按 QFluentWidgets 深色主题的
     主色规则提亮（饱和度 ×0.84、明度拉满），与软件里其他深色控件的强调色一致。"""
     color = QColor(qconfig.themeColor.value)
-    if not followsDarkTheme():
+    if not isDarkTheme():
         return color
     hue, saturation, _value, alpha = color.getHsvF()
     return QColor.fromHsvF(hue, saturation * 0.84, 1.0, alpha)
@@ -33,7 +26,7 @@ def projectionTitleColor() -> QColor:
 
 def projectionThemeBackground() -> QColor:
     """投送的默认背景（配置值"主题色"，设置页显示为"跟随主题"）：跟随深浅主题，不是强调色。"""
-    return QColor("#202020" if followsDarkTheme() else "#FFFFFF")
+    return QColor("#202020" if isDarkTheme() else "#FFFFFF")
 
 
 class WindowBackground(QWidget):

@@ -1,11 +1,6 @@
 import json
-import os
-import tempfile
-from pathlib import Path
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtTest import QTest
@@ -21,41 +16,19 @@ from app.view.pages.broadcast_page import (
 )
 from app.view.pages.countdown_page import CountdownEditPage
 from app.view.windows.main_window import MainWindow
+from tests.support import isolateCfg
 
 
 class FullscreenTaskCloseTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
-        self.tempDir = tempfile.TemporaryDirectory()
-        self.configFile = cfg.file
-        self.configValues = [
-            (item, item.value)
-            for item in (
-                cfg.broadcastActionButtonPosition,
-                cfg.showMainWindowAfterBroadcast,
-                cfg.confirmBeforeCloseBroadcast,
-                cfg.broadcastMarkdownEnabled,
-                cfg.organizeMarkdownBeforeBroadcast,
-                cfg.broadcastTitle,
-                cfg.restoreBroadcastAtStartup,
-                cfg.lastBroadcast,
-                cfg.countdownActionButtonPosition,
-                cfg.showMainWindowAfterCountdown,
-                cfg.confirmBeforeCloseCountdown,
-                cfg.confirmBeforeResetCountdown,
-            )
-        ]
-        cfg.file = Path(self.tempDir.name) / "config.json"
+        isolateCfg(self)
 
     def tearDown(self):
-        for item, value in self.configValues:
-            cfg.set(item, value)
         self.app.setQuitOnLastWindowClosed(True)
-        cfg.file = self.configFile
-        self.tempDir.cleanup()
 
     def testTaskSettingsHaveIndependentDefaults(self):
         self.assertEqual(cfg.broadcastActionButtonPosition.defaultValue, "右下角")
@@ -100,7 +73,7 @@ class FullscreenTaskCloseTest(TestCase):
         page.contentInput.setPlainText("数学97页")
 
         with patch(
-            "app.view.pages.broadcast_page._InlineAIMarkdownRequest.start"
+            "app.view.pages.broadcast_page._AIMarkdownRequest.start"
         ):
             page._onBroadcast()
 
@@ -134,7 +107,7 @@ class FullscreenTaskCloseTest(TestCase):
         page.contentInput.setPlainText("整理前正文")
 
         with patch(
-            "app.view.pages.broadcast_page._InlineAIMarkdownRequest.start"
+            "app.view.pages.broadcast_page._AIMarkdownRequest.start"
         ):
             page._onBroadcast()
 
@@ -225,7 +198,7 @@ class FullscreenTaskCloseTest(TestCase):
             forcedDarkButton = VerticalButton(
                 FIF.EDIT,
                 "编辑",
-                force_dark=True,
+                forceDark=True,
             )
             primaryButton = VerticalButton(
                 FIF.CLOSE,
@@ -254,10 +227,10 @@ class FullscreenTaskCloseTest(TestCase):
         self.addCleanup(page.deleteLater)
 
         for button in (
-            page.countdownWin.btn_reset,
-            page.countdownWin.btn_win,
+            page.countdownWin.btnReset,
+            page.countdownWin.btnWin,
         ):
-            self.assertTrue(button.force_dark)
+            self.assertTrue(button.forceDark)
             self.assertIn(
                 "rgba(255, 255, 255, 26)",
                 button.styleSheet(),
@@ -311,7 +284,7 @@ class FullscreenTaskCloseTest(TestCase):
         self.assertEqual(page.titleInput.text(), "正在投送的标题")
         self.assertEqual(page.contentInput.toPlainText(), "")
 
-        page.broadcastWin.btn_edit.click()
+        page.broadcastWin.btnEdit.click()
         self.app.processEvents()
 
         self.assertIs(container.currentWidget(), page)
@@ -391,7 +364,7 @@ class FullscreenTaskCloseTest(TestCase):
         page.contentInput.setPlainText("暂不继续投送")
         page._onBroadcast()
 
-        page.broadcastWin.btn_edit.click()
+        page.broadcastWin.btnEdit.click()
         self.app.processEvents()
 
         self.assertFalse(cfg.lastBroadcast.value["active"])
@@ -566,7 +539,7 @@ class FullscreenTaskCloseTest(TestCase):
                 page.hide()
                 taskWindow = getattr(page, windowName)
                 taskWindow.show()
-                taskWindow.btn_close.click()
+                taskWindow.btnClose.click()
                 self.app.processEvents()
 
                 flyout = next(
@@ -581,7 +554,7 @@ class FullscreenTaskCloseTest(TestCase):
                 self.assertTrue(flyout.isVisible())
                 self.assertEqual(flyout.view.contentLabel.text(), warning)
 
-                taskWindow.btn_close.click()
+                taskWindow.btnClose.click()
                 self.app.processEvents()
                 self.assertEqual(
                     [
@@ -601,7 +574,7 @@ class FullscreenTaskCloseTest(TestCase):
                 self.app.processEvents()
                 self.assertTrue(taskWindow.isVisible())
 
-                taskWindow.btn_close.click()
+                taskWindow.btnClose.click()
                 self.app.processEvents()
                 flyout = next(
                     child
@@ -627,7 +600,7 @@ class FullscreenTaskCloseTest(TestCase):
 
                 cfg.set(setting, False)
                 taskWindow.show()
-                taskWindow.btn_close.click()
+                taskWindow.btnClose.click()
                 self.app.processEvents()
                 self.assertFalse(taskWindow.isVisible())
                 page.close()
@@ -650,7 +623,7 @@ class FullscreenTaskCloseTest(TestCase):
         window = page.broadcastWin
 
         self.assertGreaterEqual(window.BORDER_WIDTH, 12)
-        window.is_windowed = True
+        window.isWindowed = True
         window._applyWindowState()
 
         self.assertTrue(window._isResizeEnabled)

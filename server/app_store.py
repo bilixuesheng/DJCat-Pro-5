@@ -15,7 +15,7 @@ from functools import wraps
 from pathlib import Path
 from urllib.parse import urlparse
 
-from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request
+from flask import Blueprint, abort, jsonify, redirect, render_template, request
 
 ARCHITECTURES = ("x86_64", "arm64")
 _INSTALL_DIR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}$")
@@ -207,6 +207,11 @@ def _formAction(actionType, target, arguments):
     return _safeAction(actionType, target, arguments) if arguments is not None else None
 
 
+def _openDatabase(connect):
+    _ensureSchema(connect)
+    return closing(connect())
+
+
 def _ensureSchema(connect):
     with closing(connect()) as database, _schemaInitLock:
         databaseRow = database.execute("PRAGMA database_list").fetchone()
@@ -377,8 +382,7 @@ def _ensureSchema(connect):
 def marketplaceStats(connect, day):
     """Return marketplace totals for the dashboard without changing catalog data."""
 
-    _ensureSchema(connect)
-    with closing(connect()) as database:
+    with _openDatabase(connect) as database:
         todayDownloads = database.execute(
             "SELECT COUNT(*) FROM market_download_events "
             "WHERE downloaded_at >= datetime(?, '-8 hours') "
@@ -394,15 +398,11 @@ def marketplaceStats(connect, day):
         adCount = database.execute(
             "SELECT COUNT(*) FROM market_advertisements WHERE enabled = 1"
         ).fetchone()[0]
-        presetCount = database.execute(
-            "SELECT COUNT(*) FROM market_presets"
-        ).fetchone()[0]
     return {
         "today_downloads": todayDownloads,
         "downloads": totalDownloads,
         "apps": appCount,
         "ads": adCount,
-        "presets": presetCount,
     }
 
 
@@ -543,21 +543,9 @@ def _advertisementForm():
     ), ""
 
 
-def _requestedOrder():
-    values = request.form.getlist("item_id")
+def _requestedIds(field):
     try:
-        ids = [int(value) for value in values]
-    except (TypeError, ValueError):
-        return None
-    if not ids or len(ids) != len(set(ids)) or any(itemId <= 0 for itemId in ids):
-        return None
-    return ids
-
-
-def _requestedExpectedOrder():
-    values = request.form.getlist("expected_item_id")
-    try:
-        ids = [int(value) for value in values]
+        ids = [int(value) for value in request.form.getlist(field)]
     except (TypeError, ValueError):
         return None
     if not ids or len(ids) != len(set(ids)) or any(itemId <= 0 for itemId in ids):
@@ -602,30 +590,53 @@ def _reorderItems(database, kind, ids, expectedIds, appId=None):
     return True
 
 
-def _formErrors(errors, renderer):
-    message = "；".join(errors)
-    if request.headers.get("X-Requested-With") == "XMLHttpRequest" or (
-        request.accept_mimetypes.best == "application/json"
-    ):
-        return jsonify(message=message, category="error"), 400
-    for error in errors:
-        flash(error, "error")
-    return renderer(), 400
-
-
-def register_app_store(
+def registerAppStore(
     app,
     *,
     connect,
-    login_required,
-    csrf_token,
-    check_csrf,
-    admin_response,
+    loginRequired,
+    csrfToken,
+    checkCsrf,
+    adminResponse,
 ):
     """Register public catalog and dashboard routes on the existing Flask app."""
 
     _ensureSchema(connect)
     blueprint = Blueprint("app_store", __name__)
+
+    def formErrors(errors, renderer):
+        return adminResponse("；".join(errors), "error", None, 400, renderer=renderer)
+
+    def saveOrder(kind, label, endpoint, appId=None):
+        checkCsrf()
+        urlValues = {"app_id": appId} if appId is not None else None
+        ids = _requestedIds("item_id")
+        expectedIds = _requestedIds("expected_item_id")
+        if ids is None or expectedIds is None:
+            return adminResponse(
+                f"{label}顺序无效", "error", endpoint, 400, urlValues=urlValues
+            )
+        with _openDatabase(connect) as database:
+            database.execute("BEGIN IMMEDIATE")
+            if not _reorderItems(database, kind, ids, expectedIds, appId):
+                database.rollback()
+                return adminResponse(
+                    f"{label}顺序已过期，请刷新后重试",
+                    "error",
+                    endpoint,
+                    409,
+                    urlValues=urlValues,
+                )
+            if appId is not None and ids != expectedIds:
+                database.execute(
+                    "UPDATE market_applications "
+                    "SET manifest_revision = manifest_revision + 1 WHERE id = ?",
+                    (appId,),
+                )
+            database.commit()
+        return adminResponse(
+            f"{label}顺序已更新", "success", endpoint, urlValues=urlValues
+        )
 
     def apiRoute(view):
         @wraps(view)
@@ -639,8 +650,7 @@ def register_app_store(
     @blueprint.get("/app-store/catalog")
     @apiRoute
     def catalog():
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             rows = database.execute(
                 "SELECT * FROM market_applications ORDER BY sort_order, id"
             ).fetchall()
@@ -705,8 +715,7 @@ def register_app_store(
         architecture = request.args.get("arch", "").lower()
         if architecture not in ARCHITECTURES:
             return jsonify(message="不支持的客户端架构"), 400
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             row = database.execute(
                 """
                 SELECT p.download_url
@@ -761,39 +770,37 @@ def register_app_store(
         return redirect(url, code=302)
 
     @blueprint.get("/admin/app-store/apps/")
-    @login_required
+    @loginRequired
     def adminApps():
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             rows = database.execute(
                 "SELECT * FROM market_applications ORDER BY sort_order, id"
             ).fetchall()
         return render_template(
             "admin_app_store_apps.html",
-            csrf_token=csrf_token(),
+            csrf_token=csrfToken(),
             current_page="app_store_apps",
             apps=rows,
         )
 
     @blueprint.route("/admin/app-store/apps/new", methods=["GET", "POST"])
-    @login_required
+    @loginRequired
     def adminNewApp():
         return _saveApp(None) if request.method == "POST" else _renderApp(None)
 
     @blueprint.route("/admin/app-store/apps/<int:app_id>", methods=["GET", "POST"])
-    @login_required
+    @loginRequired
     def adminApp(app_id):
         return _saveApp(app_id) if request.method == "POST" else _renderApp(app_id)
 
     def _renderApp(appId, submitted=None):
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             row, storedForm = _adminFormData(database, appId)
         if appId is not None and row is None:
             abort(404)
         return render_template(
             "admin_app_store_app.html",
-            csrf_token=csrf_token(),
+            csrf_token=csrfToken(),
             current_page="app_store_apps",
             app=row,
             form=submitted or storedForm,
@@ -801,7 +808,7 @@ def register_app_store(
         )
 
     def _saveApp(appId):
-        check_csrf()
+        checkCsrf()
         rawIconUrl = request.form.get("icon_url", "").strip()
         values = {
             "name": request.form.get("name", "").strip(),
@@ -875,22 +882,20 @@ def register_app_store(
             "packages": packageForm,
         }
         if appId is not None:
-            _ensureSchema(connect)
-            with closing(connect()) as database:
+            with _openDatabase(connect) as database:
                 existing = database.execute(
                     "SELECT install_dir FROM market_applications WHERE id = ?",
                     (appId,),
                 ).fetchone()
             if existing is None:
-                return admin_response(
+                return adminResponse(
                     "软件不存在", "error", "app_store.adminApps", 404
                 )
             if values["install_dir"] != existing["install_dir"]:
                 errors.append("已发布软件不能直接修改安装目录，请新建软件或执行迁移")
         if errors:
-            return _formErrors(errors, lambda: _renderApp(appId, submitted))
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+            return formErrors(errors, lambda: _renderApp(appId, submitted))
+        with _openDatabase(connect) as database:
             try:
                 database.execute("BEGIN IMMEDIATE")
                 existingApp = (
@@ -903,7 +908,7 @@ def register_app_store(
                 )
                 if appId is not None and existingApp is None:
                     database.rollback()
-                    return admin_response(
+                    return adminResponse(
                         "软件不存在",
                         "error",
                         "app_store.adminApps",
@@ -917,7 +922,7 @@ def register_app_store(
                 ).fetchone()
                 if duplicate:
                     database.rollback()
-                    return _formErrors(
+                    return formErrors(
                         ["安装目录已被其他软件使用"],
                         lambda: _renderApp(appId, submitted),
                     )
@@ -1034,47 +1039,34 @@ def register_app_store(
                 database.commit()
             except sqlite3.IntegrityError as error:
                 database.rollback()
-                return _formErrors(
+                return formErrors(
                     [f"保存失败：{error}"],
                     lambda: _renderApp(appId, submitted),
                 )
-        return admin_response("软件信息已保存", "success", "app_store.adminApps")
+        return adminResponse("软件信息已保存", "success", "app_store.adminApps")
 
     @blueprint.post("/admin/app-store/apps/<int:app_id>/delete")
-    @login_required
+    @loginRequired
     def adminDeleteApp(app_id):
-        check_csrf()
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        checkCsrf()
+        with _openDatabase(connect) as database:
             deleted = database.execute(
                 "DELETE FROM market_applications WHERE id = ?", (app_id,)
             )
             if not deleted.rowcount:
-                return admin_response(
+                return adminResponse(
                     "软件不存在",
                     "error",
                     "app_store.adminApps",
                     404,
                 )
             database.commit()
-        return admin_response("软件已删除", "success", "app_store.adminApps")
+        return adminResponse("软件已删除", "success", "app_store.adminApps")
 
     @blueprint.post("/admin/app-store/apps/order")
-    @login_required
+    @loginRequired
     def adminOrderApps():
-        check_csrf()
-        ids = _requestedOrder()
-        expectedIds = _requestedExpectedOrder()
-        if ids is None or expectedIds is None:
-            return admin_response("软件顺序无效", "error", "app_store.adminApps", 400)
-        _ensureSchema(connect)
-        with closing(connect()) as database:
-            database.execute("BEGIN IMMEDIATE")
-            if not _reorderItems(database, "applications", ids, expectedIds):
-                database.rollback()
-                return admin_response("软件顺序已过期，请刷新后重试", "error", "app_store.adminApps", 409)
-            database.commit()
-        return admin_response("软件顺序已更新", "success", "app_store.adminApps")
+        return saveOrder("applications", "软件", "app_store.adminApps")
 
     def _renderPresets(appId=None):
         if appId is None and request.args.get("app_id"):
@@ -1089,8 +1081,7 @@ def register_app_store(
                 return _renderPresetForm(appId, int(request.args["edit"]))
             except (TypeError, ValueError):
                 abort(404)
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             apps = database.execute(
                 """
                 SELECT a.id, a.name, a.version, a.sort_order,
@@ -1126,7 +1117,7 @@ def register_app_store(
             presets.append(preset)
         return render_template(
             "admin_app_store_presets.html",
-            csrf_token=csrf_token(),
+            csrf_token=csrfToken(),
             current_page="app_store_presets",
             presets=presets,
             apps=apps,
@@ -1134,8 +1125,7 @@ def register_app_store(
         )
 
     def _renderPresetForm(appId, presetId=None, submitted=None):
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             selectedApp = database.execute(
                 "SELECT id, name, version FROM market_applications WHERE id = ?",
                 (appId,),
@@ -1161,7 +1151,7 @@ def register_app_store(
             )
         return render_template(
             "admin_app_store_preset.html",
-            csrf_token=csrf_token(),
+            csrf_token=csrfToken(),
             current_page="app_store_presets",
             selected_app=selectedApp,
             preset=preset,
@@ -1170,14 +1160,14 @@ def register_app_store(
 
     @blueprint.get("/admin/app-store/presets/")
     @blueprint.get("/admin/app-store/presets/<int:app_id>/")
-    @login_required
+    @loginRequired
     def adminPresets(app_id=None):
         return _renderPresets(app_id)
 
     @blueprint.route(
         "/admin/app-store/presets/<int:app_id>/new", methods=["GET", "POST"]
     )
-    @login_required
+    @loginRequired
     def adminNewPreset(app_id):
         return (
             _savePreset(app_id, None)
@@ -1189,7 +1179,7 @@ def register_app_store(
         "/admin/app-store/presets/<int:app_id>/items/<int:preset_id>",
         methods=["GET", "POST"],
     )
-    @login_required
+    @loginRequired
     def adminPreset(app_id, preset_id):
         return (
             _savePreset(app_id, preset_id)
@@ -1197,35 +1187,17 @@ def register_app_store(
             else _renderPresetForm(app_id, preset_id)
         )
 
-    @blueprint.post("/admin/app-store/presets/")
-    @login_required
-    def adminCreatePresetLegacy():
-        return _savePreset(None, None)
-
-    @blueprint.post("/admin/app-store/presets/<int:preset_id>")
-    @login_required
-    def adminPresetLegacy(preset_id):
-        return _savePreset(None, preset_id)
-
     def _savePreset(appId, presetId):
-        check_csrf()
+        checkCsrf()
         if request.form.get("delete"):
-            _ensureSchema(connect)
-            with closing(connect()) as database:
+            with _openDatabase(connect) as database:
                 database.execute("BEGIN IMMEDIATE")
                 row = database.execute(
                     "SELECT app_id FROM market_presets WHERE id = ?",
                     (presetId,),
                 ).fetchone()
-                if row is None:
-                    return admin_response(
-                        "预设卡片不存在",
-                        "error",
-                        "app_store.adminPresets",
-                        404,
-                    )
-                if appId is not None and row["app_id"] != appId:
-                    return admin_response(
+                if row is None or row["app_id"] != appId:
+                    return adminResponse(
                         "预设卡片不存在",
                         "error",
                         "app_store.adminPresets",
@@ -1240,11 +1212,11 @@ def register_app_store(
                     (row["app_id"],),
                 )
                 database.commit()
-            return admin_response(
+            return adminResponse(
                 "预设卡片已删除",
                 "success",
                 "app_store.adminPresets",
-                url_values={"app_id": row["app_id"]},
+                urlValues={"app_id": row["app_id"]},
             )
 
         title = request.form.get("preset_title", "").strip()
@@ -1255,14 +1227,7 @@ def register_app_store(
             request.form.get("preset_action_target"),
             request.form.get("preset_action_arguments", ""),
         )
-        if appId is None:
-            try:
-                appId = int(request.form.get("preset_app_id"))
-            except (TypeError, ValueError):
-                appId = None
         errors = []
-        if appId is None:
-            errors.append("请选择软件")
         if not title:
             errors.append("卡片标题不能为空")
         if len(title) > 80:
@@ -1276,33 +1241,24 @@ def register_app_store(
                 if actionType == "url"
                 else "预设卡片动作配置无效"
             )
-        redirectValues = {"app_id": appId} if appId else None
+        redirectValues = {"app_id": appId}
         if errors:
-            if appId is not None:
-                submitted = {
-                    "id": presetId,
-                    "title": title,
-                    "description": description,
-                    "action_type": actionType,
-                    "action_target": request.form.get(
-                        "preset_action_target", ""
-                    ).strip(),
-                    "action_arguments": request.form.get(
-                        "preset_action_arguments", ""
-                    ),
-                }
-                return _formErrors(
-                    errors,
-                    lambda: _renderPresetForm(appId, presetId, submitted),
-                )
-            return admin_response(
-                "；".join(errors), "error", "app_store.adminPresets", 400
+            submitted = {
+                "id": presetId,
+                "title": title,
+                "description": description,
+                "action_type": actionType,
+                "action_target": request.form.get("preset_action_target", "").strip(),
+                "action_arguments": request.form.get("preset_action_arguments", ""),
+            }
+            return formErrors(
+                errors,
+                lambda: _renderPresetForm(appId, presetId, submitted),
             )
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             database.execute("BEGIN IMMEDIATE")
             if not database.execute("SELECT 1 FROM market_applications WHERE id = ?", (appId,)).fetchone():
-                return admin_response(
+                return adminResponse(
                     "选择的软件不存在",
                     "error",
                     "app_store.adminPresets",
@@ -1317,20 +1273,20 @@ def register_app_store(
                 else None
             )
             if presetId is not None and current is None:
-                return admin_response(
+                return adminResponse(
                     "预设卡片不存在",
                     "error",
                     "app_store.adminPresets",
                     404,
-                    url_values=redirectValues,
+                    urlValues=redirectValues,
                 )
             if current is not None and current["app_id"] != appId:
-                return admin_response(
+                return adminResponse(
                     "预设卡片不存在",
                     "error",
                     "app_store.adminPresets",
                     404,
-                    url_values=redirectValues,
+                    urlValues=redirectValues,
                 )
             sortOrder = (
                 current["sort_order"]
@@ -1371,12 +1327,12 @@ def register_app_store(
                 )
                 if not updated.rowcount:
                     database.rollback()
-                    return admin_response(
+                    return adminResponse(
                         "预设卡片不存在",
                         "error",
                         "app_store.adminPresets",
                         404,
-                        url_values=redirectValues,
+                        urlValues=redirectValues,
                     )
                 message = "预设卡片已保存"
                 manifestChanged = values != (
@@ -1395,57 +1351,20 @@ def register_app_store(
                     (appId,),
                 )
             database.commit()
-        return admin_response(
+        return adminResponse(
             message,
             "success",
             "app_store.adminPresets",
-            url_values={"app_id": appId},
+            urlValues={"app_id": appId},
         )
 
     @blueprint.post("/admin/app-store/presets/<int:app_id>/order")
-    @login_required
+    @loginRequired
     def adminOrderPresets(app_id):
-        check_csrf()
-        ids = _requestedOrder()
-        expectedIds = _requestedExpectedOrder()
-        if ids is None or expectedIds is None:
-            return admin_response(
-                "预设卡片顺序无效",
-                "error",
-                "app_store.adminPresets",
-                400,
-                url_values={"app_id": app_id},
-            )
-        _ensureSchema(connect)
-        with closing(connect()) as database:
-            database.execute("BEGIN IMMEDIATE")
-            if not _reorderItems(
-                database, "presets", ids, expectedIds, app_id
-            ):
-                database.rollback()
-                return admin_response(
-                    "预设卡片顺序已过期，请刷新后重试",
-                    "error",
-                    "app_store.adminPresets",
-                    409,
-                    url_values={"app_id": app_id},
-                )
-            if ids != expectedIds:
-                database.execute(
-                    "UPDATE market_applications "
-                    "SET manifest_revision = manifest_revision + 1 WHERE id = ?",
-                    (app_id,),
-                )
-            database.commit()
-        return admin_response(
-            "预设卡片顺序已更新",
-            "success",
-            "app_store.adminPresets",
-            url_values={"app_id": app_id},
-        )
+        return saveOrder("presets", "预设卡片", "app_store.adminPresets", app_id)
 
     @blueprint.route("/admin/app-store/ads/", methods=["GET", "POST"])
-    @login_required
+    @loginRequired
     def adminAds():
         if request.method == "POST":
             return _saveAd(None)
@@ -1454,8 +1373,7 @@ def register_app_store(
                 return _renderAd(int(request.args["edit"]))
             except (TypeError, ValueError):
                 abort(404)
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             ads = database.execute(
                 """
                 SELECT ad.*, a.name AS app_name FROM market_advertisements ad
@@ -1465,14 +1383,13 @@ def register_app_store(
             ).fetchall()
         return render_template(
             "admin_app_store_ads.html",
-            csrf_token=csrf_token(),
+            csrf_token=csrfToken(),
             current_page="app_store_ads",
             ads=ads,
         )
 
     def _renderAd(adId=None, submitted=None):
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             ad = (
                 database.execute(
                     "SELECT * FROM market_advertisements WHERE id = ?", (adId,)
@@ -1487,7 +1404,7 @@ def register_app_store(
             abort(404)
         return render_template(
             "admin_app_store_ad.html",
-            csrf_token=csrf_token(),
+            csrf_token=csrfToken(),
             current_page="app_store_ads",
             ad=submitted or ad,
             apps=apps,
@@ -1495,17 +1412,17 @@ def register_app_store(
         )
 
     @blueprint.route("/admin/app-store/ads/new", methods=["GET", "POST"])
-    @login_required
+    @loginRequired
     def adminNewAd():
         return _saveAd(None) if request.method == "POST" else _renderAd()
 
     @blueprint.route("/admin/app-store/ads/<int:ad_id>", methods=["GET", "POST"])
-    @login_required
+    @loginRequired
     def adminAd(ad_id):
         return _saveAd(ad_id) if request.method == "POST" else _renderAd(ad_id)
 
     def _saveAd(adId):
-        check_csrf()
+        checkCsrf()
         _ensureSchema(connect)
         if request.form.get("delete"):
             with closing(connect()) as database:
@@ -1514,14 +1431,14 @@ def register_app_store(
                     "DELETE FROM market_advertisements WHERE id = ?", (adId,)
                 )
                 if not deleted.rowcount:
-                    return admin_response(
+                    return adminResponse(
                         "广告不存在",
                         "error",
                         "app_store.adminAds",
                         404,
                     )
                 database.commit()
-            return admin_response("广告已删除", "success", "app_store.adminAds")
+            return adminResponse("广告已删除", "success", "app_store.adminAds")
         values, error = _advertisementForm()
         if error:
             appId = request.form.get("app_id", "").strip()
@@ -1535,7 +1452,7 @@ def register_app_store(
                 "button_url": request.form.get("button_url", "").strip(),
                 "enabled": bool(request.form.get("enabled")),
             }
-            return _formErrors(
+            return formErrors(
                 [error], lambda: _renderAd(adId, submitted)
             )
         title, description, imageUrl, appId, buttonUrl, sortOrder, enabled = values
@@ -1552,7 +1469,7 @@ def register_app_store(
                     "button_url": buttonUrl,
                     "enabled": bool(enabled),
                 }
-                return _formErrors(
+                return formErrors(
                     ["绑定的软件不存在"],
                     lambda: _renderAd(adId, submitted),
                 )
@@ -1561,7 +1478,7 @@ def register_app_store(
                 (adId,),
             ).fetchone()
             if adId is not None and current is None:
-                return admin_response(
+                return adminResponse(
                     "广告不存在", "error", "app_store.adminAds", 404
                 )
             if sortOrder is None:
@@ -1607,42 +1524,24 @@ def register_app_store(
                 )
                 message = "广告已保存"
             database.commit()
-        return admin_response(message, "success", "app_store.adminAds")
+        return adminResponse(message, "success", "app_store.adminAds")
 
     @blueprint.post("/admin/app-store/ads/order")
-    @login_required
+    @loginRequired
     def adminOrderAds():
-        check_csrf()
-        ids = _requestedOrder()
-        expectedIds = _requestedExpectedOrder()
-        if ids is None or expectedIds is None:
-            return admin_response("广告顺序无效", "error", "app_store.adminAds", 400)
-        _ensureSchema(connect)
-        with closing(connect()) as database:
-            database.execute("BEGIN IMMEDIATE")
-            if not _reorderItems(database, "advertisements", ids, expectedIds):
-                database.rollback()
-                return admin_response(
-                    "广告顺序已过期，请刷新后重试",
-                    "error",
-                    "app_store.adminAds",
-                    409,
-                )
-            database.commit()
-        return admin_response("广告顺序已更新", "success", "app_store.adminAds")
+        return saveOrder("advertisements", "广告", "app_store.adminAds")
 
     @blueprint.get("/admin/app-store/recommendations/")
-    @login_required
+    @loginRequired
     def adminRecommendations():
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        with _openDatabase(connect) as database:
             rows = database.execute(
                 "SELECT * FROM market_applications WHERE recommended = 1 "
                 "ORDER BY recommended_order, sort_order, id"
             ).fetchall()
         return render_template(
             "admin_app_store_recommendations.html",
-            csrf_token=csrf_token(),
+            csrf_token=csrfToken(),
             current_page="app_store_recommendations",
             apps=rows,
         )
@@ -1650,7 +1549,7 @@ def register_app_store(
     @blueprint.route(
         "/admin/app-store/recommendations/new", methods=["GET", "POST"]
     )
-    @login_required
+    @loginRequired
     def adminNewRecommendation():
         _ensureSchema(connect)
         if request.method == "GET":
@@ -1661,11 +1560,11 @@ def register_app_store(
                 ).fetchall()
             return render_template(
                 "admin_app_store_recommendation.html",
-                csrf_token=csrf_token(),
+                csrf_token=csrfToken(),
                 current_page="app_store_recommendations",
                 apps=apps,
             )
-        check_csrf()
+        checkCsrf()
         try:
             appId = int(request.form.get("app_id"))
         except (TypeError, ValueError):
@@ -1676,7 +1575,7 @@ def register_app_store(
                 "SELECT 1 FROM market_applications WHERE id = ? AND recommended = 0",
                 (appId,),
             ).fetchone():
-                return admin_response(
+                return adminResponse(
                     "请选择尚未推荐的软件",
                     "error",
                     "app_store.adminNewRecommendation",
@@ -1692,60 +1591,35 @@ def register_app_store(
                 (sortOrder, appId),
             )
             database.commit()
-        return admin_response(
+        return adminResponse(
             "推荐软件已新增", "success", "app_store.adminRecommendations"
         )
 
     @blueprint.post("/admin/app-store/recommendations/<int:app_id>/delete")
-    @login_required
+    @loginRequired
     def adminDeleteRecommendation(app_id):
-        check_csrf()
-        _ensureSchema(connect)
-        with closing(connect()) as database:
+        checkCsrf()
+        with _openDatabase(connect) as database:
             updated = database.execute(
                 "UPDATE market_applications SET recommended = 0, "
                 "recommended_order = NULL WHERE id = ? AND recommended = 1",
                 (app_id,),
             )
             if not updated.rowcount:
-                return admin_response(
+                return adminResponse(
                     "推荐软件不存在",
                     "error",
                     "app_store.adminRecommendations",
                     404,
                 )
             database.commit()
-        return admin_response(
+        return adminResponse(
             "已取消推荐", "success", "app_store.adminRecommendations"
         )
 
     @blueprint.post("/admin/app-store/recommendations/order")
-    @login_required
+    @loginRequired
     def adminOrderRecommendations():
-        check_csrf()
-        ids = _requestedOrder()
-        expectedIds = _requestedExpectedOrder()
-        if ids is None or expectedIds is None:
-            return admin_response(
-                "推荐顺序无效",
-                "error",
-                "app_store.adminRecommendations",
-                400,
-            )
-        _ensureSchema(connect)
-        with closing(connect()) as database:
-            database.execute("BEGIN IMMEDIATE")
-            if not _reorderItems(database, "recommendations", ids, expectedIds):
-                database.rollback()
-                return admin_response(
-                    "推荐顺序已过期，请刷新后重试",
-                    "error",
-                    "app_store.adminRecommendations",
-                    409,
-                )
-            database.commit()
-        return admin_response(
-            "推荐顺序已更新", "success", "app_store.adminRecommendations"
-        )
+        return saveOrder("recommendations", "推荐", "app_store.adminRecommendations")
 
     app.register_blueprint(blueprint)

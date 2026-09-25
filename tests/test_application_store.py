@@ -518,7 +518,7 @@ class ApplicationStoreTest(TestCase):
             "appStoreImageCache",
             self.store.cache,
         ):
-            applicationStoreModule.beginAppStorePackageOperation()
+            self.store.downloadSlots.acquire()
             try:
                 with self.assertRaisesRegex(
                     ApplicationStoreError,
@@ -527,7 +527,7 @@ class ApplicationStoreTest(TestCase):
                     applicationStoreModule.clearAppStoreCache()
                 self.assertTrue(package.exists())
             finally:
-                applicationStoreModule.endAppStorePackageOperation()
+                self.store.downloadSlots.release()
 
             applicationStoreModule.clearAppStoreCache()
 
@@ -766,28 +766,6 @@ class ApplicationStoreTest(TestCase):
         applicationStoreModule._activateProcessWindow(Mock())
 
         thread.assert_not_called()
-
-    def testWindowActivationReportsAnEarlyNonzeroExit(self):
-        if os.name != "nt":
-            self.skipTest("Windows window activation only")
-        process = Mock(
-            pid=999999,
-            args=[r"C:\missing\djcat-activation-test-6f2500.exe"],
-        )
-        process.poll.return_value = 1
-        messages = []
-
-        worker = applicationStoreModule._activateProcessWindow(
-            process,
-            onFailure=messages.append,
-        )
-        worker.join(3)
-
-        self.assertFalse(worker.is_alive())
-        self.assertEqual(
-            messages,
-            ["程序启动后立即退出，可能已有实例正在运行"],
-        )
 
     @patch("app.common.application_store._activateProcessWindow")
     def testFinishedActivationWorkersAreReclaimed(self, activate):

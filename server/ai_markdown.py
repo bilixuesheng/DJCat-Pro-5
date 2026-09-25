@@ -342,12 +342,8 @@ def _refreshHolidayCache():
     days.update(fetched)
     cache = json.dumps({"refreshed": today, "days": days}, sort_keys=True)
     with closing(_connect()) as database:
-        database.execute(
-            "INSERT INTO settings(key, value) VALUES ('holiday_calendar', ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (cache,),
-        )
-        # 旧版按 nager.at 只存了放假日期，语义不同，不再读取。
+        _putSetting(database, "holiday_calendar", cache)
+        # 旧的 holiday_cache 只存放假日期、没有补班日，不能当作这份日历用。
         database.execute("DELETE FROM settings WHERE key = 'holiday_cache'")
         database.commit()
     return bool(loadedYears)
@@ -443,6 +439,14 @@ def _connect():
     return database
 
 
+def _putSetting(database, key, value):
+    database.execute(
+        "INSERT INTO settings(key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+
+
 def _setting(key, default=None):
     with closing(_connect()) as database:
         row = database.execute(
@@ -505,13 +509,8 @@ def _saveAISettings(
         )
     with closing(_connect()) as database:
         database.execute("BEGIN IMMEDIATE")
-        database.executemany(
-            """
-            INSERT INTO settings(key, value) VALUES (?, ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-            """,
-            settings,
-        )
+        for key, value in settings:
+            _putSetting(database, key, value)
         if clearApiKey:
             database.execute("DELETE FROM settings WHERE key = 'deepseek_api_key'")
         database.commit()
@@ -519,13 +518,7 @@ def _saveAISettings(
 
 def _saveSystemPrompt(systemPrompt):
     with closing(_connect()) as database:
-        database.execute(
-            """
-            INSERT INTO settings(key, value) VALUES ('system_prompt', ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-            """,
-            (systemPrompt,),
-        )
+        _putSetting(database, "system_prompt", systemPrompt)
         database.commit()
 
 
@@ -638,7 +631,7 @@ def _recoverStaleRequests():
     return len(rows)
 
 
-def _rollupOldRequests(force=False):
+def _rollupOldRequests():
     cutoff = (
         datetime.now(TIMEZONE).date() - timedelta(days=REQUEST_LOG_RETENTION_DAYS)
     ).isoformat()
@@ -647,16 +640,15 @@ def _rollupOldRequests(force=False):
         marker = database.execute(
             "SELECT value FROM settings WHERE key = 'request_log_rollup_day'"
         ).fetchone()
-        if not force and marker and marker[0] == today:
+        if marker and marker[0] == today:
             return 0
         database.execute("BEGIN IMMEDIATE")
-        if not force:
-            marker = database.execute(
-                "SELECT value FROM settings WHERE key = 'request_log_rollup_day'"
-            ).fetchone()
-            if marker and marker[0] == today:
-                database.commit()
-                return 0
+        marker = database.execute(
+            "SELECT value FROM settings WHERE key = 'request_log_rollup_day'"
+        ).fetchone()
+        if marker and marker[0] == today:
+            database.commit()
+            return 0
         candidate = database.execute(
             """
             SELECT 1 FROM request_log
@@ -666,11 +658,7 @@ def _rollupOldRequests(force=False):
             (cutoff,),
         ).fetchone()
         if not candidate:
-            database.execute(
-                "INSERT INTO settings(key, value) VALUES ('request_log_rollup_day', ?) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (today,),
-            )
+            _putSetting(database, "request_log_rollup_day", today)
             database.commit()
             return 0
         dailyRows = database.execute(
@@ -729,11 +717,7 @@ def _rollupOldRequests(force=False):
             (cutoff,),
         )
         database.execute("DELETE FROM usage WHERE day < ?", (cutoff,))
-        database.execute(
-            "INSERT INTO settings(key, value) VALUES ('request_log_rollup_day', ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (today,),
-        )
+        _putSetting(database, "request_log_rollup_day", today)
         database.commit()
     return len(dailyRows)
 
@@ -768,19 +752,6 @@ def _claimInTransaction(database, machineId, cost, day, limit):
     return limit - count - cost
 
 
-def _claim(machineId, cost, day=None, limit=None):
-    day = day or _today()
-    limit = limit or _dailyLimit()
-    with closing(_connect()) as database:
-        database.execute("BEGIN IMMEDIATE")
-        remaining = _claimInTransaction(database, machineId, cost, day, limit)
-        if remaining < 0:
-            database.rollback()
-            return -1
-        database.commit()
-    return remaining
-
-
 def _claimRequest(machineId, cost, day, limit):
     _recoverStaleRequests()
     with closing(_connect()) as database:
@@ -798,19 +769,6 @@ def _claimRequest(machineId, cost, day, limit):
         )
         database.commit()
     return remaining, cursor.lastrowid
-
-
-def _refund(machineId, cost, day=None):
-    day = day or _today()
-    with closing(_connect()) as database:
-        database.execute(
-            """
-            UPDATE usage SET count = count - ?
-            WHERE day = ? AND machine_id = ? AND count >= ?
-            """,
-            (cost, day, machineId, cost),
-        )
-        database.commit()
 
 
 def _error(message, status):
@@ -1027,7 +985,7 @@ def _saveConversionLog(machineId, inputContent, outputContent, customStyle):
                 (machineId, inputContent, outputContent, customStyle, _nowIso()),
             )
             database.commit()
-        # 每天至多真正执行一次；只挂在记录页上，管理员不来看就永远不清。
+        # 挂在写入路径上（每天至多执行一次）：管理员不打开记录页也要清。
         _cleanupConversionLogs()
     except sqlite3.Error:
         pass
@@ -1055,11 +1013,7 @@ def _cleanupConversionLogs():
             "DELETE FROM conversion_logs WHERE created_at < ? AND status = 'pending'",
             (cutoff,),
         ).rowcount
-        database.execute(
-            "INSERT INTO settings(key, value) VALUES ('conversion_log_cleanup_day', ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (today,),
-        )
+        _putSetting(database, "conversion_log_cleanup_day", today)
         database.commit()
     return deleted
 
@@ -1104,14 +1058,14 @@ def _isAjaxRequest():
 
 
 def _adminResponse(
-    message, category, endpoint, status=200, url_values=None, renderer=None
+    message, category, endpoint, status=200, urlValues=None, renderer=None
 ):
     if _isAjaxRequest():
         return jsonify(message=message, category=category), status
     flash(message, category)
     if renderer is not None:
         return renderer(), status
-    return redirect(url_for(endpoint, **(url_values or {})))
+    return redirect(url_for(endpoint, **(urlValues or {})))
 
 
 def _adminRoute(view):
@@ -1160,7 +1114,6 @@ def _dashboardStats():
                 COUNT(*) AS requests,
                 COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS success,
                 COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
-                COALESCE(SUM(CASE WHEN status IN ('success', 'processing') THEN cost ELSE 0 END), 0) AS consumed,
                 COALESCE(SUM(CASE WHEN day = ? THEN 1 ELSE 0 END), 0) AS today_requests,
                 COALESCE(SUM(CASE WHEN day = ? AND status = 'success' THEN 1 ELSE 0 END), 0) AS today_success,
                 COALESCE(SUM(CASE WHEN day = ? AND status = 'failed' THEN 1 ELSE 0 END), 0) AS today_failed,
@@ -1173,8 +1126,7 @@ def _dashboardStats():
             """
             SELECT COALESCE(SUM(requests), 0) AS requests,
                    COALESCE(SUM(success), 0) AS success,
-                   COALESCE(SUM(failed), 0) AS failed,
-                   COALESCE(SUM(consumed), 0) AS consumed
+                   COALESCE(SUM(failed), 0) AS failed
             FROM request_daily_stats
             """
         ).fetchone()
@@ -1200,7 +1152,6 @@ def _dashboardStats():
         "consumed": consumed,
         "today": today,
         "all": allData,
-        "all_consumed": recentStats["consumed"] + summaryStats["consumed"],
         "market": market,
     }
 
@@ -1453,75 +1404,15 @@ def adminSettings():
         return _adminResponse("AI 配置已保存", "success", "adminSettings")
 
 
-def _conversionLogRows(status="all", page=1, perPage=20):
-    _cleanupConversionLogs()
-    offset = (page - 1) * perPage
-    with closing(_connect()) as database:
-        if status == "all":
-            total = database.execute(
-                "SELECT COUNT(*) FROM conversion_logs"
-            ).fetchone()[0]
-            rows = database.execute(
-                """
-                SELECT cl.id, cl.machine_id, cl.input_content, cl.output_content,
-                       cl.custom_style, cl.created_at, cl.status,
-                       m.id AS machine_number
-                FROM conversion_logs cl
-                LEFT JOIN machines m ON m.machine_id = cl.machine_id
-                ORDER BY cl.created_at DESC
-                LIMIT ? OFFSET ?
-                """,
-                (perPage, offset),
-            ).fetchall()
-        else:
-            total = database.execute(
-                "SELECT COUNT(*) FROM conversion_logs WHERE status = ?",
-                (status,),
-            ).fetchone()[0]
-            rows = database.execute(
-                """
-                SELECT cl.id, cl.machine_id, cl.input_content, cl.output_content,
-                       cl.custom_style, cl.created_at, cl.status,
-                       m.id AS machine_number
-                FROM conversion_logs cl
-                LEFT JOIN machines m ON m.machine_id = cl.machine_id
-                WHERE cl.status = ?
-                ORDER BY cl.created_at DESC
-                LIMIT ? OFFSET ?
-                """,
-                (status, perPage, offset),
-            ).fetchall()
-    logs = []
-    for row in rows:
-        code = f"DJ-{row['machine_number']:06d}" if row["machine_number"] else ""
-        logs.append({
-            "id": row["id"],
-            "machine_code": code,
-            "input_content": row["input_content"],
-            "output_content": row["output_content"],
-            "custom_style": row["custom_style"],
-            "created_at": row["created_at"],
-            "status": row["status"],
-        })
-    totalPages = max(1, (total + perPage - 1) // perPage)
-    return logs, total, totalPages
+_CONVERSION_LOG_SELECT = """
+    SELECT cl.id, cl.input_content, cl.output_content, cl.custom_style,
+           cl.created_at, cl.status, m.id AS machine_number
+    FROM conversion_logs cl
+    LEFT JOIN machines m ON m.machine_id = cl.machine_id
+"""
 
 
-def _getConversionLog(logId):
-    with closing(_connect()) as database:
-        row = database.execute(
-            """
-            SELECT cl.id, cl.machine_id, cl.input_content, cl.output_content,
-                   cl.custom_style, cl.created_at, cl.status,
-                   m.id AS machine_number
-            FROM conversion_logs cl
-            LEFT JOIN machines m ON m.machine_id = cl.machine_id
-            WHERE cl.id = ?
-            """,
-            (logId,),
-        ).fetchone()
-    if not row:
-        return None
+def _conversionLog(row):
     return {
         "id": row["id"],
         "machine_code": (
@@ -1533,6 +1424,30 @@ def _getConversionLog(logId):
         "created_at": row["created_at"],
         "status": row["status"],
     }
+
+
+def _conversionLogRows(status="all", page=1, perPage=20):
+    _cleanupConversionLogs()
+    offset = (page - 1) * perPage
+    where, parameters = ("", ()) if status == "all" else ("WHERE cl.status = ?", (status,))
+    with closing(_connect()) as database:
+        total = database.execute(
+            f"SELECT COUNT(*) FROM conversion_logs cl {where}", parameters
+        ).fetchone()[0]
+        rows = database.execute(
+            f"{_CONVERSION_LOG_SELECT} {where} ORDER BY cl.created_at DESC LIMIT ? OFFSET ?",
+            (*parameters, perPage, offset),
+        ).fetchall()
+    totalPages = max(1, (total + perPage - 1) // perPage)
+    return [_conversionLog(row) for row in rows], total, totalPages
+
+
+def _getConversionLog(logId):
+    with closing(_connect()) as database:
+        row = database.execute(
+            f"{_CONVERSION_LOG_SELECT} WHERE cl.id = ?", (logId,)
+        ).fetchone()
+    return _conversionLog(row) if row else None
 
 
 def _updateConversionLogStatus(logId, status):
@@ -1763,32 +1678,14 @@ def adminConversionLogAddSubmit(logId):
 def adminConversionLogReview():
     with closing(_connect()) as database:
         row = database.execute(
-            """
-            SELECT cl.id, cl.machine_id, cl.input_content, cl.output_content,
-                   cl.custom_style, cl.created_at, cl.status,
-                   m.id AS machine_number
-            FROM conversion_logs cl
-            LEFT JOIN machines m ON m.machine_id = cl.machine_id
-            WHERE cl.status = 'pending'
-            ORDER BY cl.created_at ASC
-            LIMIT 1
-            """,
+            f"{_CONVERSION_LOG_SELECT} WHERE cl.status = 'pending' "
+            "ORDER BY cl.created_at ASC LIMIT 1"
         ).fetchone()
     if not row:
         return _adminResponse(
             "没有待审批的记录", "info", "adminConversionLogs"
         )
-    log = {
-        "id": row["id"],
-        "machine_code": (
-            f"DJ-{row['machine_number']:06d}" if row["machine_number"] else ""
-        ),
-        "input_content": row["input_content"],
-        "output_content": row["output_content"],
-        "custom_style": row["custom_style"],
-        "created_at": row["created_at"],
-        "status": row["status"],
-    }
+    log = _conversionLog(row)
     pendingCount = 0
     with closing(_connect()) as database:
         pendingCount = database.execute(
@@ -1882,7 +1779,6 @@ def adminPromptExampleDelete(exampleId):
 @_loginRequired
 def adminPromptExamplesReorder():
     _checkCsrf()
-    # 与应用市场各目录一样，接收 admin.js 共享排序表提交的 item_id / expected_item_id。
     try:
         orderedIds = [int(value) for value in request.form.getlist("item_id")]
         originalIds = [
@@ -1893,10 +1789,9 @@ def adminPromptExamplesReorder():
     if not orderedIds or len(orderedIds) != len(set(orderedIds)):
         return _adminResponse("排序数据无效", "error", "adminPromptExamples", 400)
     if not _reorderPromptExamples(orderedIds, originalIds):
-        if _isAjaxRequest():
-            return jsonify(message="排序已过期，请刷新页面后重试", category="error"), 409
-        flash("排序已过期，请刷新页面后重试", "error")
-        return redirect(url_for("adminPromptExamples"))
+        return _adminResponse(
+            "排序已过期，请刷新页面后重试", "error", "adminPromptExamples", 409
+        )
     return _adminResponse("排序已保存", "success", "adminPromptExamples")
 
 
@@ -1939,7 +1834,6 @@ def adminResetMachine(alias):
     )
 
 
-@app.post("/admin/ai/markdown/machines/reset-all")
 @app.post("/admin/ai/markdown/reset-all")
 @_loginRequired
 def adminResetAll():
@@ -1966,17 +1860,17 @@ def adminLogout():
 
 
 try:
-    from .app_store import marketplaceStats, register_app_store
+    from .app_store import marketplaceStats, registerAppStore
 except ImportError:
-    from app_store import marketplaceStats, register_app_store
+    from app_store import marketplaceStats, registerAppStore
 
-register_app_store(
+registerAppStore(
     app,
     connect=_connect,
-    login_required=_loginRequired,
-    csrf_token=_csrfToken,
-    check_csrf=_checkCsrf,
-    admin_response=_adminResponse,
+    loginRequired=_loginRequired,
+    csrfToken=_csrfToken,
+    checkCsrf=_checkCsrf,
+    adminResponse=_adminResponse,
 )
 
 

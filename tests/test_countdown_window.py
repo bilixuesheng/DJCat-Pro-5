@@ -1,10 +1,5 @@
-import os
-import tempfile
-from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QFontMetrics
@@ -16,18 +11,16 @@ from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.task_picker import TouchTimePicker
 from app.view.pages.countdown_page import CountdownEditPage, CountdownWindow
+from tests.support import isolateCfg
 
 
 class CountdownWindowTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
-        self.tempDir = tempfile.TemporaryDirectory()
-        self.configFile = cfg.file
-        cfg.file = Path(self.tempDir.name) / "config.json"
-        self.confirmBeforeReset = cfg.confirmBeforeResetCountdown.value
+        isolateCfg(self)
         self.window = CountdownWindow()
         self.window.resize(720, 240)
         self.window.show()
@@ -35,30 +28,27 @@ class CountdownWindowTest(TestCase):
 
     def tearDown(self):
         self.window.close()
-        cfg.set(cfg.confirmBeforeResetCountdown, self.confirmBeforeReset)
-        cfg.file = self.configFile
-        self.tempDir.cleanup()
 
     def testWindowedModeCollapsesInlineControls(self):
-        self.window.is_windowed = True
+        self.window.isWindowed = True
         self.window._applyWindowState()
         self.app.processEvents()
 
         self.assertTrue(self.window.controlsWidget.isHidden())
         self.assertFalse(self.window.controlsWidget.isEnabled())
-        self.assertFalse(self.window._controls_visible)
+        self.assertFalse(self.window._controlsVisible)
         self.assertEqual(self.window.contentsRect().size().toTuple(), (600, 190))
         self.assertEqual(self.window.timeLabel.font().pixelSize(), 95)
 
         self.window.remaining = 3723
-        self.window._updateDisplay()
+        self.window._refreshTime()
         self.assertEqual(
             self.window.timeLabel.text(),
             "1\u2009:\u20092\u2009:\u20093",
         )
 
         self.window.remaining = 86399
-        self.window._updateDisplay()
+        self.window._refreshTime()
         margins = self.window.vBoxLayout.contentsMargins()
         available = (
             self.window.contentsRect().width()
@@ -142,7 +132,7 @@ class CountdownWindowTest(TestCase):
             page.close()
 
     def testWindowedBlankClickDoesNotRevealInlineControls(self):
-        self.window.is_windowed = True
+        self.window.isWindowed = True
         self.window._applyWindowState()
         self.app.processEvents()
 
@@ -154,10 +144,10 @@ class CountdownWindowTest(TestCase):
         self.app.processEvents()
 
         self.assertTrue(self.window.controlsWidget.isHidden())
-        self.assertFalse(self.window._controls_visible)
+        self.assertFalse(self.window._controlsVisible)
 
     def testFullscreenBlankClickStillRevealsInlineControls(self):
-        self.window.is_windowed = False
+        self.window.isWindowed = False
         self.window.controlsWidget.show()
         self.window._setControlsVisible(False, animated=False)
 
@@ -169,7 +159,7 @@ class CountdownWindowTest(TestCase):
         self.app.processEvents()
 
         self.assertFalse(self.window.controlsWidget.isHidden())
-        self.assertTrue(self.window._controls_visible)
+        self.assertTrue(self.window._controlsVisible)
 
     def testPauseButtonKeepsThemeStyleAcrossControlFade(self):
         self.window._setControlsVisible(True, animated=False)
@@ -184,15 +174,15 @@ class CountdownWindowTest(TestCase):
 
         self.window._setControlsVisible(True, animated=True)
         self.assertTrue(self.window.controlsWidget.isEnabled())
-        self.assertFalse(self.window.btn_pause.icon().isNull())
+        self.assertFalse(self.window.btnPause.icon().isNull())
 
     def testResetConfirmationCanCancelOrConfirm(self):
-        self.window.initial_seconds = 600
+        self.window.initialSeconds = 600
         self.window.remaining = 120
         cfg.set(cfg.confirmBeforeResetCountdown, True)
         self.window._setupCornerButtons()
 
-        self.window.btn_reset.click()
+        self.window.btnReset.click()
         self.app.processEvents()
         flyout = next(
             child
@@ -208,7 +198,7 @@ class CountdownWindowTest(TestCase):
         self.app.processEvents()
         self.assertEqual(self.window.remaining, 120)
 
-        self.window.btn_reset.click()
+        self.window.btnReset.click()
         self.app.processEvents()
         flyout = next(
             child
@@ -226,12 +216,12 @@ class CountdownWindowTest(TestCase):
         self.assertIsNone(self.window._resetFlyout)
 
     def testResetCanRunWithoutConfirmation(self):
-        self.window.initial_seconds = 600
+        self.window.initialSeconds = 600
         self.window.remaining = 120
         cfg.set(cfg.confirmBeforeResetCountdown, False)
         self.window._setupCornerButtons()
 
-        self.window.btn_reset.click()
+        self.window.btnReset.click()
         self.app.processEvents()
 
         self.assertEqual(self.window.remaining, 600)

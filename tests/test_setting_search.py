@@ -1,12 +1,7 @@
-import os
-import tempfile
 import time
-from datetime import datetime
-from pathlib import Path
+from datetime import datetime, timedelta
 from unittest import TestCase
 from unittest.mock import call, patch
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent
 from PySide6.QtGui import QColor, QImage
@@ -24,23 +19,30 @@ from app.config.constants import APP_NAME
 from app.config.paths import ASSET_DIR
 from app.view.pages.setting_page import SettingPage
 from app.view.windows.main_window import MainWindow
+from tests.support import isolateCfg
+
+
+# 2026-08-17 是周一（weekday 0），各测试任务都排在这天 08:00:00。
+MONDAY = datetime(2026, 8, 17, 8, 0, 0, tzinfo=datetime.now().astimezone().tzinfo)
+
+
+def checkScheduleAt(window, now, broadcastTasks=(), shutdownTasks=(), homeCardTasks=()):
+    with (
+        patch.object(cfg.broadcastTasks, "_ConfigItem__value", list(broadcastTasks)),
+        patch.object(cfg.shutdownTasks, "_ConfigItem__value", list(shutdownTasks)),
+        patch.object(cfg.homeCardTasks, "_ConfigItem__value", list(homeCardTasks)),
+    ):
+        window._checkScheduleAt(now)
 
 
 class SettingSearchTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
-        self.tempDir = tempfile.TemporaryDirectory()
-        self.configFile = cfg.file
-        self.windowTitle = cfg.windowTitle.value
+        self.tempDir = isolateCfg(self)
         self.applicationIcon = self.app.windowIcon()
-        self.iconValues = [
-            (item, item.value)
-            for item in (cfg.applicationIconSource, cfg.applicationIconPath)
-        ]
-        cfg.file = Path(self.tempDir.name) / "config.json"
         cfg.set(cfg.applicationIconSource, "默认")
         cfg.set(cfg.applicationIconPath, "")
         self.quotaPatcher = patch.object(SettingPage, "_refreshAIQuota")
@@ -59,12 +61,7 @@ class SettingSearchTest(TestCase):
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.app.processEvents()
         self.quotaPatcher.stop()
-        cfg.set(cfg.windowTitle, self.windowTitle)
-        for item, value in self.iconValues:
-            cfg.set(item, value)
         self.app.setWindowIcon(self.applicationIcon)
-        cfg.file = self.configFile
-        self.tempDir.cleanup()
 
     def _waitUntil(self, predicate, timeout=5.0):
         # 导航动画按真实时间推进，机器一忙固定等 500 ms 就不够；等条件成立而不是等时长。
@@ -136,7 +133,7 @@ class SettingSearchTest(TestCase):
         self.assertTrue(page.applicationIconCard.isHidden())
 
     def testCustomApplicationIconUpdatesWindowsAndRestoresDefault(self):
-        path = Path(self.tempDir.name) / "custom-icon.png"
+        path = self.tempDir / "custom-icon.png"
         image = QImage(24, 24, QImage.Format.Format_ARGB32)
         image.fill(QColor("#ce352c"))
         self.assertTrue(image.save(str(path)))
@@ -158,7 +155,7 @@ class SettingSearchTest(TestCase):
         )
 
     def testSplashScreenUsesCustomApplicationIcon(self):
-        path = Path(self.tempDir.name) / "custom-icon.png"
+        path = self.tempDir / "custom-icon.png"
         image = QImage(24, 24, QImage.Format.Format_ARGB32)
         image.fill(QColor("#ce352c"))
         self.assertTrue(image.save(str(path)))
@@ -178,7 +175,7 @@ class SettingSearchTest(TestCase):
     def testMissingCustomApplicationIconFallsBackToDefault(self):
         defaultIcon = self.window.windowIcon().pixmap(24, 24).toImage()
 
-        cfg.set(cfg.applicationIconPath, str(Path(self.tempDir.name) / "missing.ico"))
+        cfg.set(cfg.applicationIconPath, str(self.tempDir / "missing.ico"))
         cfg.set(cfg.applicationIconSource, "自定义")
 
         self.assertEqual(
@@ -188,7 +185,7 @@ class SettingSearchTest(TestCase):
 
     def testApplicationIconPickerAcceptsIcoAndStoresSelectedPath(self):
         page = self.window.settingPage.ensureLoaded()
-        path = str(Path(self.tempDir.name) / "custom.ico")
+        path = str(self.tempDir / "custom.ico")
 
         with patch(
             "app.view.pages.setting_page.QFileDialog.getOpenFileName",
@@ -203,7 +200,7 @@ class SettingSearchTest(TestCase):
     def testClearingStoreCacheDropsPinnedIconPathsAndKeepsFallback(self):
         item = cfg.pinnedHomeCards
         oldValue = item.value
-        cachedIcon = Path(self.tempDir.name) / "cached-icon.png"
+        cachedIcon = self.tempDir / "cached-icon.png"
         cachedIcon.write_bytes(b"stale")
         cards = [
             {
@@ -267,7 +264,7 @@ class SettingSearchTest(TestCase):
                         expectedScaleMode,
                     )
                     self.assertEqual(
-                        self.window.homePage.banner.get_image_path(),
+                        self.window.homePage.banner.getImagePath(),
                         str(ASSET_DIR / BANNER_IMAGE_PRESETS[preset]),
                     )
         finally:
@@ -330,7 +327,7 @@ class SettingSearchTest(TestCase):
         for title, name in pageSpecs:
             with self.subTest(page=name):
                 previousCount = self.window.stackedWidget.count()
-                self.window.homePage.all_cards[title].clicked.emit()
+                self.window.homePage.allCards[title].clicked.emit()
                 self._waitUntil(
                     lambda: getattr(self.window, name) is not None
                     and self._navigationSettled(getattr(self.window, name))
@@ -344,7 +341,7 @@ class SettingSearchTest(TestCase):
                 self.window._navToHome()
                 self._waitUntil(lambda: self._navigationSettled(self.window.homePage))
 
-                self.window.homePage.all_cards[title].clicked.emit()
+                self.window.homePage.allCards[title].clicked.emit()
                 self._waitUntil(lambda: self._navigationSettled(page))
 
                 self.assertIs(getattr(self.window, name), page)
@@ -362,7 +359,7 @@ class SettingSearchTest(TestCase):
         showMainWindow = cfg.showMainWindowAfterFullscreenClock.value
         try:
             cfg.set(cfg.showMainWindowAfterFullscreenClock, True)
-            self.window.homePage.all_cards["全屏时钟"].clicked.emit()
+            self.window.homePage.allCards["全屏时钟"].clicked.emit()
             self.app.processEvents()
 
             clock = self.window.fullscreenClockWindow
@@ -477,22 +474,8 @@ class SettingSearchTest(TestCase):
             patch.object(self.window, "_playAudioTask") as playAudio,
             patch.object(self.window, "_handleShutdownTask") as handleShutdown,
         ):
-            self.window._runScheduledTasks(
-                "broadcast",
-                [broadcastTask],
-                "2026-08-17",
-                "08:00:00",
-                0,
-                playAudio,
-            )
-            self.window._runScheduledTasks(
-                "shutdown",
-                [shutdownTask],
-                "2026-08-17",
-                "08:00:00",
-                0,
-                handleShutdown,
-            )
+            for moment in (MONDAY - timedelta(seconds=1), MONDAY):
+                checkScheduleAt(self.window, moment, [broadcastTask], [shutdownTask])
 
         playAudio.assert_called_once_with(broadcastTask)
         handleShutdown.assert_called_once_with(shutdownTask)
@@ -507,16 +490,11 @@ class SettingSearchTest(TestCase):
             "type": "系统TTS",
             "content": "测试",
         }
+        task["weeks"] = [0, 1]
         with patch.object(self.window, "_playAudioTask") as playAudio:
-            self.window._runScheduledTasks(
-                "broadcast", [task], "2026-08-17", "08:00:00", 0, playAudio
-            )
-            self.window._runScheduledTasks(
-                "broadcast", [task], "2026-08-17", "08:00:00", 0, playAudio
-            )
-            self.window._runScheduledTasks(
-                "broadcast", [task], "2026-08-18", "08:00:00", 0, playAudio
-            )
+            for day in (MONDAY, MONDAY + timedelta(days=1)):
+                for moment in (day - timedelta(seconds=1), day, day):
+                    checkScheduleAt(self.window, moment, [task])
 
         self.assertEqual(playAudio.call_count, 2)
 
@@ -532,12 +510,8 @@ class SettingSearchTest(TestCase):
             for content in ("第一条", "第二条")
         ]
         with patch.object(self.window, "_playAudioTask") as playAudio:
-            self.window._runScheduledTasks(
-                "broadcast", tasks, "2026-08-17", "08:00:00", 0, playAudio
-            )
-            self.window._runScheduledTasks(
-                "broadcast", tasks, "2026-08-17", "08:00:00", 0, playAudio
-            )
+            for moment in (MONDAY - timedelta(seconds=1), MONDAY, MONDAY):
+                checkScheduleAt(self.window, moment, tasks)
 
         self.assertEqual(
             [call.args[0]["content"] for call in playAudio.call_args_list],
@@ -588,12 +562,14 @@ class SettingSearchTest(TestCase):
         }
         timezone = datetime.now().astimezone().tzinfo
         with patch.object(self.window, "_playAudioTask") as playAudio:
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 7, 59, 59, tzinfo=timezone),
                 [task],
                 [],
             )
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 8, 0, 1, tzinfo=timezone),
                 [task],
                 [],
@@ -623,13 +599,15 @@ class SettingSearchTest(TestCase):
                 patch.object(self.window, "_handleHomeCardTask") as runHomeCard,
                 patch.object(self.window, "_handleShutdownTask") as shutdown,
             ):
-                self.window._checkScheduleAt(
+                checkScheduleAt(
+                    self.window,
                     datetime(2026, 8, 17, 7, 59, 59, tzinfo=timezone),
                     [task],
                     [task],
                     [task],
                 )
-                self.window._checkScheduleAt(
+                checkScheduleAt(
+                    self.window,
                     datetime(2026, 8, 17, 8, 0, 0, tzinfo=timezone),
                     [task],
                     [task],
@@ -637,7 +615,8 @@ class SettingSearchTest(TestCase):
                 )
                 for item in items:
                     cfg.set(item, True)
-                self.window._checkScheduleAt(
+                checkScheduleAt(
+                    self.window,
                     datetime(2026, 8, 17, 8, 0, 1, tzinfo=timezone),
                     [task],
                     [task],
@@ -662,12 +641,14 @@ class SettingSearchTest(TestCase):
         }
         timezone = datetime.now().astimezone().tzinfo
         with patch.object(self.window, "_playAudioTask") as playAudio:
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 7, 59, 30, tzinfo=timezone),
                 [task],
                 [],
             )
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 8, 0, 30, tzinfo=timezone),
                 [task],
                 [],
@@ -684,12 +665,14 @@ class SettingSearchTest(TestCase):
         }
         timezone = datetime.now().astimezone().tzinfo
         with patch.object(self.window, "_handleShutdownTask") as handleShutdown:
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 7, 59, 30, tzinfo=timezone),
                 [],
                 [task],
             )
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 8, 0, 30, tzinfo=timezone),
                 [],
                 [task],
@@ -707,12 +690,14 @@ class SettingSearchTest(TestCase):
         }
         timezone = datetime.now().astimezone().tzinfo
         with patch.object(self.window, "_playAudioTask") as playAudio:
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 23, 59, 59, tzinfo=timezone),
                 [task],
                 [],
             )
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 18, 0, 0, 1, tzinfo=timezone),
                 [task],
                 [],
@@ -739,12 +724,14 @@ class SettingSearchTest(TestCase):
             patch.object(self.window, "_playAudioTask") as playAudio,
             patch.object(self.window, "_handleShutdownTask") as handleShutdown,
         ):
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 8, 0, 0, tzinfo=timezone),
                 [broadcast],
                 [shutdown],
             )
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 18, 8, 0, 0, tzinfo=timezone),
                 [broadcast],
                 [shutdown],

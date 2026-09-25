@@ -7,8 +7,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QScroller, QWidget
 
@@ -19,29 +17,23 @@ from app.view.pages.broadcast_page import (
     AIMarkdownDialog,
     BroadcastEditPage,
     BroadcastWindow,
+    _AIMarkdownRequest,
     _iterSseContent,
 )
 from app.view.pages.setting_page import CUSTOM_STYLE_PLACEHOLDER, SettingPage
 from app.view.windows.main_window import MachineRegistrationWorker
 from server import ai_markdown
+from tests.support import isolateCfg
 
 
 class AIMarkdownTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
-        self.tempConfigDir = tempfile.TemporaryDirectory()
-        self.configFile = cfg.file
-        self.markdownEnabled = cfg.broadcastMarkdownEnabled.value
-        cfg.file = Path(self.tempConfigDir.name) / "config.json"
+        isolateCfg(self)
         cfg.set(cfg.broadcastMarkdownEnabled, False)
-
-    def tearDown(self):
-        cfg.set(cfg.broadcastMarkdownEnabled, self.markdownEnabled)
-        cfg.file = self.configFile
-        self.tempConfigDir.cleanup()
 
     def testEditorControlsAndStreamParsing(self):
         page = BroadcastEditPage()
@@ -160,15 +152,15 @@ class AIMarkdownTest(unittest.TestCase):
         with patch.object(AIMarkdownDialog, "_fetchQuota"):
             dialog = AIMarkdownDialog("原内容", parent)
         self.addCleanup(dialog.close)
-        response = MagicMock()
+        request = MagicMock()
         dialog._running = True
-        dialog._activeResponse = response
+        dialog._request = request
 
         dialog.reject()
 
-        self.assertTrue(dialog._cancelEvent.is_set())
+        request.cancel.assert_called_once_with()
+        self.assertIsNone(dialog._request)
         self.assertFalse(dialog._running)
-        response.close.assert_called_once()
 
         with patch.object(AIMarkdownDialog, "_fetchQuota"):
             batchingDialog = AIMarkdownDialog("", parent)
@@ -227,63 +219,51 @@ class AIMarkdownTest(unittest.TestCase):
             self.assertTrue(QScroller.hasScroller(viewport))
 
     def testAIStyleSettings(self):
-        oldFile = cfg.file
-        oldEnabled = cfg.aiMarkdownCustomStyleEnabled.value
-        oldStyle = cfg.aiMarkdownCustomStyle.value
-        oldMachineCode = cfg.aiMarkdownMachineCode.value
-        with tempfile.TemporaryDirectory() as directory:
-            cfg.file = Path(directory) / "config.json"
-            try:
-                cfg.set(cfg.aiMarkdownCustomStyleEnabled, False)
-                cfg.set(cfg.aiMarkdownCustomStyle, "")
-                cfg.set(cfg.aiMarkdownMachineCode, "DJ-000123")
-                with patch.object(SettingPage, "_refreshAIQuota"):
-                    page = SettingPage()
-                    page.show()
-                self.addCleanup(page.close)
-                self.assertNotIn("高峰", page.aiQuotaCard.contentLabel.text())
+        cfg.set(cfg.aiMarkdownCustomStyleEnabled, False)
+        cfg.set(cfg.aiMarkdownCustomStyle, "")
+        cfg.set(cfg.aiMarkdownMachineCode, "DJ-000123")
+        with patch.object(SettingPage, "_refreshAIQuota"):
+            page = SettingPage()
+            page.show()
+        self.addCleanup(page.close)
+        self.assertNotIn("高峰", page.aiQuotaCard.contentLabel.text())
 
-                self.assertEqual(
-                    page.aiStyleCard.textEdit.placeholderText(),
-                    CUSTOM_STYLE_PLACEHOLDER,
-                )
-                self.assertEqual(page.aiStyleCard.view.maximumHeight(), 0)
-                page.aiStyleCard.switchButton.setChecked(True)
-                QTest.qWait(250)
-                self.assertTrue(cfg.aiMarkdownCustomStyleEnabled.value)
-                self.assertGreater(page.aiStyleCard.view.maximumHeight(), 0)
+        self.assertEqual(
+            page.aiStyleCard.textEdit.placeholderText(),
+            CUSTOM_STYLE_PLACEHOLDER,
+        )
+        self.assertEqual(page.aiStyleCard.view.maximumHeight(), 0)
+        page.aiStyleCard.switchButton.setChecked(True)
+        QTest.qWait(250)
+        self.assertTrue(cfg.aiMarkdownCustomStyleEnabled.value)
+        self.assertGreater(page.aiStyleCard.view.maximumHeight(), 0)
 
-                page.aiStyleCard.textEdit.setPlainText("只使用列表")
-                page.hide()
-                self.app.processEvents()
-                self.assertEqual(cfg.aiMarkdownCustomStyle.value, "只使用列表")
+        page.aiStyleCard.textEdit.setPlainText("只使用列表")
+        page.hide()
+        self.app.processEvents()
+        self.assertEqual(cfg.aiMarkdownCustomStyle.value, "只使用列表")
 
-                page.aiStyleCard.textEdit.setPlainText("a" * 4001)
-                self.assertEqual(
-                    len(page.aiStyleCard.textEdit.toPlainText()),
-                    4000,
-                )
-                self.assertIn("已截去", page.aiStyleCard.limitLabel.text())
-                page.aiStyleCard.flushPendingSave()
-                self.assertEqual(len(cfg.aiMarkdownCustomStyle.value), 4000)
+        page.aiStyleCard.textEdit.setPlainText("a" * 4001)
+        self.assertEqual(
+            len(page.aiStyleCard.textEdit.toPlainText()),
+            4000,
+        )
+        self.assertIn("已截去", page.aiStyleCard.limitLabel.text())
+        page.aiStyleCard.flushPendingSave()
+        self.assertEqual(len(cfg.aiMarkdownCustomStyle.value), 4000)
 
-                page._onAIQuotaReceived(8, 15, 2, True, "DJ-000124")
-                self.assertEqual(page.aiQuotaLabel.text(), "8 / 15")
-                self.assertEqual(page.aiMachineCodeLabel.text(), "DJ-000124")
-                self.assertEqual(cfg.aiMarkdownMachineCode.value, "DJ-000124")
-                self.assertIn(
-                    "9:00–12:00、14:00–18:00",
-                    page.aiQuotaCard.contentLabel.text(),
-                )
-                page._onAIQuotaReceived(8, 15, 1, False, "")
-                self.assertNotIn("高峰", page.aiQuotaCard.contentLabel.text())
-                page._onAIQuotaReceived(-1, -1, 1, None, "")
-                self.assertNotIn("高峰", page.aiQuotaCard.contentLabel.text())
-            finally:
-                cfg.set(cfg.aiMarkdownCustomStyleEnabled, oldEnabled)
-                cfg.set(cfg.aiMarkdownCustomStyle, oldStyle)
-                cfg.set(cfg.aiMarkdownMachineCode, oldMachineCode)
-                cfg.file = oldFile
+        page._onAIQuotaReceived(8, 15, 2, True, "DJ-000124")
+        self.assertEqual(page.aiQuotaLabel.text(), "8 / 15")
+        self.assertEqual(page.aiMachineCodeLabel.text(), "DJ-000124")
+        self.assertEqual(cfg.aiMarkdownMachineCode.value, "DJ-000124")
+        self.assertIn(
+            "9:00–12:00、14:00–18:00",
+            page.aiQuotaCard.contentLabel.text(),
+        )
+        page._onAIQuotaReceived(8, 15, 1, False, "")
+        self.assertNotIn("高峰", page.aiQuotaCard.contentLabel.text())
+        page._onAIQuotaReceived(-1, -1, 1, None, "")
+        self.assertNotIn("高峰", page.aiQuotaCard.contentLabel.text())
 
     def testClientRegistersMachineOnFirstStartup(self):
         response = MagicMock()
@@ -368,13 +348,6 @@ class AIMarkdownTest(unittest.TestCase):
         self.assertIn("要求输出：\n- 做大册103页", prompt)
 
     def testClientSendsEnabledCustomStyle(self):
-        parent = QWidget()
-        parent.resize(760, 500)
-        self.addCleanup(parent.close)
-        with patch.object(AIMarkdownDialog, "_fetchQuota"):
-            dialog = AIMarkdownDialog("原内容", parent)
-        self.addCleanup(dialog.close)
-
         response = MagicMock()
         response.__enter__.return_value = response
         response.headers = {}
@@ -385,38 +358,25 @@ class AIMarkdownTest(unittest.TestCase):
             "data: [DONE]",
         ]
 
-        oldFile = cfg.file
-        oldEnabled = cfg.aiMarkdownCustomStyleEnabled.value
-        oldStyle = cfg.aiMarkdownCustomStyle.value
-        with tempfile.TemporaryDirectory() as directory:
-            cfg.file = Path(directory) / "config.json"
-            try:
-                cfg.set(cfg.aiMarkdownCustomStyleEnabled, True)
-                cfg.set(cfg.aiMarkdownCustomStyle, "只使用列表")
-                dialog._source = "原内容"
-                with patch(
-                    "app.view.pages.broadcast_page.requests.post",
-                    return_value=response,
-                ) as post:
-                    dialog._streamConversion()
-                self.assertEqual(
-                    post.call_args.kwargs["json"]["custom_style"],
-                    "只使用列表",
-                )
+        cfg.set(cfg.aiMarkdownCustomStyleEnabled, True)
+        cfg.set(cfg.aiMarkdownCustomStyle, "只使用列表")
+        with patch(
+            "app.view.pages.broadcast_page.requests.post",
+            return_value=response,
+        ) as post:
+            _AIMarkdownRequest("原内容")._stream()
+        self.assertEqual(
+            post.call_args.kwargs["json"]["custom_style"],
+            "只使用列表",
+        )
 
-                cfg.set(cfg.aiMarkdownCustomStyleEnabled, False)
-                dialog._result = ""
-                dialog._finished = False
-                with patch(
-                    "app.view.pages.broadcast_page.requests.post",
-                    return_value=response,
-                ) as post:
-                    dialog._streamConversion()
-                self.assertNotIn("custom_style", post.call_args.kwargs["json"])
-            finally:
-                cfg.set(cfg.aiMarkdownCustomStyleEnabled, oldEnabled)
-                cfg.set(cfg.aiMarkdownCustomStyle, oldStyle)
-                cfg.file = oldFile
+        cfg.set(cfg.aiMarkdownCustomStyleEnabled, False)
+        with patch(
+            "app.view.pages.broadcast_page.requests.post",
+            return_value=response,
+        ) as post:
+            _AIMarkdownRequest("原内容")._stream()
+        self.assertNotIn("custom_style", post.call_args.kwargs["json"])
 
     def testServerRejectsOversizedCustomStyle(self):
         with patch.dict(
@@ -737,8 +697,8 @@ class AIMarkdownTest(unittest.TestCase):
                 )
                 database.commit()
 
-            self.assertEqual(ai_markdown._rollupOldRequests(force=True), 1)
-            self.assertEqual(ai_markdown._rollupOldRequests(force=True), 0)
+            self.assertEqual(ai_markdown._rollupOldRequests(), 1)
+            self.assertEqual(ai_markdown._rollupOldRequests(), 0)
 
             stats = ai_markdown._dashboardStats()
             machines = ai_markdown._machineRows()
@@ -749,13 +709,16 @@ class AIMarkdownTest(unittest.TestCase):
                 remainingUsage = database.execute(
                     "SELECT COUNT(*) FROM usage WHERE day = ?", (oldDay,)
                 ).fetchone()[0]
+                rolledUpConsumed = database.execute(
+                    "SELECT SUM(consumed) FROM request_daily_stats"
+                ).fetchone()[0]
 
             self.assertEqual(remainingLogs, 0)
             self.assertEqual(remainingUsage, 0)
             self.assertEqual(stats["all"]["ai_requests"], 2)
             self.assertEqual(stats["all"]["ai_success"], 1)
             self.assertEqual(stats["all"]["ai_failed"], 1)
-            self.assertEqual(stats["all_consumed"], 2)
+            self.assertEqual(rolledUpConsumed, 2)
             self.assertEqual(machines[0]["requests"], 2)
 
     def testReplacingDatabaseAtSamePathReinitializesSchema(self):
@@ -832,8 +795,12 @@ class AIMarkdownTest(unittest.TestCase):
             patch.object(ai_markdown, "_quotaCost", return_value=2),
         ):
             machineId = ai_markdown._machineId("a" * 64)
-            for _ in range(14):
-                ai_markdown._claim(machineId, 1)
+            with closing(ai_markdown._connect()) as database:
+                database.execute(
+                    "INSERT INTO usage (day, machine_id, count) VALUES (?, ?, 14)",
+                    (ai_markdown._today(), machineId),
+                )
+                database.commit()
             response = ai_markdown.app.test_client().post(
                 "/ai/markdown",
                 json={"content": "作业", "machine_id": "a" * 64},
@@ -885,13 +852,20 @@ class AIMarkdownTest(unittest.TestCase):
             ),
         ):
             machineId = ai_markdown._machineId("a" * 64)
+            day = ai_markdown._today()
+            limit = ai_markdown._dailyLimit()
+            claims = [
+                ai_markdown._claimRequest(machineId, 2, day, limit) for _ in range(7)
+            ]
             self.assertEqual(
-                [ai_markdown._claim(machineId, 2) for _ in range(7)],
+                [remaining for remaining, _ in claims],
                 [13, 11, 9, 7, 5, 3, 1],
             )
-            self.assertEqual(ai_markdown._claim(machineId, 2), -1)
+            self.assertEqual(
+                ai_markdown._claimRequest(machineId, 2, day, limit), (-1, None)
+            )
             self.assertEqual(ai_markdown._remaining(machineId), 1)
-            ai_markdown._refund(machineId, 2)
+            ai_markdown._requestFinished(claims[-1][1], False, machineId, 2, day)
             self.assertEqual(ai_markdown._remaining(machineId), 3)
 
 

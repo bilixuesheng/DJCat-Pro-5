@@ -1,16 +1,13 @@
-import os
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QWidget
-from qfluentwidgets import qconfig
+from qfluentwidgets import Theme, qconfig
 
 from app.config.cfg import WINDOW_BACKGROUND_MODES, WINDOW_BACKGROUND_SCALE_MODES, cfg
 from app.view.components.setting_preview import (
@@ -29,40 +26,16 @@ from app.view.pages.broadcast_page import BroadcastWindow
 from app.view.pages.countdown_page import CountdownWindow
 from app.view.pages.fullscreen_clock import FullscreenClockWindow
 from app.view.pages.setting_page import SettingPage
+from tests.support import isolateCfg
 
 
 class WindowBackgroundTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
-        self.tempDir = tempfile.TemporaryDirectory()
-        self.configFile = cfg.file
-        cfg.file = Path(self.tempDir.name) / "config.json"
-        self.items = (
-            cfg.bannerImageSource,
-            cfg.broadcastBackgroundMode,
-            cfg.broadcastBackgroundColor,
-            cfg.broadcastBackgroundImagePath,
-            cfg.broadcastBackgroundScaleMode,
-            cfg.countdownBackgroundMode,
-            cfg.countdownBackgroundColor,
-            cfg.countdownBackgroundImagePath,
-            cfg.countdownBackgroundScaleMode,
-            cfg.fullscreenClockBackgroundMode,
-            cfg.fullscreenClockBackgroundColor,
-            cfg.fullscreenClockBackgroundImagePath,
-            cfg.fullscreenClockBackgroundScaleMode,
-            cfg.customThemeMode,
-        )
-        self.values = [(item, item.value) for item in self.items]
-
-    def tearDown(self):
-        for item, value in self.values:
-            cfg.set(item, value, save=False)
-        cfg.file = self.configFile
-        self.tempDir.cleanup()
+        self.tempDir = isolateCfg(self)
 
     def testBackgroundConfigOffersIndependentModesAndScaleModes(self):
         self.assertEqual(WINDOW_BACKGROUND_MODES, ("主题色", "纯色", "图片"))
@@ -162,10 +135,10 @@ class WindowBackgroundTest(TestCase):
         accent = QColor(49, 101, 49)
         qconfig.set(qconfig.themeColor, accent, False)
 
-        cfg.set(cfg.customThemeMode, "Light", save=False)
+        qconfig.set(qconfig.themeMode, Theme.LIGHT, False)
         self.assertEqual(projectionTitleColor(), accent)
 
-        cfg.set(cfg.customThemeMode, "Dark", save=False)
+        qconfig.set(qconfig.themeMode, Theme.DARK, False)
         background = projectionThemeBackground()
         self.assertLess(contrast(accent, background), 3)
         self.assertGreaterEqual(contrast(projectionTitleColor(), background), 4.5)
@@ -199,9 +172,9 @@ class WindowBackgroundTest(TestCase):
             preview = previews[kind]
             return preview.grab().toImage().pixelColor(20, preview.height() // 2)
 
-        for theme, projection in (("Light", "#ffffff"), ("Dark", "#202020")):
+        for theme, projection in ((Theme.LIGHT, "#ffffff"), (Theme.DARK, "#202020")):
             with self.subTest(theme=theme):
-                cfg.set(cfg.customThemeMode, theme, save=False)
+                qconfig.set(qconfig.themeMode, theme, False)
                 self.assertEqual(pixel(PROJECTION_CONTENT).name(), projection)
                 self.assertEqual(pixel(COUNTDOWN_CONTENT).name(), "#000000")
 
@@ -269,9 +242,9 @@ class WindowBackgroundTest(TestCase):
         self.assertFalse(countdown.background._borderVisible)
         self.assertFalse(clock.background._borderVisible)
 
-        broadcast.is_windowed = True
-        countdown.is_windowed = True
-        clock.is_windowed = True
+        broadcast.isWindowed = True
+        countdown.isWindowed = True
+        clock.isWindowed = True
         broadcast._applyStyle()
         countdown._applyWindowState()
         clock._applyWindowState()
@@ -282,7 +255,7 @@ class WindowBackgroundTest(TestCase):
         self.assertTrue(clock.background._borderVisible)
 
     def testDisplayWindowsPaintRoundedBackgroundAndShadow(self):
-        imagePath = Path(self.tempDir.name) / "background.png"
+        imagePath = self.tempDir / "background.png"
         source = QImage(4, 4, QImage.Format.Format_RGB32)
         source.fill(QColor("#123456"))
         self.assertTrue(source.save(str(imagePath)))
@@ -295,7 +268,7 @@ class WindowBackgroundTest(TestCase):
             window = windowType()
             self.addCleanup(window.deleteLater)
             self.addCleanup(window.close)
-            window.is_windowed = True
+            window.isWindowed = True
             if isinstance(window, BroadcastWindow):
                 window.setupLayout()
                 window._updateButtonsState()
@@ -369,7 +342,7 @@ class WindowBackgroundTest(TestCase):
         ):
             with self.subTest(x=x, y=y):
                 self.assertEqual(background.resizeEdges(QPointF(x, y), 12), expected)
-        for button in (window.btn_edit, window.btn_min, window.btn_win, window.btn_close):
+        for button in (window.btnEdit, window.btnMin, window.btnWin, window.btnClose):
             for point in (button.rect().topLeft(), button.rect().bottomRight()):
                 position = button.mapTo(window, point) - background.pos()
                 self.assertEqual(background.resizeEdges(QPointF(position), 12), Qt.Edge(0))
@@ -381,7 +354,7 @@ class WindowBackgroundTest(TestCase):
         window = BroadcastWindow()
         self.addCleanup(window.deleteLater)
         self.addCleanup(window.close)
-        window.is_windowed = True
+        window.isWindowed = True
         window._applyWindowState()
         message = SimpleNamespace(message=0x84, hWnd=123, lParam=((-234 & 0xFFFF) << 16) | (-123 & 0xFFFF))
         constants = SimpleNamespace(

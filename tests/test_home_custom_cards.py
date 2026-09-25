@@ -1,11 +1,8 @@
 import os
-import tempfile
 import threading
 import unittest
 from pathlib import Path
 from unittest import TestCase, mock
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QInputDevice, QMouseEvent
@@ -14,21 +11,19 @@ from PySide6.QtWidgets import QApplication, QScroller, QWidget
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import (
     RoundMenu,
-    ToggleToolButton,
     ToolTipFilter,
     themeColor,
 )
 
 from app.common.home_cards import (
-    DEFAULT_HOME_CARD_NAMES,
     ActionSequenceWorker,
-    execute_action,
-    extract_icon_images,
-    normalize_custom_cards,
-    normalize_pinned_cards,
-    validate_action,
+    executeAction,
+    extractIconImages,
+    normalizeCustomCards,
+    normalizePinnedCards,
+    validateAction,
 )
-from app.config.cfg import cfg
+from app.config.cfg import DEFAULT_HOME_CARDS, cfg
 from app.view.components.home_card_dialog import (
     ActionEditorDialog,
     CustomCardDialog,
@@ -36,22 +31,18 @@ from app.view.components.home_card_dialog import (
 )
 from app.view.components.scroll_area import ScrollArea
 from app.view.pages.home_page import HomePage
+from tests.support import isolateCfg
 
 
 class HomeCustomCardTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.config_file = cfg.file
-        self.card_order = list(cfg.homeCardOrder.value)
-        self.visible_defaults = list(cfg.visibleDefaultHomeCards.value)
-        self.custom_cards = list(cfg.customHomeCards.value)
-        cfg.file = Path(self.temp_dir.name) / "config.json"
-        cfg.set(cfg.homeCardOrder, list(DEFAULT_HOME_CARD_NAMES))
-        cfg.set(cfg.visibleDefaultHomeCards, list(DEFAULT_HOME_CARD_NAMES))
+        self.tempDir = isolateCfg(self)
+        cfg.set(cfg.homeCardOrder, list(DEFAULT_HOME_CARDS))
+        cfg.set(cfg.visibleDefaultHomeCards, list(DEFAULT_HOME_CARDS))
         cfg.set(cfg.customHomeCards, [])
         self.page = HomePage()
         self.page.resize(900, 700)
@@ -60,22 +51,17 @@ class HomeCustomCardTest(TestCase):
 
     def tearDown(self):
         self.page.close()
-        cfg.set(cfg.homeCardOrder, self.card_order)
-        cfg.set(cfg.visibleDefaultHomeCards, self.visible_defaults)
-        cfg.set(cfg.customHomeCards, self.custom_cards)
-        cfg.file = self.config_file
-        self.temp_dir.cleanup()
 
     def testDefaultCardsCanBeRemovedAndRestored(self):
         self.page._removeDefaultCard("全屏投送")
-        self.assertNotIn("全屏投送", self.page._card_order)
+        self.assertNotIn("全屏投送", self.page._cardOrder)
         self.assertNotIn("全屏投送", cfg.visibleDefaultHomeCards.value)
         self.page._restoreDefaultCard("全屏投送")
-        self.assertIn("全屏投送", self.page._card_order)
+        self.assertIn("全屏投送", self.page._cardOrder)
         self.assertIn("全屏投送", cfg.visibleDefaultHomeCards.value)
 
     def testRestoringCardImmediatelyRefreshesHomeLayoutHeight(self):
-        name = DEFAULT_HOME_CARD_NAMES[-1]
+        name = DEFAULT_HOME_CARDS[-1]
         self.page._removeDefaultCard(name)
         self.app.processEvents()
 
@@ -88,7 +74,7 @@ class HomeCustomCardTest(TestCase):
         self.assertGreaterEqual(self.page.cardsWidget.height(), expected_height)
 
     def testNewMenuShowsOnlyMissingDefaultsWithIcons(self):
-        visible = list(DEFAULT_HOME_CARD_NAMES[:-1])
+        visible = list(DEFAULT_HOME_CARDS[:-1])
         cfg.set(cfg.visibleDefaultHomeCards, visible)
         self.page._renderCards()
         with mock.patch.object(RoundMenu, "exec", autospec=True) as execute:
@@ -98,7 +84,7 @@ class HomeCustomCardTest(TestCase):
         self.assertFalse(submenu.icon().isNull())
         self.assertEqual(
             [action.text() for action in submenu.actions()],
-            [DEFAULT_HOME_CARD_NAMES[-1]],
+            [DEFAULT_HOME_CARDS[-1]],
         )
         self.assertFalse(submenu.actions()[0].icon().isNull())
         self.assertEqual(menu.actions()[0].text(), "自定义")
@@ -107,7 +93,7 @@ class HomeCustomCardTest(TestCase):
         self.assertEqual(self.page.addBtn.text(), "")
         self.assertEqual(self.page.addBtn.size(), self.page.sortBtn.sizeHint())
         self.assertEqual(self.page.sortBtn.size(), self.page.sortBtn.sizeHint())
-        card = self.page.all_cards[DEFAULT_HOME_CARD_NAMES[0]]
+        card = self.page.allCards[DEFAULT_HOME_CARDS[0]]
         self.assertEqual(card.editButton.size().toTuple(), (24, 24))
         self.assertEqual(card.deleteButton.size().toTuple(), (26, 26))
 
@@ -123,7 +109,7 @@ class HomeCustomCardTest(TestCase):
                 create.assert_called_once_with()
 
     def testNewControlsUseFluentTooltips(self):
-        card = self.page.all_cards[DEFAULT_HOME_CARD_NAMES[0]]
+        card = self.page.allCards[DEFAULT_HOME_CARDS[0]]
         for widget in (
             self.page.addBtn,
             self.page.sortBtn,
@@ -448,12 +434,12 @@ class HomeCustomCardTest(TestCase):
         self.page._addCustomCard(data)
         self.page._renderCards()
         self.page._saveCardOrder()
-        self.assertIn("custom:custom-one", self.page._card_order)
+        self.assertIn("custom:custom-one", self.page._cardOrder)
         self.assertEqual(cfg.customHomeCards.value[0]["id"], "custom-one")
 
         second = HomePage()
         try:
-            self.assertIn("custom:custom-one", second._card_order)
+            self.assertIn("custom:custom-one", second._cardOrder)
             self.assertEqual(second._customCardData["custom-one"]["title"], "测试卡片")
         finally:
             second.close()
@@ -529,7 +515,7 @@ class HomeCustomCardTest(TestCase):
                 state["actions"] = [second, added]
 
         worker = ActionSequenceWorker("card", get_actions)
-        with mock.patch("app.common.home_cards.execute_action", side_effect=fake_execute):
+        with mock.patch("app.common.home_cards.executeAction", side_effect=fake_execute):
             worker._run()
         self.assertEqual(calls, ["one", "two", "three"])
 
@@ -554,7 +540,7 @@ class HomeCustomCardTest(TestCase):
         cancel = threading.Event()
         cancel.set()
 
-        error = execute_action(
+        error = executeAction(
             {"type": "program", "target": "demo.exe", "wait": True},
             cancel,
         )
@@ -572,7 +558,7 @@ class HomeCustomCardTest(TestCase):
         cancel.is_set.return_value = False
         cancel.wait.return_value = True
 
-        error = execute_action(
+        error = executeAction(
             {"type": "program", "target": "demo.exe", "wait": True},
             cancel,
         )
@@ -635,7 +621,7 @@ class HomeCustomCardTest(TestCase):
         self.assertEqual(self.page.findChildren(RoundMenu), [])
 
     def testNormalizeSkipsInvalidCardsAndRepairsDuplicateActionIds(self):
-        cards = normalize_custom_cards(
+        cards = normalizeCustomCards(
             [
                 {"title": "缺动作"},
                 {
@@ -685,7 +671,7 @@ class HomeCustomCardTest(TestCase):
             "title": "打开应用",
             "action": {"type": "program", "target": "demo.exe"},
         }
-        cards = normalize_pinned_cards(
+        cards = normalizePinnedCards(
             [None, {"app_id": "broken"}, valid, dict(valid)]
         )
 
@@ -693,12 +679,12 @@ class HomeCustomCardTest(TestCase):
         self.assertEqual((cards[0]["app_id"], cards[0]["preset_id"]), (7, 9))
         self.assertEqual(self.page.setApplicationCards([None, valid, dict(valid)]), cards)
         self.assertEqual(
-            [key for key in self.page.all_cards if key.startswith("app:")],
+            [key for key in self.page.allCards if key.startswith("app:")],
             ["app:7:9"],
         )
 
     def testDirectApplicationPinnedCardUsesReservedZeroPresetId(self):
-        cards = normalize_pinned_cards(
+        cards = normalizePinnedCards(
             [
                 {
                     "app_id": 7,
@@ -712,7 +698,7 @@ class HomeCustomCardTest(TestCase):
         self.assertEqual(len(cards), 1)
         self.assertEqual((cards[0]["app_id"], cards[0]["preset_id"]), (7, 0))
         self.page.setApplicationCards(cards)
-        self.assertIn("app:7:0", self.page.all_cards)
+        self.assertIn("app:7:0", self.page.allCards)
 
     def testApplicationCardRefreshReusesWidgetsAndExecutesLatestAction(self):
         cards = [
@@ -724,7 +710,7 @@ class HomeCustomCardTest(TestCase):
             }
         ]
         self.page.setApplicationCards(cards)
-        card = self.page.all_cards["app:7:0"]
+        card = self.page.allCards["app:7:0"]
         changes = []
         actions = []
         self.page.homeCardsChanged.connect(changes.append)
@@ -732,7 +718,7 @@ class HomeCustomCardTest(TestCase):
 
         self.page.setApplicationCards(cards)
 
-        self.assertIs(self.page.all_cards["app:7:0"], card)
+        self.assertIs(self.page.allCards["app:7:0"], card)
         self.assertEqual(changes, [])
 
         cards[0]["title"] = "更新后的应用"
@@ -743,13 +729,13 @@ class HomeCustomCardTest(TestCase):
         self.page.setApplicationCards(cards)
         self.page.activateHomeCard("app:7:0")
 
-        self.assertIs(self.page.all_cards["app:7:0"], card)
+        self.assertIs(self.page.allCards["app:7:0"], card)
         self.assertEqual(card.titleLabel.text(), "更新后的应用")
         self.assertEqual(actions[-1]["action"]["url"], "https://new.example")
         self.assertEqual(len(changes), 1)
 
     def testApplicationCardFallsBackWhenCachedIconWasDeleted(self):
-        missingIcon = Path(self.temp_dir.name) / "deleted-cache.png"
+        missingIcon = self.tempDir / "deleted-cache.png"
         cards = [
             {
                 "app_id": 7,
@@ -763,7 +749,7 @@ class HomeCustomCardTest(TestCase):
 
         self.page.setApplicationCards(cards)
 
-        card = self.page.all_cards["app:7:0"]
+        card = self.page.allCards["app:7:0"]
         self.assertFalse(card.iconWidget.getIcon().isNull())
 
     def testApplicationCardsStayEditableWhenRefreshedDuringEditing(self):
@@ -779,20 +765,20 @@ class HomeCustomCardTest(TestCase):
             ]
         )
 
-        card = self.page.all_cards["app:7:0"]
+        card = self.page.allCards["app:7:0"]
         self.assertTrue(card._editing)
         self.assertFalse(card.deleteButton.isHidden())
 
     def testMalformedDefaultAndOrderConfigDoesNotBreakHomePage(self):
-        cfg.set(cfg.visibleDefaultHomeCards, [[], DEFAULT_HOME_CARD_NAMES[0]])
-        cfg.set(cfg.homeCardOrder, [[], DEFAULT_HOME_CARD_NAMES[0]])
+        cfg.set(cfg.visibleDefaultHomeCards, [[], DEFAULT_HOME_CARDS[0]])
+        cfg.set(cfg.homeCardOrder, [[], DEFAULT_HOME_CARDS[0]])
         self.page._renderCards()
-        self.assertIn(DEFAULT_HOME_CARD_NAMES[0], self.page._card_order)
+        self.assertIn(DEFAULT_HOME_CARDS[0], self.page._cardOrder)
 
     @mock.patch("app.common.home_cards.subprocess.Popen")
     def testProgramArgumentsAreStartedWithoutShell(self, popen):
         popen.return_value.poll.return_value = 0
-        error = execute_action(
+        error = executeAction(
             {
                 "type": "program",
                 "target": "demo.exe",
@@ -812,7 +798,7 @@ class HomeCustomCardTest(TestCase):
     @mock.patch("app.common.home_cards.subprocess.Popen")
     def testShellUsesConfiguredConsoleMode(self, popen):
         popen.return_value.poll.return_value = 0
-        error = execute_action(
+        error = executeAction(
             {"type": "shell", "command": "echo ready", "show_console": True},
             threading.Event(),
         )
@@ -823,14 +809,14 @@ class HomeCustomCardTest(TestCase):
     @mock.patch("app.common.home_cards.webbrowser.open", return_value=True)
     def testUrlAddsHttpsWhenMissing(self, open_url):
         self.assertIsNone(
-            execute_action({"type": "url", "target": "example.com"}, threading.Event())
+            executeAction({"type": "url", "target": "example.com"}, threading.Event())
         )
         open_url.assert_called_once_with("https://example.com", new=2)
 
     def testActionValidationRejectsUnsafeUrl(self):
-        self.assertIn("HTTP", validate_action({"type": "url", "target": "file:///bad"}))
+        self.assertIn("HTTP", validateAction({"type": "url", "target": "file:///bad"}))
         self.assertEqual(
-            validate_action({"type": "url", "target": "https://["}),
+            validateAction({"type": "url", "target": "https://["}),
             "网页地址无效",
         )
 
@@ -839,4 +825,4 @@ class HomeCustomCardTest(TestCase):
         shell32 = Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "shell32.dll"
         if not shell32.exists():
             self.skipTest("shell32.dll not found")
-        self.assertGreater(len(extract_icon_images(shell32)), 1)
+        self.assertGreater(len(extractIconImages(shell32)), 1)

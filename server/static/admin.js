@@ -175,7 +175,6 @@
         const toastCategory = category === "success" || category === "error" ? category : "info";
 
         toast.className = `toast toast-${toastCategory}`;
-        toast.dataset.toast = "true";
         toast.setAttribute("role", toastCategory === "error" ? "alert" : "status");
         mark.className = "toast-mark";
         mark.setAttribute("aria-hidden", "true");
@@ -186,7 +185,6 @@
         close.setAttribute("aria-label", "关闭提示");
         close.textContent = "×";
         progress.className = "toast-progress";
-        progress.dataset.toastProgress = "true";
         progress.setAttribute("aria-hidden", "true");
         toast.append(mark, text, close, progress);
         toastRegion().append(toast);

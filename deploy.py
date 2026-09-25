@@ -8,7 +8,7 @@ from app.common.config import VERSION
 from app.config.constants import APP_NAME, AUTHOR, YEAR
 
 
-def _numeric_version(version: str) -> str:
+def _numericVersion(version: str) -> str:
     match = re.fullmatch(r"(\d+\.\d+\.\d+)(?:\.(\d+)|-pre\.(\d+)|-kb\d+)?", version)
     if not match:
         return "1.0.0.0"
@@ -33,8 +33,8 @@ def qtTranslationArgs() -> list[str]:
     ]
 
 
-def build_args() -> list[str]:
-    nuitka_command = f'"{sys.executable}" -m nuitka'
+def buildArgs() -> list[str]:
+    nuitkaCommand = f'"{sys.executable}" -m nuitka'
 
     assetFiles = [
         "app/assets/logo.png",
@@ -51,9 +51,9 @@ def build_args() -> list[str]:
         print("Please ensure these files are committed to Git.")
         sys.exit(1)
 
-    clean_version = _numeric_version(VERSION)
+    cleanVersion = _numericVersion(VERSION)
     return [
-        nuitka_command,
+        nuitkaCommand,
         "--standalone",
         "--windows-console-mode=disable",
         "--plugin-enable=pyside6",
@@ -75,8 +75,8 @@ def build_args() -> list[str]:
         "--windows-icon-from-ico=app/assets/logo.png",
         f'--company-name="{AUTHOR}"',
         f'--product-name="{APP_NAME}"',
-        f"--file-version={clean_version}",
-        f"--product-version={clean_version}",
+        f"--file-version={cleanVersion}",
+        f"--product-version={cleanVersion}",
         f'--file-description="{APP_NAME}"',
         f'--copyright="Copyright(C) {YEAR} {AUTHOR}"',
         "--output-dir=dist",
@@ -89,7 +89,7 @@ def main() -> int:
         print("Error: This script is for Windows only.")
         return 1
 
-    args = build_args()
+    args = buildArgs()
     command = " ".join(args)
 
     print(f"Build Version: {VERSION}")

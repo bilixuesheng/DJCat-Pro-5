@@ -7,7 +7,6 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <script defer src="{{ url_for('static', filename='admin.js') }}"></script>
-    <style>.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}</style>
 </head>
 <body class="login-page">
     <main class="login-shell">
@@ -41,19 +40,6 @@
             </div>
         </section>
     </main>
-    {% with flashes = get_flashed_messages(with_categories=true) %}
-        {% if flashes %}
-            <div class="toast-region" aria-live="polite" aria-atomic="true">
-                {% for category, message in flashes %}
-                    <div class="toast toast-{{ category if category in ('success', 'error') else 'info' }}" data-toast role="{{ 'alert' if category == 'error' else 'status' }}">
-                        <span class="toast-mark" aria-hidden="true"></span>
-                        <p>{{ message }}</p>
-                        <button class="toast-close" type="button" data-toast-close aria-label="关闭提示">×</button>
-                        <span class="toast-progress" data-toast-progress aria-hidden="true"></span>
-                    </div>
-                {% endfor %}
-            </div>
-        {% endif %}
-    {% endwith %}
+    {% include "_toasts.html" %}
 </body>
 </html>

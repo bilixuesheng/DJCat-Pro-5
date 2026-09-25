@@ -1,10 +1,7 @@
-import os
 import threading
 import time
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QAbstractAnimation, QEvent, QPoint, QPointF, Qt, QTime
 from PySide6.QtGui import QImage, QInputDevice, QPixmap, QWheelEvent
@@ -23,28 +20,26 @@ from shiboken6 import delete, isValid
 
 from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
-from app.view.components.task_picker import TouchTimePicker
+from app.view.components.task_page import ScheduledTaskPage
+from app.view.components.task_picker import TaskFormSettingCard, TouchTimePicker
 from app.view.pages.home_card_task_page import (
     AddHomeCardTaskDialog,
-    HomeCardTaskSettingCard,
-    create_home_card_task_form,
+    createHomeCardTaskForm,
 )
 from app.view.pages.schedule_page import (
     AddTaskDialog,
-    BroadcastSettingCard,
     ChineseVoiceLoader,
     SchedulePage,
     TaskCard,
-    create_task_form,
+    createTaskForm,
 )
 from app.view.pages.shutdown_page import (
     AddShutdownTaskDialog,
-    ShutdownSettingCard,
     ShutdownPromptDialog,
     ShutdownPage,
     ShutdownTaskCard,
-    create_shutdown_form,
-    show_shutdown_prompt,
+    createShutdownForm,
+    showShutdownPrompt,
 )
 
 
@@ -79,7 +74,7 @@ def shutdown_task():
 class ScheduleShutdownUiTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def testPromptPlacesPrimaryShutdownButtonFirst(self):
         parent = QWidget()
@@ -121,17 +116,15 @@ class ScheduleShutdownUiTest(TestCase):
                 cfg.broadcastTasks,
                 cfg.broadcastTasksEnabled,
                 broadcast_task(),
-                "addBtn",
             ),
             (
                 ShutdownPage,
                 cfg.shutdownTasks,
                 cfg.shutdownTasksEnabled,
                 shutdown_task(),
-                "addButton",
             ),
         )
-        for pageType, tasksItem, enabledItem, task, addButtonName in cases:
+        for pageType, tasksItem, enabledItem, task in cases:
             values = (tasksItem.value, enabledItem.value)
             page = None
             try:
@@ -142,13 +135,13 @@ class ScheduleShutdownUiTest(TestCase):
 
                 with self.subTest(page=pageType.__name__):
                     self.assertFalse(page.masterSwitch.switchButton.isChecked())
-                    self.assertFalse(getattr(page, addButtonName).isEnabled())
+                    self.assertFalse(page.addButton.isEnabled())
                     self.assertFalse(card.isEnabled())
                     self.assertTrue(tasksItem.value[0]["enabled"])
 
                     page.masterSwitch.switchButton.setChecked(True)
                     self.assertTrue(enabledItem.value)
-                    self.assertTrue(getattr(page, addButtonName).isEnabled())
+                    self.assertTrue(page.addButton.isEnabled())
                     self.assertTrue(card.isEnabled())
                     self.assertTrue(tasksItem.value[0]["enabled"])
             finally:
@@ -162,15 +155,11 @@ class ScheduleShutdownUiTest(TestCase):
                 cfg.set(enabledItem, values[1])
 
     def testTaskListScrollKeepsPageHeaderFixed(self):
-        cases = (
-            (SchedulePage, "title"),
-            (ShutdownPage, "titleLabel"),
-        )
-        for pageType, titleAttribute in cases:
+        for pageType in (SchedulePage, ShutdownPage):
             with self.subTest(page=pageType.__name__), patch.object(
                 pageType,
                 "_loadTasks",
-                lambda page: setattr(page, "current_tasks", []),
+                lambda page: None,
             ):
                 page = pageType()
                 self.addCleanup(page.deleteLater)
@@ -191,7 +180,7 @@ class ScheduleShutdownUiTest(TestCase):
                     QScroller.grabbedGesture(page.scrollArea.viewport()).value,
                     0,
                 )
-                title = getattr(page, titleAttribute)
+                title = page.titleLabel
                 titlePosition = title.mapTo(page, QPoint())
                 firstRowPosition = rows[0].mapTo(page, QPoint())
 
@@ -432,9 +421,9 @@ class ScheduleShutdownUiTest(TestCase):
 
     def testTaskFormsUseFullWidthRowsWithSeparators(self):
         forms = (
-            (*create_task_form(None), BroadcastSettingCard),
-            (*create_shutdown_form(None), ShutdownSettingCard),
-            (*create_home_card_task_form(None, []), HomeCardTaskSettingCard),
+            (*createTaskForm(None), TaskFormSettingCard),
+            (*createShutdownForm(None), TaskFormSettingCard),
+            (*createHomeCardTaskForm(None, []), TaskFormSettingCard),
         )
         for form, _, cardType in forms:
             self.addCleanup(form.deleteLater)
@@ -465,9 +454,9 @@ class ScheduleShutdownUiTest(TestCase):
         parent.show()
         self.addCleanup(parent.deleteLater)
         dialogs = (
-            (AddTaskDialog(parent), BroadcastSettingCard),
-            (AddShutdownTaskDialog(parent), ShutdownSettingCard),
-            (AddHomeCardTaskDialog([], parent), HomeCardTaskSettingCard),
+            (AddTaskDialog(parent), TaskFormSettingCard),
+            (AddShutdownTaskDialog(parent), TaskFormSettingCard),
+            (AddHomeCardTaskDialog([], parent), TaskFormSettingCard),
         )
 
         for dialog, cardType in dialogs:
@@ -516,7 +505,7 @@ class ScheduleShutdownUiTest(TestCase):
 
     @patch.object(ChineseVoiceLoader, "start")
     def testEdgeTtsFormKeepsAConstrainedWidth(self, startLoader):
-        form, widgets = create_task_form(None)
+        form, widgets = createTaskForm(None)
         self.addCleanup(form.deleteLater)
         defaultWidth = form.minimumSizeHint().width()
         form.resize(560, form.sizeHint().height())
@@ -542,8 +531,8 @@ class ScheduleShutdownUiTest(TestCase):
         startLoader.assert_called_once()
 
     def testNewAndExistingTaskFormsUseTouchTimePicker(self):
-        broadcastForm, broadcastWidgets = create_task_form(None)
-        shutdownForm, shutdownWidgets = create_shutdown_form(None)
+        broadcastForm, broadcastWidgets = createTaskForm(None)
+        shutdownForm, shutdownWidgets = createShutdownForm(None)
         broadcastCard = TaskCard(broadcast_task())
         shutdownCard = ShutdownTaskCard(shutdown_task())
         self.addCleanup(broadcastForm.deleteLater)
@@ -734,7 +723,7 @@ class ScheduleShutdownUiTest(TestCase):
         self.assertFalse(isValid(panel))
 
     @patch(
-        "app.view.pages.schedule_page.load_chinese_voices",
+        "app.view.pages.schedule_page.loadChineseVoices",
         return_value=[],
     )
     def testVoiceLoaderIgnoresResultAfterOwnerIsDestroyed(self, loadVoices):
@@ -774,7 +763,7 @@ class ScheduleShutdownUiTest(TestCase):
         secondResult = QSignalSpy(second.finished)
         try:
             with patch(
-                "app.view.pages.schedule_page.load_chinese_voices",
+                "app.view.pages.schedule_page.loadChineseVoices",
                 side_effect=load,
             ) as loadVoices:
                 first.start()
@@ -800,51 +789,29 @@ class ScheduleShutdownUiTest(TestCase):
                 ) = previous
 
     def testTaskEditsAreSavedAfterOneDebounce(self):
-        cases = (
-            (
-                SchedulePage,
-                broadcast_task(),
-                "app.view.pages.schedule_page.cfg.set",
-            ),
-            (
-                ShutdownPage,
-                shutdown_task(),
-                "app.view.pages.shutdown_page.cfg.set",
-            ),
-        )
-        for pageType, task, setting in cases:
+        cases = ((SchedulePage, broadcast_task()), (ShutdownPage, shutdown_task()))
+        for pageType, task in cases:
             with self.subTest(page=pageType.__name__), patch.object(
                 pageType,
                 "_loadTasks",
-                lambda page: setattr(page, "current_tasks", []),
+                lambda page: None,
             ):
                 page = pageType()
                 self.addCleanup(page.deleteLater)
-                page.current_tasks = [task]
-                with patch(setting) as save:
+                page.currentTasks = [task]
+                with patch.object(cfg, "set") as save:
                     page._updateTask(0, task | {"name": "第一次"})
                     page._updateTask(0, task | {"name": "第二次"})
                     save.assert_not_called()
                     QTest.qWait(350)
                     save.assert_called_once()
 
-    @patch("app.view.pages.schedule_page.AddTaskDialog")
-    def testClosedBroadcastTaskDialogIsDeleted(self, dialogType):
+    def testClosedTaskDialogIsDeleted(self):
         page = MagicMock()
-        dialog = dialogType.return_value
+        dialog = page._createDialog.return_value
         dialog.exec.return_value = False
 
-        SchedulePage._addTask(page)
-
-        dialog.deleteLater.assert_called_once_with()
-
-    @patch("app.view.pages.shutdown_page.AddShutdownTaskDialog")
-    def testClosedShutdownTaskDialogIsDeleted(self, dialogType):
-        page = MagicMock()
-        dialog = dialogType.return_value
-        dialog.exec.return_value = False
-
-        ShutdownPage._addTask(page)
+        ScheduledTaskPage._addTask(page)
 
         dialog.deleteLater.assert_called_once_with()
 
@@ -859,7 +826,7 @@ class ScheduleShutdownUiTest(TestCase):
         dialog = dialogType.return_value
         dialog.exec.return_value = 2
 
-        result = show_shutdown_prompt(shutdown_task())
+        result = showShutdownPrompt(shutdown_task())
 
         self.assertEqual(result, 2)
         dialog.deleteLater.assert_called_once_with()

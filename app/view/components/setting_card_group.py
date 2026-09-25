@@ -1,19 +1,16 @@
 from __future__ import annotations
 
 from PySide6.QtCore import (
-    Property,
     QByteArray,
     QEasingCurve,
     QEvent,
     QObject,
     QPropertyAnimation,
     QRect,
-    QRectF,
     Qt,
 )
 from PySide6.QtGui import QColor, QPainter, QTextLayout, QTextOption
 from PySide6.QtWidgets import (
-    QAbstractButton,
     QApplication,
     QGraphicsOpacityEffect,
     QLabel,
@@ -23,7 +20,6 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     CardWidget,
-    FluentIcon,
     FluentStyleSheet,
     SettingCard,
     isDarkTheme,
@@ -170,51 +166,6 @@ class SettingMaterialCard(CardWidget):
             surface.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         return paintFilter
-
-
-class SettingExpandButton(QAbstractButton):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._angle = 0.0
-        self.rotateAnimation = QPropertyAnimation(self, b"angle", self)
-        self.rotateAnimation.setDuration(200)
-        self.rotateAnimation.setEasingCurve(QEasingCurve.Type.OutCubic)
-
-    def paintEvent(self, event) -> None:
-        painter = QPainter(self)
-        painter.setRenderHints(
-            QPainter.RenderHint.Antialiasing
-            | QPainter.RenderHint.SmoothPixmapTransform
-        )
-        if not self.isEnabled():
-            painter.setOpacity(0.36)
-        elif self.isDown():
-            painter.setOpacity(0.63)
-        painter.translate(self.width() / 2, self.height() / 2)
-        painter.rotate(self._angle)
-        FluentIcon.CHEVRON_RIGHT_MED.render(
-            painter,
-            QRectF(-6, -6, 12, 12),
-        )
-
-    def setExpanded(self, expanded: bool, animated: bool = True) -> None:
-        endAngle = 90.0 if expanded else 0.0
-        self.rotateAnimation.stop()
-        if not animated:
-            self.setAngle(endAngle)
-            return
-        self.rotateAnimation.setStartValue(self._angle)
-        self.rotateAnimation.setEndValue(endAngle)
-        self.rotateAnimation.start()
-
-    def getAngle(self) -> float:
-        return self._angle
-
-    def setAngle(self, angle: float) -> None:
-        self._angle = angle
-        self.update()
-
-    angle = Property(float, getAngle, setAngle)
 
 
 class CollapsibleSettingCard(QWidget):
@@ -430,9 +381,6 @@ class SettingCardList(SettingMaterialCard):
     def setSettingCardVisible(self, card: QWidget, visible: bool) -> None:
         card.setVisible(visible)
         self._refreshSeparators()
-
-    def hasVisibleCard(self) -> bool:
-        return any(not card.isHidden() for card in self._settingCards)
 
     def _refreshSeparators(self) -> None:
         seenVisibleCard = False
