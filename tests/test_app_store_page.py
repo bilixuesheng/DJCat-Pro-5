@@ -21,9 +21,16 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QColor, QImage, QInputDevice
 from PySide6.QtTest import QSignalSpy, QTest
-from PySide6.QtWidgets import QApplication, QLabel, QScroller, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QScroller,
+    QVBoxLayout,
+    QWidget,
+)
 from qfluentwidgets import (
     CardWidget,
+    DrillInTransitionStackedWidget,
     InfoBar,
     MessageBox,
     PrimaryPushButton,
@@ -40,6 +47,7 @@ from app.view.pages.app_store_page import (
     AppStorePage,
     CatalogImageWorker,
     CatalogWorker,
+    DetailTransitionStackedWidget,
     HorizontalTransitionStackedWidget,
 )
 
@@ -141,6 +149,26 @@ class AppStorePageTest(TestCase):
         self.page.close()
         self.page.deleteLater()
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.qtApp.processEvents()
+
+    def _allContentCenterX(self):
+        margins = self.page.allPage.layout().contentsMargins()
+        return (margins.left() + self.page.allPage.width() - margins.right()) // 2
+
+    def _settleTransitions(self, timeout=2):
+        animations = (
+            self.page.stack._aniGroup,
+            self.page.catalogStack._aniGroup,
+        )
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and (
+            self.page.allGridSlide.isRunning()
+            or any(
+                animation.state() == QAbstractAnimation.State.Running
+                for animation in animations
+            )
+        ):
+            QTest.qWait(10)
         self.qtApp.processEvents()
 
     def _waitForAdLayout(self, visible=False):
@@ -404,7 +432,7 @@ class AppStorePageTest(TestCase):
         self.page._renderGrid(self.page.allGrid, _apps(1))
 
         self.assertIsNone(removed.parent())
-        self.assertNotIn(removed, self.page.container.findChildren(ApplicationCard))
+        self.assertNotIn(removed, self.page.findChildren(ApplicationCard))
 
     def testUnchangedGridWidthDoesNotMoveExistingCardsAgain(self):
         self.page._renderGrid(self.page.allGrid, _apps(3))
@@ -545,25 +573,30 @@ class AppStorePageTest(TestCase):
         self.qtApp.processEvents()
         card = self.page.installedGrid.itemAtPosition(0, 0).widget()
         titleBottom = self.page.installedTitle.mapTo(
-            self.page.container,
+            self.page,
             QPoint(0, self.page.installedTitle.height()),
         ).y()
-        cardTop = card.mapTo(self.page.container, QPoint()).y()
-        margins = self.page.rootLayout.contentsMargins()
+        cardTop = card.mapTo(self.page, QPoint()).y()
+        pivotBottom = self.page.pivot.mapTo(
+            self.page, QPoint(0, self.page.pivot.height())
+        ).y()
+        titleTop = self.page.installedTitle.mapTo(self.page, QPoint()).y()
 
-        self.assertLessEqual(margins.left(), 16)
-        self.assertLessEqual(margins.top(), 12)
+        self.assertLessEqual(self.page.installedTitle.mapTo(self.page, QPoint()).x(), 16)
+        self.assertLessEqual(self.page.pivot.mapTo(self.page, QPoint()).y(), 12)
+        self.assertLessEqual(titleTop - pivotBottom, 12)
         self.assertLessEqual(cardTop - titleBottom, 24)
 
-    def testCatalogAndDetailUseHorizontalSnapshotTransitions(self):
+    def testCatalogTabsSlideAndDetailDrillsIn(self):
         self.assertIsInstance(
             self.page.catalogStack,
             HorizontalTransitionStackedWidget,
         )
         self.assertIsInstance(
             self.page.stack,
-            HorizontalTransitionStackedWidget,
+            DetailTransitionStackedWidget,
         )
+        self.assertIsInstance(self.page.stack, DrillInTransitionStackedWidget)
 
         self.page.resize(900, 600)
         self.page.show()
@@ -585,11 +618,185 @@ class AppStorePageTest(TestCase):
 
         deadline = time.monotonic() + 1
         while (
-            self.page.catalogStack.currentWidget() is not self.page.overview
+            self.page.catalogStack.currentWidget() is not self.page.installedScroll
             and time.monotonic() < deadline
         ):
             QTest.qWait(10)
-        self.assertIs(self.page.catalogStack.currentWidget(), self.page.overview)
+        self.assertIs(
+            self.page.catalogStack.currentWidget(), self.page.installedScroll
+        )
+
+    def testFirstPageSnapshotAlreadyUsesFinalColumnCount(self):
+        # 主窗口切页先把尚未显示的页面缩放到位再截快照；页面若到 showEvent 才按新宽度
+        # 重排，过渡里就会先看到一张卡片占满一整行，动画结束才跳成三列。
+        apps = _apps(3)
+        for app in apps:
+            app["installed"] = True
+        self.page.catalog = apps
+        self.page._renderInstalled()
+        self.assertEqual(self.page.installedGrid.property("djcatColumns"), 1)
+        host = QWidget()
+        self.addCleanup(host.deleteLater)
+        hostLayout = QVBoxLayout(host)
+        hostLayout.setContentsMargins(0, 0, 0, 0)
+        stack = DrillInTransitionStackedWidget(host)
+        hostLayout.addWidget(stack)
+        stack.addWidget(QWidget())
+        lazyPage = QWidget()
+        lazyLayout = QVBoxLayout(lazyPage)
+        lazyLayout.setContentsMargins(0, 0, 0, 0)
+        lazyLayout.addWidget(self.page)
+        stack.addWidget(lazyPage)
+        host.resize(1200, 800)
+        host.show()
+        self.qtApp.processEvents()
+        finished = QSignalSpy(stack.aniFinished)
+
+        stack.setCurrentWidget(lazyPage)
+
+        self.assertIsInstance(
+            self.page.installedGrid.itemAtPosition(0, 2).widget(),
+            ApplicationCard,
+        )
+        snapshot = stack._nextSnapshot.pixmap().toImage().copy()
+        self.assertTrue(finished.wait(2000))
+        self.qtApp.processEvents()
+        settled = lazyPage.grab().toImage()
+        self.assertEqual(snapshot.convertToFormat(settled.format()), settled)
+
+    def testDetailDrillInSnapshotMatchesSettledPage(self):
+        # 截图时详情页若还没按真实尺寸排好，DrillIn 会把压扁的快照拉满，
+        # 结束时真实页面再"啪"地拉长。
+        app = _apps(1)[0] | {
+            "installed": True,
+            "description": "很长的软件简介。" * 40,
+            "presets": [
+                {
+                    "id": index,
+                    "title": f"预设 {index}",
+                    "description": "固定到主页后执行这个动作",
+                    "action": {"type": "program", "target": "app.exe"},
+                }
+                for index in range(3)
+            ],
+        }
+        self.page.resize(900, 600)
+        self.page.show()
+        self._settleTransitions()
+
+        self.page._showDetail(app)
+        snapshot = self.page.stack._nextSnapshot.pixmap().toImage().copy()
+        self._settleTransitions()
+
+        settled = self.page.detail.grab().toImage()
+        self.assertEqual(snapshot.convertToFormat(settled.format()), settled)
+
+    def testBackDuringDetailEntryReturnsToCatalog(self):
+        self.page.resize(900, 600)
+        self.page.show()
+
+        self.page._showDetail(_apps(1)[0])
+        self.page._backToOverview()
+        self._settleTransitions()
+
+        self.assertIsNone(self.page.currentApp)
+        self.assertIs(self.page.stack.currentWidget(), self.page.catalogPage)
+
+    def testDetailNavigationNeverReleasesTouchGesture(self):
+        self.page.stack.setAnimationEnabled(False)
+        self.page.show()
+
+        with patch.object(QScroller, "ungrabGesture") as ungrab:
+            for _ in range(3):
+                self.page._showDetail(_apps(1)[0])
+                self.page._backToOverview()
+
+        ungrab.assert_not_called()
+
+    def testFirstSwitchToAllApplicationsStillSlides(self):
+        # 全部应用第一次渲染会让内容变高；整页一个滚动区时，这次变高会把横移当场掐断。
+        apps = _apps(12)
+        for app in apps:
+            app["recommended"] = True
+        self.page.catalog = apps
+        self.page.resize(900, 600)
+        self.page.show()
+        self._settleTransitions()
+
+        self.page.pivot.setCurrentItem("all")
+        self.page._switchCatalogTab(1)
+        QTest.qWait(30)
+
+        self.assertEqual(
+            self.page.catalogStack._aniGroup.state(),
+            QAbstractAnimation.State.Running,
+        )
+
+    def testInstalledTabDoesNotScrollThroughAllApplicationsHeight(self):
+        apps = _apps(20)
+        for app in apps:
+            app["recommended"] = True
+        apps[0]["installed"] = True
+        self.page.catalog = apps
+        self.page.resize(900, 600)
+        self.page.show()
+        self.page.pivot.setCurrentItem("all")
+        self.page._switchCatalogTab(1)
+        self._settleTransitions()
+        self.assertGreater(self.page.allScroll.verticalScrollBar().maximum(), 0)
+
+        self.page.pivot.setCurrentItem("installed")
+        self.page._switchCatalogTab(0)
+        self._settleTransitions()
+
+        self.assertEqual(self.page.installedScroll.verticalScrollBar().maximum(), 0)
+
+    def testEachCatalogTabRemembersItsScrollPosition(self):
+        apps = _apps(20)
+        for index, app in enumerate(apps):
+            app["recommended"] = True
+            app["installed"] = index < 12
+        self.page.catalog = apps
+        self.page.resize(700, 420)
+        self.page.show()
+        self.page._renderInstalled()
+        self._settleTransitions()
+        installedBar = self.page.installedScroll.verticalScrollBar()
+        allBar = self.page.allScroll.verticalScrollBar()
+        installedBar.setValue(100)
+
+        self.page.pivot.setCurrentItem("all")
+        self.page._switchCatalogTab(1)
+        self._settleTransitions()
+        allBar.setValue(200)
+        self.page.pivot.setCurrentItem("installed")
+        self.page._switchCatalogTab(0)
+        self._settleTransitions()
+
+        self.assertEqual(installedBar.value(), 100)
+        self.page.pivot.setCurrentItem("all")
+        self.page._switchCatalogTab(1)
+        self._settleTransitions()
+        self.assertEqual(allBar.value(), 200)
+
+    def testPageChangeSlidesGrid(self):
+        self.page.catalog = _apps(14)
+        self.page.resize(900, 600)
+        self.page.show()
+        self.page.pivot.setCurrentItem("all")
+        self.page._switchCatalogTab(1)
+        self.page.categoryPivot.setCurrentItem("all")
+        self.page._switchCategory(1)
+        self._settleTransitions()
+
+        self.page._changePage(1)
+
+        self.assertTrue(self.page.allGridSlide.isRunning())
+        self.assertTrue(self.page.allGridWidget.isHidden())
+        self._settleTransitions()
+        self.assertEqual(self.page._currentPage, 1)
+        self.assertEqual(self.page.allGrid.count(), 6)
+        self.assertTrue(self.page.allGridWidget.isVisible())
 
     def testRepeatedDetailNavigationReleasesTransientPresetWidgets(self):
         app = _apps(1)[0] | {
@@ -674,7 +881,7 @@ class AppStorePageTest(TestCase):
                 0,
             )
             self.assertGreater(scrollArea.verticalScrollBar().maximum(), 0)
-        outerScroll = self.page.verticalScrollBar()
+        catalogScroll = self.page.installedScroll.verticalScrollBar()
         leftScroll = self.page.detailLeftScroll.verticalScrollBar()
         rightScroll = self.page.presetScroll.verticalScrollBar()
         device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
@@ -703,7 +910,7 @@ class AppStorePageTest(TestCase):
 
         self.assertGreater(rightScroll.value(), 0)
         self.assertEqual(leftScroll.value(), 0)
-        self.assertEqual(outerScroll.value(), 0)
+        self.assertEqual(catalogScroll.value(), 0)
         self.assertIsInstance(self.page.presetGroup, CardWidget)
         self.assertFalse(
             any(
@@ -862,16 +1069,17 @@ class AppStorePageTest(TestCase):
         self.assertFalse(openButton.isEnabled())
 
     def testDetailHidesCatalogRefreshButton(self):
+        self.page.stack.setAnimationEnabled(False)
         self.page.show()
         self.page._showDetail(_apps(1)[0])
         self.qtApp.processEvents()
 
-        self.assertTrue(self.page.refreshButton.isHidden())
-        self.assertTrue(self.page.checkUpdatesButton.isHidden())
+        self.assertFalse(self.page.refreshButton.isVisible())
+        self.assertFalse(self.page.checkUpdatesButton.isVisible())
 
         self.page._backToOverview()
         self.qtApp.processEvents()
-        self.assertFalse(self.page.refreshButton.isHidden())
+        self.assertTrue(self.page.refreshButton.isVisible())
 
     def testDownloadCountIsShownOnlyOnAllApplicationCards(self):
         app = _apps(1)[0] | {"download_count": 1234}
@@ -921,8 +1129,8 @@ class AppStorePageTest(TestCase):
         QTest.qWait(20)
         self.page._showDetail(apps[0])
         self.page._backToOverview()
-        QTest.qWait(20)
-        scrollBar = self.page.verticalScrollBar()
+        self._settleTransitions()
+        scrollBar = self.page.allScroll.verticalScrollBar()
         self.assertGreater(scrollBar.maximum(), 0)
         card = self.page.allGrid.itemAtPosition(0, 0).widget()
         clicks = []
@@ -1566,7 +1774,7 @@ class AppStorePageTest(TestCase):
         self.assertLessEqual(
             abs(
                 self.page.adFrame.geometry().center().x()
-                - self.page.allPage.rect().center().x()
+                - self._allContentCenterX()
             ),
             2,
         )
@@ -1682,13 +1890,13 @@ class AppStorePageTest(TestCase):
         self.page.installedEmptyButton.click()
         deadline = time.monotonic() + 1
         while (
-            self.page.catalogStack.currentWidget() is not self.page.allPage
+            self.page.catalogStack.currentWidget() is not self.page.allScroll
             and time.monotonic() < deadline
         ):
             QTest.qWait(10)
 
         self.assertEqual(self.page.pivot.currentRouteKey(), "all")
-        self.assertIs(self.page.catalogStack.currentWidget(), self.page.allPage)
+        self.assertIs(self.page.catalogStack.currentWidget(), self.page.allScroll)
 
     def testInstalledSearchEmptyStateClearsSearchInsteadOfLeavingPage(self):
         app = _apps(1)[0]
@@ -1708,7 +1916,7 @@ class AppStorePageTest(TestCase):
         self.assertEqual(self.page.searchText, "")
         self.assertEqual(self.page.pivot.currentRouteKey(), "installed")
 
-    def testCategoryRerenderKeepsViewportFrozenUntilLayoutSettles(self):
+    def testCategorySwitchSlidesGridAndKeepsScrollPosition(self):
         apps = _apps(18)
         for app in apps:
             app["recommended"] = True
@@ -1717,26 +1925,26 @@ class AppStorePageTest(TestCase):
         self.page.show()
         self.page.pivot.setCurrentItem("all")
         self.page._switchCatalogTab(1)
-        QTest.qWait(220)
+        self._settleTransitions()
+        scrollBar = self.page.allScroll.verticalScrollBar()
+        scrollBar.setValue(80)
+        before = scrollBar.value()
+
         self.page.categoryPivot.setCurrentItem("all")
-        self.page._renderAll()
-        self.page.verticalScrollBar().setValue(80)
-        before = self.page.verticalScrollBar().value()
+        self.page._switchCategory(1)
 
-        self.page.categoryPivot.setCurrentItem("recommended")
-        self.page._switchCategory(0)
+        self.assertTrue(self.page.allGridSlide.isRunning())
+        self._settleTransitions()
+        self.assertTrue(self.page.allGridWidget.isVisible())
+        self.assertEqual(scrollBar.value(), before)
+        self.assertEqual(self.page.allGrid.count(), 6)
 
-        self.assertFalse(self.page.viewport().updatesEnabled())
-        QTest.qWait(30)
-        self.assertTrue(self.page.viewport().updatesEnabled())
-        self.assertEqual(self.page.verticalScrollBar().value(), before)
-
-    def testViewportFreezeStopsOuterTouchScroller(self):
-        scroller = QScroller.scroller(self.page.viewport())
+    def testCategorySwitchStopsTabTouchScroller(self):
+        self.page.allScroll.grabTouchGesture()
+        scroller = QScroller.scroller(self.page.allScroll.viewport())
 
         with patch.object(scroller, "stop") as stop:
-            self.page._beginViewportUpdate()
-            self.page._finishViewportUpdate()
+            self.page._switchCategory(1)
 
         stop.assert_called_once_with()
 
@@ -1823,14 +2031,14 @@ class AppStorePageTest(TestCase):
         QTest.qWait(80)
 
         self.assertLessEqual(
-            self.page.container.width(),
-            self.page.viewport().width() + 2,
+            self.page.allPage.width(),
+            self.page.allScroll.viewport().width() + 2,
         )
         self.assertTrue(self.page.allPage.rect().contains(self.page.adFrame.geometry()))
         self.assertLessEqual(
             abs(
                 self.page.adFrame.geometry().center().x()
-                - self.page.allPage.rect().center().x()
+                - self._allContentCenterX()
             ),
             2,
         )
@@ -1895,7 +2103,7 @@ class AppStorePageTest(TestCase):
             "https://example.test/product",
         )
 
-    def testDetailStartsAtTopAndBackRestoresCatalogScroll(self):
+    def testDetailLeavesCatalogScrollWhereItWas(self):
         apps = _apps(20)
         for app in apps:
             app["recommended"] = True
@@ -1903,22 +2111,24 @@ class AppStorePageTest(TestCase):
         self.page.resize(700, 420)
         self.page.show()
         self.page._switchCatalogTab(1)
-        self.page._renderAll()
-        QTest.qWait(20)
-        self.page.container.setMinimumHeight(self.page.container.sizeHint().height())
-        QTest.qWait(20)
-        scrollBar = self.page.verticalScrollBar()
+        self._settleTransitions()
+        scrollBar = self.page.allScroll.verticalScrollBar()
         original = min(180, scrollBar.maximum())
         self.assertGreater(original, 0)
         scrollBar.setValue(original)
+        self.qtApp.processEvents()
+        visible = self.page.catalogPage.grab().toImage()
 
         self.page._showDetail(apps[0])
-        QTest.qWait(20)
 
-        self.assertEqual(scrollBar.value(), 0)
+        # 离场快照就是屏幕上正在看的那一段，不是列表顶部。
+        outgoing = self.page.stack._currentSnapshot.pixmap().toImage()
+        self.assertEqual(outgoing.convertToFormat(visible.format()), visible)
+        self._settleTransitions()
+        self.assertEqual(scrollBar.value(), original)
 
         self.page._backToOverview()
-        QTest.qWait(20)
+        self._settleTransitions()
 
         self.assertEqual(scrollBar.value(), original)
 
