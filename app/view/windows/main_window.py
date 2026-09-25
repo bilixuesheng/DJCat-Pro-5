@@ -279,6 +279,7 @@ class LazySettingPage(LazyPage):
 
 class LazyAppStorePage(LazyPage):
     pinnedCardsChanged = Signal(object)
+    launchFailed = Signal()
 
     def __init__(self, parent=None):
         super().__init__("AppStorePage", parent)
@@ -289,6 +290,7 @@ class LazyAppStorePage(LazyPage):
 
         page = AppStorePage(self)
         page.pinnedCardsChanged.connect(self.pinnedCardsChanged)
+        page.launchFailed.connect(self.launchFailed)
         if self._searchText:
             page.setSearchText(self._searchText)
         return page
@@ -303,7 +305,7 @@ class LazyAppStorePage(LazyPage):
             self.page.setSearchText(text)
 
     def executePinnedCard(self, item):
-        return self.ensureLoaded().executePinnedCard(item)
+        self.ensureLoaded().executePinnedCard(item)
 
     def shutdown(self):
         if self.page is not None:
@@ -1128,11 +1130,15 @@ class MainWindow(MSFluentWindow):
             self.homePage.all_cards["定时关机"].clicked.connect(self._navToShutdown)
 
         self.appStorePage.pinnedCardsChanged.connect(self._setPinnedHomeCards)
+        # 从托盘打开固定卡片失败时主窗口可能隐藏着，得先把它叫出来才看得到提示。
+        self.appStorePage.launchFailed.connect(self._showMainWindow)
         self.settingPage.appStoreCacheCleared.connect(
             self._onAppStoreCacheCleared
         )
         cfg.showCreditsPage.valueChanged.connect(self._setCreditsPageVisible)
-        self.homePage.applicationCardClicked.connect(self._onPinnedHomeCardClicked)
+        self.homePage.applicationCardClicked.connect(
+            self.appStorePage.executePinnedCard
+        )
         self.homePage.applicationCardRemoved.connect(self._onPinnedHomeCardRemoved)
         self._setPinnedHomeCards(cfg.pinnedHomeCards.value)
         self.homePage.homeCardsChanged.connect(self._onHomeCardsChanged)
@@ -1195,10 +1201,6 @@ class MainWindow(MSFluentWindow):
         if changed:
             cfg.set(cfg.pinnedHomeCards, cards)
         self._setPinnedHomeCards(cards)
-
-    def _onPinnedHomeCardClicked(self, item):
-        if self.appStorePage.executePinnedCard(item) is False:
-            self._showMainWindow()
 
     def _onPinnedHomeCardRemoved(self, item):
         normalized = normalize_pinned_cards([item])

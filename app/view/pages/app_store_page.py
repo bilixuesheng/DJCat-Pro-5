@@ -762,6 +762,7 @@ class AdvertisementOverlay(QWidget):
 
 class AppStorePage(ScrollArea):
     pinnedCardsChanged = Signal(object)
+    launchFailed = Signal()
     _launchFinished = Signal(int, str)
     _downloadProgressSignal = Signal(int, int, int)
     _downloadRetrySignal = Signal(str)
@@ -1993,13 +1994,7 @@ class AppStorePage(ScrollArea):
             actionEnabled = hasOpenAction
         else:
             actionEnabled = supported
-        self.detailAction.setEnabled(
-            appId not in self._downloadJobs
-            and appId not in self._launching
-            and appId not in self._installing
-            and appId not in self._uninstalling
-            and actionEnabled
-        )
+        self.detailAction.setEnabled(not self._isBusy(appId) and actionEnabled)
         if (
             appId in self._launching
             or appId in self._installing
@@ -2011,12 +2006,7 @@ class AppStorePage(ScrollArea):
             self.detailAction.setProgress(progress, indeterminate=not progress)
         else:
             self.detailAction.setProgress()
-        busy = (
-            appId in self._downloadJobs
-            or appId in self._launching
-            or appId in self._installing
-            or appId in self._uninstalling
-        )
+        busy = self._isBusy(appId)
         for openButton, pinButton, available, pinned in self._presetActionButtons:
             openButton.setEnabled(available and not busy)
             pinButton.setEnabled((available or pinned) and not busy)
@@ -2027,36 +2017,17 @@ class AppStorePage(ScrollArea):
 
     def _onAppAction(self, app, allowUpdate=True):
         appId = int(app["id"])
-        if (
-            appId in self._downloadJobs
-            or appId in self._launching
-            or appId in self._installing
-            or appId in self._uninstalling
-        ):
+        if self._isBusy(appId):
             return
         if app.get("installed") and (
             not app.get("update_available") or not allowUpdate
         ):
-            self._launching.add(appId)
-            self._downloadStates[appId] = "打开中"
-            self._updateVisibleCardState(appId)
-            self._updateDetailAction()
-            try:
-                thread = threading.Thread(
-                    target=self._launchInBackground,
-                    args=(app,),
-                    daemon=True,
-                )
-                with self._fileOperationLock:
-                    self._fileOperationThreads.add(thread)
-                try:
-                    thread.start()
-                except Exception:
-                    with self._fileOperationLock:
-                        self._fileOperationThreads.discard(thread)
-                    raise
-            except Exception as error:
-                self._onLaunchFinished(appId, str(error))
+            self._startLaunch(
+                appId,
+                lambda: self.store.executeAction(
+                    self.store.installed().get(appId) or app
+                ),
+            )
             return
         try:
             self.store.downloadSlots.acquire()
@@ -2104,12 +2075,33 @@ class AppStorePage(ScrollArea):
         self._updateVisibleCardState(appId)
         self._updateDetailAction()
 
-    def _launchInBackground(self, app):
-        appId = int(app["id"])
+    def _startLaunch(self, appId, execute):
+        self._launching.add(appId)
+        self._downloadStates[appId] = "打开中"
+        self._updateVisibleCardState(appId)
+        self._updateDetailAction()
+        try:
+            thread = threading.Thread(
+                target=self._launchInBackground,
+                args=(appId, execute),
+                daemon=True,
+            )
+            with self._fileOperationLock:
+                self._fileOperationThreads.add(thread)
+            try:
+                thread.start()
+            except Exception:
+                with self._fileOperationLock:
+                    self._fileOperationThreads.discard(thread)
+                raise
+        except Exception as error:
+            self._onLaunchFinished(appId, str(error))
+
+    def _launchInBackground(self, appId, execute):
         errorMessage = ""
         try:
-            local = self.store.installed().get(appId)
-            self.store.executeAction(local or app)
+            if not execute():
+                errorMessage = "系统未能打开这个链接"
         except Exception as error:
             errorMessage = str(error)
         finally:
@@ -2126,13 +2118,17 @@ class AppStorePage(ScrollArea):
         self._updateVisibleCardState(appId)
         self._updateDetailAction()
         if error:
-            InfoBar.error(
-                "无法打开应用",
-                error,
-                duration=4000,
-                position=InfoBarPosition.BOTTOM_RIGHT,
-                parent=self,
-            )
+            self._showLaunchFailure(error)
+
+    def _showLaunchFailure(self, message):
+        InfoBar.error(
+            "无法打开应用",
+            message,
+            duration=4000,
+            position=InfoBarPosition.BOTTOM_RIGHT,
+            parent=self.window(),
+        )
+        self.launchFailed.emit()
 
     def _queueDownloadProgress(self, appId, done, total):
         if appId not in self._downloadJobs:
@@ -2262,12 +2258,7 @@ class AppStorePage(ScrollArea):
 
     def _confirmUninstall(self, app):
         appId = int(app["id"])
-        if (
-            appId in self._downloadJobs
-            or appId in self._launching
-            or appId in self._installing
-            or appId in self._uninstalling
-        ):
+        if self._isBusy(appId):
             return
         box = MessageBox("确认卸载", f"将删除 {app.get('name', '')} 的安装目录，是否继续？", self)
         try:
@@ -2380,12 +2371,7 @@ class AppStorePage(ScrollArea):
                 str(preset.get("id", "")) in installedPresetIds
                 or self._catalogExternalAction(preset) is not None
             )
-            busy = (
-                key[0] in self._downloadJobs
-                or key[0] in self._launching
-                or key[0] in self._installing
-                or key[0] in self._uninstalling
-            )
+            busy = self._isBusy(key[0])
             openButton = PushButton(FIF.PLAY, "打开", item)
             openButton.setAccessibleName("打开预设")
             openButton.setEnabled(available and not busy)
@@ -2472,53 +2458,45 @@ class AppStorePage(ScrollArea):
 
     def _openPreset(self, app, preset):
         appId = int(app["id"])
-        if (
+        if not self._isBusy(appId):
+            self._startLaunch(
+                appId,
+                lambda: self._executePreset(appId, preset.get("id"), preset),
+            )
+
+    def _isBusy(self, appId):
+        return (
             appId in self._downloadJobs
             or appId in self._launching
             or appId in self._installing
             or appId in self._uninstalling
-        ):
-            return
+        )
+
+    def _executePreset(self, appId, presetId, catalogPreset):
         installed = self.store.installed().get(appId)
         if installed is None:
-            InfoBar.warning(
-                "应用尚未安装",
-                "请先安装应用后再打开预设。",
-                duration=3000,
-                position=InfoBarPosition.BOTTOM_RIGHT,
-                parent=self.window(),
-            )
-            return
-        installedPreset = next(
+            raise ApplicationStoreError("应用尚未安装，请先安装应用。")
+        if presetId == DIRECT_APPLICATION_PRESET_ID:
+            return self.store.executeAction(installed)
+        action = self._resolvePresetAction(installed, presetId, catalogPreset)
+        if action is None:
+            raise ApplicationStoreError("预设不可用，请先更新应用或重新固定这张卡片。")
+        return self.store.executeAction(installed, action)
+
+    def _resolvePresetAction(self, installed, presetId, catalogPreset):
+        localPreset = next(
             (
-                item
-                for item in installed.metadata.get("presets", [])
-                if str(item.get("id", "")) == str(preset.get("id", ""))
+                preset
+                for preset in installed.metadata.get("presets", [])
+                if isinstance(preset, dict)
+                and str(preset.get("id", "")) == str(presetId)
             ),
             None,
         )
-        action = installedPreset.get("action") if installedPreset else None
-        if not isinstance(action, dict):
-            action = self._catalogExternalAction(preset)
-        if not isinstance(action, dict):
-            InfoBar.warning(
-                "预设不可用",
-                "请先更新应用，再打开这个预设。",
-                duration=3000,
-                position=InfoBarPosition.BOTTOM_RIGHT,
-                parent=self.window(),
-            )
-            return
-        try:
-            self.store.executeAction(installed, action)
-        except (ApplicationStoreError, OSError, ValueError) as error:
-            InfoBar.error(
-                "无法打开预设",
-                str(error),
-                duration=4000,
-                position=InfoBarPosition.BOTTOM_RIGHT,
-                parent=self.window(),
-            )
+        action = localPreset.get("action") if localPreset else None
+        if isinstance(action, dict):
+            return action
+        return self._catalogExternalAction(catalogPreset)
 
     def _pinnedKeys(self):
         return {
@@ -2578,64 +2556,24 @@ class AppStorePage(ScrollArea):
         self.pinnedCardsChanged.emit(cards)
 
     def executePinnedCard(self, item):
-        noticeParent = self.window()
         cards = normalize_pinned_cards([item])
         if not cards:
-            InfoBar.warning("预设卡片无效", "请重新固定这张主页卡片。", duration=3000, position=InfoBarPosition.BOTTOM_RIGHT, parent=noticeParent)
-            return False
+            self._showLaunchFailure("主页卡片无效，请重新固定这张卡片。")
+            return
         item = cards[0]
         appId = item["app_id"]
-        installed = self.store.installed().get(appId)
-        if not installed:
-            InfoBar.warning("应用尚未安装", "请先安装对应应用后再使用主页预设卡片。", duration=3000, position=InfoBarPosition.BOTTOM_RIGHT, parent=noticeParent)
-            return False
-        try:
-            if item["preset_id"] == DIRECT_APPLICATION_PRESET_ID:
-                result = self.store.executeAction(installed)
-            else:
-                localPreset = next(
-                    (
-                        preset
-                        for preset in installed.metadata.get("presets", [])
-                        if isinstance(preset, dict)
-                        and str(preset.get("id", ""))
-                        == str(item["preset_id"])
-                    ),
-                    None,
-                )
-                action = None
-                if self._catalogLoaded:
-                    catalogPreset = self._currentCatalogPreset(
-                        appId, item["preset_id"]
-                    )
-                    if catalogPreset is not None:
-                        catalogAction = self._catalogExternalAction(catalogPreset)
-                        if catalogAction is not None:
-                            action = catalogAction
-                        elif (
-                            isinstance(catalogPreset.get("action"), dict)
-                            and catalogPreset["action"].get("type") == "program"
-                            and isinstance(localPreset, dict)
-                        ):
-                            action = localPreset.get("action")
-                elif isinstance(localPreset, dict):
-                    action = localPreset.get("action")
-                if not isinstance(action, dict) and not self._catalogLoaded:
-                    action = self._catalogExternalAction(item)
-                if not isinstance(action, dict):
-                    InfoBar.warning(
-                        "主页卡片已失效",
-                        "请在应用详情中重新固定这张预设卡片。",
-                        duration=3000,
-                        position=InfoBarPosition.BOTTOM_RIGHT,
-                        parent=noticeParent,
-                    )
-                    return False
-                result = self.store.executeAction(installed, action)
-            return bool(result)
-        except (ApplicationStoreError, OSError, ValueError) as error:
-            InfoBar.error("执行预设失败", str(error), duration=4000, position=InfoBarPosition.BOTTOM_RIGHT, parent=noticeParent)
-            return False
+        if self._isBusy(appId):
+            return
+        # 目录没加载时只能信任固定时保存的动作；加载后以当前目录为准。
+        catalogPreset = (
+            self._currentCatalogPreset(appId, item["preset_id"])
+            if self._catalogLoaded
+            else item
+        )
+        self._startLaunch(
+            appId,
+            lambda: self._executePreset(appId, item["preset_id"], catalogPreset),
+        )
 
     def refreshPinnedCards(self):
         cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)

@@ -382,14 +382,17 @@ class TrayControlNavigationTest(TestCase):
         activateWindow.assert_called_once_with()
         activateCard.assert_called_once_with("全屏投送")
 
-    def testLazyApplicationPagePropagatesPinnedCardResult(self):
+    def testLazyApplicationPageForwardsLaunchFailure(self):
         from app.view.windows.main_window import LazyAppStorePage
 
         page = LazyAppStorePage()
-        loaded = type("Loaded", (), {"executePinnedCard": lambda self, item: False})()
-        page.ensureLoaded = lambda: loaded
+        self.addCleanup(page.deleteLater)
+        failures = []
+        page.launchFailed.connect(lambda: failures.append(True))
 
-        self.assertIs(page.executePinnedCard({"app_id": 7, "preset_id": 0}), False)
+        page.ensureLoaded().launchFailed.emit()
+
+        self.assertEqual(failures, [True])
 
     def testTrayCustomCardDoesNotShowWindowOnSuccess(self):
         entry = {
@@ -417,15 +420,11 @@ class TrayControlNavigationTest(TestCase):
         showWindow.assert_not_called()
         activateCard.assert_called_once_with("custom:one")
 
-    def testFailedApplicationCardShowsWindowButSuccessDoesNot(self):
-        with patch.object(self.window, "_showMainWindow") as showWindow:
-            self.window.appStorePage.executePinnedCard = lambda item: True
-            self.window._onPinnedHomeCardClicked({"app_id": 7})
-            showWindow.assert_not_called()
+    def testApplicationLaunchFailureShowsWindow(self):
+        with patch.object(self.window, "show") as show:
+            self.window.appStorePage.launchFailed.emit()
 
-            self.window.appStorePage.executePinnedCard = lambda item: False
-            self.window._onPinnedHomeCardClicked({"app_id": 7})
-            showWindow.assert_called_once_with()
+        show.assert_called_once_with()
 
 
 class TrayMenuTest(TestCase):

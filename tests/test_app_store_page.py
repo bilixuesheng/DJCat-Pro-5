@@ -1255,16 +1255,18 @@ class AppStorePageTest(TestCase):
                 "action": {"type": "program", "target": "new.exe"},
             }
         )
+        self._waitForLaunch()
 
         self.page.store.executeAction.assert_called_once_with(installed)
 
-    def testPinnedCardPropagatesActionFailure(self):
+    def testPinnedCardActionFailureIsReported(self):
         installed = object()
         self.page.store = Mock()
         self.page.store.installed.return_value = {1: installed}
         self.page.store.executeAction.return_value = False
+        failures = QSignalSpy(self.page.launchFailed)
 
-        self.assertFalse(
+        with patch.object(InfoBar, "error") as showError:
             self.page.executePinnedCard(
                 {
                     "app_id": 1,
@@ -1274,7 +1276,11 @@ class AppStorePageTest(TestCase):
                     "action": {"type": "url", "target": "https://example.test"},
                 }
             )
-        )
+            self._waitForLaunch()
+
+        showError.assert_called_once()
+        self.assertIs(showError.call_args.kwargs["parent"], self.page.window())
+        self.assertEqual(failures.count(), 1)
 
     def testPresetPinnedCardUsesMatchingInstalledPresetAction(self):
         installed = SimpleNamespace(
@@ -1316,6 +1322,7 @@ class AppStorePageTest(TestCase):
                 "action": {"type": "program", "target": "old.exe"},
             }
         )
+        self._waitForLaunch()
 
         self.page.store.executeAction.assert_called_once_with(
             installed,
@@ -1338,6 +1345,7 @@ class AppStorePageTest(TestCase):
                 "action": action,
             }
         )
+        self._waitForLaunch()
 
         self.page.store.executeAction.assert_called_once_with(installed, action)
 
@@ -1368,12 +1376,34 @@ class AppStorePageTest(TestCase):
                 },
             }
         )
+        self._waitForLaunch()
 
         self.page.store.executeAction.assert_called_once_with(
             installed, currentAction
         )
 
-    def testWithdrawnCatalogPresetDoesNotUseStoredExternalAction(self):
+    def testDetailPresetFollowsTheSameRuleOffTheGuiThread(self):
+        localAction = {"type": "program", "target": "local.exe"}
+        installed = SimpleNamespace(
+            metadata={"presets": [{"id": 7, "action": localAction}]}
+        )
+        self.page.store = Mock()
+        self.page.store.installed.return_value = {1: installed}
+        threads = []
+        self.page.store.executeAction.side_effect = (
+            lambda *_args: threads.append(threading.current_thread()) or True
+        )
+
+        self.page._openPreset(
+            {"id": 1},
+            {"id": 7, "action": {"type": "uri", "target": "catalog://preset"}},
+        )
+        self._waitForLaunch()
+
+        self.page.store.executeAction.assert_called_once_with(installed, localAction)
+        self.assertIsNot(threads[0], threading.main_thread())
+
+    def testInstalledPresetActionWinsOverWithdrawnCatalogPreset(self):
         installed = SimpleNamespace(
             metadata={
                 "presets": [
@@ -1391,21 +1421,24 @@ class AppStorePageTest(TestCase):
         self.page.store.installed.return_value = {1: installed}
         self.page.catalog = [{"id": 1, "presets": "malformed"}]
 
-        with patch.object(InfoBar, "warning"):
-            self.page.executePinnedCard(
-                {
-                    "app_id": 1,
-                    "preset_id": 7,
-                    "title": "已撤回预设",
-                    "description": "",
-                    "action": {
-                        "type": "uri",
-                        "target": "classisland://app/withdrawn",
-                    },
-                }
-            )
+        self.page.executePinnedCard(
+            {
+                "app_id": 1,
+                "preset_id": 7,
+                "title": "已撤回预设",
+                "description": "",
+                "action": {
+                    "type": "uri",
+                    "target": "classisland://app/pinned",
+                },
+            }
+        )
+        self._waitForLaunch()
 
-        self.page.store.executeAction.assert_not_called()
+        self.page.store.executeAction.assert_called_once_with(
+            installed,
+            {"type": "uri", "target": "classisland://app/withdrawn"},
+        )
 
     def testCatalogRefreshKeepsPinnedActionAndCachedIconUntilReplacementLoads(self):
         item = cfg.pinnedHomeCards
