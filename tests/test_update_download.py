@@ -41,7 +41,6 @@ from app.config.constants import (
     normalizeReleaseVersion,
 )
 from app.view.pages.setting_page import SettingPage
-from app.view.shell.tray import SystemTrayIcon
 from app.view.windows.main_window import (
     InstallerLaunchDialog,
     MainWindow,
@@ -1056,14 +1055,11 @@ class UpdateWindowLifecycleTest(TestCase):
         toolTip = StateToolTip("", "", self.window)
         self.window._downloadStateToolTip = toolTip
         delete(toolTip)
-        tray = Mock()
-        tray.parent.return_value = self.window
-
         with (
             patch("app.view.windows.main_window.cfg.set"),
             patch("app.view.windows.main_window.QApplication.quit") as quitApp,
         ):
-            SystemTrayIcon._onQuitActionTriggered(tray)
+            self.window.requestQuit()
 
         self.assertIsNone(self.window._downloadStateToolTip)
         quitApp.assert_called_once_with()
@@ -1124,9 +1120,7 @@ class UpdateWindowLifecycleTest(TestCase):
 
         self.assertIsNone(self.window._updateInfoBar)
 
-        tray = Mock()
-        tray.parent.return_value = self.window
-        SystemTrayIcon._onShowActionTriggered(tray)
+        self.window._showMainWindow()
         self.app.processEvents()
         QTest.qWait(250)
         self.app.processEvents()
@@ -1238,15 +1232,6 @@ class UpdateWindowLifecycleTest(TestCase):
 
         clear.assert_called_once_with()
         quitApp.assert_called_once_with()
-
-    def testTrayActionDelegatesToControlledQuit(self):
-        parent = Mock()
-        tray = Mock()
-        tray.parent.return_value = parent
-
-        SystemTrayIcon._onQuitActionTriggered(tray)
-
-        parent.requestQuit.assert_called_once_with()
 
     def testUpdateWorkerEmitsTheResponse(self):
         response = Mock()

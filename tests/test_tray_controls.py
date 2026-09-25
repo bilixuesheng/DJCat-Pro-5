@@ -2,7 +2,7 @@ import os
 import tempfile
 from pathlib import Path
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -254,7 +254,7 @@ class TrayControlNavigationTest(TestCase):
         with (
             patch.object(MainWindow, "_startMachineRegistration"),
             patch.object(MainWindow, "checkForUpdates"),
-            patch("app.view.windows.main_window.SystemTrayIcon"),
+            patch("app.view.windows.main_window.SystemTrayIcon") as self.trayClass,
         ):
             self.window = MainWindow(isSilent=True)
 
@@ -364,6 +364,14 @@ class TrayControlNavigationTest(TestCase):
         self.window._setCreditsPageVisible(True)
         self.assertFalse(item.isHidden())
 
+    def testTrayRequestsAreWiredToMainWindow(self):
+        tray = self.trayClass.return_value
+        tray.showRequested.connect.assert_called_once_with(self.window._showMainWindow)
+        tray.homeCardTriggered.connect.assert_called_once_with(
+            self.window._executeHomeCard
+        )
+        tray.quitRequested.connect.assert_called_once_with(self.window.requestQuit)
+
     def testTrayDefaultCardShowsMainWindowBeforeActivation(self):
         with (
             patch.object(self.window, "show") as show,
@@ -375,7 +383,7 @@ class TrayControlNavigationTest(TestCase):
                 return_value=True,
             ) as activateCard,
         ):
-            self.window._onTrayHomeCardTriggered("全屏投送")
+            self.window._executeHomeCard("全屏投送")
 
         show.assert_called_once_with()
         raiseWindow.assert_called_once_with()
@@ -405,8 +413,8 @@ class TrayControlNavigationTest(TestCase):
         with (
             patch.object(
                 self.window.homePage,
-                "homeCardEntries",
-                return_value=[entry],
+                "homeCardEntry",
+                return_value=entry,
             ),
             patch.object(
                 self.window.homePage,
@@ -415,7 +423,7 @@ class TrayControlNavigationTest(TestCase):
             ) as activateCard,
             patch.object(self.window, "_showMainWindow") as showWindow,
         ):
-            self.window._onTrayHomeCardTriggered("custom:one")
+            self.window._executeHomeCard("custom:one")
 
         showWindow.assert_not_called()
         activateCard.assert_called_once_with("custom:one")
@@ -702,10 +710,22 @@ class TrayMenuTest(TestCase):
         finally:
             tray.deleteLater()
 
-    def testCardActionDelegatesToMainWindowTrigger(self):
-        triggered = []
-        self.parent._onTrayHomeCardTriggered = triggered.append
+    def testShowAndQuitActionsEmitRequests(self):
         tray = self._createTray()
+        requests = []
+        tray.showRequested.connect(lambda: requests.append("show"))
+        tray.quitRequested.connect(lambda: requests.append("quit"))
+        try:
+            tray.showAction.trigger()
+            tray.quitAction.trigger()
+            self.assertEqual(requests, ["show", "quit"])
+        finally:
+            tray.deleteLater()
+
+    def testCardActionEmitsItsHomeCardKey(self):
+        triggered = []
+        tray = self._createTray()
+        tray.homeCardTriggered.connect(triggered.append)
         try:
             cardAction = next(
                 action
@@ -737,9 +757,9 @@ class TrayMenuTest(TestCase):
     def testLeftClickCanOpenMenuOrMainWindow(self):
         tray = self._createTray()
         try:
-            with patch.object(tray.menu, "exec") as showMenu, patch.object(
-                tray, "_onShowActionTriggered"
-            ) as showWindow:
+            showWindow = Mock()
+            tray.showRequested.connect(showWindow)
+            with patch.object(tray.menu, "exec") as showMenu:
                 cfg.set(cfg.trayLeftClickAction, "ShowMenu")
                 tray.onTrayIconClick(
                     tray.ActivationReason.Trigger

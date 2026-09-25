@@ -71,6 +71,7 @@ from app.config.constants import (
     normalizeReleaseVersion,
 )
 from app.config.paths import APP_DIR, ASSET_DIR, UPDATE_STAGING_DIR, UPDATE_ZIP_PATH
+from app.platform.application import raiseWindow
 from app.signal_bus import signalBus
 from app.view.components.setting_suggestion_menu import SettingSuggestionMenu
 from app.view.pages.home_page import HomePage
@@ -406,6 +407,9 @@ class MainWindow(MSFluentWindow):
         self.initNavigation()
         self._startMachineRegistration()
         self.tray = SystemTrayIcon(self, self.homePage.homeCardEntries())
+        self.tray.showRequested.connect(self._showMainWindow)
+        self.tray.homeCardTriggered.connect(self._executeHomeCard)
+        self.tray.quitRequested.connect(self.requestQuit)
         self.tray.show()
 
         signalBus.catchException.connect(self._onExceptionCaught)
@@ -1112,21 +1116,8 @@ class MainWindow(MSFluentWindow):
         if tray is not None:
             tray.setHomeCards(entries)
 
-    def _onTrayHomeCardTriggered(self, key: str) -> None:
-        entry = next(
-            (item for item in self.homePage.homeCardEntries() if item["key"] == key),
-            None,
-        )
-        if entry is None:
-            return
-        if entry["source"] == "default":
-            self._showMainWindow()
-        self.homePage.activateHomeCard(key)
-
     def _showMainWindow(self):
-        self.show()
-        self.raise_()
-        self.activateWindow()
+        raiseWindow(self)
 
     def _setPinnedHomeCards(self, cards):
         normalized = self.homePage.setApplicationCards(cards)
@@ -1706,7 +1697,7 @@ class MainWindow(MSFluentWindow):
             self._disposeDownloadStateToolTip()
             return
 
-        self._restoreForUpdateMessage()
+        self._showMainWindow()
 
         if error:
             self._disposeDownloadStateToolTip()
@@ -1724,14 +1715,6 @@ class MainWindow(MSFluentWindow):
             self._downloadStateToolTip.setState(True)
 
         self._showInstallUpdateInfoBar(Path(zipPath))
-
-    def _restoreForUpdateMessage(self):
-        if self.isMinimized():
-            self.showNormal()
-        else:
-            self.show()
-        self.raise_()
-        self.activateWindow()
 
     def _showInstallUpdateInfoBar(self, zipPath):
         infoBar = InfoBar(
