@@ -310,8 +310,6 @@ class Config(QConfig):
         "Schedule", "ShutdownTasksEnabled", True, BoolValidator()
     )
 
-    expandedSettingGroups = ConfigItem("UI", "ExpandedSettingGroups", [])
-
 
 cfg = Config()
 cfg.file = CONFIG_PATH

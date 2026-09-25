@@ -349,16 +349,14 @@ def _activateProcessWindow(process, stopEvent=None):
 
 
 def _assertNoLinks(root: Path) -> None:
-    isJunction = getattr(root, "is_junction", lambda: False)()
-    if root.is_symlink() or isJunction:
+    if root.is_symlink() or root.is_junction():
         raise ApplicationStoreError("现有安装目录包含链接，已停止覆盖安装")
     if not root.exists():
         return
     for directory, directories, files in os.walk(root, followlinks=False):
         for name in (*directories, *files):
             path = Path(directory) / name
-            isJunction = getattr(path, "is_junction", lambda: False)()
-            if path.is_symlink() or isJunction:
+            if path.is_symlink() or path.is_junction():
                 raise ApplicationStoreError("现有安装目录包含链接，已停止覆盖安装")
 
 
@@ -913,14 +911,11 @@ class ApplicationStore:
                         key=lambda path: path.name.casefold(),
                     )
                     for directory in directories:
-                        isJunction = getattr(
-                            directory, "is_junction", lambda: False
-                        )()
                         if (
                             directory.name.startswith(".")
                             or not directory.is_dir()
                             or directory.is_symlink()
-                            or isJunction
+                            or directory.is_junction()
                         ):
                             continue
                         manifestPath = directory / MANIFEST_NAME
@@ -965,12 +960,12 @@ class ApplicationStore:
             self._installedCopies = copies
             return dict(result)
 
-    def uninstall(self, appOrInstallDir: dict | InstalledApplication | str) -> None:
+    def uninstall(self, appOrInstallDir: dict | InstalledApplication) -> None:
         appId = None
         if isinstance(appOrInstallDir, InstalledApplication):
             installDir = appOrInstallDir.installDir
             appId = appOrInstallDir.appId
-        elif isinstance(appOrInstallDir, dict):
+        else:
             local = None
             try:
                 appId = int(appOrInstallDir.get("id"))
@@ -978,8 +973,6 @@ class ApplicationStore:
             except (TypeError, ValueError):
                 pass
             installDir = local.installDir if local else appOrInstallDir.get("install_dir")
-        else:
-            installDir = appOrInstallDir
         installDir = _safeInstallDir(installDir)
         target = _underRoot(self.programDir / installDir, self.programDir)
         tombstones = []

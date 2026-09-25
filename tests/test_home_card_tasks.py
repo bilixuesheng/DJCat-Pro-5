@@ -95,6 +95,15 @@ def custom_task():
     }
 
 
+def checkScheduleAt(window, now, broadcastTasks=(), shutdownTasks=(), homeCardTasks=()):
+    with (
+        patch.object(cfg.broadcastTasks, "_ConfigItem__value", list(broadcastTasks)),
+        patch.object(cfg.shutdownTasks, "_ConfigItem__value", list(shutdownTasks)),
+        patch.object(cfg.homeCardTasks, "_ConfigItem__value", list(homeCardTasks)),
+    ):
+        window._checkScheduleAt(now)
+
+
 class HomeCardTaskDataTest(TestCase):
     def testNormalizationRepairsIdsAndKeepsBothModeBranches(self):
         first = custom_task()
@@ -421,19 +430,22 @@ class HomeCardTaskRuntimeTest(TestCase):
         task = existing_task()
         timezone = datetime.now().astimezone().tzinfo
         with patch.object(self.window, "_handleHomeCardTask") as execute:
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 7, 59, 59, tzinfo=timezone),
                 [],
                 [],
                 [task],
             )
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 8, 0, 1, tzinfo=timezone),
                 [],
                 [],
                 [task],
             )
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 8, 0, 2, tzinfo=timezone),
                 [],
                 [],
@@ -452,7 +464,8 @@ class HomeCardTaskRuntimeTest(TestCase):
         )
         timezone = datetime.now().astimezone().tzinfo
         with patch.object(self.window, "_handleHomeCardTask") as execute:
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 8, 0, 0, tzinfo=timezone),
                 [],
                 [],

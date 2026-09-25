@@ -2577,11 +2577,6 @@ class AppStorePage(ScrollArea):
             lambda: self._executePreset(appId, item["preset_id"], catalogPreset),
         )
 
-    def refreshPinnedCards(self):
-        cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
-        self._refreshPinStates(cards)
-        self.pinnedCardsChanged.emit(cards)
-
     def clearCachedImages(self):
         self.imagePaths.clear()
 

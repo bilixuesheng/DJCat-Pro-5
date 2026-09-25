@@ -20,7 +20,6 @@ from qfluentwidgets import (
 )
 
 from app.common.home_cards import (
-    DEFAULT_HOME_CARD_NAMES,
     ActionSequenceWorker,
     execute_action,
     extract_icon_images,
@@ -28,7 +27,7 @@ from app.common.home_cards import (
     normalize_pinned_cards,
     validate_action,
 )
-from app.config.cfg import cfg
+from app.config.cfg import DEFAULT_HOME_CARDS, cfg
 from app.view.components.home_card_dialog import (
     ActionEditorDialog,
     CustomCardDialog,
@@ -50,8 +49,8 @@ class HomeCustomCardTest(TestCase):
         self.visible_defaults = list(cfg.visibleDefaultHomeCards.value)
         self.custom_cards = list(cfg.customHomeCards.value)
         cfg.file = Path(self.temp_dir.name) / "config.json"
-        cfg.set(cfg.homeCardOrder, list(DEFAULT_HOME_CARD_NAMES))
-        cfg.set(cfg.visibleDefaultHomeCards, list(DEFAULT_HOME_CARD_NAMES))
+        cfg.set(cfg.homeCardOrder, list(DEFAULT_HOME_CARDS))
+        cfg.set(cfg.visibleDefaultHomeCards, list(DEFAULT_HOME_CARDS))
         cfg.set(cfg.customHomeCards, [])
         self.page = HomePage()
         self.page.resize(900, 700)
@@ -75,7 +74,7 @@ class HomeCustomCardTest(TestCase):
         self.assertIn("全屏投送", cfg.visibleDefaultHomeCards.value)
 
     def testRestoringCardImmediatelyRefreshesHomeLayoutHeight(self):
-        name = DEFAULT_HOME_CARD_NAMES[-1]
+        name = DEFAULT_HOME_CARDS[-1]
         self.page._removeDefaultCard(name)
         self.app.processEvents()
 
@@ -88,7 +87,7 @@ class HomeCustomCardTest(TestCase):
         self.assertGreaterEqual(self.page.cardsWidget.height(), expected_height)
 
     def testNewMenuShowsOnlyMissingDefaultsWithIcons(self):
-        visible = list(DEFAULT_HOME_CARD_NAMES[:-1])
+        visible = list(DEFAULT_HOME_CARDS[:-1])
         cfg.set(cfg.visibleDefaultHomeCards, visible)
         self.page._renderCards()
         with mock.patch.object(RoundMenu, "exec", autospec=True) as execute:
@@ -98,7 +97,7 @@ class HomeCustomCardTest(TestCase):
         self.assertFalse(submenu.icon().isNull())
         self.assertEqual(
             [action.text() for action in submenu.actions()],
-            [DEFAULT_HOME_CARD_NAMES[-1]],
+            [DEFAULT_HOME_CARDS[-1]],
         )
         self.assertFalse(submenu.actions()[0].icon().isNull())
         self.assertEqual(menu.actions()[0].text(), "自定义")
@@ -107,7 +106,7 @@ class HomeCustomCardTest(TestCase):
         self.assertEqual(self.page.addBtn.text(), "")
         self.assertEqual(self.page.addBtn.size(), self.page.sortBtn.sizeHint())
         self.assertEqual(self.page.sortBtn.size(), self.page.sortBtn.sizeHint())
-        card = self.page.all_cards[DEFAULT_HOME_CARD_NAMES[0]]
+        card = self.page.all_cards[DEFAULT_HOME_CARDS[0]]
         self.assertEqual(card.editButton.size().toTuple(), (24, 24))
         self.assertEqual(card.deleteButton.size().toTuple(), (26, 26))
 
@@ -123,7 +122,7 @@ class HomeCustomCardTest(TestCase):
                 create.assert_called_once_with()
 
     def testNewControlsUseFluentTooltips(self):
-        card = self.page.all_cards[DEFAULT_HOME_CARD_NAMES[0]]
+        card = self.page.all_cards[DEFAULT_HOME_CARDS[0]]
         for widget in (
             self.page.addBtn,
             self.page.sortBtn,
@@ -784,10 +783,10 @@ class HomeCustomCardTest(TestCase):
         self.assertFalse(card.deleteButton.isHidden())
 
     def testMalformedDefaultAndOrderConfigDoesNotBreakHomePage(self):
-        cfg.set(cfg.visibleDefaultHomeCards, [[], DEFAULT_HOME_CARD_NAMES[0]])
-        cfg.set(cfg.homeCardOrder, [[], DEFAULT_HOME_CARD_NAMES[0]])
+        cfg.set(cfg.visibleDefaultHomeCards, [[], DEFAULT_HOME_CARDS[0]])
+        cfg.set(cfg.homeCardOrder, [[], DEFAULT_HOME_CARDS[0]])
         self.page._renderCards()
-        self.assertIn(DEFAULT_HOME_CARD_NAMES[0], self.page._card_order)
+        self.assertIn(DEFAULT_HOME_CARDS[0], self.page._card_order)
 
     @mock.patch("app.common.home_cards.subprocess.Popen")
     def testProgramArgumentsAreStartedWithoutShell(self, popen):

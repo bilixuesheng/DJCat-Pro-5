@@ -158,7 +158,6 @@ class SettingSectionTest(TestCase):
         self.app.processEvents()
 
         # 整页挂不透明度效果时每个 Animation Tick 都要重新栅格化整棵子树。
-        self.assertTrue(stack.isAnimating())
         for view in (root, target):
             with self.subTest(view=view.key):
                 self.assertIsNone(view.graphicsEffect())
@@ -167,7 +166,6 @@ class SettingSectionTest(TestCase):
         QTest.qWait(SLIDE_DURATION_MS + 80)
         self.app.processEvents()
 
-        self.assertFalse(stack.isAnimating())
         self.assertTrue(root.isHidden())
         self.assertFalse(target.isHidden())
         self.assertEqual(target.pos(), QPoint(0, 0))
@@ -182,7 +180,6 @@ class SettingSectionTest(TestCase):
         page.resize(1000, 700)
         self.app.processEvents()
 
-        self.assertFalse(stack.isAnimating())
         self.assertFalse(stack.view("broadcast").isHidden())
         self.assertTrue(stack.view(ROOT_SECTION_KEY).isHidden())
         self.assertEqual(stack.view("broadcast").size(), stack.size())

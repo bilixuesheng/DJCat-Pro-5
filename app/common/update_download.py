@@ -829,10 +829,6 @@ class UpdateDownloadWorker(QObject):
         with self._segmentsLock:
             return sum(segment.end - segment.start + 1 for segment in self._segments)
 
-    def _segmentCount(self) -> int:
-        with self._segmentsLock:
-            return len(self._segments)
-
     def _trackResponse(self, response) -> None:
         with self._responsesLock:
             self._responses.add(response)

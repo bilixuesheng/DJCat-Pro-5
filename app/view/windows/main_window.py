@@ -766,13 +766,7 @@ class MainWindow(MSFluentWindow):
     def _checkSchedule(self):
         self._checkScheduleAt(datetime.now().astimezone())
 
-    def _checkScheduleAt(
-        self,
-        now,
-        broadcastTasks=None,
-        shutdownTasks=None,
-        homeCardTasks=None,
-    ):
+    def _checkScheduleAt(self, now):
         previous = self._lastScheduleCheck
         self._lastScheduleCheck = now
         if previous is None or now <= previous:
@@ -787,11 +781,7 @@ class MainWindow(MSFluentWindow):
         if cfg.broadcastTasksEnabled.value:
             self._runDueScheduledTasks(
                 "broadcast",
-                (
-                    cfg.broadcastTasks.value
-                    if broadcastTasks is None
-                    else broadcastTasks
-                ),
+                cfg.broadcastTasks.value,
                 previous,
                 now,
                 self._playAudioTask,
@@ -799,11 +789,7 @@ class MainWindow(MSFluentWindow):
         if cfg.homeCardTasksEnabled.value:
             self._runDueScheduledTasks(
                 "home-card",
-                (
-                    cfg.homeCardTasks.value
-                    if homeCardTasks is None
-                    else homeCardTasks
-                ),
+                cfg.homeCardTasks.value,
                 previous,
                 now,
                 self._handleHomeCardTask,
@@ -811,11 +797,7 @@ class MainWindow(MSFluentWindow):
         if cfg.shutdownTasksEnabled.value:
             self._runDueScheduledTasks(
                 "shutdown",
-                (
-                    cfg.shutdownTasks.value
-                    if shutdownTasks is None
-                    else shutdownTasks
-                ),
+                cfg.shutdownTasks.value,
                 max(previous, now - SHUTDOWN_CATCH_UP_LIMIT),
                 now,
                 self._handleShutdownTask,
@@ -869,40 +851,6 @@ class MainWindow(MSFluentWindow):
             return
         self._triggeredScheduleDate = date_key
         self._triggeredScheduleKeys.clear()
-
-    def _runScheduledTasks(
-        self,
-        kind,
-        tasks,
-        date_key,
-        now_time,
-        today_week,
-        callback,
-    ):
-        if not isinstance(tasks, (list, tuple)):
-            return
-        self._prepareScheduleDate(date_key)
-        taskIdentities = {}
-
-        for task in tasks:
-            if not isinstance(task, dict):
-                continue
-            weeks = task.get("weeks", [])
-            if not isinstance(weeks, (list, tuple, set)):
-                continue
-            if not (
-                task.get("enabled", False)
-                and today_week in weeks
-                and task.get("time") == now_time
-            ):
-                continue
-
-            identity = self._scheduleTaskIdentity(task, taskIdentities)
-            key = (kind, f"{date_key}T{now_time}", identity)
-            if key in self._triggeredScheduleKeys:
-                continue
-            self._triggeredScheduleKeys.add(key)
-            callback(task)
 
     @staticmethod
     def _scheduleTaskIdentity(task, identities):

@@ -270,9 +270,6 @@ def _fetchRemoteImage(url: str, cancelEvent, setConnection) -> bytes:
 
 
 def _loadLocalPixmap(src: str) -> QPixmap | None:
-    url = QUrl(src)
-    if url.scheme() in ("http", "https"):
-        return None
     if not src.startswith(":/"):
         return None
     pixmap = QPixmap(src)

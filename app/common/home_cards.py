@@ -16,11 +16,9 @@ from PySide6.QtGui import QIcon, QImage
 from qfluentwidgets import FluentIcon as FIF
 
 from app.common.process_environment import externalProcessEnvironment
-from app.config.cfg import DEFAULT_HOME_CARDS
 from app.config.paths import HOME_CARD_ICON_DIR
 
 
-DEFAULT_HOME_CARD_NAMES = DEFAULT_HOME_CARDS
 DIRECT_APPLICATION_PRESET_ID = 0
 ACTION_TYPES = ("program", "shell", "url", "path", "delay")
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
@@ -416,22 +414,3 @@ class ActionSequenceWorker(QObject):
         except RuntimeError:
             # HomePage may be deleted while the daemon thread is finishing.
             pass
-
-
-__all__ = [
-    "ACTION_TYPES",
-    "ActionSequenceWorker",
-    "DEFAULT_HOME_CARD_NAMES",
-    "DIRECT_APPLICATION_PRESET_ID",
-    "HomeCardError",
-    "execute_action",
-    "extract_icon_images",
-    "icon_for_data",
-    "new_id",
-    "normalize_action",
-    "normalize_custom_cards",
-    "normalize_pinned_cards",
-    "remove_cached_icon",
-    "save_icon_image",
-    "validate_action",
-]

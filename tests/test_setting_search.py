@@ -1,7 +1,7 @@
 import os
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import TestCase
 from unittest.mock import call, patch
@@ -24,6 +24,19 @@ from app.config.constants import APP_NAME
 from app.config.paths import ASSET_DIR
 from app.view.pages.setting_page import SettingPage
 from app.view.windows.main_window import MainWindow
+
+
+# 2026-08-17 是周一（weekday 0），各测试任务都排在这天 08:00:00。
+MONDAY = datetime(2026, 8, 17, 8, 0, 0, tzinfo=datetime.now().astimezone().tzinfo)
+
+
+def checkScheduleAt(window, now, broadcastTasks=(), shutdownTasks=(), homeCardTasks=()):
+    with (
+        patch.object(cfg.broadcastTasks, "_ConfigItem__value", list(broadcastTasks)),
+        patch.object(cfg.shutdownTasks, "_ConfigItem__value", list(shutdownTasks)),
+        patch.object(cfg.homeCardTasks, "_ConfigItem__value", list(homeCardTasks)),
+    ):
+        window._checkScheduleAt(now)
 
 
 class SettingSearchTest(TestCase):
@@ -477,22 +490,8 @@ class SettingSearchTest(TestCase):
             patch.object(self.window, "_playAudioTask") as playAudio,
             patch.object(self.window, "_handleShutdownTask") as handleShutdown,
         ):
-            self.window._runScheduledTasks(
-                "broadcast",
-                [broadcastTask],
-                "2026-08-17",
-                "08:00:00",
-                0,
-                playAudio,
-            )
-            self.window._runScheduledTasks(
-                "shutdown",
-                [shutdownTask],
-                "2026-08-17",
-                "08:00:00",
-                0,
-                handleShutdown,
-            )
+            for moment in (MONDAY - timedelta(seconds=1), MONDAY):
+                checkScheduleAt(self.window, moment, [broadcastTask], [shutdownTask])
 
         playAudio.assert_called_once_with(broadcastTask)
         handleShutdown.assert_called_once_with(shutdownTask)
@@ -507,16 +506,11 @@ class SettingSearchTest(TestCase):
             "type": "系统TTS",
             "content": "测试",
         }
+        task["weeks"] = [0, 1]
         with patch.object(self.window, "_playAudioTask") as playAudio:
-            self.window._runScheduledTasks(
-                "broadcast", [task], "2026-08-17", "08:00:00", 0, playAudio
-            )
-            self.window._runScheduledTasks(
-                "broadcast", [task], "2026-08-17", "08:00:00", 0, playAudio
-            )
-            self.window._runScheduledTasks(
-                "broadcast", [task], "2026-08-18", "08:00:00", 0, playAudio
-            )
+            for day in (MONDAY, MONDAY + timedelta(days=1)):
+                for moment in (day - timedelta(seconds=1), day, day):
+                    checkScheduleAt(self.window, moment, [task])
 
         self.assertEqual(playAudio.call_count, 2)
 
@@ -532,12 +526,8 @@ class SettingSearchTest(TestCase):
             for content in ("第一条", "第二条")
         ]
         with patch.object(self.window, "_playAudioTask") as playAudio:
-            self.window._runScheduledTasks(
-                "broadcast", tasks, "2026-08-17", "08:00:00", 0, playAudio
-            )
-            self.window._runScheduledTasks(
-                "broadcast", tasks, "2026-08-17", "08:00:00", 0, playAudio
-            )
+            for moment in (MONDAY - timedelta(seconds=1), MONDAY, MONDAY):
+                checkScheduleAt(self.window, moment, tasks)
 
         self.assertEqual(
             [call.args[0]["content"] for call in playAudio.call_args_list],
@@ -588,12 +578,14 @@ class SettingSearchTest(TestCase):
         }
         timezone = datetime.now().astimezone().tzinfo
         with patch.object(self.window, "_playAudioTask") as playAudio:
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 7, 59, 59, tzinfo=timezone),
                 [task],
                 [],
             )
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 8, 0, 1, tzinfo=timezone),
                 [task],
                 [],
@@ -623,13 +615,15 @@ class SettingSearchTest(TestCase):
                 patch.object(self.window, "_handleHomeCardTask") as runHomeCard,
                 patch.object(self.window, "_handleShutdownTask") as shutdown,
             ):
-                self.window._checkScheduleAt(
+                checkScheduleAt(
+                    self.window,
                     datetime(2026, 8, 17, 7, 59, 59, tzinfo=timezone),
                     [task],
                     [task],
                     [task],
                 )
-                self.window._checkScheduleAt(
+                checkScheduleAt(
+                    self.window,
                     datetime(2026, 8, 17, 8, 0, 0, tzinfo=timezone),
                     [task],
                     [task],
@@ -637,7 +631,8 @@ class SettingSearchTest(TestCase):
                 )
                 for item in items:
                     cfg.set(item, True)
-                self.window._checkScheduleAt(
+                checkScheduleAt(
+                    self.window,
                     datetime(2026, 8, 17, 8, 0, 1, tzinfo=timezone),
                     [task],
                     [task],
@@ -662,12 +657,14 @@ class SettingSearchTest(TestCase):
         }
         timezone = datetime.now().astimezone().tzinfo
         with patch.object(self.window, "_playAudioTask") as playAudio:
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 7, 59, 30, tzinfo=timezone),
                 [task],
                 [],
             )
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 8, 0, 30, tzinfo=timezone),
                 [task],
                 [],
@@ -684,12 +681,14 @@ class SettingSearchTest(TestCase):
         }
         timezone = datetime.now().astimezone().tzinfo
         with patch.object(self.window, "_handleShutdownTask") as handleShutdown:
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 7, 59, 30, tzinfo=timezone),
                 [],
                 [task],
             )
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 8, 0, 30, tzinfo=timezone),
                 [],
                 [task],
@@ -707,12 +706,14 @@ class SettingSearchTest(TestCase):
         }
         timezone = datetime.now().astimezone().tzinfo
         with patch.object(self.window, "_playAudioTask") as playAudio:
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 23, 59, 59, tzinfo=timezone),
                 [task],
                 [],
             )
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 18, 0, 0, 1, tzinfo=timezone),
                 [task],
                 [],
@@ -739,12 +740,14 @@ class SettingSearchTest(TestCase):
             patch.object(self.window, "_playAudioTask") as playAudio,
             patch.object(self.window, "_handleShutdownTask") as handleShutdown,
         ):
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 17, 8, 0, 0, tzinfo=timezone),
                 [broadcast],
                 [shutdown],
             )
-            self.window._checkScheduleAt(
+            checkScheduleAt(
+                self.window,
                 datetime(2026, 8, 18, 8, 0, 0, tzinfo=timezone),
                 [broadcast],
                 [shutdown],

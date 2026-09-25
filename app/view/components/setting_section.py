@@ -315,12 +315,6 @@ class SettingSectionView(ScrollArea):
             card for cardList in self._cardLists for card in cardList.settingCards()
         )
 
-    def cardListFor(self, card: QWidget) -> SettingCardList | None:
-        for cardList in self._cardLists:
-            if card in cardList.settingCards():
-                return cardList
-        return None
-
     def scrollToCard(self, card: QWidget) -> None:
         top = card.mapTo(self.container, QPoint()).y()
         value = max(0, top - self.vBoxLayout.contentsMargins().top())
@@ -358,9 +352,6 @@ class SettingSectionStack(QWidget):
 
     def currentView(self) -> SettingSectionView | None:
         return self._views.get(self._currentKey)
-
-    def isAnimating(self) -> bool:
-        return bool(self._transitions)
 
     def setCurrentView(
         self,

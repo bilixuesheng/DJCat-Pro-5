@@ -122,22 +122,3 @@ def normalize_home_card_tasks(value) -> list[dict]:
             }
         )
     return tasks
-
-
-__all__ = [
-    "APPLICATION_HOME_CARD_TRIGGER",
-    "APPLICATION_QUIT_EVENT",
-    "APPLICATION_STARTUP_EVENT",
-    "CLOSE_HOME_CARD_ACTION",
-    "CUSTOM_HOME_CARD_TASK",
-    "EXISTING_HOME_CARD_TASK",
-    "HOME_CARD_TASK_ACTIONS",
-    "HOME_CARD_TASK_EVENTS",
-    "HOME_CARD_TASK_KEY",
-    "HOME_CARD_TASK_MODES",
-    "HOME_CARD_TASK_TRIGGERS",
-    "OPEN_HOME_CARD_ACTION",
-    "SCHEDULED_HOME_CARD_TRIGGER",
-    "SILENT_STARTUP_EVENT",
-    "normalize_home_card_tasks",
-]

@@ -46,16 +46,13 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from app.common.home_cards import (
-    DEFAULT_HOME_CARD_NAMES,
     ActionSequenceWorker,
     icon_for_data,
     normalize_custom_cards,
     normalize_pinned_cards,
     remove_cached_icon,
 )
-from app.config.cfg import (
-    cfg,
-)
+from app.config.cfg import DEFAULT_HOME_CARDS, cfg
 from app.view.components.banner_widget import BannerWidget
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import LabelElideFilter
@@ -629,7 +626,7 @@ class HomePage(ScrollArea):
     def _defaultCardNames(self):
         value = cfg.visibleDefaultHomeCards.value
         if not isinstance(value, list):
-            return list(DEFAULT_HOME_CARD_NAMES)
+            return list(DEFAULT_HOME_CARDS)
         names = []
         for name in value:
             if isinstance(name, str) and name in DEFAULT_CARD_INFO and name not in names:
