@@ -15,8 +15,6 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 import requests
 from PySide6.QtWidgets import QApplication
 
@@ -86,7 +84,7 @@ class ServerAttributionTest(TestCase):
 class ClientAttributionTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def _run(self, **postBehaviour):
         request = SimpleNamespace(

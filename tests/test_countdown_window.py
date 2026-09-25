@@ -1,10 +1,5 @@
-import os
-import tempfile
-from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QFontMetrics
@@ -16,18 +11,16 @@ from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.task_picker import TouchTimePicker
 from app.view.pages.countdown_page import CountdownEditPage, CountdownWindow
+from tests.support import isolateCfg
 
 
 class CountdownWindowTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
-        self.tempDir = tempfile.TemporaryDirectory()
-        self.configFile = cfg.file
-        cfg.file = Path(self.tempDir.name) / "config.json"
-        self.confirmBeforeReset = cfg.confirmBeforeResetCountdown.value
+        isolateCfg(self)
         self.window = CountdownWindow()
         self.window.resize(720, 240)
         self.window.show()
@@ -35,9 +28,6 @@ class CountdownWindowTest(TestCase):
 
     def tearDown(self):
         self.window.close()
-        cfg.set(cfg.confirmBeforeResetCountdown, self.confirmBeforeReset)
-        cfg.file = self.configFile
-        self.tempDir.cleanup()
 
     def testWindowedModeCollapsesInlineControls(self):
         self.window.is_windowed = True

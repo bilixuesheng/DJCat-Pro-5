@@ -73,7 +73,6 @@ class StorageModeTest(TestCase):
             root = Path(directory).resolve()
             appDirectory = root / "program"
             appDirectory.mkdir(parents=True)
-            userDirectory = root / "user" / "DJCatPro"
             portableDirectory = appDirectory / "DJCatPro"
 
             with (
@@ -98,7 +97,6 @@ class StorageModeTest(TestCase):
             appDirectory = root / "program"
             appDirectory.mkdir(parents=True)
             userDirectory = root / "user" / "DJCatPro"
-            portableDirectory = appDirectory / "DJCatPro"
 
             with (
                 patch.object(sys, "frozen", True, create=True),

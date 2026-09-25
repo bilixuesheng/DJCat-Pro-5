@@ -1,5 +1,3 @@
-import os
-import sys
 import threading
 import time
 from pathlib import Path
@@ -7,8 +5,6 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import (
     QAbstractAnimation,
@@ -129,7 +125,7 @@ def _apps(count):
 class AppStorePageTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.qtApp = QApplication.instance() or QApplication(sys.argv)
+        cls.qtApp = QApplication.instance()
 
     def setUp(self):
         with patch("app.view.pages.app_store_page.ApplicationStore", return_value=_Store()):

@@ -1,10 +1,7 @@
-import os
 import tempfile
 from pathlib import Path
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
@@ -23,7 +20,7 @@ from deploy import build_args
 class EdgeTtsVoiceTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def testVoiceFilterKeepsOnlyChineseLocales(self):
         voices = filter_chinese_voices(

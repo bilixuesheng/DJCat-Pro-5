@@ -1,10 +1,5 @@
-import os
-import tempfile
-from pathlib import Path
 from unittest import TestCase
 from unittest.mock import Mock, patch
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QInputDevice
@@ -18,6 +13,7 @@ from app.config.paths import ASSET_DIR
 from app.view.pages.home_page import HomePage
 from app.view.pages.setting_page import SettingPage
 from app.view.windows.main_window import MainWindow
+from tests.support import isolateCfg
 
 
 class TrayConfigTest(TestCase):
@@ -40,22 +36,10 @@ class TrayConfigTest(TestCase):
 class HomeCardTrayInterfaceTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
-        self.tempDir = tempfile.TemporaryDirectory()
-        self.configFile = cfg.file
-        self.values = [
-            (item, item.value)
-            for item in (
-                cfg.homeCardOrder,
-                cfg.visibleDefaultHomeCards,
-                cfg.customHomeCards,
-                cfg.pinnedHomeCards,
-                cfg.trayHomeCardKeys,
-            )
-        ]
-        cfg.file = Path(self.tempDir.name) / "config.json"
+        isolateCfg(self)
         cfg.set(
             cfg.homeCardOrder,
             ["考试倒计时", "全屏投送", "定时播报", "定时关机"],
@@ -71,10 +55,6 @@ class HomeCardTrayInterfaceTest(TestCase):
 
     def tearDown(self):
         self.page.close()
-        for item, value in self.values:
-            cfg.set(item, value)
-        cfg.file = self.configFile
-        self.tempDir.cleanup()
 
     def testEntriesFollowHomeOrderAndIdentifyDefaultCards(self):
         entries = self.page.homeCardEntries()
@@ -246,9 +226,10 @@ class HomeCardTrayInterfaceTest(TestCase):
 class TrayControlNavigationTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
+        isolateCfg(self)
         self.quotaPatcher = patch.object(SettingPage, "_refreshAIQuota")
         self.quotaPatcher.start()
         with (
@@ -298,17 +279,7 @@ class TrayControlNavigationTest(TestCase):
         self.assertEqual(cfg.trayHomeCardKeys.value, ["全屏投送"])
 
     def testRestartRestoresDefaultAndApplicationCardSelections(self):
-        tempDir = tempfile.TemporaryDirectory()
-        configFile = cfg.file
-        values = [
-            (item, item.value)
-            for item in (
-                cfg.pinnedHomeCards,
-                cfg.trayHomeCardKeys,
-            )
-        ]
         restoredWindow = None
-        cfg.file = Path(tempDir.name) / "config.json"
         applicationCard = {
             "app_id": 7,
             "preset_id": 0,
@@ -347,10 +318,6 @@ class TrayControlNavigationTest(TestCase):
                 restoredWindow.deleteLater()
                 QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
                 self.app.processEvents()
-            for item, value in values:
-                cfg.set(item, value, save=False)
-            cfg.file = configFile
-            tempDir.cleanup()
 
     def testCreditsNavigationCanBeHiddenWithoutLoadingPage(self):
         item = self.window._creditsNavigationItem
@@ -438,31 +405,10 @@ class TrayControlNavigationTest(TestCase):
 class TrayMenuTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
-        self.tempDir = tempfile.TemporaryDirectory()
-        self.configFile = cfg.file
-        self.values = [
-            (item, item.value)
-            for item in (
-                cfg.applicationIconSource,
-                cfg.applicationIconPath,
-                cfg.broadcastTasks,
-                cfg.homeCardTasks,
-                cfg.shutdownTasks,
-                cfg.broadcastTasksEnabled,
-                cfg.homeCardTasksEnabled,
-                cfg.shutdownTasksEnabled,
-                cfg.showBroadcastTrayAction,
-                cfg.showHomeCardTaskTrayAction,
-                cfg.showShutdownTrayAction,
-                cfg.trayTooltip,
-                cfg.trayHomeCardKeys,
-                cfg.trayHomeCardsInSubmenu,
-            )
-        ]
-        cfg.file = Path(self.tempDir.name) / "config.json"
+        self.tempDir = isolateCfg(self)
         cfg.set(cfg.applicationIconSource, "默认")
         cfg.set(cfg.applicationIconPath, "")
         cfg.set(
@@ -489,10 +435,6 @@ class TrayMenuTest(TestCase):
 
     def tearDown(self):
         self.parent.deleteLater()
-        for item, value in self.values:
-            cfg.set(item, value)
-        cfg.file = self.configFile
-        self.tempDir.cleanup()
         self.app.processEvents()
 
     def _createTray(self):
@@ -556,7 +498,7 @@ class TrayMenuTest(TestCase):
 
     def testCustomApplicationIconUpdatesTrayAndExistingHomeAction(self):
         tray = self._createTray()
-        path = Path(self.tempDir.name) / "custom-icon.png"
+        path = self.tempDir / "custom-icon.png"
         image = QImage(24, 24, QImage.Format.Format_ARGB32)
         image.fill(QColor("#ce352c"))
         self.assertTrue(image.save(str(path)))
@@ -589,7 +531,7 @@ class TrayMenuTest(TestCase):
 
     def testCustomApplicationIconSurvivesTrayMenuRebuild(self):
         tray = self._createTray()
-        path = Path(self.tempDir.name) / "custom-icon.png"
+        path = self.tempDir / "custom-icon.png"
         image = QImage(24, 24, QImage.Format.Format_ARGB32)
         image.fill(QColor("#ce352c"))
         self.assertTrue(image.save(str(path)))

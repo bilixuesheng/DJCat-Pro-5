@@ -1,11 +1,8 @@
 import os
-import tempfile
 import threading
 import unittest
 from pathlib import Path
 from unittest import TestCase, mock
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QInputDevice, QMouseEvent
@@ -14,7 +11,6 @@ from PySide6.QtWidgets import QApplication, QScroller, QWidget
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import (
     RoundMenu,
-    ToggleToolButton,
     ToolTipFilter,
     themeColor,
 )
@@ -35,20 +31,16 @@ from app.view.components.home_card_dialog import (
 )
 from app.view.components.scroll_area import ScrollArea
 from app.view.pages.home_page import HomePage
+from tests.support import isolateCfg
 
 
 class HomeCustomCardTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.config_file = cfg.file
-        self.card_order = list(cfg.homeCardOrder.value)
-        self.visible_defaults = list(cfg.visibleDefaultHomeCards.value)
-        self.custom_cards = list(cfg.customHomeCards.value)
-        cfg.file = Path(self.temp_dir.name) / "config.json"
+        self.tempDir = isolateCfg(self)
         cfg.set(cfg.homeCardOrder, list(DEFAULT_HOME_CARDS))
         cfg.set(cfg.visibleDefaultHomeCards, list(DEFAULT_HOME_CARDS))
         cfg.set(cfg.customHomeCards, [])
@@ -59,11 +51,6 @@ class HomeCustomCardTest(TestCase):
 
     def tearDown(self):
         self.page.close()
-        cfg.set(cfg.homeCardOrder, self.card_order)
-        cfg.set(cfg.visibleDefaultHomeCards, self.visible_defaults)
-        cfg.set(cfg.customHomeCards, self.custom_cards)
-        cfg.file = self.config_file
-        self.temp_dir.cleanup()
 
     def testDefaultCardsCanBeRemovedAndRestored(self):
         self.page._removeDefaultCard("全屏投送")
@@ -748,7 +735,7 @@ class HomeCustomCardTest(TestCase):
         self.assertEqual(len(changes), 1)
 
     def testApplicationCardFallsBackWhenCachedIconWasDeleted(self):
-        missingIcon = Path(self.temp_dir.name) / "deleted-cache.png"
+        missingIcon = self.tempDir / "deleted-cache.png"
         cards = [
             {
                 "app_id": 7,

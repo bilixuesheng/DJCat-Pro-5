@@ -1,8 +1,5 @@
-import os
 from unittest import TestCase
 from unittest.mock import patch
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import (
     QCoreApplication,
@@ -43,7 +40,7 @@ TOP_LEVEL_SECTIONS = [
 class SettingSectionTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def buildPage(self):
         patcher = patch("app.view.pages.setting_page.threading.Thread")
@@ -362,7 +359,7 @@ class SettingSectionTest(TestCase):
 class SettingSuggestionTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
         patcher = patch("app.view.pages.setting_page.threading.Thread")

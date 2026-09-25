@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import math
-import os
 from unittest.mock import patch
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 import pytest
-from PySide6.QtGui import QColor, QPainterPath
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication, QGraphicsDropShadowEffect, QVBoxLayout, QWidget
 
 from app.view.components.busy_glow import (
@@ -26,7 +22,7 @@ from app.view.components.busy_glow import (
 
 @pytest.fixture(scope="module")
 def app():
-    return QApplication.instance() or QApplication([])
+    return QApplication.instance()
 
 
 @pytest.fixture

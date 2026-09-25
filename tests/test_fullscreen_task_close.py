@@ -1,11 +1,6 @@
 import json
-import os
-import tempfile
-from pathlib import Path
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtTest import QTest
@@ -21,41 +16,19 @@ from app.view.pages.broadcast_page import (
 )
 from app.view.pages.countdown_page import CountdownEditPage
 from app.view.windows.main_window import MainWindow
+from tests.support import isolateCfg
 
 
 class FullscreenTaskCloseTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
-        self.tempDir = tempfile.TemporaryDirectory()
-        self.configFile = cfg.file
-        self.configValues = [
-            (item, item.value)
-            for item in (
-                cfg.broadcastActionButtonPosition,
-                cfg.showMainWindowAfterBroadcast,
-                cfg.confirmBeforeCloseBroadcast,
-                cfg.broadcastMarkdownEnabled,
-                cfg.organizeMarkdownBeforeBroadcast,
-                cfg.broadcastTitle,
-                cfg.restoreBroadcastAtStartup,
-                cfg.lastBroadcast,
-                cfg.countdownActionButtonPosition,
-                cfg.showMainWindowAfterCountdown,
-                cfg.confirmBeforeCloseCountdown,
-                cfg.confirmBeforeResetCountdown,
-            )
-        ]
-        cfg.file = Path(self.tempDir.name) / "config.json"
+        isolateCfg(self)
 
     def tearDown(self):
-        for item, value in self.configValues:
-            cfg.set(item, value)
         self.app.setQuitOnLastWindowClosed(True)
-        cfg.file = self.configFile
-        self.tempDir.cleanup()
 
     def testTaskSettingsHaveIndependentDefaults(self):
         self.assertEqual(cfg.broadcastActionButtonPosition.defaultValue, "右下角")

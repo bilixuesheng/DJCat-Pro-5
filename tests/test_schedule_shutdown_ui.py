@@ -1,10 +1,7 @@
-import os
 import threading
 import time
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QAbstractAnimation, QEvent, QPoint, QPointF, Qt, QTime
 from PySide6.QtGui import QImage, QInputDevice, QPixmap, QWheelEvent
@@ -77,7 +74,7 @@ def shutdown_task():
 class ScheduleShutdownUiTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def testPromptPlacesPrimaryShutdownButtonFirst(self):
         parent = QWidget()

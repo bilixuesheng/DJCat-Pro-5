@@ -11,8 +11,6 @@ from unittest.mock import Mock, patch
 
 import requests
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 from PySide6.QtCore import QEvent, QRect, QSize
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -44,7 +42,6 @@ from app.view.pages.setting_page import SettingPage
 from app.view.windows.main_window import (
     InstallerLaunchDialog,
     MainWindow,
-    UpdateApplyWorker,
     UpdateWorker,
 )
 
@@ -830,7 +827,7 @@ class UpdateDownloadTest(TestCase):
 
     def testCancelWaitsForOpenPartialFileBeforeFinishing(self):
         with tempfile.TemporaryDirectory() as tempDir:
-            app = QApplication.instance() or QApplication([])
+            app = QApplication.instance()
             worker = downloadWorker(
                 DOWNLOAD_URL,
                 Path(tempDir) / "update.exe",
@@ -906,7 +903,7 @@ class UpdateDownloadTest(TestCase):
 class UpdateWindowLifecycleTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
         self.quotaPatcher = patch.object(SettingPage, "_refreshAIQuota")

@@ -1,60 +1,21 @@
-import ast
-from pathlib import Path
 from unittest import TestCase
-from unittest.mock import Mock
+from unittest.mock import patch
+
+from app.view.pages.setting_page import ThemeColorSettingCard
+from tests.support import isolateCfg
 
 
 class ThemeColorDialogLifecycleTest(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        sourcePath = (
-            Path(__file__).parents[1]
-            / "app"
-            / "view"
-            / "pages"
-            / "setting_page.py"
-        )
-        module = ast.parse(sourcePath.read_text(encoding="utf-8"))
-        cardClass = next(
-            node
-            for node in module.body
-            if isinstance(node, ast.ClassDef)
-            and node.name == "ThemeColorSettingCard"
-        )
-        method = next(
-            node
-            for node in cardClass.body
-            if isinstance(node, ast.FunctionDef)
-            and node.name == "_onButtonClicked"
-        )
-        cls.methodCode = compile(
-            ast.fix_missing_locations(
-                ast.Module(body=[method], type_ignores=[])
-            ),
-            str(sourcePath),
-            "exec",
-        )
+    def setUp(self):
+        isolateCfg(self)
 
-    def testCustomColorDialogIsDeletedWhenExecRaises(self):
-        dialog = Mock()
-        dialog.exec.side_effect = RuntimeError("dialog failed")
-        config = Mock()
-        config.customThemeColor.value = "green"
-        namespace = {
-            "ColorDialog": Mock(return_value=dialog),
-            "THEME_COLOR_PRESETS": (),
-            "QColor": Mock(),
-            "cfg": config,
-        }
-        exec(self.methodCode, namespace)
-
-        card = Mock()
-        card.customButton = Mock()
-        card.customButton.text.return_value = "自定义颜色"
-        card.presetButtons = {}
-        card.window.return_value = object()
+    @patch("app.view.pages.setting_page.ColorDialog")
+    def testCustomColorDialogIsDeletedWhenExecRaises(self, colorDialog):
+        colorDialog.return_value.exec.side_effect = RuntimeError("dialog failed")
+        card = ThemeColorSettingCard()
+        self.addCleanup(card.deleteLater)
 
         with self.assertRaisesRegex(RuntimeError, "dialog failed"):
-            namespace["_onButtonClicked"](card, card.customButton)
+            card._onButtonClicked(card.customButton)
 
-        dialog.deleteLater.assert_called_once_with()
+        colorDialog.return_value.deleteLater.assert_called_once_with()

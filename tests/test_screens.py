@@ -1,10 +1,7 @@
 import io
-import os
 import tokenize
 from pathlib import Path
 from unittest import TestCase
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import shiboken6
 from PySide6.QtCore import QCoreApplication, QEvent
@@ -24,7 +21,7 @@ def _destroy(widget):
 class ScreenForTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def testDestroyingAWindowLeavesTheGlobalScreenAlone(self):
         """QWidget.screen() hands the QScreen wrapper to the widget as a shiboken child,

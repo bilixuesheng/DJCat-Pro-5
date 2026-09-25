@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import os
 import time
 from unittest.mock import patch
 
 import pytest
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEasingCurve, QPoint, Qt
 from PySide6.QtGui import QAction
@@ -33,7 +30,7 @@ ORIGINAL_MENU_ANIMATION_DURATION_MS = 250
 
 @pytest.fixture(scope="module")
 def application():
-    return QApplication.instance() or QApplication([])
+    return QApplication.instance()
 
 
 @pytest.fixture

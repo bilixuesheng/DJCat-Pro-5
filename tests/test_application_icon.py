@@ -1,16 +1,13 @@
 import os
-import tempfile
 import time
-from pathlib import Path
 from unittest import TestCase
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication
 
 from app.common.application_icon import applicationIcon, trayHomeIcon
 from app.config.cfg import cfg
+from tests.support import isolateCfg
 
 
 def _saveIcon(path, color):
@@ -26,21 +23,10 @@ def _color(icon):
 class ApplicationIconTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
-        self.tempDir = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tempDir.cleanup)
-        self.configFile = cfg.file
-        self.source = cfg.applicationIconSource.value
-        self.path = cfg.applicationIconPath.value
-        cfg.file = Path(self.tempDir.name) / "config.json"
-        self.addCleanup(self._restore)
-
-    def _restore(self):
-        cfg.set(cfg.applicationIconSource, self.source)
-        cfg.set(cfg.applicationIconPath, self.path)
-        cfg.file = self.configFile
+        self.tempDir = isolateCfg(self)
 
     def testRepeatedLookupsReuseTheDecodedIcon(self):
         # 设置页预览在 paintEvent 里取图标；每次都新建 QIcon 会整张重新解码。
@@ -48,7 +34,7 @@ class ApplicationIconTest(TestCase):
         self.assertIs(trayHomeIcon(), trayHomeIcon())
 
     def testChangingTheSettingResolvesTheNewIcon(self):
-        path = Path(self.tempDir.name) / "custom.png"
+        path = self.tempDir / "custom.png"
         _saveIcon(path, "#ce352c")
         default = applicationIcon()
 
@@ -60,7 +46,7 @@ class ApplicationIconTest(TestCase):
         self.assertEqual(_color(trayHomeIcon()), "#ce352c")
 
     def testReplacingTheFileAtTheSamePathIsPickedUp(self):
-        path = Path(self.tempDir.name) / "custom.png"
+        path = self.tempDir / "custom.png"
         _saveIcon(path, "#ce352c")
         cfg.set(cfg.applicationIconPath, str(path))
         cfg.set(cfg.applicationIconSource, "自定义")
@@ -74,7 +60,7 @@ class ApplicationIconTest(TestCase):
 
     def testAMissingCustomFileFallsBackToTheDefault(self):
         default = _color(applicationIcon())
-        cfg.set(cfg.applicationIconPath, str(Path(self.tempDir.name) / "gone.png"))
+        cfg.set(cfg.applicationIconPath, str(self.tempDir / "gone.png"))
         cfg.set(cfg.applicationIconSource, "自定义")
 
         self.assertEqual(_color(applicationIcon()), default)

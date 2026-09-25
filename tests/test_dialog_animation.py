@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import os
 from unittest.mock import patch
 
 import pytest
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
@@ -36,7 +33,7 @@ FADE_OUT_MS = 100
 
 @pytest.fixture(scope="module")
 def application():
-    return QApplication.instance() or QApplication([])
+    return QApplication.instance()
 
 
 @pytest.fixture

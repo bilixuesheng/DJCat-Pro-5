@@ -1,13 +1,9 @@
 """Conversion Log review and Prompt Example management on the Admin Console."""
 
-import json
-import re
 from contextlib import closing
 from datetime import datetime, timedelta
 from unittest import TestCase
-from unittest.mock import patch
 
-import requests
 from werkzeug.datastructures import MultiDict
 
 from server import ai_markdown

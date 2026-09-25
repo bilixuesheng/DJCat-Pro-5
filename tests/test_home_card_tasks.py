@@ -1,12 +1,7 @@
-import os
-import tempfile
 import time
 from datetime import datetime
-from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QPoint
 from PySide6.QtTest import QTest
@@ -34,6 +29,7 @@ from app.view.pages.home_card_task_page import (
 )
 from app.view.pages.setting_page import SettingPage
 from app.view.windows.main_window import MainWindow
+from tests.support import isolateCfg
 
 
 def home_cards():
@@ -173,19 +169,11 @@ class HomeCardTaskDataTest(TestCase):
 class HomeCardTaskUiTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
-        self.tempDir = tempfile.TemporaryDirectory()
-        self.configFile = cfg.file
-        self.tasks = cfg.homeCardTasks.value
-        cfg.file = Path(self.tempDir.name) / "config.json"
+        isolateCfg(self)
         cfg.set(cfg.homeCardTasks, [])
-
-    def tearDown(self):
-        cfg.set(cfg.homeCardTasks, self.tasks)
-        cfg.file = self.configFile
-        self.tempDir.cleanup()
 
     def testFormUsesTouchPickerAndExcludesItselfFromExistingCards(self):
         form, widgets = create_home_card_task_form(None, home_cards())
@@ -375,15 +363,10 @@ class HomeCardTaskUiTest(TestCase):
 class HomeCardTaskRuntimeTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
-        self.tempDir = tempfile.TemporaryDirectory()
-        self.configFile = cfg.file
-        self.tasks = cfg.homeCardTasks.value
-        self.tasksEnabled = cfg.homeCardTasksEnabled.value
-        self.lastBroadcast = cfg.lastBroadcast.value
-        cfg.file = Path(self.tempDir.name) / "config.json"
+        isolateCfg(self)
         cfg.set(cfg.homeCardTasks, [])
         cfg.set(cfg.homeCardTasksEnabled, True)
         self.quotaPatcher = patch.object(SettingPage, "_refreshAIQuota")
@@ -402,11 +385,6 @@ class HomeCardTaskRuntimeTest(TestCase):
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.app.processEvents()
         self.quotaPatcher.stop()
-        cfg.set(cfg.homeCardTasks, self.tasks)
-        cfg.set(cfg.homeCardTasksEnabled, self.tasksEnabled)
-        cfg.set(cfg.lastBroadcast, self.lastBroadcast)
-        cfg.file = self.configFile
-        self.tempDir.cleanup()
 
     def testExistingCardTaskUsesStableHomeCardKey(self):
         with patch.object(self.window, "_executeHomeCard", return_value=True) as execute:
@@ -646,46 +624,32 @@ class HomeCardTaskRuntimeTest(TestCase):
 
 class HomeCardTaskMigrationTest(TestCase):
     def testRenameKeepsOrderVisibilityAndTraySelection(self):
-        items = (
+        isolateCfg(self)
+        cfg.set(
             cfg.homeCardOrder,
-            cfg.visibleDefaultHomeCards,
-            cfg.trayHomeCardKeys,
-            cfg.homeCardSchemaVersion,
+            ["全屏投送", "定时任务", "定时播报"],
+            save=False,
         )
-        values = [(item, item.value) for item in items]
-        configFile = cfg.file
-        with tempfile.TemporaryDirectory() as directory:
-            try:
-                cfg.file = Path(directory) / "config.json"
-                cfg.set(
-                    cfg.homeCardOrder,
-                    ["全屏投送", "定时任务", "定时播报"],
-                    save=False,
-                )
-                cfg.set(
-                    cfg.visibleDefaultHomeCards,
-                    ["全屏投送", "定时播报"],
-                    save=False,
-                )
-                cfg.set(cfg.trayHomeCardKeys, ["定时任务"], save=False)
-                cfg.set(cfg.homeCardSchemaVersion, 2, save=False)
+        cfg.set(
+            cfg.visibleDefaultHomeCards,
+            ["全屏投送", "定时播报"],
+            save=False,
+        )
+        cfg.set(cfg.trayHomeCardKeys, ["定时任务"], save=False)
+        cfg.set(cfg.homeCardSchemaVersion, 2, save=False)
 
-                migrateConfig()
+        migrateConfig()
 
-                self.assertEqual(
-                    cfg.homeCardOrder.value,
-                    ["全屏投送", "自动任务", "定时播报"],
-                )
-                self.assertEqual(
-                    cfg.visibleDefaultHomeCards.value,
-                    ["全屏投送", "定时播报"],
-                )
-                self.assertEqual(cfg.trayHomeCardKeys.value, ["自动任务"])
-                self.assertEqual(
-                    cfg.homeCardSchemaVersion.value,
-                    HOME_CARD_SCHEMA_VERSION,
-                )
-            finally:
-                for item, value in values:
-                    cfg.set(item, value, save=False)
-                cfg.file = configFile
+        self.assertEqual(
+            cfg.homeCardOrder.value,
+            ["全屏投送", "自动任务", "定时播报"],
+        )
+        self.assertEqual(
+            cfg.visibleDefaultHomeCards.value,
+            ["全屏投送", "定时播报"],
+        )
+        self.assertEqual(cfg.trayHomeCardKeys.value, ["自动任务"])
+        self.assertEqual(
+            cfg.homeCardSchemaVersion.value,
+            HOME_CARD_SCHEMA_VERSION,
+        )

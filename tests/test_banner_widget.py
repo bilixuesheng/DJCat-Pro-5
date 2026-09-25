@@ -1,35 +1,21 @@
 import os
-import tempfile
-from pathlib import Path
 from unittest import TestCase
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication
 
 from app.config.cfg import cfg
 from app.view.components.banner_widget import BannerWidget
+from tests.support import isolateCfg
 
 
 class BannerSourceImageTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
-        self.tempDir = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tempDir.cleanup)
-        self.configFile = cfg.file
-        self.source = cfg.bannerImageSource.value
-        self.path = cfg.bannerImagePath.value
-        cfg.file = Path(self.tempDir.name) / "config.json"
-        self.addCleanup(self._restore)
-
-    def _restore(self):
-        cfg.set(cfg.bannerImageSource, self.source)
-        cfg.set(cfg.bannerImagePath, self.path)
-        cfg.file = self.configFile
+        self.tempDir = isolateCfg(self)
 
     def _banner(self):
         banner = BannerWidget()
@@ -51,7 +37,7 @@ class BannerSourceImageTest(TestCase):
         )
 
     def testAReplacedCustomImageIsDecodedAgain(self):
-        path = Path(self.tempDir.name) / "banner.png"
+        path = self.tempDir / "banner.png"
         image = QImage(64, 32, QImage.Format.Format_ARGB32)
         image.fill(QColor("#ce352c"))
         self.assertTrue(image.save(str(path)))
@@ -73,7 +59,7 @@ class BannerSourceImageTest(TestCase):
 class BannerHighDpiTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def testTheCachedBannerIsRenderedAtDevicePixels(self):
         # 150%/200% 缩放下按逻辑尺寸渲染再被放大，横幅会发虚。

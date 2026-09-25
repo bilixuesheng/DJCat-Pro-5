@@ -1,10 +1,5 @@
-import os
-import tempfile
-from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QInputDevice
@@ -13,20 +8,16 @@ from PySide6.QtWidgets import QApplication, QScroller, QScrollerProperties
 
 from app.config.cfg import cfg
 from app.view.pages.home_page import HomePage
+from tests.support import isolateCfg
 
 
 class HomeCardEditTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def setUp(self):
-        self.tempDir = tempfile.TemporaryDirectory()
-        self.configFile = cfg.file
-        self.cardOrder = list(cfg.homeCardOrder.value)
-        self.visibleDefaults = list(cfg.visibleDefaultHomeCards.value)
-        self.customCards = list(cfg.customHomeCards.value)
-        cfg.file = Path(self.tempDir.name) / "config.json"
+        isolateCfg(self)
         cfg.set(
             cfg.homeCardOrder,
             ["全屏投送", "考试倒计时", "定时关机", "定时播报"],
@@ -43,11 +34,6 @@ class HomeCardEditTest(TestCase):
 
     def tearDown(self):
         self.page.close()
-        cfg.set(cfg.homeCardOrder, self.cardOrder)
-        cfg.set(cfg.visibleDefaultHomeCards, self.visibleDefaults)
-        cfg.set(cfg.customHomeCards, self.customCards)
-        cfg.file = self.configFile
-        self.tempDir.cleanup()
 
     def testCardsCanBeReorderedWithoutTouchScrolling(self):
         self.assertEqual(

@@ -1,11 +1,8 @@
-import os
 import socket
 import threading
 import time
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QBuffer, QIODevice, QPoint, Qt
 from PySide6.QtGui import QImage, QInputDevice, QTextBlockFormat
@@ -42,7 +39,7 @@ def _pngBytes() -> bytes:
 class MarkdownRendererTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = QApplication.instance()
 
     def _waitFor(self, predicate):
         deadline = time.monotonic() + 3
