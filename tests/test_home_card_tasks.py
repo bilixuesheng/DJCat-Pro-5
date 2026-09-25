@@ -24,8 +24,8 @@ from app.config.cfg import HOME_CARD_SCHEMA_VERSION, cfg, migrateConfig
 from app.view.components.task_picker import TouchTimePicker
 from app.view.pages.home_card_task_page import (
     HomeCardTaskPage,
-    create_home_card_task_form,
-    home_card_task_data,
+    createHomeCardTaskForm,
+    homeCardTaskData,
 )
 from app.view.pages.setting_page import SettingPage
 from app.view.windows.main_window import MainWindow
@@ -176,7 +176,7 @@ class HomeCardTaskUiTest(TestCase):
         cfg.set(cfg.homeCardTasks, [])
 
     def testFormUsesTouchPickerAndExcludesItselfFromExistingCards(self):
-        form, widgets = create_home_card_task_form(None, home_cards())
+        form, widgets = createHomeCardTaskForm(None, home_cards())
         self.addCleanup(form.deleteLater)
 
         self.assertIsInstance(widgets["timePicker"], TouchTimePicker)
@@ -187,14 +187,14 @@ class HomeCardTaskUiTest(TestCase):
         self.assertNotIn(HOME_CARD_TASK_KEY, widgets["homeCards"])
         self.assertEqual(widgets["homeCardCombo"].currentText(), "全屏投送")
         self.assertFalse(widgets["operationCard"].isHidden())
-        self.assertEqual(home_card_task_data(widgets)["actions"], [])
+        self.assertEqual(homeCardTaskData(widgets)["actions"], [])
         widgets["modeCombo"].setCurrentIndex(
             widgets["modeCombo"].findData(CUSTOM_HOME_CARD_TASK)
         )
-        self.assertEqual(home_card_task_data(widgets)["actions"], [])
+        self.assertEqual(homeCardTaskData(widgets)["actions"], [])
 
     def testApplicationTriggerReplacesTimeAndWeekControls(self):
-        form, widgets = create_home_card_task_form(None, home_cards())
+        form, widgets = createHomeCardTaskForm(None, home_cards())
         self.addCleanup(form.deleteLater)
 
         widgets["triggerCombo"].setCurrentIndex(
@@ -208,38 +208,38 @@ class HomeCardTaskUiTest(TestCase):
         self.assertTrue(widgets["weekCard"].isHidden())
         self.assertFalse(widgets["eventCard"].isHidden())
         self.assertEqual(widgets["eventCombo"].currentText(), "电教猫关闭时")
-        data = home_card_task_data(widgets)
+        data = homeCardTaskData(widgets)
         self.assertEqual(data["trigger"], APPLICATION_HOME_CARD_TRIGGER)
         self.assertEqual(data["event"], APPLICATION_QUIT_EVENT)
 
     def testCloseActionIsOnlyAvailableForDefaultHomeCards(self):
-        form, widgets = create_home_card_task_form(None, home_cards())
+        form, widgets = createHomeCardTaskForm(None, home_cards())
         self.addCleanup(form.deleteLater)
         widgets["operationCombo"].setCurrentIndex(
             widgets["operationCombo"].findData(CLOSE_HOME_CARD_ACTION)
         )
 
-        self.assertEqual(home_card_task_data(widgets)["operation"], CLOSE_HOME_CARD_ACTION)
+        self.assertEqual(homeCardTaskData(widgets)["operation"], CLOSE_HOME_CARD_ACTION)
         widgets["homeCardCombo"].setCurrentIndex(
             widgets["homeCardCombo"].findData("custom:one")
         )
         self.assertTrue(widgets["operationCard"].isHidden())
-        self.assertEqual(home_card_task_data(widgets)["operation"], OPEN_HOME_CARD_ACTION)
+        self.assertEqual(homeCardTaskData(widgets)["operation"], OPEN_HOME_CARD_ACTION)
 
     def testSwitchingModesKeepsExistingTargetAndCustomActions(self):
         data = custom_task()
         data.update({"targetKey": "custom:one", "targetTitle": "课程表"})
-        form, widgets = create_home_card_task_form(None, home_cards(), data)
+        form, widgets = createHomeCardTaskForm(None, home_cards(), data)
         self.addCleanup(form.deleteLater)
 
         widgets["modeCombo"].setCurrentIndex(
             widgets["modeCombo"].findData(EXISTING_HOME_CARD_TASK)
         )
-        existing = home_card_task_data(widgets)
+        existing = homeCardTaskData(widgets)
         widgets["modeCombo"].setCurrentIndex(
             widgets["modeCombo"].findData(CUSTOM_HOME_CARD_TASK)
         )
-        custom = home_card_task_data(widgets)
+        custom = homeCardTaskData(widgets)
 
         self.assertEqual(existing["targetKey"], "custom:one")
         self.assertEqual(custom["actions"], data["actions"])
@@ -247,7 +247,7 @@ class HomeCardTaskUiTest(TestCase):
     def testMissingTargetIsShownWithoutPointingAtAnotherCard(self):
         data = existing_task()
         data.update({"targetKey": "custom:missing", "targetTitle": "旧卡片"})
-        form, widgets = create_home_card_task_form(None, home_cards(), data)
+        form, widgets = createHomeCardTaskForm(None, home_cards(), data)
         self.addCleanup(form.deleteLater)
 
         self.assertEqual(widgets["homeCardCombo"].currentData(), "custom:missing")

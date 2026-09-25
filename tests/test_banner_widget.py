@@ -21,7 +21,7 @@ class BannerSourceImageTest(TestCase):
         banner = BannerWidget()
         self.addCleanup(banner.deleteLater)
         banner.resize(900, 300)
-        banner._create_cached_pixmap(900, 300)
+        banner._createCachedPixmap(900, 300)
         return banner
 
     def testHomeBannerAndSettingPreviewShareOneDecodedImage(self):
@@ -31,9 +31,9 @@ class BannerSourceImageTest(TestCase):
         cfg.set(cfg.bannerImageSource, "预设: 树人门")
         home, preview = self._banner(), self._banner()
 
-        self.assertIsNotNone(home._source_pixmap)
+        self.assertIsNotNone(home._sourcePixmap)
         self.assertEqual(
-            home._source_pixmap.cacheKey(), preview._source_pixmap.cacheKey()
+            home._sourcePixmap.cacheKey(), preview._sourcePixmap.cacheKey()
         )
 
     def testAReplacedCustomImageIsDecodedAgain(self):
@@ -43,16 +43,16 @@ class BannerSourceImageTest(TestCase):
         self.assertTrue(image.save(str(path)))
         cfg.set(cfg.bannerImagePath, str(path))
         cfg.set(cfg.bannerImageSource, "自定义")
-        first = self._banner()._source_pixmap.cacheKey()
+        first = self._banner()._sourcePixmap.cacheKey()
 
         image.fill(QColor("#2c7ace"))
         self.assertTrue(image.save(str(path)))
         os.utime(path, ns=(1, 1))
 
         banner = self._banner()
-        self.assertNotEqual(banner._source_pixmap.cacheKey(), first)
+        self.assertNotEqual(banner._sourcePixmap.cacheKey(), first)
         self.assertEqual(
-            banner._source_pixmap.toImage().pixelColor(10, 10).name(), "#2c7ace"
+            banner._sourcePixmap.toImage().pixelColor(10, 10).name(), "#2c7ace"
         )
 
 
@@ -67,7 +67,7 @@ class BannerHighDpiTest(TestCase):
         self.addCleanup(banner.deleteLater)
         banner.devicePixelRatioF = lambda: 2.0
 
-        pixmap = banner._create_cached_pixmap(450, 150)
+        pixmap = banner._createCachedPixmap(450, 150)
 
         self.assertEqual((pixmap.width(), pixmap.height()), (900, 300))
         self.assertEqual(pixmap.devicePixelRatio(), 2.0)
@@ -78,10 +78,10 @@ class BannerHighDpiTest(TestCase):
         banner.resize(450, 150)
         banner.show()
         banner.grab()
-        first = banner._cached_pixmap
+        first = banner._cachedPixmap
 
         banner.devicePixelRatioF = lambda: 1.5
         banner.grab()
 
-        self.assertIsNot(banner._cached_pixmap, first)
-        self.assertEqual(banner._cached_pixmap.devicePixelRatio(), 1.5)
+        self.assertIsNot(banner._cachedPixmap, first)
+        self.assertEqual(banner._cachedPixmap.devicePixelRatio(), 1.5)

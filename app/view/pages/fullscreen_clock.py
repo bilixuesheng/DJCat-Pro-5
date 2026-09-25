@@ -27,7 +27,7 @@ class FullscreenClockWindow(TimerWindow):
 
     def startClock(self):
         self.timer.stop()
-        self.is_windowed = cfg.fullscreenClockStartWindowed.value
+        self.isWindowed = cfg.fullscreenClockStartWindowed.value
         self._refreshTime()
         self._setupCornerButtons()
         self._applyWindowState()
@@ -36,7 +36,7 @@ class FullscreenClockWindow(TimerWindow):
         now = QTime.currentTime()
         timeFormat = (
             "HH : mm : ss"
-            if self.is_windowed
+            if self.isWindowed
             else "HH : mm : ss"
         )
         self.timeLabel.setText(now.toString(timeFormat))

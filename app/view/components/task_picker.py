@@ -330,5 +330,5 @@ class TaskExpandCardBehavior(QObject):
         painter.drawLine(1, y, widget.width() - 1, y)
 
 
-def configure_task_expand_card(expandCard):
+def configureTaskExpandCard(expandCard):
     return TaskExpandCardBehavior(expandCard)

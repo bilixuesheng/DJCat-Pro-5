@@ -169,7 +169,7 @@ class MarkdownRendererTest(TestCase):
 
     def testMarkdownDisablesSelectionAndUsesBroadcastTypography(self):
         window = BroadcastWindow()
-        window.setContent("title", "普通正文", is_markdown=False)
+        window.setContent("title", "普通正文", isMarkdown=False)
         plainFont = window.contentEdit.font()
         markdownMargins = window.markdownView._contentLayout.contentsMargins()
         documentMargin = round(window.contentEdit.document().documentMargin())
@@ -188,7 +188,7 @@ class MarkdownRendererTest(TestCase):
             "# 标题\n\n正文\n\n[链接](https://example.com)\n\n"
             "| A | B |\n|---|---|\n| 1 | 2 |\n\n"
             "```python\nprint(1)\n```",
-            is_markdown=True,
+            isMarkdown=True,
         )
         self.app.processEvents()
 
@@ -459,7 +459,7 @@ class MarkdownRendererTest(TestCase):
 
     def testBroadcastSwitchesBetweenPlainAndMarkdownViews(self):
         window = BroadcastWindow()
-        window.setContent("title", "# markdown", is_markdown=True)
+        window.setContent("title", "# markdown", isMarkdown=True)
         self.assertTrue(window.contentEdit.isHidden())
         self.assertFalse(window.markdownView.isHidden())
         self.assertEqual(
@@ -467,7 +467,7 @@ class MarkdownRendererTest(TestCase):
             True,
         )
 
-        window.setContent("title", "plain", is_markdown=False)
+        window.setContent("title", "plain", isMarkdown=False)
         self.assertTrue(window.markdownView.isHidden())
         self.assertFalse(window.contentEdit.isHidden())
         self.assertEqual(window.markdownView._content.findChildren(QLabel), [])
@@ -480,19 +480,19 @@ class MarkdownRendererTest(TestCase):
         window.show()
 
         for windowed in (False, True):
-            window.is_windowed = windowed
+            window.isWindowed = windowed
             for isMarkdown, view in (
                 (False, window.contentEdit),
                 (True, window.markdownView),
             ):
                 with self.subTest(windowed=windowed, isMarkdown=isMarkdown):
-                    window.setContent("title", "正文", is_markdown=isMarkdown)
+                    window.setContent("title", "正文", isMarkdown=isMarkdown)
                     self.app.processEvents()
                     self.assertEqual(view.geometry().bottom(), window.contentsRect().bottom())
 
     def testClosingBroadcastReleasesItsRenderedDocument(self):
         window = BroadcastWindow()
-        window.setContent("title", "# 标题\n\n正文", is_markdown=True)
+        window.setContent("title", "# 标题\n\n正文", isMarkdown=True)
         self.assertTrue(window.markdownView._content.findChildren(QLabel))
 
         window.close()
@@ -507,7 +507,7 @@ class MarkdownRendererTest(TestCase):
             "title",
             "**【数学】**\n- 尝试拖动这段已经禁用文字选择的正文\n\n"
             "[查看作业](https://example.com)",
-            is_markdown=True,
+            isMarkdown=True,
         )
         window.startBroadcast()
         self.app.processEvents()
@@ -558,8 +558,8 @@ class MarkdownRendererTest(TestCase):
             )
         openUrl.assert_called_once()
 
-        window.btn_win.click()
-        self.assertTrue(window.is_windowed)
+        window.btnWin.click()
+        self.assertTrue(window.isWindowed)
 
     def testWindowedBroadcastUsesBodyForWindowDragging(self):
         window = BroadcastWindow()
@@ -567,7 +567,7 @@ class MarkdownRendererTest(TestCase):
         window.contentEdit.setPlainText(
             "\n".join(f"line {index}" for index in range(200))
         )
-        window.is_windowed = True
+        window.isWindowed = True
         window._updateContentInteraction()
         window.resize(720, 300)
         window.move(100, 100)
@@ -616,14 +616,14 @@ class MarkdownRendererTest(TestCase):
             QScroller, "ungrabGesture"
         ) as ungrabGesture:
             for _ in range(3):
-                window.is_windowed = True
+                window.isWindowed = True
                 window._updateContentInteraction()
                 self.assertTrue(window._contentDragFilterInstalled)
                 self.assertTrue(
                     all(distance > 1.0 for distance in dragStartDistances())
                 )
 
-                window.is_windowed = False
+                window.isWindowed = False
                 window._updateContentInteraction()
                 self.assertFalse(window._contentDragFilterInstalled)
                 self.assertEqual(dragStartDistances(), original)
@@ -640,9 +640,9 @@ class MarkdownRendererTest(TestCase):
             "title",
             "[查看作业](https://example.com)\n\n"
             + "\n\n".join(f"正文 {index}" for index in range(80)),
-            is_markdown=True,
+            isMarkdown=True,
         )
-        window.is_windowed = True
+        window.isWindowed = True
         window._updateContentInteraction()
         window.resize(720, 300)
         window.move(100, 100)

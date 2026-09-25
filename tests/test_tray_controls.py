@@ -133,7 +133,7 @@ class HomeCardTrayInterfaceTest(TestCase):
 
     def testAHomeCardCanBeActivatedByItsStableKey(self):
         clicks = []
-        self.page.all_cards["全屏投送"].clicked.connect(
+        self.page.allCards["全屏投送"].clicked.connect(
             lambda: clicks.append("全屏投送")
         )
 

@@ -499,10 +499,10 @@ class MainWindow(MSFluentWindow):
         self.player = None
         self.audioOutput = None
         self.tts = None
-        self.current_play_repeats = 0
-        self._edge_tts_request_id = 0
-        self._edge_tts_jobs = {}
-        self._edge_tts_temp_path = ""
+        self.currentPlayRepeats = 0
+        self._edgeTtsRequestId = 0
+        self._edgeTtsJobs = {}
+        self._edgeTtsTempPath = ""
         self._audioTaskQueue = deque()
         self._audioTaskActive = False
         self._activeAudioKind = ""
@@ -563,14 +563,14 @@ class MainWindow(MSFluentWindow):
         if self.tts is not None:
             self.tts.setVolume(volume)
 
-    def _playAudioTask(self, task_data):
+    def _playAudioTask(self, taskData):
         if (
             self._resourcesShutdown
-            or not isinstance(task_data, dict)
-            or not isinstance(task_data.get("type"), str)
+            or not isinstance(taskData, dict)
+            or not isinstance(taskData.get("type"), str)
         ):
             return
-        self._audioTaskQueue.append(dict(task_data))
+        self._audioTaskQueue.append(dict(taskData))
         self._playNextAudioTask()
 
     def _playNextAudioTask(self):
@@ -591,25 +591,25 @@ class MainWindow(MSFluentWindow):
         if not self._resourcesShutdown:
             QTimer.singleShot(0, self, self._playNextAudioTask)
 
-    def _startAudioTask(self, task_data):
+    def _startAudioTask(self, taskData):
         if self._resourcesShutdown:
             return False
 
         self._ensureAudioBackend()
-        volume = task_data.get("volume", 100)
+        volume = taskData.get("volume", 100)
         self._setBroadcastVolume(volume)
-        t = task_data["type"]
-        repeat_count = task_data.get("repeat", 1)
+        t = taskData["type"]
+        repeatCount = taskData.get("repeat", 1)
 
         if t == "Edge TTS（需要联网）":
             from app.common.edge_tts import DEFAULT_EDGE_VOICE
 
-            content = task_data.get("content", "").strip()
+            content = taskData.get("content", "").strip()
             if content:
                 self._startEdgeTts(
                     content,
-                    task_data.get("voice", DEFAULT_EDGE_VOICE),
-                    repeat_count,
+                    taskData.get("voice", DEFAULT_EDGE_VOICE),
+                    repeatCount,
                     volume,
                 )
                 self._activeAudioKind = "edge"
@@ -620,11 +620,11 @@ class MainWindow(MSFluentWindow):
         self._cleanupEdgeTtsFile()
 
         if t == "系统TTS":
-            content = task_data.get("content", "")
+            content = taskData.get("content", "")
             if content:
-                full_text = "。".join([content] * repeat_count)
+                fullText = "。".join([content] * repeatCount)
                 self._activeAudioKind = "tts"
-                self.tts.say(full_text)
+                self.tts.say(fullText)
                 return True
             return False
 
@@ -636,38 +636,38 @@ class MainWindow(MSFluentWindow):
         path = (
             str(ASSET_DIR / presetFiles[t])
             if t in presetFiles
-            else task_data.get("file", "")
+            else taskData.get("file", "")
         )
 
         if path and Path(path).exists():
             self._activeAudioKind = "media"
-            self.current_play_repeats = repeat_count - 1
+            self.currentPlayRepeats = repeatCount - 1
             self.player.setSource(QUrl.fromLocalFile(path))
             self.player.play()
             return True
         return False
 
-    def _startEdgeTts(self, content, voice, repeat_count, volume):
+    def _startEdgeTts(self, content, voice, repeatCount, volume):
         from app.common.edge_tts import EdgeSpeechWorker
 
-        self._edge_tts_request_id += 1
-        request_id = self._edge_tts_request_id
-        worker = EdgeSpeechWorker(request_id, content, voice)
+        self._edgeTtsRequestId += 1
+        requestId = self._edgeTtsRequestId
+        worker = EdgeSpeechWorker(requestId, content, voice)
         thread = threading.Thread(target=worker.run, daemon=True)
-        self._edge_tts_jobs[request_id] = (
+        self._edgeTtsJobs[requestId] = (
             worker,
             thread,
-            repeat_count,
+            repeatCount,
             volume,
         )
         worker.finished.connect(self._onEdgeTtsReady)
         thread.start()
 
-    def _onEdgeTtsReady(self, request_id, path, error):
-        job = self._edge_tts_jobs.pop(request_id, None)
+    def _onEdgeTtsReady(self, requestId, path, error):
+        job = self._edgeTtsJobs.pop(requestId, None)
         if job:
             job[0].deleteLater()
-        if request_id != self._edge_tts_request_id:
+        if requestId != self._edgeTtsRequestId:
             if path:
                 self._removeTempFile(path)
             return
@@ -685,29 +685,29 @@ class MainWindow(MSFluentWindow):
             self._finishAudioTask()
             return
 
-        _, _, repeat_count, volume = job
+        _, _, repeatCount, volume = job
         self._setBroadcastVolume(volume)
         self._cleanupEdgeTtsFile()
-        self._edge_tts_temp_path = path
+        self._edgeTtsTempPath = path
         self._activeAudioKind = "media"
-        self.current_play_repeats = repeat_count - 1
+        self.currentPlayRepeats = repeatCount - 1
         self.player.setSource(QUrl.fromLocalFile(path))
         self.player.play()
 
     def _invalidatePendingEdgeTts(self):
-        self._edge_tts_request_id += 1
+        self._edgeTtsRequestId += 1
 
     def _cancelPendingEdgeTts(self):
         self._invalidatePendingEdgeTts()
-        for worker, *_ in self._edge_tts_jobs.values():
+        for worker, *_ in self._edgeTtsJobs.values():
             worker.cancel()
 
     def _cleanupEdgeTtsFile(self):
-        if not self._edge_tts_temp_path:
+        if not self._edgeTtsTempPath:
             return
 
-        path = self._edge_tts_temp_path
-        self._edge_tts_temp_path = ""
+        path = self._edgeTtsTempPath
+        self._edgeTtsTempPath = ""
         if self.player is not None and self.player.source().toLocalFile() == path:
             self.player.setSource(QUrl())
         try:
@@ -727,9 +727,9 @@ class MainWindow(MSFluentWindow):
 
         if (
             status == QMediaPlayer.MediaStatus.EndOfMedia
-            and self.current_play_repeats > 0
+            and self.currentPlayRepeats > 0
         ):
-            self.current_play_repeats -= 1
+            self.currentPlayRepeats -= 1
             self.player.setPosition(0)
             self.player.play()
         elif status == QMediaPlayer.MediaStatus.EndOfMedia:
@@ -840,10 +840,10 @@ class MainWindow(MSFluentWindow):
                 callback(task)
             day += timedelta(days=1)
 
-    def _prepareScheduleDate(self, date_key):
-        if date_key == self._triggeredScheduleDate:
+    def _prepareScheduleDate(self, dateKey):
+        if dateKey == self._triggeredScheduleDate:
             return
-        self._triggeredScheduleDate = date_key
+        self._triggeredScheduleDate = dateKey
         self._triggeredScheduleKeys.clear()
 
     @staticmethod
@@ -875,10 +875,10 @@ class MainWindow(MSFluentWindow):
         from app.view.pages.shutdown_page import (
             SHUTDOWN_RESULT,
             WAIT_RESULT,
-            show_shutdown_prompt,
+            showShutdownPrompt,
         )
 
-        result = show_shutdown_prompt(task)
+        result = showShutdownPrompt(task)
         if result == SHUTDOWN_RESULT:
             self._shutdownNow()
         elif result == WAIT_RESULT:
@@ -1054,22 +1054,22 @@ class MainWindow(MSFluentWindow):
             position=NavigationItemPosition.BOTTOM,
         )
 
-        if "全屏投送" in self.homePage.all_cards:
-            self.homePage.all_cards["全屏投送"].clicked.connect(self._navToBroadcast)
-        if "考试倒计时" in self.homePage.all_cards:
-            self.homePage.all_cards["考试倒计时"].clicked.connect(self._navToCountdown)
-        if "全屏时钟" in self.homePage.all_cards:
-            self.homePage.all_cards["全屏时钟"].clicked.connect(
+        if "全屏投送" in self.homePage.allCards:
+            self.homePage.allCards["全屏投送"].clicked.connect(self._navToBroadcast)
+        if "考试倒计时" in self.homePage.allCards:
+            self.homePage.allCards["考试倒计时"].clicked.connect(self._navToCountdown)
+        if "全屏时钟" in self.homePage.allCards:
+            self.homePage.allCards["全屏时钟"].clicked.connect(
                 self._showFullscreenClock
             )
-        if "定时播报" in self.homePage.all_cards:
-            self.homePage.all_cards["定时播报"].clicked.connect(self._navToSchedule)
-        if HOME_CARD_TASK_KEY in self.homePage.all_cards:
-            self.homePage.all_cards[HOME_CARD_TASK_KEY].clicked.connect(
+        if "定时播报" in self.homePage.allCards:
+            self.homePage.allCards["定时播报"].clicked.connect(self._navToSchedule)
+        if HOME_CARD_TASK_KEY in self.homePage.allCards:
+            self.homePage.allCards[HOME_CARD_TASK_KEY].clicked.connect(
                 self._navToHomeCardTasks
             )
-        if "定时关机" in self.homePage.all_cards:
-            self.homePage.all_cards["定时关机"].clicked.connect(self._navToShutdown)
+        if "定时关机" in self.homePage.allCards:
+            self.homePage.allCards["定时关机"].clicked.connect(self._navToShutdown)
 
         self.appStorePage.pinnedCardsChanged.connect(self._setPinnedHomeCards)
         # 应用卡片在后台启动，失败时才弹出主窗口，让用户看到提示。
@@ -1461,7 +1461,7 @@ class MainWindow(MSFluentWindow):
             return
 
         try:
-            latest_version = normalizeReleaseVersion(data.get("latest_version"))
+            latestVersion = normalizeReleaseVersion(data.get("latest_version"))
         except ValueError:
             if manual:
                 InfoBar.error(
@@ -1472,7 +1472,7 @@ class MainWindow(MSFluentWindow):
                     parent=self,
                 )
             return
-        if not isUpdateAvailable(VERSION, latest_version):
+        if not isUpdateAvailable(VERSION, latestVersion):
             if manual:
                 InfoBar.success(
                     "已是最新版本",
@@ -1494,17 +1494,17 @@ class MainWindow(MSFluentWindow):
 
         if not manual and (not self.isVisible() or not self._geometryApplied):
             self._closeUpdateInfoBar()
-            self._pendingUpdateNotification = (latest_version, note)
+            self._pendingUpdateNotification = (latestVersion, note)
             return
 
-        self._showUpdateInfoBar(latest_version, note)
+        self._showUpdateInfoBar(latestVersion, note)
 
-    def _showUpdateInfoBar(self, latest_version, note):
+    def _showUpdateInfoBar(self, latestVersion, note):
         self._closeUpdateInfoBar()
 
         infoBar = InfoBar(
             icon=FIF.UPDATE,
-            title=f"检测到新版本: v{latest_version}",
+            title=f"检测到新版本: v{latestVersion}",
             content="请及时下载更新以体验最新功能",
             orient=Qt.Orientation.Horizontal,
             isClosable=True,
@@ -1515,11 +1515,11 @@ class MainWindow(MSFluentWindow):
         infoBar.widgetLayout.addSpacing(10)
         downloadButton = PrimaryPushButton(FIF.DOWNLOAD, "下载更新")
         downloadButton.clicked.connect(
-            lambda: self._startUpdateDownload(latest_version)
+            lambda: self._startUpdateDownload(latestVersion)
         )
         infoBar.addWidget(downloadButton)
         detailButton = PushButton(FIF.DOCUMENT, "更新日志")
-        detailButton.clicked.connect(lambda: self._showUpdateLog(latest_version, note))
+        detailButton.clicked.connect(lambda: self._showUpdateLog(latestVersion, note))
         infoBar.addWidget(detailButton)
         self._updateInfoBar = infoBar
         infoBar.destroyed.connect(

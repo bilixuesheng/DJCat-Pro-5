@@ -24,22 +24,22 @@ from app.view.components.task_page import ScheduledTaskPage
 from app.view.components.task_picker import TaskFormSettingCard, TouchTimePicker
 from app.view.pages.home_card_task_page import (
     AddHomeCardTaskDialog,
-    create_home_card_task_form,
+    createHomeCardTaskForm,
 )
 from app.view.pages.schedule_page import (
     AddTaskDialog,
     ChineseVoiceLoader,
     SchedulePage,
     TaskCard,
-    create_task_form,
+    createTaskForm,
 )
 from app.view.pages.shutdown_page import (
     AddShutdownTaskDialog,
     ShutdownPromptDialog,
     ShutdownPage,
     ShutdownTaskCard,
-    create_shutdown_form,
-    show_shutdown_prompt,
+    createShutdownForm,
+    showShutdownPrompt,
 )
 
 
@@ -421,9 +421,9 @@ class ScheduleShutdownUiTest(TestCase):
 
     def testTaskFormsUseFullWidthRowsWithSeparators(self):
         forms = (
-            (*create_task_form(None), TaskFormSettingCard),
-            (*create_shutdown_form(None), TaskFormSettingCard),
-            (*create_home_card_task_form(None, []), TaskFormSettingCard),
+            (*createTaskForm(None), TaskFormSettingCard),
+            (*createShutdownForm(None), TaskFormSettingCard),
+            (*createHomeCardTaskForm(None, []), TaskFormSettingCard),
         )
         for form, _, cardType in forms:
             self.addCleanup(form.deleteLater)
@@ -505,7 +505,7 @@ class ScheduleShutdownUiTest(TestCase):
 
     @patch.object(ChineseVoiceLoader, "start")
     def testEdgeTtsFormKeepsAConstrainedWidth(self, startLoader):
-        form, widgets = create_task_form(None)
+        form, widgets = createTaskForm(None)
         self.addCleanup(form.deleteLater)
         defaultWidth = form.minimumSizeHint().width()
         form.resize(560, form.sizeHint().height())
@@ -531,8 +531,8 @@ class ScheduleShutdownUiTest(TestCase):
         startLoader.assert_called_once()
 
     def testNewAndExistingTaskFormsUseTouchTimePicker(self):
-        broadcastForm, broadcastWidgets = create_task_form(None)
-        shutdownForm, shutdownWidgets = create_shutdown_form(None)
+        broadcastForm, broadcastWidgets = createTaskForm(None)
+        shutdownForm, shutdownWidgets = createShutdownForm(None)
         broadcastCard = TaskCard(broadcast_task())
         shutdownCard = ShutdownTaskCard(shutdown_task())
         self.addCleanup(broadcastForm.deleteLater)
@@ -826,7 +826,7 @@ class ScheduleShutdownUiTest(TestCase):
         dialog = dialogType.return_value
         dialog.exec.return_value = 2
 
-        result = show_shutdown_prompt(shutdown_task())
+        result = showShutdownPrompt(shutdown_task())
 
         self.assertEqual(result, 2)
         dialog.deleteLater.assert_called_once_with()

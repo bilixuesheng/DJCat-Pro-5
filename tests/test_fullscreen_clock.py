@@ -33,10 +33,10 @@ class FullscreenClockTest(TestCase):
         displayed = QTime.fromString(self.window.timeLabel.text(), "HH : mm : ss")
         difference = abs(displayed.secsTo(QTime.currentTime()))
         self.assertLessEqual(min(difference, 86400 - difference), 1)
-        self.assertFalse(hasattr(self.window, "btn_pause"))
-        self.assertFalse(hasattr(self.window, "btn_reset"))
+        self.assertFalse(hasattr(self.window, "btnPause"))
+        self.assertFalse(hasattr(self.window, "btnReset"))
         self.assertEqual(
-            [self.window.btn_win.text(), self.window.btn_close.text()],
+            [self.window.btnWin.text(), self.window.btnClose.text()],
             ["窗口化", "关闭"],
         )
 
@@ -66,7 +66,7 @@ class FullscreenClockTest(TestCase):
                     self.window.startClock()
                     self.app.processEvents()
 
-                    self.assertEqual(self.window.is_windowed, startWindowed)
+                    self.assertEqual(self.window.isWindowed, startWindowed)
                     self.assertEqual(
                         self.window.titleLabel.isHidden(),
                         startWindowed,
@@ -75,13 +75,13 @@ class FullscreenClockTest(TestCase):
             cfg.set(cfg.fullscreenClockStartWindowed, value, save=False)
 
     def testWindowedModeKeepsOnlyTimeAndCornerButtons(self):
-        self.window.is_windowed = False
+        self.window.isWindowed = False
         self.window._setupCornerButtons()
 
         self.window.toggleWindowMode()
         self.app.processEvents()
 
-        self.assertTrue(self.window.is_windowed)
+        self.assertTrue(self.window.isWindowed)
         self.assertTrue(self.window.titleLabel.isHidden())
         self.assertFalse(self.window.timeLabel.isHidden())
         self.assertEqual(self.window.contentsRect().size().toTuple(), (600, 190))
@@ -109,7 +109,7 @@ class FullscreenClockTest(TestCase):
         try:
             cfg.set(cfg.confirmBeforeCloseFullscreenClock, True)
             self.window._setupCornerButtons()
-            self.window.btn_close.click()
+            self.window.btnClose.click()
             self.app.processEvents()
 
             flyout = next(

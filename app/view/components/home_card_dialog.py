@@ -61,12 +61,12 @@ ACTION_LABELS = {
 }
 
 
-def _dialog_host(widget):
+def _dialogHost(widget):
     window = widget.window()
     return window.parentWidget() or window
 
 
-def _dispose_dialog(dialog):
+def _disposeDialog(dialog):
     # Nested editors can be reopened before the next event-loop turn.
     dialog.deleteLater()
     app = QApplication.instance()
@@ -76,23 +76,23 @@ def _dispose_dialog(dialog):
 
 class _ResponsiveMessageBox(MessageBoxBase):
     def __init__(self, parent=None):
-        self._preferred_width = 0
-        self._preferred_height = 0
+        self._preferredWidth = 0
+        self._preferredHeight = 0
         self._closing = False
         super().__init__(parent)
         self.buttonLayout.setContentsMargins(24, 16, 24, 16)
 
     def setPreferredSize(self, width, height):
-        self._preferred_width = width
-        self._preferred_height = height
+        self._preferredWidth = width
+        self._preferredHeight = height
         self._updatePanelSize(self.size())
 
     def _updatePanelSize(self, size):
-        if not self._preferred_width or size.width() <= 0:
+        if not self._preferredWidth or size.width() <= 0:
             return
         self.widget.setFixedSize(
-            min(self._preferred_width, max(0, size.width() - 32)),
-            min(self._preferred_height, max(0, size.height() - 16)),
+            min(self._preferredWidth, max(0, size.width() - 32)),
+            min(self._preferredHeight, max(0, size.height() - 16)),
         )
 
     def resizeEvent(self, event):
@@ -104,8 +104,8 @@ class _ResponsiveMessageBox(MessageBoxBase):
             return
         self._closing = True
         self.buttonGroup.setEnabled(False)
-        for scroll_area in self.findChildren(ScrollArea):
-            viewport = scroll_area.viewport()
+        for scrollArea in self.findChildren(ScrollArea):
+            viewport = scrollArea.viewport()
             QScroller.scroller(viewport).stop()
             QScroller.ungrabGesture(viewport)
         super().done(code)
@@ -123,27 +123,27 @@ class DragHandleButton(ToolButton):
         setFluentToolTip(self, "拖动调整动作顺序")
         self.setAccessibleName("拖动调整动作顺序")
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
-        self._press_position = None
+        self._pressPosition = None
         self._dragging = False
 
     def _begin(self, position: QPoint):
-        self._press_position = position
+        self._pressPosition = position
         self._dragging = False
 
     def _move(self, position: QPoint):
-        if self._press_position is None:
+        if self._pressPosition is None:
             return
         if not self._dragging:
-            if (position - self._press_position).manhattanLength() < QApplication.startDragDistance():
+            if (position - self._pressPosition).manhattanLength() < QApplication.startDragDistance():
                 return
             self._dragging = True
-            self.dragStarted.emit(self._press_position)
+            self.dragStarted.emit(self._pressPosition)
         self.dragMoved.emit(position)
 
     def _finish(self):
         if self._dragging:
             self.dragFinished.emit()
-        self._press_position = None
+        self._pressPosition = None
         self._dragging = False
 
     def event(self, event):
@@ -173,13 +173,13 @@ class DragHandleButton(ToolButton):
 
     def mouseMoveEvent(self, event):
         self._move(event.globalPosition().toPoint())
-        if self._press_position is not None:
+        if self._pressPosition is not None:
             event.accept()
             return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if self._press_position is not None:
+        if self._pressPosition is not None:
             self._finish()
             event.accept()
             return
@@ -219,28 +219,28 @@ class ActionRow(CardWidget):
         self._layout.setContentsMargins(12, 10, 12, 10)
         self._layout.setSpacing(12)
         self._layout.addWidget(self.dragHandle)
-        text_layout = QVBoxLayout()
-        text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.addWidget(self.summary)
-        text_layout.addWidget(self.detail)
-        self._layout.addLayout(text_layout, 1)
+        textLayout = QVBoxLayout()
+        textLayout.setContentsMargins(0, 0, 0, 0)
+        textLayout.addWidget(self.summary)
+        textLayout.addWidget(self.detail)
+        self._layout.addLayout(textLayout, 1)
         self._layout.addWidget(self.editButton)
         self._layout.addWidget(self.deleteButton)
         self.setMinimumHeight(76)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
-        self._body_touching = False
+        self._bodyTouching = False
         self.setData(self.action)
 
     def setData(self, action: dict):
         self.action = normalizeAction(action) or self.action
-        action_type = self.action["type"]
-        self.summary.setText(ACTION_LABELS[action_type])
-        if action_type == "program":
+        actionType = self.action["type"]
+        self.summary.setText(ACTION_LABELS[actionType])
+        if actionType == "program":
             detail = self.action["target"] or "未设置程序"
-        elif action_type == "shell":
+        elif actionType == "shell":
             detail = self.action["command"] or "未设置命令"
-        elif action_type in {"url", "path"}:
+        elif actionType in {"url", "path"}:
             detail = self.action["target"] or "未设置目标"
         else:
             detail = f"{self.action['seconds']} 秒"
@@ -252,18 +252,18 @@ class ActionRow(CardWidget):
 
     def event(self, event):
         if event.type() == QEvent.Type.TouchBegin and event.points():
-            self._body_touching = True
+            self._bodyTouching = True
             self.bodyTouchStarted.emit(event.points()[0].globalPosition().toPoint())
             event.accept()
             return True
-        if event.type() == QEvent.Type.TouchUpdate and event.points() and self._body_touching:
+        if event.type() == QEvent.Type.TouchUpdate and event.points() and self._bodyTouching:
             self.bodyTouchMoved.emit(event.points()[0].globalPosition().toPoint())
             event.accept()
             return True
         if event.type() in (QEvent.Type.TouchEnd, QEvent.Type.TouchCancel):
-            if self._body_touching:
+            if self._bodyTouching:
                 self.bodyTouchFinished.emit()
-            self._body_touching = False
+            self._bodyTouching = False
             event.accept()
             return True
         return super().event(event)
@@ -281,26 +281,26 @@ class ActionListWidget(QWidget):
     def __init__(self, actions=None, parent=None):
         super().__init__(parent)
         self.rows = []
-        self._drag_row = None
-        self._drag_changed = False
-        self._scroll_area = None
+        self._dragRow = None
+        self._dragChanged = False
+        self._scrollArea = None
         self._indicator = QFrame(self)
         self._indicator.setFixedHeight(3)
         self._indicator.setStyleSheet("background: #4cc2ff; border-radius: 1px;")
         self._indicator.hide()
-        self._auto_scroll_timer = QTimer(self)
-        self._auto_scroll_timer.setInterval(50)
-        self._auto_scroll_timer.timeout.connect(self._autoScroll)
-        self._drag_position = QPoint()
-        self._body_touch_position = None
+        self._autoScrollTimer = QTimer(self)
+        self._autoScrollTimer.setInterval(50)
+        self._autoScrollTimer.timeout.connect(self._autoScroll)
+        self._dragPosition = QPoint()
+        self._bodyTouchPosition = None
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(8)
         for action in actions or []:
             self.addAction(action)
 
-    def setScrollArea(self, scroll_area):
-        self._scroll_area = scroll_area
+    def setScrollArea(self, scrollArea):
+        self._scrollArea = scrollArea
 
     def addAction(self, action):
         row = ActionRow(action, self)
@@ -320,13 +320,13 @@ class ActionListWidget(QWidget):
         return [deepcopy(row.action) for row in self.rows]
 
     def _editRow(self, row):
-        dialog = ActionEditorDialog(row.action, _dialog_host(self))
+        dialog = ActionEditorDialog(row.action, _dialogHost(self))
         try:
             if not dialog.exec():
                 return
             action = dialog.getData()
         finally:
-            _dispose_dialog(dialog)
+            _disposeDialog(dialog)
         row.setData(action)
         self.orderChanged.emit()
 
@@ -337,25 +337,25 @@ class ActionListWidget(QWidget):
         self.orderChanged.emit()
 
     def _startBodyScroll(self, position):
-        if self._drag_row is None:
-            self._body_touch_position = position
+        if self._dragRow is None:
+            self._bodyTouchPosition = position
 
     def _moveBodyScroll(self, position):
-        if self._body_touch_position is None or self._scroll_area is None:
+        if self._bodyTouchPosition is None or self._scrollArea is None:
             return
-        delta = position.y() - self._body_touch_position.y()
+        delta = position.y() - self._bodyTouchPosition.y()
         if delta:
-            bar = self._scroll_area.verticalScrollBar()
+            bar = self._scrollArea.verticalScrollBar()
             bar.setValue(bar.value() - delta)
-            self._body_touch_position = position
+            self._bodyTouchPosition = position
 
     def _finishBodyScroll(self):
-        self._body_touch_position = None
+        self._bodyTouchPosition = None
 
     def _startDrag(self, row, position):
-        self._drag_row = row
-        self._drag_changed = False
-        self._drag_position = position
+        self._dragRow = row
+        self._dragChanged = False
+        self._dragPosition = position
         effect = row.graphicsEffect()
         if effect is None:
             from PySide6.QtWidgets import QGraphicsOpacityEffect
@@ -364,25 +364,25 @@ class ActionListWidget(QWidget):
             row.setGraphicsEffect(effect)
         effect.setOpacity(0.35)
         self._indicator.show()
-        self._auto_scroll_timer.start()
+        self._autoScrollTimer.start()
         self._moveDrag(position)
 
     def _moveDrag(self, position):
-        if self._drag_row is None:
+        if self._dragRow is None:
             return
-        self._drag_position = position
-        local_y = self.mapFromGlobal(position).y()
-        remaining = [row for row in self.rows if row is not self._drag_row]
-        target_index = sum(local_y > row.geometry().center().y() for row in remaining)
-        current_index = self.rows.index(self._drag_row)
-        if target_index != current_index:
-            self.rows.remove(self._drag_row)
-            self.rows.insert(target_index, self._drag_row)
-            self._layout.removeWidget(self._drag_row)
-            self._layout.insertWidget(target_index, self._drag_row)
-            self._drag_changed = True
-        if target_index < len(remaining):
-            y = remaining[target_index].geometry().top() - 2
+        self._dragPosition = position
+        localY = self.mapFromGlobal(position).y()
+        remaining = [row for row in self.rows if row is not self._dragRow]
+        targetIndex = sum(localY > row.geometry().center().y() for row in remaining)
+        currentIndex = self.rows.index(self._dragRow)
+        if targetIndex != currentIndex:
+            self.rows.remove(self._dragRow)
+            self.rows.insert(targetIndex, self._dragRow)
+            self._layout.removeWidget(self._dragRow)
+            self._layout.insertWidget(targetIndex, self._dragRow)
+            self._dragChanged = True
+        if targetIndex < len(remaining):
+            y = remaining[targetIndex].geometry().top() - 2
         elif remaining:
             y = remaining[-1].geometry().bottom() + 2
         else:
@@ -391,31 +391,31 @@ class ActionListWidget(QWidget):
         self._indicator.raise_()
 
     def _autoScroll(self):
-        if self._drag_row is None or self._scroll_area is None:
+        if self._dragRow is None or self._scrollArea is None:
             return
-        viewport = self._scroll_area.viewport()
-        position = viewport.mapFromGlobal(self._drag_position)
+        viewport = self._scrollArea.viewport()
+        position = viewport.mapFromGlobal(self._dragPosition)
         margin = 60
         step = 14
         if position.y() < margin:
-            bar = self._scroll_area.verticalScrollBar()
+            bar = self._scrollArea.verticalScrollBar()
             bar.setValue(max(bar.minimum(), bar.value() - step))
         elif position.y() > viewport.height() - margin:
-            bar = self._scroll_area.verticalScrollBar()
+            bar = self._scrollArea.verticalScrollBar()
             bar.setValue(min(bar.maximum(), bar.value() + step))
 
     def _finishDrag(self):
-        if self._drag_row is None:
+        if self._dragRow is None:
             return
-        effect = self._drag_row.graphicsEffect()
+        effect = self._dragRow.graphicsEffect()
         if effect:
             effect.setOpacity(1.0)
-            self._drag_row.setGraphicsEffect(None)
+            self._dragRow.setGraphicsEffect(None)
         self._indicator.hide()
-        self._auto_scroll_timer.stop()
-        changed = self._drag_changed
-        self._drag_row = None
-        self._drag_changed = False
+        self._autoScrollTimer.stop()
+        changed = self._dragChanged
+        self._dragRow = None
+        self._dragChanged = False
         if changed:
             self.orderChanged.emit()
 
@@ -470,13 +470,13 @@ class ActionSequenceEditor(QWidget):
         return True
 
     def addAction(self):
-        dialog = ActionEditorDialog(parent=_dialog_host(self))
+        dialog = ActionEditorDialog(parent=_dialogHost(self))
         try:
             if not dialog.exec():
                 return
             action = dialog.getData()
         finally:
-            _dispose_dialog(dialog)
+            _disposeDialog(dialog)
         self.actionList.addAction(action)
         self.changed.emit()
 
@@ -487,8 +487,8 @@ class ActionEditorDialog(_ResponsiveMessageBox):
         self.titleLabel = SubtitleLabel("配置动作", self)
         self.descriptionLabel = CaptionLabel("选择动作类型，并填写执行所需的信息。", self)
         self.typeCombo = ComboBox(self)
-        for action_type in ACTION_TYPES:
-            self.typeCombo.addItem(ACTION_LABELS[action_type])
+        for actionType in ACTION_TYPES:
+            self.typeCombo.addItem(ACTION_LABELS[actionType])
         self.stack = QStackedWidget(self)
         self.scrollArea = ScrollArea(self.widget)
         self.scrollArea.setWidgetResizable(True)
@@ -510,7 +510,7 @@ class ActionEditorDialog(_ResponsiveMessageBox):
         self.yesButton.setText("保存")
         self.cancelButton.setText("取消")
 
-    def _form_page(self):
+    def _formPage(self):
         page = QWidget(self.stack)
         page.setStyleSheet("background: transparent;")
         layout = QFormLayout(page)
@@ -521,11 +521,11 @@ class ActionEditorDialog(_ResponsiveMessageBox):
         layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
         return page, layout
 
-    def _line_with_browse(self, title, filter_text):
+    def _lineWithBrowse(self, title, filterText):
         line = LineEdit(self)
         button = PushButton(FIF.FOLDER, "选择", self)
         button.clicked.connect(
-            lambda: self._choose_file(line, title, filter_text)
+            lambda: self._chooseFile(line, title, filterText)
         )
         wrapper = QWidget(self)
         row = QHBoxLayout(wrapper)
@@ -535,39 +535,39 @@ class ActionEditorDialog(_ResponsiveMessageBox):
         return wrapper, line
 
     def _buildPages(self):
-        page, form = self._form_page()
-        target_wrapper, target = self._line_with_browse("选择程序", "Programs (*.exe *.com *.bat *.cmd);;All files (*.*)")
+        page, form = self._formPage()
+        targetWrapper, target = self._lineWithBrowse("选择程序", "Programs (*.exe *.com *.bat *.cmd);;All files (*.*)")
         arguments = LineEdit(self)
         arguments.setPlaceholderText("可选，例如 --profile default")
-        working_wrapper, working_dir = self._line_with_browse("选择工作目录", "All files (*.*)")
+        workingWrapper, workingDir = self._lineWithBrowse("选择工作目录", "All files (*.*)")
         wait = CheckBox("等待程序结束后继续", self)
-        form.addRow("程序或命令", target_wrapper)
+        form.addRow("程序或命令", targetWrapper)
         form.addRow("参数", arguments)
-        form.addRow("工作目录", working_wrapper)
+        form.addRow("工作目录", workingWrapper)
         form.addRow("执行方式", wait)
         self._pages["program"] = page
-        self._widgets["program"] = (target, arguments, working_dir, wait)
+        self._widgets["program"] = (target, arguments, workingDir, wait)
         self.stack.addWidget(page)
 
-        page, form = self._form_page()
+        page, form = self._formPage()
         command = PlainTextEdit(self)
         command.setPlaceholderText("输入 Windows Shell 命令")
         command.setFixedHeight(110)
-        shell_wrapper, shell_working_dir = self._line_with_browse("选择工作目录", "All files (*.*)")
-        shell_wait = CheckBox("等待命令结束后继续", self)
-        show_console = CheckBox("显示控制台窗口", self)
+        shellWrapper, shellWorkingDir = self._lineWithBrowse("选择工作目录", "All files (*.*)")
+        shellWait = CheckBox("等待命令结束后继续", self)
+        showConsole = CheckBox("显示控制台窗口", self)
         warning = BodyLabel("Shell 命令会直接在本机执行，请确认内容可信。", self)
         warning.setStyleSheet("color: #d13438;")
         form.addRow("命令", command)
-        form.addRow("工作目录", shell_wrapper)
-        form.addRow("执行方式", shell_wait)
-        form.addRow("窗口", show_console)
+        form.addRow("工作目录", shellWrapper)
+        form.addRow("执行方式", shellWait)
+        form.addRow("窗口", showConsole)
         form.addRow("提示", warning)
         self._pages["shell"] = page
-        self._widgets["shell"] = (command, shell_working_dir, shell_wait, show_console)
+        self._widgets["shell"] = (command, shellWorkingDir, shellWait, showConsole)
         self.stack.addWidget(page)
 
-        page, form = self._form_page()
+        page, form = self._formPage()
         url = LineEdit(self)
         url.setPlaceholderText("例如 https://example.com")
         form.addRow("网页地址", url)
@@ -575,24 +575,24 @@ class ActionEditorDialog(_ResponsiveMessageBox):
         self._widgets["url"] = (url,)
         self.stack.addWidget(page)
 
-        page, form = self._form_page()
+        page, form = self._formPage()
         path = LineEdit(self)
-        file_button = PushButton(FIF.FOLDER, "文件", self)
-        folder_button = PushButton(FIF.FOLDER, "文件夹", self)
-        file_button.clicked.connect(lambda: self._choose_file(path, "选择文件", "All files (*.*)"))
-        folder_button.clicked.connect(lambda: self._choose_folder(path))
+        fileButton = PushButton(FIF.FOLDER, "文件", self)
+        folderButton = PushButton(FIF.FOLDER, "文件夹", self)
+        fileButton.clicked.connect(lambda: self._chooseFile(path, "选择文件", "All files (*.*)"))
+        folderButton.clicked.connect(lambda: self._chooseFolder(path))
         buttons = QWidget(self)
-        buttons_layout = QHBoxLayout(buttons)
-        buttons_layout.setContentsMargins(0, 0, 0, 0)
-        buttons_layout.addWidget(path, 1)
-        buttons_layout.addWidget(file_button)
-        buttons_layout.addWidget(folder_button)
+        buttonsLayout = QHBoxLayout(buttons)
+        buttonsLayout.setContentsMargins(0, 0, 0, 0)
+        buttonsLayout.addWidget(path, 1)
+        buttonsLayout.addWidget(fileButton)
+        buttonsLayout.addWidget(folderButton)
         form.addRow("目标", buttons)
         self._pages["path"] = page
         self._widgets["path"] = (path,)
         self.stack.addWidget(page)
 
-        page, form = self._form_page()
+        page, form = self._formPage()
         seconds = SpinBox(self)
         seconds.setRange(1, 86400)
         seconds.setSuffix(" 秒")
@@ -601,52 +601,52 @@ class ActionEditorDialog(_ResponsiveMessageBox):
         self._widgets["delay"] = (seconds,)
         self.stack.addWidget(page)
 
-    def _choose_file(self, line, title, filter_text):
-        path, _ = QFileDialog.getOpenFileName(self, title, "", filter_text)
+    def _chooseFile(self, line, title, filterText):
+        path, _ = QFileDialog.getOpenFileName(self, title, "", filterText)
         if path:
             line.setText(path)
 
-    def _choose_folder(self, line):
+    def _chooseFolder(self, line):
         path = QFileDialog.getExistingDirectory(self, "选择文件夹")
         if path:
             line.setText(path)
 
     def _onTypeChanged(self, index):
-        action_type = ACTION_TYPES[index]
-        self.stack.setCurrentWidget(self._pages[action_type])
+        actionType = ACTION_TYPES[index]
+        self.stack.setCurrentWidget(self._pages[actionType])
 
     def _load(self, action):
-        action_type = action["type"] if action else "program"
-        self.typeCombo.setCurrentIndex(max(0, ACTION_TYPES.index(action_type)))
+        actionType = action["type"] if action else "program"
+        self.typeCombo.setCurrentIndex(max(0, ACTION_TYPES.index(actionType)))
         if not action:
             return
-        widgets = self._widgets[action_type]
-        if action_type == "program":
+        widgets = self._widgets[actionType]
+        if actionType == "program":
             widgets[0].setText(action["target"])
             widgets[1].setText(action["arguments"])
             widgets[2].setText(action["working_dir"])
             widgets[3].setChecked(action["wait"])
-        elif action_type == "shell":
+        elif actionType == "shell":
             widgets[0].setPlainText(action["command"])
             widgets[1].setText(action["working_dir"])
             widgets[2].setChecked(action["wait"])
             widgets[3].setChecked(action["show_console"])
-        elif action_type in {"url", "path"}:
+        elif actionType in {"url", "path"}:
             widgets[0].setText(action["target"])
         else:
             widgets[0].setValue(action["seconds"])
 
     def getData(self) -> dict:
-        action_type = ACTION_TYPES[self.typeCombo.currentIndex()]
-        old_id = self._action.get("id") if self._action else newId()
-        widgets = self._widgets[action_type]
-        if action_type == "program":
-            return {"id": old_id, "type": action_type, "target": widgets[0].text().strip(), "arguments": widgets[1].text(), "working_dir": widgets[2].text().strip(), "wait": widgets[3].isChecked()}
-        if action_type == "shell":
-            return {"id": old_id, "type": action_type, "command": widgets[0].toPlainText().strip(), "working_dir": widgets[1].text().strip(), "wait": widgets[2].isChecked(), "show_console": widgets[3].isChecked()}
-        if action_type in {"url", "path"}:
-            return {"id": old_id, "type": action_type, "target": widgets[0].text().strip()}
-        return {"id": old_id, "type": action_type, "seconds": widgets[0].value()}
+        actionType = ACTION_TYPES[self.typeCombo.currentIndex()]
+        oldId = self._action.get("id") if self._action else newId()
+        widgets = self._widgets[actionType]
+        if actionType == "program":
+            return {"id": oldId, "type": actionType, "target": widgets[0].text().strip(), "arguments": widgets[1].text(), "working_dir": widgets[2].text().strip(), "wait": widgets[3].isChecked()}
+        if actionType == "shell":
+            return {"id": oldId, "type": actionType, "command": widgets[0].toPlainText().strip(), "working_dir": widgets[1].text().strip(), "wait": widgets[2].isChecked(), "show_console": widgets[3].isChecked()}
+        if actionType in {"url", "path"}:
+            return {"id": oldId, "type": actionType, "target": widgets[0].text().strip()}
+        return {"id": oldId, "type": actionType, "seconds": widgets[0].value()}
 
     def validate(self) -> bool:
         error = validateAction(self.getData())
@@ -689,8 +689,8 @@ class IconPickerDialog(_ResponsiveMessageBox):
         self.gridWidget = IconGrid(self.contentWidget)
         self.scrollArea.setWidget(self.contentWidget)
         self._selected = {"type": "fluent", "name": "APPLICATION"}
-        self._external_image = None
-        self._external_images = []
+        self._externalImage = None
+        self._externalImages = []
         self.sourceCombo.currentIndexChanged.connect(self._sourceChanged)
         self.gridWidget.iconClicked.connect(self._onIconClicked)
         self.searchEdit.textChanged.connect(self._filterIcons)
@@ -717,7 +717,7 @@ class IconPickerDialog(_ResponsiveMessageBox):
         self._sourceChanged()
 
     def _renderFluentIcons(self):
-        self._external_images = []
+        self._externalImages = []
         self.gridWidget.setItems(
             [
                 IconGridItem(name, icon, name)
@@ -730,7 +730,7 @@ class IconPickerDialog(_ResponsiveMessageBox):
         self._selectFluent(name if name in FIF.__members__ else "APPLICATION")
 
     def _clearGrid(self):
-        self._external_images = []
+        self._externalImages = []
         self.gridWidget.setItems([])
 
     def _refreshGridLayout(self):
@@ -767,27 +767,27 @@ class IconPickerDialog(_ResponsiveMessageBox):
         self._refreshGridLayout()
 
     def _onIconClicked(self, index):
-        if self._external_images:
-            self._selectImage(self._external_images[index], index)
+        if self._externalImages:
+            self._selectImage(self._externalImages[index], index)
         else:
             self._selectFluent(self.gridWidget.items()[index].key)
 
     def _selectFluent(self, name):
         self._selected = {"type": "fluent", "name": name}
-        self._external_image = None
+        self._externalImage = None
         self.previewIcon.setIcon(getattr(FIF, name, FIF.APPLICATION))
         self.previewLabel.setText(name)
         self.gridWidget.setCheckedIndex(self.gridWidget.indexOfKey(name))
 
     def _browse(self):
-        image_source = self.sourceCombo.currentIndex() == 1
+        imageSource = self.sourceCombo.currentIndex() == 1
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "选择图片" if image_source else "选择图标资源",
+            "选择图片" if imageSource else "选择图标资源",
             "",
             (
                 "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp)"
-                if image_source
+                if imageSource
                 else "图标资源 (*.ico *.exe *.dll)"
             ),
         )
@@ -804,12 +804,12 @@ class IconPickerDialog(_ResponsiveMessageBox):
                 for index, image in enumerate(images)
             ]
         )
-        self._external_images = list(images)
+        self._externalImages = list(images)
         self._refreshGridLayout()
         self._selectImage(images[0], 0)
 
     def _selectImage(self, image, index=None):
-        self._external_image = image.copy()
+        self._externalImage = image.copy()
         self._selected = {"type": "image"}
         self.previewIcon.setIcon(QIcon(QPixmap.fromImage(image)))
         self.previewLabel.setText(
@@ -818,7 +818,7 @@ class IconPickerDialog(_ResponsiveMessageBox):
         self.gridWidget.setCheckedIndex(index)
 
     def selected(self):
-        return deepcopy(self._selected), self._external_image.copy() if self._external_image else None
+        return deepcopy(self._selected), self._externalImage.copy() if self._externalImage else None
 
 
 class CustomCardDialog(_ResponsiveMessageBox):
@@ -827,7 +827,7 @@ class CustomCardDialog(_ResponsiveMessageBox):
         data = deepcopy(data) if isinstance(data, dict) else {}
         self.cardId = data.get("id") or newId()
         self._icon = deepcopy(data.get("icon") or {"type": "fluent", "name": "APPLICATION"})
-        self._staged_image = None
+        self._stagedImage = None
         self.titleLabel = SubtitleLabel("编辑主页卡片" if data else "新建主页卡片", self)
         self.descriptionLabel = CaptionLabel(
             "设置卡片的显示信息，以及点击后依次执行的动作。", self
@@ -843,25 +843,25 @@ class CustomCardDialog(_ResponsiveMessageBox):
         setFluentToolTip(self.iconPreview, "当前图标")
         self.iconCard = SimpleCardWidget(self)
         self.iconCard.setMinimumHeight(76)
-        icon_title = StrongBodyLabel("卡片图标", self.iconCard)
-        icon_description = CaptionLabel("选择一个容易识别的图标", self.iconCard)
+        iconTitle = StrongBodyLabel("卡片图标", self.iconCard)
+        iconDescription = CaptionLabel("选择一个容易识别的图标", self.iconCard)
         self.iconSelectButton = PushButton(FIF.PALETTE, "选择图标", self)
         self.iconSelectButton.clicked.connect(self._chooseIcon)
-        icon_card_layout = QHBoxLayout(self.iconCard)
-        icon_card_layout.setContentsMargins(16, 12, 16, 12)
-        icon_card_layout.setSpacing(12)
-        icon_text_layout = QVBoxLayout()
-        icon_text_layout.setContentsMargins(0, 0, 0, 0)
-        icon_text_layout.setSpacing(2)
-        icon_text_layout.addWidget(icon_title)
-        icon_text_layout.addWidget(icon_description)
-        icon_card_layout.addWidget(self.iconPreview)
-        icon_card_layout.addLayout(icon_text_layout, 1)
-        icon_card_layout.addWidget(self.iconSelectButton)
-        initial_actions = data.get("actions") if data else None
-        if not initial_actions:
-            initial_actions = [{"id": newId(), "type": "program", "target": "", "arguments": "", "working_dir": "", "wait": False}]
-        self.actionEditor = ActionSequenceEditor(initial_actions, self)
+        iconCardLayout = QHBoxLayout(self.iconCard)
+        iconCardLayout.setContentsMargins(16, 12, 16, 12)
+        iconCardLayout.setSpacing(12)
+        iconTextLayout = QVBoxLayout()
+        iconTextLayout.setContentsMargins(0, 0, 0, 0)
+        iconTextLayout.setSpacing(2)
+        iconTextLayout.addWidget(iconTitle)
+        iconTextLayout.addWidget(iconDescription)
+        iconCardLayout.addWidget(self.iconPreview)
+        iconCardLayout.addLayout(iconTextLayout, 1)
+        iconCardLayout.addWidget(self.iconSelectButton)
+        initialActions = data.get("actions") if data else None
+        if not initialActions:
+            initialActions = [{"id": newId(), "type": "program", "target": "", "arguments": "", "working_dir": "", "wait": False}]
+        self.actionEditor = ActionSequenceEditor(initialActions, self)
         self.actionList = self.actionEditor.actionList
         self.addActionButton = self.actionEditor.addActionButton
         self.scrollArea = ScrollArea(self.widget)
@@ -871,24 +871,24 @@ class CustomCardDialog(_ResponsiveMessageBox):
         self.scrollArea.setMaximumHeight(560)
         self.form = QWidget(self.scrollArea)
         self.form.setStyleSheet("background: transparent;")
-        form_layout = QVBoxLayout(self.form)
-        form_layout.setContentsMargins(6, 6, 6, 6)
-        form_layout.setSpacing(10)
-        form_layout.addWidget(StrongBodyLabel("标题", self.form))
-        form_layout.addWidget(self.titleEdit)
-        form_layout.addWidget(StrongBodyLabel("简介", self.form))
-        form_layout.addWidget(self.descriptionEdit)
-        form_layout.addSpacing(4)
-        form_layout.addWidget(self.iconCard)
-        form_layout.addSpacing(10)
-        form_layout.addWidget(StrongBodyLabel("动作列表", self.form))
-        form_layout.addWidget(
+        formLayout = QVBoxLayout(self.form)
+        formLayout.setContentsMargins(6, 6, 6, 6)
+        formLayout.setSpacing(10)
+        formLayout.addWidget(StrongBodyLabel("标题", self.form))
+        formLayout.addWidget(self.titleEdit)
+        formLayout.addWidget(StrongBodyLabel("简介", self.form))
+        formLayout.addWidget(self.descriptionEdit)
+        formLayout.addSpacing(4)
+        formLayout.addWidget(self.iconCard)
+        formLayout.addSpacing(10)
+        formLayout.addWidget(StrongBodyLabel("动作列表", self.form))
+        formLayout.addWidget(
             CaptionLabel(
                 "触摸正文可滚动；从每行动作左侧的手柄拖动排序。",
                 self.form,
             )
         )
-        form_layout.addWidget(self.actionEditor)
+        formLayout.addWidget(self.actionEditor)
         self.scrollArea.setWidget(self.form)
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(self.descriptionLabel)
@@ -901,19 +901,19 @@ class CustomCardDialog(_ResponsiveMessageBox):
         self.actionEditor.setScrollArea(self.scrollArea)
 
     def _chooseIcon(self):
-        dialog = IconPickerDialog(_dialog_host(self))
+        dialog = IconPickerDialog(_dialogHost(self))
         try:
             if not dialog.exec():
                 return
             selected, image = dialog.selected()
         finally:
-            _dispose_dialog(dialog)
+            _disposeDialog(dialog)
         if selected["type"] == "fluent":
             self._icon = selected
-            self._staged_image = None
+            self._stagedImage = None
             self.iconPreview.setIcon(iconForData(self._icon))
         else:
-            self._staged_image = image
+            self._stagedImage = image
             self._icon = {"type": "image"}
             self.iconPreview.setIcon(QIcon(QPixmap.fromImage(image)))
 
@@ -927,10 +927,10 @@ class CustomCardDialog(_ResponsiveMessageBox):
             return False
         if not self.actionEditor.validate(self):
             return False
-        if self._staged_image is not None:
+        if self._stagedImage is not None:
             try:
-                self._icon = {"type": "file", "file": saveIconImage(self._staged_image)}
-                self._staged_image = None
+                self._icon = {"type": "file", "file": saveIconImage(self._stagedImage)}
+                self._stagedImage = None
             except HomeCardError as error:
                 _showError(self, "无法保存图标", str(error))
                 return False

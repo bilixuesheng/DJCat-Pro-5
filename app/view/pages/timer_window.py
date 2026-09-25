@@ -51,7 +51,7 @@ class TimerWindow(FramelessWindow):
         self.background.lower()
         self.background.setGeometry(self.contentsRect())
 
-        self.is_windowed = False
+        self.isWindowed = False
         self._closeFlyout = None
         self._moved = False
 
@@ -77,10 +77,10 @@ class TimerWindow(FramelessWindow):
         self.btnLayout = QHBoxLayout(self.btnContainer)
         self.btnLayout.setContentsMargins(0, 0, 0, 0)
         self.btnLayout.setSpacing(12)
-        self.btn_win = VerticalButton(FIF.COPY, "窗口化", force_dark=True)
-        self.btn_close = VerticalButton(FIF.CLOSE, "关闭", primary=True, force_dark=True)
-        self.btn_win.clicked.connect(self.toggleWindowMode)
-        self.btn_close.clicked.connect(self._onClose)
+        self.btnWin = VerticalButton(FIF.COPY, "窗口化", forceDark=True)
+        self.btnClose = VerticalButton(FIF.CLOSE, "关闭", primary=True, forceDark=True)
+        self.btnWin.clicked.connect(self.toggleWindowMode)
+        self.btnClose.clicked.connect(self._onClose)
 
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
@@ -89,7 +89,7 @@ class TimerWindow(FramelessWindow):
         return ()
 
     def _cornerButtons(self):
-        return [self.btn_win, self.btn_close]
+        return [self.btnWin, self.btnClose]
 
     def _refreshTime(self):
         pass
@@ -108,10 +108,10 @@ class TimerWindow(FramelessWindow):
         for button in ordered:
             self.btnLayout.addWidget(button)
         for button in buttons:
-            button.setWindowed(self.is_windowed)
+            button.setWindowed(self.isWindowed)
             button.updateStyle()
-        self.btn_win.icon_enum = FIF.FULL_SCREEN if self.is_windowed else FIF.COPY
-        self.btn_win.updateStyle()
+        self.btnWin.iconEnum = FIF.FULL_SCREEN if self.isWindowed else FIF.COPY
+        self.btnWin.updateStyle()
 
         self.btnContainer.adjustSize()
         self._updateBtnPosition()
@@ -123,7 +123,7 @@ class TimerWindow(FramelessWindow):
         placeCornerButtons(self.btnContainer, self.contentsRect(), self._buttonsAtLeft())
 
     def toggleWindowMode(self):
-        self.is_windowed = not self.is_windowed
+        self.isWindowed = not self.isWindowed
         self._refreshTime()
         self._setupCornerButtons()
         self._applyWindowState()
@@ -131,7 +131,7 @@ class TimerWindow(FramelessWindow):
     def _applyWindowState(self):
         isTop = (
             self.topmostInWindowedItem.value
-            if self.is_windowed
+            if self.isWindowed
             else self.topmostInFullscreenItem.value
         )
         flags = (
@@ -143,15 +143,15 @@ class TimerWindow(FramelessWindow):
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
 
-        margin = WINDOW_SHADOW_MARGIN if self.is_windowed else 0
+        margin = WINDOW_SHADOW_MARGIN if self.isWindowed else 0
         self.setContentsMargins(margin, margin, margin, margin)
-        self.background.setRoundedWindow(self.is_windowed)
+        self.background.setRoundedWindow(self.isWindowed)
         self.background.setGeometry(self.contentsRect())
         self.setStyleSheet(f"{self.objectName()} {{ background-color: transparent; }}")
-        self.titleLabel.setVisible(not self.is_windowed)
-        self._setControlsShown(not self.is_windowed)
+        self.titleLabel.setVisible(not self.isWindowed)
+        self._setControlsShown(not self.isWindowed)
 
-        if self.is_windowed:
+        if self.isWindowed:
             self.showNormal()
             rect = screenFor(self).availableGeometry()
             # 底部只留角落操作按钮自身的高度
@@ -182,7 +182,7 @@ class TimerWindow(FramelessWindow):
 
         font = self.timeLabel.font()
         numerator, denominator = self.windowedTimeRatio
-        size = max(32, height * numerator // denominator if self.is_windowed else height * 9 // 40)
+        size = max(32, height * numerator // denominator if self.isWindowed else height * 9 // 40)
         font.setPixelSize(size)
         font.setBold(True)
         # 超宽时按比例缩小字号到刚好放得下
@@ -206,7 +206,7 @@ class TimerWindow(FramelessWindow):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self.is_windowed and event.buttons() == Qt.MouseButton.LeftButton:
+        if self.isWindowed and event.buttons() == Qt.MouseButton.LeftButton:
             position = event.globalPosition().toPoint()
             if (position - self.pos() - self._dragPos).manhattanLength() > 3:
                 self._moved = True
@@ -219,7 +219,7 @@ class TimerWindow(FramelessWindow):
             return
         if self._closeFlyout is not None:
             return
-        self._closeFlyout = showCloseConfirmation(self, self.btn_close, self.closeMessage)
+        self._closeFlyout = showCloseConfirmation(self, self.btnClose, self.closeMessage)
 
     def closeEvent(self, event):
         if self._closeFlyout is not None:

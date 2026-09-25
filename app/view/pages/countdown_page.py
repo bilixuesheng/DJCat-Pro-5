@@ -69,22 +69,22 @@ class CountdownWindow(TimerWindow):
     closeMessage = "关闭后不会保存倒计时进度。"
 
     def __init__(self):
-        self.voice_enabled = True
-        self.initial_seconds = 0
+        self.voiceEnabled = True
+        self.initialSeconds = 0
         self.remaining = 0
         self.ended = False
-        self.title_text = DEFAULT_TITLE
-        self.end_title_text = DEFAULT_END_TITLE
+        self.titleText = DEFAULT_TITLE
+        self.endTitleText = DEFAULT_END_TITLE
         self._played15 = False
-        self._controls_visible = False
+        self._controlsVisible = False
         self._resetFlyout = None
         super().__init__()
 
-        self.btn_reset = VerticalButton(FIF.SYNC, "重置", force_dark=True)
-        self.btn_pause.clicked.connect(self._onPause)
-        self.btn_rewind.clicked.connect(lambda: self._onAdjust(10))
-        self.btn_forward.clicked.connect(lambda: self._onAdjust(-30))
-        self.btn_reset.clicked.connect(self.resetCountdown)
+        self.btnReset = VerticalButton(FIF.SYNC, "重置", forceDark=True)
+        self.btnPause.clicked.connect(self._onPause)
+        self.btnRewind.clicked.connect(lambda: self._onAdjust(10))
+        self.btnForward.clicked.connect(lambda: self._onAdjust(-30))
+        self.btnReset.clicked.connect(self.resetCountdown)
 
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self._tickCountdown)
@@ -98,27 +98,27 @@ class CountdownWindow(TimerWindow):
         controlsLayout.setContentsMargins(0, 20, 0, 0)
         controlsLayout.setSpacing(16)
         controlsLayout.addStretch(1)
-        self.btn_rewind = ToolButton(FIF.SKIP_BACK.icon(color="white"), self.controlsWidget)
-        self.btn_pause = PrimaryToolButton(FIF.PAUSE, self.controlsWidget)
-        self.btn_forward = ToolButton(FIF.SKIP_FORWARD.icon(color="white"), self.controlsWidget)
+        self.btnRewind = ToolButton(FIF.SKIP_BACK.icon(color="white"), self.controlsWidget)
+        self.btnPause = PrimaryToolButton(FIF.PAUSE, self.controlsWidget)
+        self.btnForward = ToolButton(FIF.SKIP_FORWARD.icon(color="white"), self.controlsWidget)
         for button, name in (
-            (self.btn_rewind, "倒回10秒"),
-            (self.btn_pause, "暂停或继续"),
-            (self.btn_forward, "快进30秒"),
+            (self.btnRewind, "倒回10秒"),
+            (self.btnPause, "暂停或继续"),
+            (self.btnForward, "快进30秒"),
         ):
             button.setFixedSize(56, 56)
             button.setIconSize(QSize(24, 24))
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setAccessibleName(name)
             controlsLayout.addWidget(button)
-        for button in (self.btn_rewind, self.btn_forward):
+        for button in (self.btnRewind, self.btnForward):
             button.setStyleSheet(
                 "QToolButton { background-color: rgba(255,255,255,0.15); color: white;"
                 " border: none; border-radius: 28px; }"
                 " QToolButton:hover { background-color: rgba(255,255,255,0.25); }"
             )
-        self.btn_pause.setStyleSheet(
-            self.btn_pause.styleSheet() + "PrimaryToolButton { border-radius: 28px; padding: 0; }"
+        self.btnPause.setStyleSheet(
+            self.btnPause.styleSheet() + "PrimaryToolButton { border-radius: 28px; padding: 0; }"
         )
         controlsLayout.addStretch(1)
 
@@ -137,27 +137,27 @@ class CountdownWindow(TimerWindow):
         return (self.controlsWidget,)
 
     def _cornerButtons(self):
-        return [self.btn_reset, *super()._cornerButtons()]
+        return [self.btnReset, *super()._cornerButtons()]
 
     def _setControlsShown(self, shown):
         if not shown:
             self._setControlsVisible(False, animated=False)
         self.controlsWidget.setVisible(shown)
 
-    def startCountdown(self, title, seconds, voice_enabled, end_title=DEFAULT_END_TITLE):
-        self.title_text = title
-        self.end_title_text = end_title
-        self.voice_enabled = voice_enabled
-        self.initial_seconds = seconds
+    def startCountdown(self, title, seconds, voiceEnabled, endTitle=DEFAULT_END_TITLE):
+        self.titleText = title
+        self.endTitleText = endTitle
+        self.voiceEnabled = voiceEnabled
+        self.initialSeconds = seconds
         self.remaining = seconds
         self.ended = False
         self._played15 = False
         self.titleLabel.setText(title)
-        self.btn_pause.setIcon(FIF.PAUSE)
+        self.btnPause.setIcon(FIF.PAUSE)
         self._refreshTime()
         self._setControlsVisible(False, animated=False)
 
-        self.is_windowed = False
+        self.isWindowed = False
         self._setupCornerButtons()
         self._applyWindowState()
         self._startTimer()
@@ -165,9 +165,9 @@ class CountdownWindow(TimerWindow):
     def _resetCountdown(self):
         self.ended = False
         self._played15 = False
-        self.remaining = self.initial_seconds
-        self.titleLabel.setText(self.title_text)
-        self.btn_pause.setIcon(FIF.PAUSE)
+        self.remaining = self.initialSeconds
+        self.titleLabel.setText(self.titleText)
+        self.btnPause.setIcon(FIF.PAUSE)
         self._refreshTime()
         self._startTimer()
 
@@ -179,7 +179,7 @@ class CountdownWindow(TimerWindow):
             return self._resetFlyout
         self._resetFlyout = showActionConfirmation(
             self,
-            self.btn_reset,
+            self.btnReset,
             "确认重置？",
             "倒计时将恢复到最初设置的时间。",
             "重置",
@@ -195,18 +195,18 @@ class CountdownWindow(TimerWindow):
             self._tickCountdown()
             self.timer.stop()
             self._deadline = None
-            self.btn_pause.setIcon(FIF.PLAY)
+            self.btnPause.setIcon(FIF.PLAY)
         else:
             self._startTimer()
-            self.btn_pause.setIcon(FIF.PAUSE)
+            self.btnPause.setIcon(FIF.PAUSE)
         self.hideControlsTimer.start()
 
     def _onAdjust(self, delta):
-        was_active = self.timer.isActive()
-        if was_active:
+        wasActive = self.timer.isActive()
+        if wasActive:
             self._tickCountdown()
         self._setRemaining(self.remaining + delta)
-        if was_active and self.remaining > 0:
+        if wasActive and self.remaining > 0:
             self._deadline = time.monotonic() + self.remaining
         self.hideControlsTimer.start()
 
@@ -227,11 +227,11 @@ class CountdownWindow(TimerWindow):
 
         if self.ended and self.remaining > 0:
             self.ended = False
-            self.titleLabel.setText(self.title_text)
+            self.titleLabel.setText(self.titleText)
             self._startTimer()
 
         if (
-            self.voice_enabled
+            self.voiceEnabled
             and not self._played15
             and prev > VOICE_REMIND_SECONDS >= self.remaining > 0
         ):
@@ -242,19 +242,19 @@ class CountdownWindow(TimerWindow):
             self.ended = True
             self.timer.stop()
             self._deadline = None
-            self.titleLabel.setText(self.end_title_text)
-            if self.voice_enabled:
+            self.titleLabel.setText(self.endTitleText)
+            if self.voiceEnabled:
                 self._playSound("end.wav")
 
     def _refreshTime(self):
         hours, rest = divmod(self.remaining, 3600)
         minutes, seconds = divmod(rest, 60)
-        separator = "\u2009:\u2009" if self.is_windowed else " : "
+        separator = "\u2009:\u2009" if self.isWindowed else " : "
         self.timeLabel.setText(
             f"{hours}{separator}{minutes}{separator}{seconds}"
         )
         # 文本长度变化会影响窗口化下的自适应字号
-        if self.is_windowed:
+        if self.isWindowed:
             self._applyFonts(self.contentsRect().height())
 
     def _playSound(self, name):
@@ -262,7 +262,7 @@ class CountdownWindow(TimerWindow):
         self.sound.play()
 
     def _setControlsVisible(self, visible, animated=True):
-        self._controls_visible = visible
+        self._controlsVisible = visible
         self.controlsWidget.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents,
             not visible,
@@ -284,17 +284,17 @@ class CountdownWindow(TimerWindow):
             self.hideControlsTimer.stop()
 
     def _onControlsAnimationFinished(self):
-        if not self._controls_visible:
+        if not self._controlsVisible:
             self.controlsWidget.setEnabled(False)
-        self.btn_pause.update()
+        self.btnPause.update()
 
     def mouseReleaseEvent(self, e):
         if (
-            not self.is_windowed
+            not self.isWindowed
             and e.button() == Qt.MouseButton.LeftButton
             and not self._moved
         ):
-            self._setControlsVisible(not self._controls_visible)
+            self._setControlsVisible(not self._controlsVisible)
         super().mouseReleaseEvent(e)
 
     def closeEvent(self, event):

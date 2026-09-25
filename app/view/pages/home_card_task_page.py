@@ -77,7 +77,7 @@ class ActionSequenceSettingCard(QWidget):
         painter.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
 
 
-def _available_home_cards(entries) -> list[dict]:
+def _availableHomeCards(entries) -> list[dict]:
     cards = []
     keys = set()
     for entry in entries if isinstance(entries, list) else []:
@@ -91,7 +91,7 @@ def _available_home_cards(entries) -> list[dict]:
     return cards
 
 
-def _home_card_text(entry, occurrence=None):
+def _homeCardText(entry, occurrence=None):
     title = str(entry.get("title", "")).strip() or str(entry.get("key", ""))
     source = SOURCE_LABELS.get(entry.get("source"), "")
     if occurrence is not None:
@@ -99,8 +99,8 @@ def _home_card_text(entry, occurrence=None):
     return f"{title}（{source}）" if source else title
 
 
-def update_home_card_options(widgets, entries):
-    cards = _available_home_cards(entries)
+def updateHomeCardOptions(widgets, entries):
+    cards = _availableHomeCards(entries)
     combo = widgets["homeCardCombo"]
     selectedKey = combo.currentData() or widgets.get("targetKey", "")
     targetTitle = widgets.get("targetTitle", "")
@@ -123,7 +123,7 @@ def update_home_card_options(widgets, entries):
         labelOccurrences[label] = labelOccurrences.get(label, 0) + 1
         occurrence = labelOccurrences[label] if labelCounts[label] > 1 else None
         combo.addItem(
-            _home_card_text(entry, occurrence),
+            _homeCardText(entry, occurrence),
             userData=entry["key"],
         )
 
@@ -140,7 +140,7 @@ def update_home_card_options(widgets, entries):
     widgets["homeCards"] = {entry["key"]: entry for entry in cards}
 
 
-def create_home_card_task_form(
+def createHomeCardTaskForm(
     parent,
     homeCards,
     initialData=None,
@@ -272,7 +272,7 @@ def create_home_card_task_form(
     homeCardCombo = ComboBox(form)
     homeCardCombo.setFixedWidth(280)
     widgets["homeCardCombo"] = homeCardCombo
-    update_home_card_options(widgets, homeCards)
+    updateHomeCardOptions(widgets, homeCards)
     homeCardCard = TaskFormSettingCard(
         FIF.HOME,
         "已有卡片",
@@ -346,7 +346,7 @@ def create_home_card_task_form(
     return form, widgets
 
 
-def home_card_task_data(widgets):
+def homeCardTaskData(widgets):
     targetKey = widgets["homeCardCombo"].currentData() or ""
     entry = widgets.get("homeCards", {}).get(targetKey)
     mode = widgets["modeCombo"].currentData() or EXISTING_HOME_CARD_TASK
@@ -390,12 +390,12 @@ class AddHomeCardTaskDialog(ScheduledTaskDialog):
     def __init__(self, homeCards, parent=None):
         super().__init__(
             "添加自动任务",
-            lambda form, scrollArea: create_home_card_task_form(
+            lambda form, scrollArea: createHomeCardTaskForm(
                 form,
                 homeCards,
                 scrollArea=scrollArea,
             ),
-            home_card_task_data,
+            homeCardTaskData,
             parent,
             maxHeight=420,
             minWidth=640,
@@ -405,7 +405,7 @@ class AddHomeCardTaskDialog(ScheduledTaskDialog):
 
     def validate(self):
         widgets = self.formWidgets
-        data = home_card_task_data(widgets)
+        data = homeCardTaskData(widgets)
         if data["mode"] != EXISTING_HOME_CARD_TASK:
             return widgets["actionEditor"].validate(self)
         if data["targetKey"] in widgets.get("homeCards", {}):
@@ -428,12 +428,12 @@ class HomeCardTaskCard(ScheduledTaskCard):
         self._homeCards = homeCards
         self._scrollArea = scrollArea
         self._homeCardKeys = {
-            entry["key"] for entry in _available_home_cards(homeCards)
+            entry["key"] for entry in _availableHomeCards(homeCards)
         }
         super().__init__(data, parent)
 
     def _createForm(self):
-        return create_home_card_task_form(
+        return createHomeCardTaskForm(
             self,
             self._homeCards,
             self.data,
@@ -458,7 +458,7 @@ class HomeCardTaskCard(ScheduledTaskCard):
 
     def _formData(self):
         self.formWidgets["targetTitle"] = self.data.get("targetTitle", "")
-        return home_card_task_data(self.formWidgets)
+        return homeCardTaskData(self.formWidgets)
 
     def _summary(self):
         if self.data.get("mode") == CUSTOM_HOME_CARD_TASK:
@@ -481,17 +481,17 @@ class HomeCardTaskCard(ScheduledTaskCard):
 
     def setHomeCards(self, entries):
         self._homeCardKeys = {
-            entry["key"] for entry in _available_home_cards(entries)
+            entry["key"] for entry in _availableHomeCards(entries)
         }
         self.formWidgets["targetKey"] = self.data.get("targetKey", "")
         self.formWidgets["targetTitle"] = self.data.get("targetTitle", "")
-        update_home_card_options(self.formWidgets, entries)
+        updateHomeCardOptions(self.formWidgets, entries)
         self._saveData()
 
 
 class HomeCardTaskPage(ScheduledTaskPage):
     def __init__(self, homeCards=None, parent=None):
-        self._homeCards = _available_home_cards(homeCards or [])
+        self._homeCards = _availableHomeCards(homeCards or [])
         super().__init__(
             "自动任务",
             "还没有设置自动任务哦 ~",
@@ -501,7 +501,7 @@ class HomeCardTaskPage(ScheduledTaskPage):
         )
 
     def setHomeCards(self, entries):
-        self._homeCards = _available_home_cards(entries or [])
+        self._homeCards = _availableHomeCards(entries or [])
         for card in self._cards:
             card.setHomeCards(self._homeCards)
 

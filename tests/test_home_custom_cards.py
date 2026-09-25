@@ -54,10 +54,10 @@ class HomeCustomCardTest(TestCase):
 
     def testDefaultCardsCanBeRemovedAndRestored(self):
         self.page._removeDefaultCard("全屏投送")
-        self.assertNotIn("全屏投送", self.page._card_order)
+        self.assertNotIn("全屏投送", self.page._cardOrder)
         self.assertNotIn("全屏投送", cfg.visibleDefaultHomeCards.value)
         self.page._restoreDefaultCard("全屏投送")
-        self.assertIn("全屏投送", self.page._card_order)
+        self.assertIn("全屏投送", self.page._cardOrder)
         self.assertIn("全屏投送", cfg.visibleDefaultHomeCards.value)
 
     def testRestoringCardImmediatelyRefreshesHomeLayoutHeight(self):
@@ -93,7 +93,7 @@ class HomeCustomCardTest(TestCase):
         self.assertEqual(self.page.addBtn.text(), "")
         self.assertEqual(self.page.addBtn.size(), self.page.sortBtn.sizeHint())
         self.assertEqual(self.page.sortBtn.size(), self.page.sortBtn.sizeHint())
-        card = self.page.all_cards[DEFAULT_HOME_CARDS[0]]
+        card = self.page.allCards[DEFAULT_HOME_CARDS[0]]
         self.assertEqual(card.editButton.size().toTuple(), (24, 24))
         self.assertEqual(card.deleteButton.size().toTuple(), (26, 26))
 
@@ -109,7 +109,7 @@ class HomeCustomCardTest(TestCase):
                 create.assert_called_once_with()
 
     def testNewControlsUseFluentTooltips(self):
-        card = self.page.all_cards[DEFAULT_HOME_CARDS[0]]
+        card = self.page.allCards[DEFAULT_HOME_CARDS[0]]
         for widget in (
             self.page.addBtn,
             self.page.sortBtn,
@@ -434,12 +434,12 @@ class HomeCustomCardTest(TestCase):
         self.page._addCustomCard(data)
         self.page._renderCards()
         self.page._saveCardOrder()
-        self.assertIn("custom:custom-one", self.page._card_order)
+        self.assertIn("custom:custom-one", self.page._cardOrder)
         self.assertEqual(cfg.customHomeCards.value[0]["id"], "custom-one")
 
         second = HomePage()
         try:
-            self.assertIn("custom:custom-one", second._card_order)
+            self.assertIn("custom:custom-one", second._cardOrder)
             self.assertEqual(second._customCardData["custom-one"]["title"], "测试卡片")
         finally:
             second.close()
@@ -679,7 +679,7 @@ class HomeCustomCardTest(TestCase):
         self.assertEqual((cards[0]["app_id"], cards[0]["preset_id"]), (7, 9))
         self.assertEqual(self.page.setApplicationCards([None, valid, dict(valid)]), cards)
         self.assertEqual(
-            [key for key in self.page.all_cards if key.startswith("app:")],
+            [key for key in self.page.allCards if key.startswith("app:")],
             ["app:7:9"],
         )
 
@@ -698,7 +698,7 @@ class HomeCustomCardTest(TestCase):
         self.assertEqual(len(cards), 1)
         self.assertEqual((cards[0]["app_id"], cards[0]["preset_id"]), (7, 0))
         self.page.setApplicationCards(cards)
-        self.assertIn("app:7:0", self.page.all_cards)
+        self.assertIn("app:7:0", self.page.allCards)
 
     def testApplicationCardRefreshReusesWidgetsAndExecutesLatestAction(self):
         cards = [
@@ -710,7 +710,7 @@ class HomeCustomCardTest(TestCase):
             }
         ]
         self.page.setApplicationCards(cards)
-        card = self.page.all_cards["app:7:0"]
+        card = self.page.allCards["app:7:0"]
         changes = []
         actions = []
         self.page.homeCardsChanged.connect(changes.append)
@@ -718,7 +718,7 @@ class HomeCustomCardTest(TestCase):
 
         self.page.setApplicationCards(cards)
 
-        self.assertIs(self.page.all_cards["app:7:0"], card)
+        self.assertIs(self.page.allCards["app:7:0"], card)
         self.assertEqual(changes, [])
 
         cards[0]["title"] = "更新后的应用"
@@ -729,7 +729,7 @@ class HomeCustomCardTest(TestCase):
         self.page.setApplicationCards(cards)
         self.page.activateHomeCard("app:7:0")
 
-        self.assertIs(self.page.all_cards["app:7:0"], card)
+        self.assertIs(self.page.allCards["app:7:0"], card)
         self.assertEqual(card.titleLabel.text(), "更新后的应用")
         self.assertEqual(actions[-1]["action"]["url"], "https://new.example")
         self.assertEqual(len(changes), 1)
@@ -749,7 +749,7 @@ class HomeCustomCardTest(TestCase):
 
         self.page.setApplicationCards(cards)
 
-        card = self.page.all_cards["app:7:0"]
+        card = self.page.allCards["app:7:0"]
         self.assertFalse(card.iconWidget.getIcon().isNull())
 
     def testApplicationCardsStayEditableWhenRefreshedDuringEditing(self):
@@ -765,7 +765,7 @@ class HomeCustomCardTest(TestCase):
             ]
         )
 
-        card = self.page.all_cards["app:7:0"]
+        card = self.page.allCards["app:7:0"]
         self.assertTrue(card._editing)
         self.assertFalse(card.deleteButton.isHidden())
 
@@ -773,7 +773,7 @@ class HomeCustomCardTest(TestCase):
         cfg.set(cfg.visibleDefaultHomeCards, [[], DEFAULT_HOME_CARDS[0]])
         cfg.set(cfg.homeCardOrder, [[], DEFAULT_HOME_CARDS[0]])
         self.page._renderCards()
-        self.assertIn(DEFAULT_HOME_CARDS[0], self.page._card_order)
+        self.assertIn(DEFAULT_HOME_CARDS[0], self.page._cardOrder)
 
     @mock.patch("app.common.home_cards.subprocess.Popen")
     def testProgramArgumentsAreStartedWithoutShell(self, popen):

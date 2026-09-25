@@ -242,9 +242,9 @@ class WindowBackgroundTest(TestCase):
         self.assertFalse(countdown.background._borderVisible)
         self.assertFalse(clock.background._borderVisible)
 
-        broadcast.is_windowed = True
-        countdown.is_windowed = True
-        clock.is_windowed = True
+        broadcast.isWindowed = True
+        countdown.isWindowed = True
+        clock.isWindowed = True
         broadcast._applyStyle()
         countdown._applyWindowState()
         clock._applyWindowState()
@@ -268,7 +268,7 @@ class WindowBackgroundTest(TestCase):
             window = windowType()
             self.addCleanup(window.deleteLater)
             self.addCleanup(window.close)
-            window.is_windowed = True
+            window.isWindowed = True
             if isinstance(window, BroadcastWindow):
                 window.setupLayout()
                 window._updateButtonsState()
@@ -342,7 +342,7 @@ class WindowBackgroundTest(TestCase):
         ):
             with self.subTest(x=x, y=y):
                 self.assertEqual(background.resizeEdges(QPointF(x, y), 12), expected)
-        for button in (window.btn_edit, window.btn_min, window.btn_win, window.btn_close):
+        for button in (window.btnEdit, window.btnMin, window.btnWin, window.btnClose):
             for point in (button.rect().topLeft(), button.rect().bottomRight()):
                 position = button.mapTo(window, point) - background.pos()
                 self.assertEqual(background.resizeEdges(QPointF(position), 12), Qt.Edge(0))
@@ -354,7 +354,7 @@ class WindowBackgroundTest(TestCase):
         window = BroadcastWindow()
         self.addCleanup(window.deleteLater)
         self.addCleanup(window.close)
-        window.is_windowed = True
+        window.isWindowed = True
         window._applyWindowState()
         message = SimpleNamespace(message=0x84, hWnd=123, lParam=((-234 & 0xFFFF) << 16) | (-123 & 0xFFFF))
         constants = SimpleNamespace(

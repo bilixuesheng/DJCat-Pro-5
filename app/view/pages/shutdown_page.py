@@ -40,7 +40,7 @@ SHUTDOWN_RESULT = 1
 SKIP_RESULT = 2
 
 
-def create_shutdown_form(parent, initialData=None):
+def createShutdownForm(parent, initialData=None):
     form = QWidget(parent)
     layout = QVBoxLayout(form)
     layout.setContentsMargins(0, 0, 0, 0)
@@ -185,7 +185,7 @@ def create_shutdown_form(parent, initialData=None):
     return form, widgets
 
 
-def shutdown_task_data(widgets):
+def shutdownTaskData(widgets):
     return {
         "name": widgets["nameInput"].text() or "未命名任务",
         "time": widgets["timePicker"].getTime().toString("HH:mm:ss"),
@@ -208,8 +208,8 @@ class AddShutdownTaskDialog(ScheduledTaskDialog):
     def __init__(self, parent=None):
         super().__init__(
             "添加关机任务",
-            lambda form, _scrollArea: create_shutdown_form(form),
-            shutdown_task_data,
+            lambda form, _scrollArea: createShutdownForm(form),
+            shutdownTaskData,
             parent,
         )
 
@@ -223,7 +223,7 @@ class ShutdownTaskCard(ScheduledTaskCard):
         super().__init__(data, parent)
 
     def _createForm(self):
-        return create_shutdown_form(self, self.data)
+        return createShutdownForm(self, self.data)
 
     def _bindForm(self):
         widgets = self.formWidgets
@@ -239,7 +239,7 @@ class ShutdownTaskCard(ScheduledTaskCard):
         widgets["waitSpin"].valueChanged.connect(self._saveData)
 
     def _formData(self):
-        return shutdown_task_data(self.formWidgets)
+        return shutdownTaskData(self.formWidgets)
 
     def _summary(self):
         return f"关机时间：{self.data['time']}"
@@ -266,7 +266,7 @@ class ShutdownPromptDialog(MessageBoxBase):
     def __init__(self, task, parent=None):
         super().__init__(parent)
         self.setMaskColor(QColor(0, 0, 0, 180))
-        self.remaining_seconds = max(1, int(task.get("waitSeconds", 30)))
+        self.remainingSeconds = max(1, int(task.get("waitSeconds", 30)))
         self.titleLabel = TitleLabel(
             task.get("promptTitle") or DEFAULT_PROMPT_TITLE,
             self,
@@ -306,19 +306,19 @@ class ShutdownPromptDialog(MessageBoxBase):
 
     def _updateCountdown(self):
         self.countdownLabel.setText(
-            f"{self.remaining_seconds} 秒后将自动关机"
+            f"{self.remainingSeconds} 秒后将自动关机"
         )
 
     def _onTimeout(self):
-        self.remaining_seconds -= 1
-        if self.remaining_seconds <= 0:
+        self.remainingSeconds -= 1
+        if self.remainingSeconds <= 0:
             self.timer.stop()
             self.accept()
             return
         self._updateCountdown()
 
 
-def show_shutdown_prompt(task):
+def showShutdownPrompt(task):
     overlay = QWidget()
     overlay.setWindowFlags(
         Qt.WindowType.Tool

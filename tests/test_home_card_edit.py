@@ -51,7 +51,7 @@ class HomeCardEditTest(TestCase):
         QTest.mouseClick(self.page.sortBtn, Qt.MouseButton.LeftButton)
 
         for card in (
-            self.page.all_cards[name] for name in self.page._card_order
+            self.page.allCards[name] for name in self.page._cardOrder
         ):
             self.assertEqual(card.size().toTuple(), (210, 120))
             self.assertTrue(card.deleteButton.isVisible())
@@ -60,8 +60,8 @@ class HomeCardEditTest(TestCase):
                 card.testAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents)
             )
 
-        firstCard = self.page.all_cards["全屏投送"]
-        targetCard = self.page.all_cards["定时关机"]
+        firstCard = self.page.allCards["全屏投送"]
+        targetCard = self.page.allCards["定时关机"]
         targetStart = targetCard.pos()
         scrollBar = self.page.verticalScrollBar()
         scrollBar.setValue(scrollBar.maximum() // 2)
@@ -127,12 +127,12 @@ class HomeCardEditTest(TestCase):
         ) as ungrab:
             for _ in range(3):
                 QTest.mouseClick(self.page.sortBtn, Qt.MouseButton.LeftButton)
-                self.assertTrue(self.page._editing_cards)
+                self.assertTrue(self.page._editingCards)
                 self.assertTrue(area.isTouchScrollSuppressed)
                 self.assertGreater(dragStartDistance(), 1.0)
 
                 QTest.mouseClick(self.page.sortBtn, Qt.MouseButton.LeftButton)
-                self.assertFalse(self.page._editing_cards)
+                self.assertFalse(self.page._editingCards)
                 self.assertFalse(area.isTouchScrollSuppressed)
                 self.assertEqual(dragStartDistance(), original)
 
@@ -141,7 +141,7 @@ class HomeCardEditTest(TestCase):
         self.assertTrue(area.isTouchGestureGrabbed)
 
     def testEditAndDeleteButtonsRespondToTouchInEditingMode(self):
-        card = self.page.all_cards["全屏投送"]
+        card = self.page.allCards["全屏投送"]
         card.setEditable(True)
         card.setRemovable(True)
         card.setEditing(True)
@@ -166,8 +166,8 @@ class HomeCardEditTest(TestCase):
 
     def testCardPreviewFollowsMouse(self):
         QTest.mouseClick(self.page.sortBtn, Qt.MouseButton.LeftButton)
-        card = self.page.all_cards["全屏投送"]
-        targetCard = self.page.all_cards["定时关机"]
+        card = self.page.allCards["全屏投送"]
+        targetCard = self.page.allCards["定时关机"]
         target = card.mapFromGlobal(
             targetCard.mapToGlobal(targetCard.rect().center())
         )
@@ -192,7 +192,7 @@ class HomeCardEditTest(TestCase):
         )
 
     def testCardReleaseOutsideDoesNotClick(self):
-        card = self.page.all_cards["全屏投送"]
+        card = self.page.allCards["全屏投送"]
         clicks = []
         card.clicked.connect(lambda: clicks.append(True))
 
@@ -226,7 +226,7 @@ class HomeCardEditTest(TestCase):
         self.assertEqual(clicks, [True])
 
     def testCardIgnoresRightClick(self):
-        card = self.page.all_cards["全屏投送"]
+        card = self.page.allCards["全屏投送"]
         clicks = []
         card.clicked.connect(lambda: clicks.append(True))
 
@@ -239,7 +239,7 @@ class HomeCardEditTest(TestCase):
         self.assertEqual(clicks, [])
 
     def testCardTitleAndDescriptionEndWithEllipsis(self):
-        card = self.page.all_cards["全屏投送"]
+        card = self.page.allCards["全屏投送"]
         card.setCardData(
             card.iconWidget.icon,
             "Ghost Downloader 的标题非常非常长",
@@ -262,7 +262,7 @@ class HomeCardEditTest(TestCase):
         scrollBar = self.page.verticalScrollBar()
         scrollBar.setValue(300)
         scrollStart = scrollBar.value()
-        card = self.page.all_cards["全屏投送"]
+        card = self.page.allCards["全屏投送"]
         clicks = []
         card.clicked.connect(lambda: clicks.append(True))
         touchDevice = QTest.createTouchDevice(
@@ -295,8 +295,8 @@ class HomeCardEditTest(TestCase):
 
     def testCardsShiftBeforePointerFullyEntersTarget(self):
         QTest.mouseClick(self.page.sortBtn, Qt.MouseButton.LeftButton)
-        card = self.page.all_cards["全屏投送"]
-        targetCard = self.page.all_cards["考试倒计时"]
+        card = self.page.allCards["全屏投送"]
+        targetCard = self.page.allCards["考试倒计时"]
         nearTarget = targetCard.rect().center()
         nearTarget.setX(-24)
         target = card.mapFromGlobal(targetCard.mapToGlobal(nearTarget))
@@ -310,15 +310,15 @@ class HomeCardEditTest(TestCase):
         self.app.processEvents()
 
         self.assertEqual(
-            self.page._card_order,
+            self.page._cardOrder,
             ["考试倒计时", "全屏投送", "定时关机", "定时播报"],
         )
         QTest.mouseRelease(card, Qt.MouseButton.LeftButton, pos=target)
 
     def testCardsDoNotBounceDuringContinuousMouseDrag(self):
         QTest.mouseClick(self.page.sortBtn, Qt.MouseButton.LeftButton)
-        card = self.page.all_cards["全屏投送"]
-        targetCard = self.page.all_cards["考试倒计时"]
+        card = self.page.allCards["全屏投送"]
+        targetCard = self.page.allCards["考试倒计时"]
         target = targetCard.mapToGlobal(targetCard.rect().center())
         self.page._startCardDrag(
             card,
@@ -329,7 +329,7 @@ class HomeCardEditTest(TestCase):
         self.page._moveCard(card, target + QPoint(1, 0))
 
         self.assertEqual(
-            self.page._card_order,
+            self.page._cardOrder,
             ["考试倒计时", "全屏投送", "定时关机", "定时播报"],
         )
 
@@ -337,9 +337,9 @@ class HomeCardEditTest(TestCase):
         scrollBar = self.page.verticalScrollBar()
         scrollBar.setRange(0, 1000)
         scrollBar.setValue(0)
-        card = self.page.all_cards["全屏投送"]
-        self.page._drag_card = card
-        self.page._drag_position = self.page.viewport().mapToGlobal(
+        card = self.page.allCards["全屏投送"]
+        self.page._dragCard = card
+        self.page._dragPosition = self.page.viewport().mapToGlobal(
             QPoint(self.page.viewport().width() // 2, self.page.viewport().height() - 1)
         )
 

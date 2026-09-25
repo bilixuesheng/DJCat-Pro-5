@@ -18,7 +18,7 @@ from app.view.components.setting_card_group import SettingMaterialCard
 from app.view.components.task_picker import (
     TaskExpandSettingCard,
     TaskMasterSwitch,
-    configure_task_expand_card,
+    configureTaskExpandCard,
 )
 
 
@@ -75,7 +75,7 @@ class ScheduledTaskCard(SettingMaterialCard):
             self,
         )
         self.paintFilter = self.applyExpandCardMaterial(self.expandCard)
-        self.expandBehavior = configure_task_expand_card(self.expandCard)
+        self.expandBehavior = configureTaskExpandCard(self.expandCard)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.expandCard)

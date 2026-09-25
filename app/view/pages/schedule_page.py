@@ -104,15 +104,15 @@ class ChineseVoiceLoader(QObject):
         self._emit(*self._fetch())
 
 
-def create_task_form(parent_widget, initial_data=None):
-    form = QWidget(parent_widget)
+def createTaskForm(parentWidget, initialData=None):
+    form = QWidget(parentWidget)
     layout = QVBoxLayout(form)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(2)
 
-    default_time = QTime.currentTime()
-    data = initial_data or {
-        "name": "", "time": default_time.toString("HH:mm:ss"),
+    defaultTime = QTime.currentTime()
+    data = initialData or {
+        "name": "", "time": defaultTime.toString("HH:mm:ss"),
         "weeks": [0,1,2,3,4,5,6], "type": "预设: 12:30报时",
         "content": "", "file": "", "repeat": 3,
         "voice": DEFAULT_EDGE_VOICE,
@@ -128,7 +128,7 @@ def create_task_form(parent_widget, initial_data=None):
 
     timePicker = TouchTimePicker(form, showSeconds=True)
     timePicker.setColumnFormatter(2, SecondsFormatter())
-    timePicker.setTime(QTime.fromString(data["time"], "HH:mm:ss") if data["time"] else default_time)
+    timePicker.setTime(QTime.fromString(data["time"], "HH:mm:ss") if data["time"] else defaultTime)
     layout.addWidget(TaskFormSettingCard(FIF.ALBUM, "播报时间", "设置触发的具体时间(时:分:秒)", timePicker, form))
     widgets['timePicker'] = timePicker
 
@@ -226,7 +226,7 @@ def create_task_form(parent_widget, initial_data=None):
     widgets['voicesLoaded'] = False
 
     def _onVoicesLoaded(voices, error):
-        selected_voice = voiceCombo.currentData() or data.get(
+        selectedVoice = voiceCombo.currentData() or data.get(
             "voice", DEFAULT_EDGE_VOICE
         )
         if voices:
@@ -234,8 +234,8 @@ def create_task_form(parent_widget, initial_data=None):
             for voice in voices:
                 voiceCombo.addItem(voice["label"], userData=voice["name"])
             voiceCombo.setFixedWidth(260)
-            selected_index = voiceCombo.findData(selected_voice)
-            voiceCombo.setCurrentIndex(max(0, selected_index))
+            selectedIndex = voiceCombo.findData(selectedVoice)
+            voiceCombo.setCurrentIndex(max(0, selectedIndex))
             widgets['voicesLoaded'] = True
             voiceCombo.setEnabled(True)
             return
@@ -253,10 +253,10 @@ def create_task_form(parent_widget, initial_data=None):
 
     def _updateVisibility(text):
         ttsCard.setVisible("TTS" in text)
-        is_edge_tts = text == "Edge TTS（需要联网）"
-        voiceCard.setVisible(is_edge_tts)
+        isEdgeTts = text == "Edge TTS（需要联网）"
+        voiceCard.setVisible(isEdgeTts)
         fileCard.setVisible(text == "本地音频")
-        if is_edge_tts and not widgets['voicesLoaded']:
+        if isEdgeTts and not widgets['voicesLoaded']:
             voiceCombo.setEnabled(False)
             voiceLoader.start()
     typeCombo.currentTextChanged.connect(_updateVisibility)
@@ -265,7 +265,7 @@ def create_task_form(parent_widget, initial_data=None):
     return form, widgets
 
 
-def broadcast_task_data(widgets):
+def broadcastTaskData(widgets):
     return {
         "name": widgets["nameInput"].text() or "未命名任务",
         "time": widgets["timePicker"].getTime().toString("HH:mm:ss"),
@@ -287,8 +287,8 @@ class AddTaskDialog(ScheduledTaskDialog):
     def __init__(self, parent=None):
         super().__init__(
             "添加播报任务",
-            lambda form, _scrollArea: create_task_form(form),
-            broadcast_task_data,
+            lambda form, _scrollArea: createTaskForm(form),
+            broadcastTaskData,
             parent,
         )
 
@@ -297,7 +297,7 @@ class TaskCard(ScheduledTaskCard):
     ICON = FIF.MEGAPHONE
 
     def _createForm(self):
-        return create_task_form(self, self.data)
+        return createTaskForm(self, self.data)
 
     def _bindForm(self):
         widgets = self.formWidgets
@@ -320,7 +320,7 @@ class TaskCard(ScheduledTaskCard):
         return (self.playBtn,)
 
     def _formData(self):
-        return broadcast_task_data(self.formWidgets)
+        return broadcastTaskData(self.formWidgets)
 
     def _summary(self):
         return f"触发时间: {self.data['time']}"

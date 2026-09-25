@@ -264,7 +264,7 @@ class SettingSearchTest(TestCase):
                         expectedScaleMode,
                     )
                     self.assertEqual(
-                        self.window.homePage.banner.get_image_path(),
+                        self.window.homePage.banner.getImagePath(),
                         str(ASSET_DIR / BANNER_IMAGE_PRESETS[preset]),
                     )
         finally:
@@ -327,7 +327,7 @@ class SettingSearchTest(TestCase):
         for title, name in pageSpecs:
             with self.subTest(page=name):
                 previousCount = self.window.stackedWidget.count()
-                self.window.homePage.all_cards[title].clicked.emit()
+                self.window.homePage.allCards[title].clicked.emit()
                 self._waitUntil(
                     lambda: getattr(self.window, name) is not None
                     and self._navigationSettled(getattr(self.window, name))
@@ -341,7 +341,7 @@ class SettingSearchTest(TestCase):
                 self.window._navToHome()
                 self._waitUntil(lambda: self._navigationSettled(self.window.homePage))
 
-                self.window.homePage.all_cards[title].clicked.emit()
+                self.window.homePage.allCards[title].clicked.emit()
                 self._waitUntil(lambda: self._navigationSettled(page))
 
                 self.assertIs(getattr(self.window, name), page)
@@ -359,7 +359,7 @@ class SettingSearchTest(TestCase):
         showMainWindow = cfg.showMainWindowAfterFullscreenClock.value
         try:
             cfg.set(cfg.showMainWindowAfterFullscreenClock, True)
-            self.window.homePage.all_cards["全屏时钟"].clicked.emit()
+            self.window.homePage.allCards["全屏时钟"].clicked.emit()
             self.app.processEvents()
 
             clock = self.window.fullscreenClockWindow
