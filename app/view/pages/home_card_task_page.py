@@ -1,24 +1,16 @@
 from __future__ import annotations
 
-from copy import deepcopy
-
-from PySide6.QtCore import Qt, QTime, QTimer, Signal
+from PySide6.QtCore import QTime
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     CaptionLabel,
     ComboBox,
     InfoBar,
     InfoBarPosition,
     LineEdit,
-    MessageBoxBase,
     PillPushButton,
-    PushButton,
     StrongBodyLabel,
-    SubtitleLabel,
-    SwitchButton,
-    TitleLabel,
-    ToolButton,
     isDarkTheme,
 )
 from qfluentwidgets import FluentIcon as FIF
@@ -39,15 +31,12 @@ from app.common.home_card_tasks import (
 from app.common.home_cards import new_id, validate_action
 from app.config.cfg import cfg
 from app.view.components.home_card_dialog import ActionSequenceEditor
-from app.view.components.scroll_area import ScrollArea
-from app.view.components.setting_card_group import SettingMaterialCard
-from app.view.components.task_picker import (
-    TaskExpandSettingCard,
-    TaskFormSettingCard,
-    TaskMasterSwitch,
-    TouchTimePicker,
-    configure_task_expand_card,
+from app.view.components.task_page import (
+    ScheduledTaskCard,
+    ScheduledTaskDialog,
+    ScheduledTaskPage,
 )
+from app.view.components.task_picker import TaskFormSettingCard, TouchTimePicker
 
 SOURCE_LABELS = {
     "custom": "自定义",
@@ -58,10 +47,6 @@ APPLICATION_EVENT_LABELS = {
     SILENT_STARTUP_EVENT: "电教猫开机静默启动时",
     APPLICATION_QUIT_EVENT: "电教猫关闭时",
 }
-
-
-class HomeCardTaskSettingCard(TaskFormSettingCard):
-    pass
 
 
 class ActionSequenceSettingCard(QWidget):
@@ -188,7 +173,7 @@ def create_home_card_task_form(
     nameInput.setText(data.get("name", ""))
     nameInput.setPlaceholderText("任务名称（例如：打开课程表）")
     layout.addWidget(
-        HomeCardTaskSettingCard(
+        TaskFormSettingCard(
             FIF.EDIT,
             "任务名称",
             "设置该自动任务的标题",
@@ -205,7 +190,7 @@ def create_home_card_task_form(
     triggerCombo.setCurrentIndex(triggerIndex if triggerIndex >= 0 else 0)
     triggerCombo.setFixedWidth(180)
     layout.addWidget(
-        HomeCardTaskSettingCard(
+        TaskFormSettingCard(
             FIF.HISTORY,
             "触发时机",
             "选择固定时间或软件行为触发",
@@ -221,7 +206,7 @@ def create_home_card_task_form(
     eventIndex = eventCombo.findData(data.get("event"))
     eventCombo.setCurrentIndex(eventIndex if eventIndex >= 0 else 0)
     eventCombo.setFixedWidth(220)
-    eventCard = HomeCardTaskSettingCard(
+    eventCard = TaskFormSettingCard(
         FIF.APPLICATION,
         "软件行为",
         "选择触发任务的软件行为",
@@ -235,7 +220,7 @@ def create_home_card_task_form(
     timePicker = TouchTimePicker(form, showSeconds=True)
     taskTime = QTime.fromString(data.get("time", ""), "HH:mm:ss")
     timePicker.setTime(taskTime if taskTime.isValid() else now)
-    timeCard = HomeCardTaskSettingCard(
+    timeCard = TaskFormSettingCard(
         FIF.ALBUM,
         "执行时间",
         "设置触发任务的具体时间",
@@ -256,7 +241,7 @@ def create_home_card_task_form(
         button.setChecked(index in data.get("weeks", []))
         weekButtons.append(button)
         weekLayout.addWidget(button)
-    weekCard = HomeCardTaskSettingCard(
+    weekCard = TaskFormSettingCard(
         FIF.CALENDAR,
         "重复频率",
         "选择在一周中的哪几天执行",
@@ -274,7 +259,7 @@ def create_home_card_task_form(
     modeCombo.setCurrentIndex(modeIndex if modeIndex >= 0 else 0)
     modeCombo.setFixedWidth(180)
     layout.addWidget(
-        HomeCardTaskSettingCard(
+        TaskFormSettingCard(
             FIF.APPLICATION,
             "任务类型",
             "执行已有主页卡片，或编排自定义动作",
@@ -288,7 +273,7 @@ def create_home_card_task_form(
     homeCardCombo.setFixedWidth(280)
     widgets["homeCardCombo"] = homeCardCombo
     update_home_card_options(widgets, homeCards)
-    homeCardCard = HomeCardTaskSettingCard(
+    homeCardCard = TaskFormSettingCard(
         FIF.HOME,
         "已有卡片",
         "触发后执行所选主页卡片",
@@ -304,7 +289,7 @@ def create_home_card_task_form(
     operationIndex = operationCombo.findData(data.get("operation"))
     operationCombo.setCurrentIndex(operationIndex if operationIndex >= 0 else 0)
     operationCombo.setFixedWidth(180)
-    operationCard = HomeCardTaskSettingCard(
+    operationCard = TaskFormSettingCard(
         FIF.POWER_BUTTON,
         "执行动作",
         "选择打开或关闭所选默认功能",
@@ -401,26 +386,20 @@ def home_card_task_data(widgets):
     }
 
 
-class AddHomeCardTaskDialog(MessageBoxBase):
+class AddHomeCardTaskDialog(ScheduledTaskDialog):
     def __init__(self, homeCards, parent=None):
-        super().__init__(parent)
-        self.titleLabel = SubtitleLabel("添加自动任务", self)
-        self.scrollArea = ScrollArea(self.widget)
-        self.scrollArea.setWidgetResizable(True)
-        self.scrollArea.enableTransparentBackground()
-        self.formWidget, self.formWidgets = create_home_card_task_form(
-            self,
-            homeCards,
-            scrollArea=self.scrollArea,
+        super().__init__(
+            "添加自动任务",
+            lambda form, scrollArea: create_home_card_task_form(
+                form,
+                homeCards,
+                scrollArea=scrollArea,
+            ),
+            home_card_task_data,
+            parent,
+            maxHeight=420,
+            minWidth=640,
         )
-        self.scrollArea.setWidget(self.formWidget)
-        self.scrollArea.setMinimumHeight(180)
-        self.scrollArea.setMaximumHeight(420)
-
-        self.viewLayout.addWidget(self.titleLabel)
-        self.viewLayout.addSpacing(10)
-        self.viewLayout.addWidget(self.scrollArea)
-        self.widget.setMinimumWidth(640)
         self.yesButton.setText("保存")
         self.cancelButton.setText("取消")
 
@@ -460,78 +439,28 @@ class AddHomeCardTaskDialog(MessageBoxBase):
         return True
 
     def getData(self):
-        return {
-            "id": new_id(),
-            **home_card_task_data(self.formWidgets),
-            "enabled": True,
-        }
+        return {"id": new_id(), **super().getData()}
 
 
-class HomeCardTaskCard(SettingMaterialCard):
-    deleteClicked = Signal(str)
-    dataChanged = Signal()
-
+class HomeCardTaskCard(ScheduledTaskCard):
     def __init__(self, data, homeCards, scrollArea, parent=None):
-        super().__init__(parent)
-        self.data = data
+        self._homeCards = homeCards
+        self._scrollArea = scrollArea
         self._homeCardKeys = {
             entry["key"] for entry in _available_home_cards(homeCards)
         }
-        self.expandCard = TaskExpandSettingCard(
-            FIF.HISTORY,
-            data["name"],
-            self._summary(),
+        super().__init__(data, parent)
+
+    def _createForm(self):
+        return create_home_card_task_form(
             self,
+            self._homeCards,
+            self.data,
+            self._scrollArea,
         )
-        self.paintFilter = self.applyExpandCardMaterial(self.expandCard)
-        self.expandBehavior = configure_task_expand_card(self.expandCard)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.expandCard)
-
-        self.titleLabel = None
-        self.summaryLabel = None
-        for label in self.findChildren(QLabel):
-            if label.text() == data["name"]:
-                self.titleLabel = label
-            elif label.text() == self._summary():
-                self.summaryLabel = label
-
-        self.enableSwitch = SwitchButton(self)
-        self.enableSwitch.setChecked(data.get("enabled", True))
-        self.expandCard.addWidget(self.enableSwitch)
-
-        self.formWidget, self.formWidgets = create_home_card_task_form(
-            self,
-            homeCards,
-            data,
-            scrollArea,
-        )
-        self.formHeightTimer = QTimer(self)
-        self.formHeightTimer.setSingleShot(True)
-        self.formHeightTimer.setInterval(10)
-        self.formHeightTimer.timeout.connect(self.expandCard._adjustViewSize)
-        self._bindForm()
-
-        deleteButton = PushButton(FIF.DELETE, "删除任务", self)
-        deleteButton.clicked.connect(lambda: self.deleteClicked.emit(self.data["id"]))
-        buttonLayout = QHBoxLayout()
-        buttonLayout.setContentsMargins(16, 0, 16, 0)
-        buttonLayout.addStretch(1)
-        buttonLayout.addWidget(deleteButton)
-
-        container = QWidget(self)
-        containerLayout = QVBoxLayout(container)
-        containerLayout.setContentsMargins(0, 0, 0, 16)
-        containerLayout.addWidget(self.formWidget)
-        containerLayout.addSpacing(10)
-        containerLayout.addLayout(buttonLayout)
-        self.expandCard.viewLayout.addWidget(container)
 
     def _bindForm(self):
         widgets = self.formWidgets
-        self.enableSwitch.checkedChanged.connect(self._onEnabledChanged)
         widgets["nameInput"].textChanged.connect(self._saveData)
         widgets["timePicker"].timeChanged.connect(self._saveData)
         for button in widgets["weekButtons"]:
@@ -545,6 +474,10 @@ class HomeCardTaskCard(SettingMaterialCard):
         widgets["homeCardCombo"].currentIndexChanged.connect(self._refreshFormHeight)
         widgets["operationCombo"].currentIndexChanged.connect(self._saveData)
         widgets["actionEditor"].changed.connect(self._saveData)
+
+    def _formData(self):
+        self.formWidgets["targetTitle"] = self.data.get("targetTitle", "")
+        return home_card_task_data(self.formWidgets)
 
     def _summary(self):
         if self.data.get("mode") == CUSTOM_HOME_CARD_TASK:
@@ -565,28 +498,6 @@ class HomeCardTaskCard(SettingMaterialCard):
             trigger = f"触发时间：{self.data['time']}"
         return f"{trigger} · {target}"
 
-    def _onEnabledChanged(self, checked):
-        if self.data.get("enabled", True) == checked:
-            return
-        self.data["enabled"] = checked
-        self.dataChanged.emit()
-
-    def _saveData(self, *args):
-        self.formWidgets["targetTitle"] = self.data.get("targetTitle", "")
-        updated = home_card_task_data(self.formWidgets)
-        changed = any(self.data.get(key) != value for key, value in updated.items())
-        self.data.update(updated)
-        if self.titleLabel is not None:
-            self.titleLabel.setText(self.data["name"])
-        if self.summaryLabel is not None:
-            self.summaryLabel.setText(self._summary())
-        if changed:
-            self.dataChanged.emit()
-
-    def _refreshFormHeight(self):
-        self.expandCard._adjustViewSize()
-        self.formHeightTimer.start()
-
     def setHomeCards(self, entries):
         self._homeCardKeys = {
             entry["key"] for entry in _available_home_cards(entries)
@@ -597,156 +508,27 @@ class HomeCardTaskCard(SettingMaterialCard):
         self._saveData()
 
 
-class HomeCardTaskPage(QWidget):
-    backSignal = Signal()
-
+class HomeCardTaskPage(ScheduledTaskPage):
     def __init__(self, homeCards=None, parent=None):
-        super().__init__(parent)
         self._homeCards = _available_home_cards(homeCards or [])
-        self._cards = []
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(30, 30, 30, 30)
-
-        header = QHBoxLayout()
-        self.backButton = ToolButton(FIF.RETURN, self)
-        self.backButton.clicked.connect(self.backSignal.emit)
-        self.titleLabel = TitleLabel("自动任务", self)
-        self.masterSwitch = TaskMasterSwitch(cfg.homeCardTasksEnabled, self)
-        self.addButton = ToolButton(FIF.ADD, self)
-        self.addButton.clicked.connect(self._addTask)
-        header.addWidget(self.backButton)
-        header.addWidget(self.titleLabel)
-        header.addStretch(1)
-        header.addWidget(self.masterSwitch)
-        header.addSpacing(8)
-        header.addWidget(self.addButton)
-        self.layout.addLayout(header)
-
-        self.scrollArea = ScrollArea(self)
-        self.scrollArea.setWidgetResizable(True)
-        self.scrollArea.enableTransparentBackground()
-        self.view = QWidget(self.scrollArea)
-        contentLayout = QVBoxLayout(self.view)
-        contentLayout.setContentsMargins(0, 0, 0, 0)
-
-        self.cardLayout = QVBoxLayout()
-        self.cardLayout.setSpacing(10)
-        contentLayout.addLayout(self.cardLayout)
-        self.emptyLabel = SubtitleLabel("还没有设置自动任务哦 ~", self.view)
-        self.emptyLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.emptyLabel.setStyleSheet("color: gray;")
-        contentLayout.addWidget(self.emptyLabel, 1, Qt.AlignmentFlag.AlignCenter)
-        contentLayout.addStretch(1)
-
-        self.scrollArea.setWidget(self.view)
-        self.layout.addWidget(self.scrollArea, 1)
-        self.saveTimer = QTimer(self)
-        self.saveTimer.setSingleShot(True)
-        self.saveTimer.setInterval(300)
-        self.saveTimer.timeout.connect(self.flushPendingSave)
-        self._savePending = False
-        self._loadTasks()
-        cfg.homeCardTasks.valueChanged.connect(self._onTasksChanged)
-        cfg.homeCardTasksEnabled.valueChanged.connect(
-            self._setTaskControlsEnabled
+        super().__init__(
+            "自动任务",
+            "还没有设置自动任务哦 ~",
+            cfg.homeCardTasks,
+            cfg.homeCardTasksEnabled,
+            parent,
         )
-        self._setTaskControlsEnabled(cfg.homeCardTasksEnabled.value)
 
     def setHomeCards(self, entries):
         self._homeCards = _available_home_cards(entries or [])
         for card in self._cards:
             card.setHomeCards(self._homeCards)
 
-    def _onTasksChanged(self, tasks):
-        if tasks != self.currentTasks:
-            self._loadTasks()
+    def _normalizeTasks(self, tasks):
+        return normalize_home_card_tasks(tasks)
 
-    def _loadTasks(self):
-        self.saveTimer.stop()
-        self._savePending = False
-        while self.cardLayout.count():
-            widget = self.cardLayout.takeAt(0).widget()
-            if widget is not None:
-                widget.deleteLater()
-        rawTasks = cfg.homeCardTasks.value
-        tasks = normalize_home_card_tasks(rawTasks)
-        self.currentTasks = deepcopy(tasks)
-        if tasks != rawTasks:
-            cfg.set(cfg.homeCardTasks, tasks)
-        self._cards = []
-        self.emptyLabel.setVisible(not self.currentTasks)
-        for index, task in enumerate(self.currentTasks):
-            card = HomeCardTaskCard(
-                task,
-                self._homeCards,
-                self.scrollArea,
-                self.view,
-            )
-            card.deleteClicked.connect(self._removeTask)
-            card.dataChanged.connect(
-                lambda taskIndex=index, taskCard=card: self._updateTask(
-                    taskIndex,
-                    taskCard.data,
-                )
-            )
-            self._cards.append(card)
-            card.setEnabled(cfg.homeCardTasksEnabled.value)
-            self.cardLayout.addWidget(card)
+    def _createCard(self, task):
+        return HomeCardTaskCard(task, self._homeCards, self.scrollArea, self.view)
 
-    def _setTaskControlsEnabled(self, enabled):
-        self.addButton.setEnabled(enabled)
-        for card in self._cards:
-            card.setEnabled(enabled)
-
-    def _addTask(self):
-        self.flushPendingSave()
-        dialog = AddHomeCardTaskDialog(self._homeCards, self.window())
-        try:
-            if not dialog.exec():
-                return
-            self.currentTasks.insert(0, dialog.getData())
-            cfg.set(
-                cfg.homeCardTasks,
-                normalize_home_card_tasks(self.currentTasks),
-            )
-            self._loadTasks()
-        finally:
-            dialog.deleteLater()
-
-    def _updateTask(self, index, data):
-        if not 0 <= index < len(self.currentTasks):
-            return
-        self.currentTasks[index] = deepcopy(data)
-        self._savePending = True
-        self.saveTimer.start()
-
-    def _removeTask(self, taskId):
-        self.saveTimer.stop()
-        self._savePending = False
-        self.currentTasks = [
-            task for task in self.currentTasks if task.get("id") != taskId
-        ]
-        cfg.set(cfg.homeCardTasks, self.currentTasks)
-        self._loadTasks()
-
-    def flushPendingSave(self):
-        if not self._savePending:
-            return
-        self._savePending = False
-        self.saveTimer.stop()
-        tasks = normalize_home_card_tasks(self.currentTasks)
-        self.currentTasks = deepcopy(tasks)
-        cfg.set(cfg.homeCardTasks, tasks)
-
-    def hideEvent(self, event):
-        self.flushPendingSave()
-        super().hideEvent(event)
-
-
-__all__ = [
-    "AddHomeCardTaskDialog",
-    "HomeCardTaskCard",
-    "HomeCardTaskPage",
-    "create_home_card_task_form",
-    "home_card_task_data",
-]
+    def _createDialog(self):
+        return AddHomeCardTaskDialog(self._homeCards, self.window())
