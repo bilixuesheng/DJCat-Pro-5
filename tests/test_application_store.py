@@ -23,6 +23,7 @@ from app.common.application_store import (
     DownloadLimitError,
     DownloadSlots,
     ImageCache,
+    MANIFEST_NAME,
     UnsafeArchiveError,
     clientArchitecture,
     downloadWorker,
@@ -257,7 +258,8 @@ class ApplicationStoreTest(TestCase):
         self.assertEqual(merged["open_action"]["target"], "new.exe")
         self.assertEqual(merged["installed_open_action"]["target"], "old.exe")
 
-    def testManifestRevisionCanUpdateActionsWithoutChangingVersion(self):
+    def testOnlyANewVersionOffersAnUpdate(self):
+        # 只改目录信息（修订号变了、版本没变）不该让用户整包重下。
         app = self._app() | {
             "manifest_revision": 1,
             "packages": {
@@ -265,15 +267,70 @@ class ApplicationStoreTest(TestCase):
             },
         }
         self.store.installZip(app, self._zip())
-        catalog = app | {
+
+        sameVersion = app | {
             "manifest_revision": 2,
             "open_action": {"type": "program", "target": "new.exe"},
         }
+        newVersion = app | {"version": "3.0.0"}
 
+        self.assertFalse(self.store.mergeInstalled([sameVersion])[0]["update_available"])
+        self.assertTrue(self.store.mergeInstalled([newVersion])[0]["update_available"])
+
+    def testSameVersionCatalogChangesAreWrittenIntoTheLocalManifest(self):
+        app = self._app() | {
+            "manifest_revision": 1,
+            "open_action": {"type": "program", "target": "app.exe"},
+        }
+        installed = self.store.installZip(app, self._zip())
+        preset = {
+            "id": 3,
+            "title": "新预设",
+            "action": {"type": "program", "target": "app.exe"},
+        }
+        catalog = app | {
+            "name": "Renamed",
+            "manifest_revision": 2,
+            "open_action": {"type": "program", "target": "bin/app.exe"},
+            "presets": [preset],
+        }
+
+        self.assertEqual(self.store.syncInstalledMetadata([catalog]), 1)
+
+        manifest = json.loads(
+            (installed.path / MANIFEST_NAME).read_text(encoding="utf-8")
+        )
+        self.assertEqual(manifest["name"], "Renamed")
+        self.assertEqual(manifest["manifest_revision"], 2)
+        self.assertEqual(manifest["presets"], [preset])
+        self.assertEqual(manifest["install_dir"], "demo")
         merged = self.store.mergeInstalled([catalog])[0]
+        self.assertEqual(merged["installed_presets"], [preset])
+        self.assertEqual(merged["installed_open_action"]["target"], "bin/app.exe")
+        self.assertFalse(merged["update_available"])
+        self.assertEqual((installed.path / "app.exe").read_bytes(), b"first")
+        self.assertEqual(
+            sorted(path.name for path in installed.path.iterdir()),
+            sorted([MANIFEST_NAME, "app.exe"]),
+        )
 
-        self.assertTrue(merged["update_available"])
-        self.assertEqual(merged["installed_manifest_revision"], 1)
+    def testMetadataSyncLeavesOtherVersionsAndOlderRevisionsAlone(self):
+        app = self._app() | {"manifest_revision": 2}
+        installed = self.store.installZip(app, self._zip())
+        before = (installed.path / MANIFEST_NAME).read_bytes()
+
+        synced = self.store.syncInstalledMetadata(
+            [
+                app | {"version": "3.0.0", "manifest_revision": 5, "name": "New"},
+                app | {"manifest_revision": 2, "name": "Same revision"},
+                app | {"manifest_revision": 1, "name": "Older"},
+                {"id": 999, "manifest_revision": 9},
+                "malformed",
+            ]
+        )
+
+        self.assertEqual(synced, 0)
+        self.assertEqual((installed.path / MANIFEST_NAME).read_bytes(), before)
 
     def testInstalledApplicationRemainsVisibleWithoutCatalog(self):
         app = self._app() | {
@@ -756,6 +813,48 @@ class ApplicationStoreTest(TestCase):
                 )
 
         self.assertEqual((installed.path / "app.exe").read_bytes(), b"first")
+
+    def testApplicationRunningChecksTheInstalledCopy(self):
+        installed = self.store.installZip(self._app(), self._zip())
+        executable = installed.path / "app.exe"
+
+        self.assertFalse(self.store.applicationRunning(self._app()))
+        self.assertFalse(
+            self.store.applicationRunning(self._app() | {"id": 999})
+        )
+        with patch(
+            "app.common.application_store._runningExecutablesUnder",
+            return_value=[executable],
+        ):
+            self.assertTrue(self.store.applicationRunning(self._app()))
+
+    def testUpdateWalksExistingInstallationOutsideTheInstalledLock(self):
+        # 遍历旧安装目录可能要好几秒；持锁期间界面线程上的 installed() 会跟着卡住。
+        self.store.installZip(self._app(), self._zip())
+        heldDuringWalk = []
+
+        def assertNoLinks(_root):
+            # RLock 在同一线程可重入，只能从另一个线程探测它是否被占着。
+            probe = []
+            thread = threading.Thread(
+                target=lambda: probe.append(
+                    self.store._installedLock.acquire(timeout=0.2)
+                    and (self.store._installedLock.release() or True)
+                )
+            )
+            thread.start()
+            thread.join()
+            heldDuringWalk.append(not probe[0])
+
+        with patch(
+            "app.common.application_store._assertNoLinks",
+            side_effect=assertNoLinks,
+        ):
+            self.store.installZip(
+                self._app() | {"version": "3.0.0"}, self._zip(content=b"new")
+            )
+
+        self.assertEqual(heldDuringWalk, [False])
 
     @patch("app.common.application_store._activateProcessWindow", return_value=None)
     @patch("app.common.application_store.subprocess.Popen")

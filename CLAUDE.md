@@ -8,7 +8,7 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 - **Application Home Card** 引用一个 Installed Application 的 Open Action 或 Application Preset；Application 被卸载或固定关系被移除后，相应主页和托盘入口同步失效。
 - **Application Catalog** 与本机安装清单按稳定 Application ID 合并，形成界面使用的 `installed`、`update_available`、`installed_version` 和架构支持状态。
 - **Admin Console** 维护四种互不替代的 Catalog Order；Application Preset 还按所属 Application 分组，任何服务端顺序都不直接覆盖本机 Home Card 排序。
-- **Application Update** 与首次安装使用同一 Package 下载和安装链路；差别只在目标目录已有受 DJCat 管理的 Installed Application。
+- **Application Update** 与首次安装使用同一 Package 下载和安装链路；差别只在目标目录已有受 DJCat 管理的 Installed Application。是否提供 Application Update 只看版本号：服务端的 `manifest_revision` 在改名、改预设、改动作甚至换下载链接时都会递增，客户端用它判断要不要同步，而不是要不要重下。同版本、更高修订号的目录信息由 `ApplicationStore.syncInstalledMetadata()` 在目录加载的后台线程里原子改写进本机清单。
 - **Application Launch** 执行 Installed Application 的 Open Action；Application Store 的卡片和详情页共享同一后台运行状态，不创建第二个并发启动。
 - **Projection** 的纯文本正文由 `QTextEdit` 渲染，Markdown 正文由 `MarkdownView(largeText=True)` 渲染；两者是同一 Projection 的互斥显示方式。
 - Projection 编辑器的标题保存在 `cfg.broadcastTitle`，离开编辑器后仍保留；正文不作为编辑草稿持久化。
@@ -50,7 +50,7 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 **`ScrollArea` 统一仲裁单指触控滚动与子控件点击。** 从按钮、下拉框或卡片上起滑时，移动达到系统拖动阈值后必须取消该触控序列的按压和释放，不能在滚动结束时触发原控件；未达到阈值的短按仍按正常点击处理。页面不得各自复制这套判定。HomePage 进入卡片编辑态时由排序手势独占触控，并依靠卡片拖动的边缘自动滚动跨越视口；退出编辑态后恢复页面触控滚动。
 
-需要让出触控的模式调用 `ScrollArea.setTouchScrollSuppressed()`，它把拖动阈值抬到手指够不到的距离，不释放手势；页面不得自己 `QScroller.ungrabGesture()`，也不得对已抓过的 viewport 再调 `QScroller.grabGesture()`（它会先自行 ungrab 再重抓）。不是 `ScrollArea` 的 viewport（Projection 正文的 `QTextEdit`、`MarkdownView`）用 `scroll_area.setTouchScrollSuppressed(viewport, ...)` 做同一件事；Application Store 进入详情页时外层页面同样只抑制、不释放。
+需要让出触控的模式调用 `ScrollArea.setTouchScrollSuppressed()`，它把拖动阈值抬到手指够不到的距离，不释放手势；页面不得自己 `QScroller.ungrabGesture()`，也不得对已抓过的 viewport 再调 `QScroller.grabGesture()`（它会先自行 ungrab 再重抓）。不是 `ScrollArea` 的 viewport（Projection 正文的 `QTextEdit`、`MarkdownView`）用 `scroll_area.setTouchScrollSuppressed(viewport, ...)` 做同一件事。Application Store 页面本身不滚动，两个选项卡和详情两栏各自是 `ScrollArea`，进出详情不抑制也不释放任何手势。
 
 **Tray Menu 不拥有 Home Card。** 它只根据 HomePage 提供的入口快照重建菜单，并把稳定 key 交回 MainWindow/HomePage 执行。
 
@@ -81,7 +81,7 @@ Lazy Page 必须保留外部调用需要的最小接口：
 
 | Lazy Page | 加载前可暂存或转发的状态 |
 |---|---|
-| `LazyAppStorePage` | 搜索文字、固定卡片信号；清缓存和关闭在未加载时为空操作 |
+| `LazyAppStorePage` | 搜索文字、固定卡片信号与应用卡片失败信号；清缓存和关闭在未加载时为空操作 |
 | `LazySettingPage` | 缓存清理信号；搜索建议和 Setting Route 导航一律转发给真实页面（导航到设置页必然已 `ensureLoaded()`，搜索框只在该页可见） |
 | `LazyTrayControlPage` | 最新 Home Card 列表 |
 | `LazyCreditsPage` | 无业务状态 |
@@ -110,16 +110,22 @@ Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence�
 |---|---|
 | `_downloadJobs` | 正在传输 Package 的 worker 与线程 |
 | `_downloadProgress` | 0–100 的确定下载百分比 |
-| `_launching` | 正在后台执行 Open Action 的 Application ID |
+| `_launching` | 正在后台执行 Open Action 或 Preset Action 的 Application ID |
 | `_installing` | 正在解压并原子替换的 Application ID |
 | `_uninstalling` | 正在移除的 Application ID |
 | `_downloadStates` | 卡片和详情按钮共享的用户可见状态文字 |
 
 下载刚建立或尚未得到有效传输进度时，即使按钮文字为"下载中 0%"，仍显示不确定进度线；出现有效百分比后切换为确定进度线。确定进度使用与 Fluent ProgressBar 一致的 150 ms 属性动画；连续更新必须从当前显示值追到最新目标值，不能瞬间跳变或排队播放过时进度。打开、安装和卸载无法可靠计算百分比，始终显示不确定进度线。进度线贴住按钮底边，只铺满两侧 5 px 圆角之间的直线区域；自身两端保持抗锯齿圆角，按钮禁用时仍使用当前主题色。卡片和详情页必须从同一组状态读取，不能各自维护进度。
 
-Application Launch 在后台线程读取本机安装状态并执行 Open Action 或 Application Preset，完成或失败后通过 Qt Signal 在 GUI 线程恢复卡片和详情按钮；线程创建、启动失败和页面关闭也必须清理 `_launching`，不得留下永久禁用的按钮。首次启动不等待或检查可见窗口，无窗口或仅托盘运行的 Application 仍属于正常启动；只有重新打开仍在运行的进程时才尝试唤起已有窗口。
+Application Launch 在后台线程读取本机安装状态并执行 Open Action；详情页打开预设同样走这条路径并共用 `_launching`，预设打开期间卡片、详情按钮和预设按钮一起禁用。主页的 Application Home Card 和托盘里对应的 Tray Card Shortcut 也一样：`executePinnedCard()` 不返回结果，只在后台读取安装清单并执行，失败时发 `pinnedCardFailed`，由 MainWindow 弹出主窗口；应用正在下载、安装或卸载时直接提示，不去等锁。完成或失败后通过 Qt Signal 在 GUI 线程恢复卡片和详情按钮；线程创建、启动失败和页面关闭也必须清理 `_launching`，不得留下永久禁用的按钮。首次启动不等待或检查可见窗口，无窗口或仅托盘运行的 Application 仍属于正常启动；只有重新打开仍在运行的进程时才尝试唤起已有窗口。
 
-Application Store 首次显示前同步计算"已安装"和"全部应用"两个网格的最终列数，避免先按旧宽度单列绘制再重新排列。后续尺寸变化仍由现有布局定时器合并，不为修复首帧闪动持续同步重排。
+Application Store 首次显示前同步计算"已安装"和"全部应用"两个网格的最终列数，避免先按旧宽度单列绘制再重新排列。"首次显示前"包括主窗口切页截快照的那一刻：DrillIn 先把尚未显示的页面缩放到位再 `grab()`，此时 `showEvent` 还没来，所以页面隐藏时收到的尺寸变化必须当场重排，否则过渡里会先看到一张卡片占满一整行。页面可见后的尺寸变化仍由现有布局定时器合并，不为修复首帧闪动持续同步重排。
+
+AppStorePage 本身不滚动：选项卡栏固定在顶部，"已安装"和"全部应用"各自是一个 `ScrollArea`，各自记住滚动位置。两个选项卡曾经共用整页一个滚动区，结果是：QStackedWidget 取两页中较高的一页作为高度，"已安装"下面会多出一整片空白可以滚；切换时高度变化会把横移当场掐断；截快照只能截到列表顶部，从列表中段进详情时画面会跳；进出详情还得放开再抓回外层的触控手势。不要改回整页滚动。
+
+应用市场有两种切换动画，按层级区分：选项卡（"已安装 / 全部应用"）、分类（"推荐 / 全部"）和分页是同级之间的横移，按序号决定方向，180 ms `OutCubic`；进入应用详情是往下一级走，用 QFluentWidgets 的 DrillIn，与主窗口切页一致。DrillIn 曾被换掉过：当时进详情要把整页滚动区缩到一屏高，截快照和动画用的是缩之前的尺寸，DrillIn 把快照拉伸到容器大小，详情页先扁一下、动画结束时"啪"地拉长。现在容器尺寸在进出详情时不变，测试逐像素比对 DrillIn 的进场快照与动画结束后的真实页面，改动详情页结构时必须保持它通过。分类和分页的横移只在网格上叠两张快照，网格本身立即换好并保留占位隐藏，不做第二套卡片，也不逐帧重排。分页超过一页时，"全部"的网格预留一整页的高度，最后一页卡片少时分页按钮不上跳；只有一页时不预留。换分类或翻页后，若分类栏已滚出视口，就平滑滚回分类栏，让新内容从头显示；分类栏仍在视口内时不滚动，也不滚到广告横幅所在的最顶部。两种堆叠切换都必须能在过渡途中反向：过渡期间 `currentIndex()` 仍是旧页，需要"当前选项卡"的地方以选项卡栏的当前项为准。
+
+"全部应用"与"已安装"一样有空状态卡片：搜索无结果时提供"清除搜索"，目录加载失败且没有已知目录时提供"重试"，加载中只显示说明，"推荐"为空而目录里有应用时提供"查看全部"。
 
 广告触控的 QApplication 全局事件过滤器只在 Application Store 可见时安装；页面隐藏或关闭时移除，避免其他页面的全部输入事件继续经过广告层。
 
@@ -374,3 +380,4 @@ def __init__(self, parent=None):
 - 主窗口右上角关闭曾被理解为退出。已消歧：**close** 只隐藏主窗口；**quit** 才清理资源并结束进程。
 - "解除 Qt 60 帧限制"容易被理解为绕过 VSync 或保证某个 FPS。已消歧：本实现只把 **Animation Tick** 的默认 16 ms 间隔改为 1 ms，不控制 **Presented Frame**。
 - Application Store 的"全部应用 → 全部"分类固定每页最多展示 6 个 Application；"推荐"分类展示全部推荐项，不参与分页。
+- 应用市场里的"选项卡"有三层，说的时候要指明是哪一层：顶部的"已安装 / 全部应用"（Catalog 选项卡），"全部应用"里的"推荐 / 全部"（分类），以及"全部"下面的分页。三者都是同级横移；进入应用详情不是选项卡切换。

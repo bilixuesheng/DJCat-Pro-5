@@ -9,6 +9,7 @@ from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
     QObject,
+    QParallelAnimationGroup,
     QPoint,
     Property,
     QPropertyAnimation,
@@ -25,11 +26,13 @@ from PySide6.QtWidgets import (
     QAbstractScrollArea,
     QApplication,
     QFrame,
+    QGraphicsOpacityEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QScroller,
     QSizePolicy,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -37,6 +40,7 @@ from qfluentwidgets import (
     BodyLabel,
     CardWidget,
     CaptionLabel,
+    DrillInTransitionStackedWidget,
     HorizontalFlipView,
     InfoBar,
     InfoBarPosition,
@@ -71,7 +75,8 @@ from app.view.components.tool_tip import setFluentToolTip
 
 SHUTDOWN_WAIT_SECONDS = 0.5
 ALL_APPS_PAGE_SIZE = 6
-QWIDGETSIZE_MAX = (1 << 24) - 1
+APPLICATION_CARD_HEIGHT = 168
+CONTENT_MARGINS = (12, 8, 20, 24)
 _LIVE_CATALOG_URI_SCHEMES = frozenset({"classisland"})
 def _releaseSlotAfterExit(thread, downloadSlots):
     def releaseAfterExit():
@@ -85,7 +90,35 @@ def _releaseSlotAfterExit(thread, downloadSlots):
     ).start()
 
 
-class HorizontalTransitionStackedWidget(TransitionStackedWidget):
+# 选项卡、分类和分页是同级之间的横移；进入详情是往下一级走，用 DrillIn 区分开。
+SLIDE_DURATION_MS = 180
+SLIDE_NEXT_START_OPACITY = 0.35
+
+
+def _slideOffset(width):
+    return max(48, min(120, width // 8))
+
+
+class _ReversibleSnapshotTransition:
+    def setCurrentIndex(self, index, duration=None, isBack=False):
+        if index < 0 or index >= self.count():
+            return
+        # 过渡期间 currentIndex 仍是旧页：不先收尾，反向切回旧页会被当成原地不动。
+        if self._aniGroup.state() == QAbstractAnimation.State.Running:
+            if index == self._nextIndex:
+                return
+            self._stopAnimation()
+        super().setCurrentIndex(index, duration, isBack)
+
+    def _onAniFinished(self):
+        super()._onAniFinished()
+        self._currentSnapshot.clear()
+        self._nextSnapshot.clear()
+
+
+class HorizontalTransitionStackedWidget(
+    _ReversibleSnapshotTransition, TransitionStackedWidget
+):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._currentSlide = QPropertyAnimation(self._currentSnapshot, b"pos", self)
@@ -104,15 +137,6 @@ class HorizontalTransitionStackedWidget(TransitionStackedWidget):
         ):
             self._aniGroup.addAnimation(animation)
 
-    def setCurrentIndex(self, index, duration=None, isBack=False):
-        if index < 0 or index >= self.count():
-            return
-        if self._aniGroup.state() == QAbstractAnimation.State.Running:
-            if index == self._nextIndex:
-                return
-            self._stopAnimation()
-        super().setCurrentIndex(index, duration, isBack)
-
     def _setUpTransitionAnimation(self, nextIndex, duration, isBack):
         current = self.currentWidget()
         nextWidget = self.widget(nextIndex)
@@ -124,8 +148,8 @@ class HorizontalTransitionStackedWidget(TransitionStackedWidget):
         nextWidget.hide()
 
         direction = -1 if isBack else (1 if nextIndex > self.currentIndex() else -1)
-        offset = max(48, min(120, self.width() // 8))
-        animationDuration = duration or 180
+        offset = _slideOffset(self.width())
+        animationDuration = duration or SLIDE_DURATION_MS
         curve = QEasingCurve(QEasingCurve.Type.OutCubic)
         for animation in (
             self._currentSlide,
@@ -144,17 +168,105 @@ class HorizontalTransitionStackedWidget(TransitionStackedWidget):
         self._nextSlide.setEndValue(QPoint(0, 0))
         self._currentFade.setStartValue(1.0)
         self._currentFade.setEndValue(0.0)
-        self._nextFade.setStartValue(0.35)
+        self._nextFade.setStartValue(SLIDE_NEXT_START_OPACITY)
         self._nextFade.setEndValue(1.0)
-
-    def _onAniFinished(self):
-        super()._onAniFinished()
-        self._currentSnapshot.clear()
-        self._nextSnapshot.clear()
 
     def resizeEvent(self, event):
         self._stopAnimation()
         super().resizeEvent(event)
+
+
+class DetailTransitionStackedWidget(
+    _ReversibleSnapshotTransition, DrillInTransitionStackedWidget
+):
+    pass
+
+
+class GridSlideTransition(QObject):
+    """Slide a grid's previous and new contents past each other.
+
+    The grid changes at once and stays hidden, keeping its layout space, under
+    two snapshots; paging and category switches then move like the catalog
+    tabs without a second set of cards or any relayout per animation tick.
+    """
+
+    def __init__(self, target: QWidget):
+        super().__init__(target)
+        self._target = target
+        policy = target.sizePolicy()
+        policy.setRetainSizeWhenHidden(True)
+        target.setSizePolicy(policy)
+        self._group = QParallelAnimationGroup(self)
+        self._group.finished.connect(self._settle)
+        self._labels = []
+        self._slides = []
+        self._fades = []
+        curve = QEasingCurve(QEasingCurve.Type.OutCubic)
+        for _ in range(2):
+            label = QLabel(target.parentWidget())
+            label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            effect = QGraphicsOpacityEffect(label)
+            label.setGraphicsEffect(effect)
+            label.hide()
+            slide = QPropertyAnimation(label, b"pos", self)
+            fade = QPropertyAnimation(effect, b"opacity", self)
+            for animation in (slide, fade):
+                animation.setDuration(SLIDE_DURATION_MS)
+                animation.setEasingCurve(curve)
+                self._group.addAnimation(animation)
+            self._labels.append(label)
+            self._slides.append(slide)
+            self._fades.append(fade)
+
+    def isRunning(self):
+        return self._group.state() == QAbstractAnimation.State.Running
+
+    def run(self, change, forward=True):
+        self.stop()
+        target = self._target
+        if not target.isVisible() or target.width() <= 0:
+            change()
+            return
+        before = target.grab()
+        change()
+        target.parentWidget().layout().activate()
+        target.layout().activate()
+        after = target.grab()
+
+        origin = target.pos()
+        offset = _slideOffset(target.width()) * (1 if forward else -1)
+        current, upcoming = self._labels
+        for label, pixmap in ((current, before), (upcoming, after)):
+            label.setPixmap(pixmap)
+            label.resize(pixmap.deviceIndependentSize().toSize())
+            label.show()
+            label.raise_()
+        currentSlide, nextSlide = self._slides
+        currentFade, nextFade = self._fades
+        currentSlide.setStartValue(origin)
+        currentSlide.setEndValue(origin - QPoint(offset, 0))
+        nextSlide.setStartValue(origin + QPoint(offset, 0))
+        nextSlide.setEndValue(origin)
+        currentFade.setStartValue(1.0)
+        currentFade.setEndValue(0.0)
+        nextFade.setStartValue(SLIDE_NEXT_START_OPACITY)
+        nextFade.setEndValue(1.0)
+        current.move(origin)
+        upcoming.move(origin + QPoint(offset, 0))
+        target.hide()
+        self._group.start()
+
+    def stop(self):
+        if self.isRunning():
+            self._group.stop()
+            self._settle()
+
+    def _settle(self):
+        for label in self._labels:
+            label.hide()
+            label.clear()
+        self._target.show()
 
 
 class CatalogWorker(QObject):
@@ -174,6 +286,10 @@ class CatalogWorker(QObject):
             payload = self.store.fetchCatalog()
             if self._cancelEvent.is_set():
                 return
+            try:
+                self.store.syncInstalledMetadata(payload.get("apps"))
+            except Exception:
+                logger.exception("同步已安装应用的目录信息失败")
             self.finished.emit(payload, {}, "")
         except Exception as error:
             if not self._cancelEvent.is_set():
@@ -381,7 +497,7 @@ class ApplicationCard(CardWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setClickEnabled(True)
-        self.setFixedHeight(168)
+        self.setFixedHeight(APPLICATION_CARD_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.appId = None
@@ -532,6 +648,39 @@ class ApplicationCard(CardWidget):
                 event.accept()
                 return
         super().mouseReleaseEvent(event)
+
+
+class EmptyStateCard(CardWidget):
+    actionRequested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(220)
+        self.iconLabel = QLabel(self)
+        self.iconLabel.setFixedSize(64, 64)
+        self.iconLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.iconLabel.setPixmap(FIF.APPLICATION.icon().pixmap(QSize(48, 48)))
+        self.titleLabel = SubtitleLabel(self)
+        self.descriptionLabel = BodyLabel(self)
+        self.descriptionLabel.setWordWrap(True)
+        self.descriptionLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.actionButton = PrimaryPushButton(self)
+        self.actionButton.clicked.connect(self.actionRequested)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 28, 24, 28)
+        layout.setSpacing(10)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.iconLabel, 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self.titleLabel, 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self.descriptionLabel)
+        layout.addWidget(self.actionButton, 0, Qt.AlignmentFlag.AlignHCenter)
+
+    def setContent(self, title: str, description: str, actionText: str = "") -> None:
+        self.titleLabel.setText(title)
+        self.descriptionLabel.setText(description)
+        self.actionButton.setText(actionText)
+        self.actionButton.setVisible(bool(actionText))
 
 
 class AdvertisementFrame(QWidget):
@@ -732,12 +881,20 @@ class AdvertisementOverlay(QWidget):
         super().mouseReleaseEvent(event)
 
 
-class AppStorePage(ScrollArea):
+class _PinnedCardNotice(Exception):
+    def __init__(self, level, title, message):
+        super().__init__(message)
+        self.level = level
+        self.title = title
+
+
+class AppStorePage(QWidget):
     pinnedCardsChanged = Signal(object)
-    launchFailed = Signal()
-    _launchFinished = Signal(int, str)
+    pinnedCardFailed = Signal()
+    _pinnedCardFinished = Signal(int, bool, str, str, str)
+    _launchFinished = Signal(int, str, str)
     _downloadProgressSignal = Signal(int, int, int)
-    _downloadRetrySignal = Signal(str)
+    _downloadRetrySignal = Signal(str, str)
     _downloadFinishedSignal = Signal(object, str, str, bool)
     _uninstallFinished = Signal(int, object, str)
 
@@ -752,6 +909,7 @@ class AppStorePage(ScrollArea):
         self.searchText = ""
         self._catalogLoading = False
         self._catalogLoaded = False
+        self._catalogError = ""
         self._catalogThread = None
         self._catalogWorker = None
         self._imageJobs = {}
@@ -780,18 +938,15 @@ class AppStorePage(ScrollArea):
         self._adSyncTimer = QTimer(self)
         self._adSyncTimer.setSingleShot(True)
         self._adSyncTimer.timeout.connect(self._syncAdImageSize)
-        self._viewportUpdateTimer = QTimer(self)
-        self._viewportUpdateTimer.setSingleShot(True)
-        self._viewportUpdateTimer.timeout.connect(self._finishViewportUpdate)
         self._currentPage = 0
-        self._catalogScrollPosition = 0
+        self._categoryIndex = 0
         self._renderingAll = False
-        self._viewportUpdatePending = False
-        self._frozenScrollPosition = 0
+        self._allEmptyAction = None
         self._downloadProgressSignal.connect(self._queueDownloadProgress)
         self._downloadRetrySignal.connect(self._showDownloadRetry)
         self._downloadFinishedSignal.connect(self._onDownloadFinished)
         self._launchFinished.connect(self._onLaunchFinished)
+        self._pinnedCardFinished.connect(self._onPinnedCardFinished)
         self._installFinished.connect(self._onInstallFinished)
         self._uninstallFinished.connect(self._onUninstallFinished)
         self.setObjectName("AppStorePage")
@@ -799,89 +954,59 @@ class AppStorePage(ScrollArea):
         cfg.pinnedHomeCards.valueChanged.connect(self._refreshPinStates)
 
     def _buildUi(self):
-        self.container = QWidget()
-        self.rootLayout = QVBoxLayout(self.container)
-        self.rootLayout.setContentsMargins(12, 8, 20, 24)
-        self.rootLayout.setSpacing(8)
+        # 选项卡栏固定在顶部，两个选项卡各自滚动、各自记住位置：切换和进出详情时
+        # 页面高度不变，快照截到的就是屏幕上正在看的那一段。
+        self.rootLayout = QVBoxLayout(self)
+        self.rootLayout.setContentsMargins(0, 0, 0, 0)
+        self.stack = DetailTransitionStackedWidget(self)
+        self.catalogPage = QWidget(self.stack)
+        catalogLayout = QVBoxLayout(self.catalogPage)
+        catalogLayout.setContentsMargins(0, 0, 0, 0)
+        catalogLayout.setSpacing(8)
 
-        self.pivot = Pivot(self.container)
+        self.pivot = Pivot(self.catalogPage)
         self.pivot.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.pivot.addItem("installed", "已安装", lambda: self._switchCatalogTab(0))
         self.pivot.addItem("all", "全部应用", lambda: self._switchCatalogTab(1))
         self.pivot.setCurrentItem("installed")
 
         header = QHBoxLayout()
+        header.setContentsMargins(
+            CONTENT_MARGINS[0], CONTENT_MARGINS[1], CONTENT_MARGINS[2], 0
+        )
         header.addWidget(self.pivot)
         header.addStretch(1)
         self.checkUpdatesButton = PushButton(
-            FIF.SYNC, "检查更新", self.container
+            FIF.SYNC, "检查更新", self.catalogPage
         )
         self.checkUpdatesButton.clicked.connect(self._checkInstalledUpdates)
         header.addWidget(self.checkUpdatesButton)
-        self.refreshButton = ToolButton(FIF.SYNC, self.container)
+        self.refreshButton = ToolButton(FIF.SYNC, self.catalogPage)
         setFluentToolTip(self.refreshButton, "刷新应用目录")
         self.refreshButton.clicked.connect(self._loadCatalog)
         header.addWidget(self.refreshButton)
-        self.rootLayout.addLayout(header)
+        catalogLayout.addLayout(header)
 
-        self.stack = HorizontalTransitionStackedWidget(self.container)
-        self.catalogPage = QWidget(self.stack)
-        catalogLayout = QVBoxLayout(self.catalogPage)
-        catalogLayout.setContentsMargins(0, 0, 0, 0)
         self.catalogStack = HorizontalTransitionStackedWidget(self.catalogPage)
-        catalogLayout.addWidget(self.catalogStack)
+        catalogLayout.addWidget(self.catalogStack, 1)
 
-        self.overview = QWidget(self.catalogStack)
-        overviewLayout = QVBoxLayout(self.overview)
-        overviewLayout.setContentsMargins(0, 0, 0, 0)
-        overviewLayout.setSpacing(8)
-        overviewLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.overview = QWidget()
+        overviewLayout = self._createTabLayout(self.overview)
         self.installedTitle = BodyLabel("已安装的软件", self.overview)
         overviewLayout.addWidget(self.installedTitle)
-        self.installedEmpty = CardWidget(self.overview)
-        self.installedEmpty.setMinimumHeight(220)
-        emptyLayout = QVBoxLayout(self.installedEmpty)
-        emptyLayout.setContentsMargins(24, 28, 24, 28)
-        emptyLayout.setSpacing(10)
-        emptyLayout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.installedEmptyIcon = QLabel(self.installedEmpty)
-        self.installedEmptyIcon.setFixedSize(64, 64)
-        self.installedEmptyIcon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.installedEmptyIcon.setPixmap(
-            FIF.APPLICATION.icon().pixmap(QSize(48, 48))
-        )
-        self.installedEmptyTitle = SubtitleLabel(
-            "还没有已安装的应用", self.installedEmpty
-        )
-        self.installedEmptyDescription = BodyLabel(
-            "去全部应用看看，安装后可以在这里快速打开、更新或固定到主页。",
-            self.installedEmpty,
-        )
-        self.installedEmptyDescription.setWordWrap(True)
-        self.installedEmptyDescription.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.installedEmptyButton = PrimaryPushButton(
-            "浏览全部应用", self.installedEmpty
-        )
-        self.installedEmptyButton.clicked.connect(self._handleInstalledEmptyAction)
-        emptyLayout.addWidget(
-            self.installedEmptyIcon, 0, Qt.AlignmentFlag.AlignHCenter
-        )
-        emptyLayout.addWidget(
-            self.installedEmptyTitle, 0, Qt.AlignmentFlag.AlignHCenter
-        )
-        emptyLayout.addWidget(self.installedEmptyDescription)
-        emptyLayout.addWidget(
-            self.installedEmptyButton, 0, Qt.AlignmentFlag.AlignHCenter
-        )
+        self.installedEmpty = EmptyStateCard(self.overview)
+        self.installedEmpty.actionRequested.connect(self._handleInstalledEmptyAction)
+        self.installedEmptyIcon = self.installedEmpty.iconLabel
+        self.installedEmptyTitle = self.installedEmpty.titleLabel
+        self.installedEmptyDescription = self.installedEmpty.descriptionLabel
+        self.installedEmptyButton = self.installedEmpty.actionButton
         overviewLayout.addWidget(self.installedEmpty)
         self.installedGridWidget, self.installedGrid = self._createGrid(self.overview)
         overviewLayout.addWidget(self.installedGridWidget)
+        self.installedScroll = self._createTabScroll(self.overview, grabTouch=True)
 
-        self.allPage = QWidget(self.catalogStack)
-        allLayout = QVBoxLayout(self.allPage)
-        allLayout.setContentsMargins(0, 0, 0, 0)
-        allLayout.setSpacing(8)
-        allLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.allPage = QWidget()
+        allLayout = self._createTabLayout(self.allPage)
         self.adFrame = AdvertisementFrame(self.allPage)
         self.adFrame.setMinimumHeight(170)
         self.adFrame.setMaximumHeight(200)
@@ -897,8 +1022,9 @@ class AppStorePage(ScrollArea):
         self.adFlipView.setBorderRadius(12)
         adLayout.addWidget(self.adFlipView)
         self.adOverlay = AdvertisementOverlay(self.adFlipView)
+        self.allScroll = self._createTabScroll(self.allPage, grabTouch=False)
         for touchTarget in (
-            self.viewport(),
+            self.allScroll.viewport(),
             self.adFlipView,
             self.adFlipView.viewport(),
         ):
@@ -951,8 +1077,13 @@ class AppStorePage(ScrollArea):
         self.categoryPivot.addItem("all", "全部", lambda: self._switchCategory(1))
         self.categoryPivot.setCurrentItem("recommended")
         allLayout.addWidget(self.categoryPivot)
+        self.allEmpty = EmptyStateCard(self.allPage)
+        self.allEmpty.actionRequested.connect(self._handleAllEmptyAction)
+        self.allEmpty.hide()
+        allLayout.addWidget(self.allEmpty)
         self.allGridWidget, self.allGrid = self._createGrid(self.allPage)
         allLayout.addWidget(self.allGridWidget)
+        self.allGridSlide = GridSlideTransition(self.allGridWidget)
         self.pagerBar = QWidget(self.allPage)
         pagerLayout = QHBoxLayout(self.pagerBar)
         pagerLayout.setContentsMargins(0, 0, 0, 0)
@@ -968,22 +1099,35 @@ class AppStorePage(ScrollArea):
         pagerLayout.addWidget(self.pagerNext)
         allLayout.addWidget(self.pagerBar, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        self.catalogStack.addWidget(self.overview)
-        self.catalogStack.addWidget(self.allPage)
+        self.catalogStack.addWidget(self.installedScroll)
+        self.catalogStack.addWidget(self.allScroll)
         self.catalogStack.aniFinished.connect(self._resumeAds)
         self.stack.addWidget(self.catalogPage)
-        self.rootLayout.addWidget(self.stack)
 
         self.detail = QWidget(self.stack)
         self._buildDetail()
         self.stack.addWidget(self.detail)
-        self.stack.aniFinished.connect(self._restoreCatalogScroll)
-        self.setWidget(self.container)
-        self.setWidgetResizable(True)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.enableTransparentBackground()
+        self.rootLayout.addWidget(self.stack)
         self.adFrame.hide()
         self._renderInstalled()
+
+    @staticmethod
+    def _createTabLayout(content):
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(
+            CONTENT_MARGINS[0], 0, CONTENT_MARGINS[2], CONTENT_MARGINS[3]
+        )
+        layout.setSpacing(8)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        return layout
+
+    def _createTabScroll(self, content, grabTouch):
+        scroll = ScrollArea(self.catalogStack, grabTouch=grabTouch)
+        scroll.setWidget(content)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.enableTransparentBackground()
+        return scroll
 
     def _createGrid(self, parent):
         widget = QWidget(parent)
@@ -996,7 +1140,7 @@ class AppStorePage(ScrollArea):
 
     def _buildDetail(self):
         layout = QVBoxLayout(self.detail)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(*CONTENT_MARGINS)
         layout.setSpacing(8)
         self.detailBackButton = PushButton(
             FIF.LEFT_ARROW, "返回应用列表", self.detail
@@ -1084,9 +1228,9 @@ class AppStorePage(ScrollArea):
         layout.addLayout(columns, 1)
 
     def _switchCatalogTab(self, index: int):
-        self._beginViewportUpdate(0)
         self.checkUpdatesButton.setVisible(index == 0)
         if index == 1:
+            self.allScroll.grabTouchGesture()
             self._renderAll()
             self._resumeAds()
         else:
@@ -1098,9 +1242,39 @@ class AppStorePage(ScrollArea):
         )
 
     def _switchCategory(self, index: int):
-        self._beginViewportUpdate()
-        self._currentPage = 0
-        self._renderAll()
+        changed = index != self._categoryIndex
+        forward = index > self._categoryIndex
+        self._categoryIndex = index
+
+        def change():
+            self._currentPage = 0
+            self._renderAll()
+
+        if changed:
+            self.allGridSlide.run(change, forward)
+            self._scrollAllToListStart()
+        else:
+            change()
+
+    def _scrollAllToListStart(self):
+        """Bring the category bar back into view after the list content changed.
+
+        Only scrolls up: when the start of the list is still on screen the new
+        page is already readable where it is, and scrolling to the very top
+        would put the banner, not the list, in front of the user.
+        """
+        # 惯性滚动不停下，会把页面拖回原来的位置。没抓过手势就没有惯性，
+        # 也别用 QScroller.scroller() 顺手建出一个。
+        if self.allScroll.isTouchGestureGrabbed:
+            QScroller.scroller(self.allScroll.viewport()).stop()
+        target = self.categoryPivot.y()
+        if self.allScroll.verticalScrollBar().value() <= target:
+            return
+        smoothBar = getattr(getattr(self.allScroll, "delegate", None), "vScrollBar", None)
+        if smoothBar is not None:
+            smoothBar.scrollTo(target)
+        else:
+            self.allScroll.verticalScrollBar().setValue(target)
 
     def _showAllApplications(self):
         searchEdit = getattr(self.window(), "searchEdit", None)
@@ -1111,48 +1285,33 @@ class AppStorePage(ScrollArea):
         self.pivot.setCurrentItem("all")
         self._switchCatalogTab(1)
 
+    def _clearSearch(self):
+        searchEdit = getattr(self.window(), "searchEdit", None)
+        if searchEdit is not None:
+            searchEdit.clear()
+        else:
+            self.setSearchText("")
+
     def _handleInstalledEmptyAction(self):
         if self.searchText:
-            searchEdit = getattr(self.window(), "searchEdit", None)
-            if searchEdit is not None:
-                searchEdit.clear()
-            else:
-                self.setSearchText("")
+            self._clearSearch()
             return
         self._showAllApplications()
 
-    def _beginViewportUpdate(self, scrollPosition=None):
-        scroller = QScroller.scroller(self.viewport())
-        if scroller is not None:
-            scroller.stop()
-        if scrollPosition is not None or not self._viewportUpdatePending:
-            self._frozenScrollPosition = (
-                self.verticalScrollBar().value()
-                if scrollPosition is None
-                else scrollPosition
-            )
-        if self._viewportUpdatePending:
-            return
-        self._viewportUpdatePending = True
-        self.viewport().setUpdatesEnabled(False)
-        self._viewportUpdateTimer.start(0)
+    def _handleAllEmptyAction(self):
+        if self._allEmptyAction is not None:
+            self._allEmptyAction()
 
-    def _finishViewportUpdate(self):
-        if self._shuttingDown:
-            self._viewportUpdatePending = False
-            return
-        self.rootLayout.activate()
-        scrollBar = self.verticalScrollBar()
-        scrollBar.setValue(min(self._frozenScrollPosition, scrollBar.maximum()))
-        self.viewport().setUpdatesEnabled(True)
-        self.viewport().update()
-        self._viewportUpdatePending = False
+    def _showAllCategory(self):
+        self.categoryPivot.setCurrentItem("all")
+        self._switchCategory(1)
 
     def setSearchText(self, text: str):
         self.searchText = text.strip().lower()
-        if self.stack.currentWidget() is self.detail:
+        if self.currentApp is not None:
             return
-        if self.catalogStack.currentIndex() == 0:
+        # 横移期间 catalogStack 仍停在旧页，以选项卡栏为准才不会渲染错页。
+        if self.pivot.currentRouteKey() == "installed":
             self._renderInstalled()
         else:
             self._renderAll()
@@ -1185,7 +1344,6 @@ class AppStorePage(ScrollArea):
         self.store.shutdown()
         self._layoutTimer.stop()
         self._adSyncTimer.stop()
-        self._viewportUpdateTimer.stop()
         self._progressTimer.stop()
         self._pendingProgress.clear()
         self._catalogLoading = False
@@ -1270,8 +1428,11 @@ class AppStorePage(ScrollArea):
         if self._shuttingDown or self._catalogLoading:
             return
         self._catalogLoading = True
+        self._catalogError = ""
         self.refreshButton.setEnabled(False)
         self.checkUpdatesButton.setEnabled(False)
+        if not self.catalog:
+            self._renderAll()
         worker = CatalogWorker(self.store)
         self._catalogWorker = worker
         thread = threading.Thread(target=worker.run, daemon=True)
@@ -1284,8 +1445,10 @@ class AppStorePage(ScrollArea):
         if self._shuttingDown:
             return
         if error:
+            self._catalogError = error
             self._mergedCatalog = None
             self._renderInstalled()
+            self._renderAll()
             InfoBar.error("应用目录加载失败", error, duration=5000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
             return
         self._catalogLoaded = True
@@ -1338,7 +1501,8 @@ class AppStorePage(ScrollArea):
         if self.currentApp:
             current = next((app for app in self._mergedApps() if app["id"] == self.currentApp["id"]), None)
             if current:
-                self._showDetail(current)
+                # 正在看的详情就地换成新目录的数据，不把两栏滚回顶部。
+                self._populateDetail(current)
             else:
                 self._backToOverview()
 
@@ -1376,7 +1540,7 @@ class AppStorePage(ScrollArea):
         if self._shuttingDown:
             return
         self.imagePaths[url] = path
-        for card in self.container.findChildren(ApplicationCard):
+        for card in self.findChildren(ApplicationCard):
             if card.appData.get("icon_url") == url:
                 card.setImage(path)
 
@@ -1499,8 +1663,8 @@ class AppStorePage(ScrollArea):
         ]
 
     def _columnCount(self):
-        margins = self.rootLayout.contentsMargins()
-        width = self.viewport().width() - margins.left() - margins.right()
+        # 选项卡的滚动条浮在内容上方，不占宽度，所以按页面宽度算，隐藏时也算得准。
+        width = self.width() - CONTENT_MARGINS[0] - CONTENT_MARGINS[2]
         if width >= 900:
             return 3
         if width >= 640:
@@ -1623,35 +1787,53 @@ class AppStorePage(ScrollArea):
             return
         self._reflowGrid(self.installedGrid)
         self._reflowGrid(self.allGrid)
+        self._reserveAllGridHeight()
+
+    def _reserveAllGridHeight(self):
+        # 最后一页卡片少时网格变矮，分页按钮会往上跳，翻页的横移会把这一跳放大。
+        # 只有一页时不预留，免得凭空多出一片空白。
+        height = 0
+        if (
+            self.categoryPivot.currentRouteKey() == "all"
+            and self.pager.count() > 1
+        ):
+            rows = -(-ALL_APPS_PAGE_SIZE // self._columnCount())
+            margins = self.allGrid.contentsMargins()
+            height = (
+                rows * APPLICATION_CARD_HEIGHT
+                + (rows - 1) * self.allGrid.verticalSpacing()
+                + margins.top()
+                + margins.bottom()
+            )
+        self.allGridWidget.setMinimumHeight(height)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._scheduleLayoutUpdate()
+        if self.isVisible():
+            self._scheduleLayoutUpdate()
+            return
+        # 主窗口切页时先把尚未显示的页面缩放到位再截快照，这一刻就得按最终列数排好；
+        # 等到 showEvent 再排，过渡动画里就会先看到一张卡片占满一整行。
+        self._layoutTimer.stop()
+        self._applyLayoutUpdate()
 
     def _scheduleLayoutUpdate(self):
         if hasattr(self, "_layoutTimer"):
             self._layoutTimer.start()
 
     def _applyLayoutUpdate(self):
-        if hasattr(self, "detail") and self.stack.currentWidget() is self.detail:
-            self._resizeDetailStack()
         self._reflowGrids()
         self._syncAdImageSize()
 
-    def _resizeDetailStack(self):
-        margins = self.rootLayout.contentsMargins()
-        available = self.viewport().height() - margins.top() - margins.bottom()
-        self.stack.setFixedHeight(max(280, available))
-
     def _updateVisibleCardState(self, appId):
-        for card in self.container.findChildren(ApplicationCard):
+        for card in self.findChildren(ApplicationCard):
             if card.appId == appId:
                 self._setCardState(card, card.appData, card.installedPage)
 
     def _refreshPinStates(self, _cards=None):
         if self._shuttingDown:
             return
-        for card in self.container.findChildren(ApplicationCard):
+        for card in self.findChildren(ApplicationCard):
             self._setCardState(card, card.appData, card.installedPage)
         if self.currentApp:
             self._renderPresets(self.currentApp)
@@ -1711,9 +1893,11 @@ class AppStorePage(ScrollArea):
             if self.pager.currentIndex() != self._currentPage:
                 self.pager.setCurrentIndex(self._currentPage)
             self.pager.setVisible(paginated)
-            self.pagerBar.setVisible(paginated)
+            self.pagerBar.setVisible(paginated and bool(apps))
             self._updatePagerButtons()
             self._renderAllPage(apps)
+            self._reserveAllGridHeight()
+            self._updateAllEmptyState(apps)
         finally:
             self.pager.blockSignals(False)
             self._renderingAll = False
@@ -1725,12 +1909,51 @@ class AppStorePage(ScrollArea):
             apps = apps[start : start + ALL_APPS_PAGE_SIZE]
         self._renderGrid(self.allGrid, apps)
 
-    def _onPageChanged(self, index):
-        if self._renderingAll:
+    def _updateAllEmptyState(self, apps):
+        self.allEmpty.setVisible(not apps)
+        if apps:
+            self._allEmptyAction = None
             return
-        self._currentPage = index
-        self._updatePagerButtons()
-        self._renderAllPage()
+        if self.searchText:
+            content = (
+                "未找到匹配的应用",
+                "试试其他关键词，或清除搜索查看全部应用。",
+                "清除搜索",
+            )
+            action = self._clearSearch
+        elif not self.catalog and self._catalogError:
+            content = ("应用目录加载失败", self._catalogError, "重试")
+            action = self._loadCatalog
+        elif not self._catalogLoaded and self._catalogLoading:
+            content = ("正在加载应用目录", "请稍候，加载完成后会显示在这里。", "")
+            action = None
+        elif self.categoryPivot.currentRouteKey() == "recommended" and any(
+            app.get("catalog_available", True) for app in self._mergedApps()
+        ):
+            content = (
+                "暂无推荐应用",
+                "切换到“全部”查看所有可用的应用。",
+                "查看全部",
+            )
+            action = self._showAllCategory
+        else:
+            content = ("暂无可用应用", "应用目录还是空的，稍后再来看看。", "")
+            action = None
+        self.allEmpty.setContent(*content)
+        self._allEmptyAction = action
+
+    def _onPageChanged(self, index):
+        if self._renderingAll or index == self._currentPage:
+            return
+        forward = index > self._currentPage
+
+        def change():
+            self._currentPage = index
+            self._updatePagerButtons()
+            self._renderAllPage()
+
+        self.allGridSlide.run(change, forward)
+        self._scrollAllToListStart()
 
     def _changePage(self, offset):
         self.pager.setCurrentIndex(self._currentPage + offset)
@@ -1753,7 +1976,6 @@ class AppStorePage(ScrollArea):
                 self.adFlipView.addImage(QPixmap())
         self.adFlipView.setCurrentIndex(0)
         self.adFrame.show()
-        self.allPage.setGeometry(self.catalogStack.contentsRect())
         self.allPage.layout().activate()
         multipleAds = len(self.ads) > 1
         for button in (self.adPrevious, self.adNext):
@@ -1880,14 +2102,14 @@ class AppStorePage(ScrollArea):
             self.adTimer.start()
 
     def _showDetail(self, app):
-        if self.stack.currentWidget() is not self.detail:
-            self._catalogScrollPosition = self.verticalScrollBar().value()
-        self._beginViewportUpdate(0)
+        self._populateDetail(app)
+        self.detailLeftScroll.verticalScrollBar().setValue(0)
+        self.presetScroll.verticalScrollBar().setValue(0)
+        self.stack.setCurrentWidget(self.detail)
+
+    def _populateDetail(self, app):
         self.currentApp = app
         self._pauseAds()
-        self.pivot.hide()
-        self.checkUpdatesButton.hide()
-        self.refreshButton.hide()
         self.detailName.setText(str(app.get("name", "")))
         self.detailDeveloper.setText(f"开发者：{app.get('developer') or '未填写'}")
         self.detailVersion.setText(f"版本：{app.get('version') or '未填写'}")
@@ -1906,42 +2128,20 @@ class AppStorePage(ScrollArea):
         )
         self._updateDetailAction()
         self._renderPresets(app)
-        self.detailLeftScroll.verticalScrollBar().setValue(0)
-        self.presetScroll.verticalScrollBar().setValue(0)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._resizeDetailStack()
-        self.stack.setCurrentWidget(self.detail, isBack=False)
-        self.verticalScrollBar().setValue(0)
-        # 详情页由两侧各自的 ScrollArea 滚动；外层只让出触控，不放掉手势——
-        # 抓了又放会在 Qt 的手势管理器里留下残留，之后创建窗口时崩溃。
-        self.setTouchScrollSuppressed(True)
 
     def _backToOverview(self):
-        self._beginViewportUpdate(self._catalogScrollPosition)
         self.currentApp = None
-        self.pivot.show()
-        self.checkUpdatesButton.setVisible(
-            self.pivot.currentRouteKey() == "installed"
-        )
-        self.refreshButton.show()
-        self.stack.setMinimumHeight(0)
-        self.stack.setMaximumHeight(QWIDGETSIZE_MAX)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.setTouchScrollSuppressed(False)
         target = 0 if self.pivot.currentRouteKey() == "installed" else 1
-        self.catalogStack.setCurrentIndex(target)
         if target == 0:
             self._renderInstalled()
         else:
             self._renderAll()
+        if self.catalogStack.currentIndex() != target:
+            # 列表页此刻被详情挡着，直接换好选项卡，不在看不见的地方播横移。
+            self.catalogStack._stopAnimation()
+            QStackedWidget.setCurrentIndex(self.catalogStack, target)
         self.stack.setCurrentIndex(0, isBack=True)
-        if target == 1:
-            self._resumeAds()
-
-    def _restoreCatalogScroll(self):
-        if self.currentApp is None:
-            scrollBar = self.verticalScrollBar()
-            scrollBar.setValue(min(self._catalogScrollPosition, scrollBar.maximum()))
+        self._resumeAds()
 
     def _updateDetailAction(self):
         if not self.currentApp:
@@ -1967,12 +2167,7 @@ class AppStorePage(ScrollArea):
         if app.get("installed") and (
             not app.get("update_available") or not allowUpdate
         ):
-            self._startLaunch(
-                appId,
-                lambda: self.store.executeAction(
-                    self.store.installed().get(appId) or app
-                ),
-            )
+            self._startLaunch(app)
             return
         try:
             self.store.downloadSlots.acquire()
@@ -1982,7 +2177,11 @@ class AppStorePage(ScrollArea):
         worker = None
         try:
             worker = downloadWorker(app, self.store)
-            thread = threading.Thread(target=worker.run, daemon=True)
+            thread = threading.Thread(
+                target=self._downloadInBackground,
+                args=(app, worker),
+                daemon=True,
+            )
         except Exception as error:
             self.store.downloadSlots.release()
             if worker is not None:
@@ -1998,7 +2197,9 @@ class AppStorePage(ScrollArea):
             )
         )
         worker.retrying.connect(
-            lambda _try, _total, message: self._downloadRetrySignal.emit(message)
+            lambda _try, _total, message, name=str(app.get("name", "")): self._downloadRetrySignal.emit(
+                name, message
+            )
         )
         worker.finished.connect(
             lambda path, error, canceled, appData=app: self._downloadFinishedSignal.emit(
@@ -2019,15 +2220,27 @@ class AppStorePage(ScrollArea):
         self._updateVisibleCardState(appId)
         self._updateDetailAction()
 
-    def _startLaunch(self, appId, execute):
+    def _isBusy(self, appId):
+        return (
+            appId in self._downloadJobs
+            or appId in self._launching
+            or appId in self._installing
+            or appId in self._uninstalling
+        )
+
+    def _startLaunch(self, app, preset=None):
+        # 打开应用和打开预设共用"打开中"：卡片、详情按钮和预设按钮一起禁用，
+        # 同一应用不会并发出第二次启动。
+        appId = int(app["id"])
         self._launching.add(appId)
         self._downloadStates[appId] = "打开中"
         self._updateVisibleCardState(appId)
         self._updateDetailAction()
+        errorTitle = "无法打开应用" if preset is None else "无法打开预设"
         try:
             thread = threading.Thread(
                 target=self._launchInBackground,
-                args=(appId, execute),
+                args=(app, preset, errorTitle),
                 daemon=True,
             )
             with self._fileOperationLock:
@@ -2039,22 +2252,44 @@ class AppStorePage(ScrollArea):
                     self._fileOperationThreads.discard(thread)
                 raise
         except Exception as error:
-            self._onLaunchFinished(appId, str(error))
+            self._onLaunchFinished(appId, str(error), errorTitle)
 
-    def _launchInBackground(self, appId, execute):
+    def _launchInBackground(self, app, preset=None, errorTitle="无法打开应用"):
+        appId = int(app["id"])
         errorMessage = ""
         try:
-            if not execute():
-                errorMessage = "系统未能打开这个链接"
+            local = self.store.installed().get(appId)
+            if preset is None:
+                self.store.executeAction(local or app)
+            else:
+                self.store.executeAction(local, self._presetAction(local, preset))
         except Exception as error:
             errorMessage = str(error)
         finally:
             with self._fileOperationLock:
                 self._fileOperationThreads.discard(threading.current_thread())
         if not self._shuttingDown:
-            self._launchFinished.emit(appId, errorMessage)
+            self._launchFinished.emit(appId, errorMessage, errorTitle)
 
-    def _onLaunchFinished(self, appId, error):
+    def _presetAction(self, installed, preset):
+        if installed is None:
+            raise ApplicationStoreError("请先安装应用后再打开预设。")
+        installedPreset = next(
+            (
+                item
+                for item in installed.metadata.get("presets", [])
+                if str(item.get("id", "")) == str(preset.get("id", ""))
+            ),
+            None,
+        )
+        action = installedPreset.get("action") if installedPreset else None
+        if not isinstance(action, dict):
+            action = self._catalogExternalAction(preset)
+        if not isinstance(action, dict):
+            raise ApplicationStoreError("请先更新应用，再打开这个预设。")
+        return action
+
+    def _onLaunchFinished(self, appId, error, errorTitle="无法打开应用"):
         if self._shuttingDown or appId not in self._launching:
             return
         self._launching.discard(appId)
@@ -2062,17 +2297,13 @@ class AppStorePage(ScrollArea):
         self._updateVisibleCardState(appId)
         self._updateDetailAction()
         if error:
-            self._showLaunchFailure(error)
-
-    def _showLaunchFailure(self, message):
-        InfoBar.error(
-            "无法打开应用",
-            message,
-            duration=4000,
-            position=InfoBarPosition.BOTTOM_RIGHT,
-            parent=self.window(),
-        )
-        self.launchFailed.emit()
+            InfoBar.error(
+                errorTitle,
+                error,
+                duration=4000,
+                position=InfoBarPosition.BOTTOM_RIGHT,
+                parent=self,
+            )
 
     def _queueDownloadProgress(self, appId, done, total):
         if appId not in self._downloadJobs:
@@ -2100,8 +2331,22 @@ class AppStorePage(ScrollArea):
         if self.currentApp and int(self.currentApp["id"]) == appId:
             self._updateDetailAction()
 
-    def _showDownloadRetry(self, message):
-        InfoBar.warning("下载重试", message, duration=2000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
+    def _downloadInBackground(self, app, worker):
+        # 程序是否在运行原本要等下载、解压完、替换目录时才查；那时才失败，
+        # 下载好的包也跟着删掉，关掉程序后还得整包重下。
+        if app.get("installed"):
+            try:
+                running = self.store.applicationRunning(app)
+            except Exception:
+                running = False
+            if running:
+                worker.finished.emit("", "软件仍在运行，请完全退出后再更新", False)
+                return
+        worker.run()
+
+    def _showDownloadRetry(self, name, message):
+        title = f"{name} 下载重试" if name else "下载重试"
+        InfoBar.warning(title, message, duration=2000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
 
     def _onDownloadFinished(self, app, path, error, canceled):
         if self._shuttingDown:
@@ -2119,7 +2364,8 @@ class AppStorePage(ScrollArea):
             self._updateVisibleCardState(appId)
             self._updateDetailAction()
             if error:
-                InfoBar.error("下载失败", error, duration=5000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
+                title = "更新失败" if app.get("installed") else "下载失败"
+                InfoBar.error(title, error, duration=5000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
             return
         self._installing.add(appId)
         self._downloadStates[appId] = "安装中"
@@ -2333,6 +2579,8 @@ class AppStorePage(ScrollArea):
                 tooltip = "取消固定"
             elif available:
                 tooltip = "固定到主页"
+            elif not app.get("installed"):
+                tooltip = "请先安装应用"
             else:
                 tooltip = "请先更新应用"
             pin.setAccessibleName(tooltip)
@@ -2343,6 +2591,9 @@ class AppStorePage(ScrollArea):
             )
             row.addWidget(pin)
             self.presetCards.addWidget(item)
+            # 固定、取消固定和目录刷新都会整组重建预设卡片。新卡片要等排队的
+            # 显示事件才算可见，在那之前布局把整栏当成空的，滚动位置被夹回顶部。
+            item.show()
 
     @staticmethod
     def _catalogExternalAction(preset):
@@ -2401,46 +2652,8 @@ class AppStorePage(ScrollArea):
         return self._catalogExternalAction(preset)
 
     def _openPreset(self, app, preset):
-        appId = int(app["id"])
-        if not self._isBusy(appId):
-            self._startLaunch(
-                appId,
-                lambda: self._executePreset(appId, preset.get("id"), preset),
-            )
-
-    def _isBusy(self, appId):
-        return (
-            appId in self._downloadJobs
-            or appId in self._launching
-            or appId in self._installing
-            or appId in self._uninstalling
-        )
-
-    def _executePreset(self, appId, presetId, catalogPreset):
-        installed = self.store.installed().get(appId)
-        if installed is None:
-            raise ApplicationStoreError("应用尚未安装，请先安装应用。")
-        if presetId == DIRECT_APPLICATION_PRESET_ID:
-            return self.store.executeAction(installed)
-        action = self._resolvePresetAction(installed, presetId, catalogPreset)
-        if action is None:
-            raise ApplicationStoreError("预设不可用，请先更新应用或重新固定这张卡片。")
-        return self.store.executeAction(installed, action)
-
-    def _resolvePresetAction(self, installed, presetId, catalogPreset):
-        localPreset = next(
-            (
-                preset
-                for preset in installed.metadata.get("presets", [])
-                if isinstance(preset, dict)
-                and str(preset.get("id", "")) == str(presetId)
-            ),
-            None,
-        )
-        action = localPreset.get("action") if localPreset else None
-        if isinstance(action, dict):
-            return action
-        return self._catalogExternalAction(catalogPreset)
+        if not self._isBusy(int(app["id"])):
+            self._startLaunch(app, preset)
 
     def _pinnedKeys(self):
         return {
@@ -2500,24 +2713,153 @@ class AppStorePage(ScrollArea):
         self.pinnedCardsChanged.emit(cards)
 
     def executePinnedCard(self, item):
+        """Run an Application Home Card without blocking the GUI thread.
+
+        Reading the installed manifests waits on the store lock, which an
+        update or uninstall holds while it enumerates processes, and creating
+        the process can stall on antivirus scans; the result arrives through
+        `pinnedCardFailed` instead of a return value.
+        """
         cards = normalize_pinned_cards([item])
         if not cards:
-            self._showLaunchFailure("主页卡片无效，请重新固定这张卡片。")
+            self._showPinnedCardNotice(
+                "warning", "预设卡片无效", "请重新固定这张主页卡片。"
+            )
+            self.pinnedCardFailed.emit()
             return
         item = cards[0]
         appId = item["app_id"]
-        if self._isBusy(appId):
+        if appId in self._launching:
             return
-        # 目录没加载时只能信任固定时保存的动作；加载后以当前目录为准。
-        catalogPreset = (
-            self._currentCatalogPreset(appId, item["preset_id"])
-            if self._catalogLoaded
-            else item
+        if self._isBusy(appId):
+            self._showPinnedCardNotice(
+                "warning",
+                "应用暂时无法打开",
+                "应用正在下载、安装或卸载，请完成后再试。",
+            )
+            self.pinnedCardFailed.emit()
+            return
+        # 目录只在界面线程里读写，先在这里取出，后台线程不碰它。
+        catalogLoaded = self._catalogLoaded
+        catalogPreset = None
+        if item["preset_id"] != DIRECT_APPLICATION_PRESET_ID and catalogLoaded:
+            catalogPreset = self._currentCatalogPreset(appId, item["preset_id"])
+        self._launching.add(appId)
+        self._downloadStates[appId] = "打开中"
+        self._updateVisibleCardState(appId)
+        self._updateDetailAction()
+        try:
+            thread = threading.Thread(
+                target=self._executePinnedCardInBackground,
+                args=(item, catalogLoaded, catalogPreset),
+                daemon=True,
+            )
+            with self._fileOperationLock:
+                self._fileOperationThreads.add(thread)
+            try:
+                thread.start()
+            except Exception:
+                with self._fileOperationLock:
+                    self._fileOperationThreads.discard(thread)
+                raise
+        except Exception as error:
+            self._onPinnedCardFinished(
+                appId, False, "error", "执行预设失败", str(error)
+            )
+
+    def _executePinnedCardInBackground(self, item, catalogLoaded, catalogPreset):
+        appId = item["app_id"]
+        succeeded = False
+        level = title = message = ""
+        try:
+            installed = self.store.installed().get(appId)
+            if not installed:
+                raise _PinnedCardNotice(
+                    "warning",
+                    "应用尚未安装",
+                    "请先安装对应应用后再使用主页预设卡片。",
+                )
+            if item["preset_id"] == DIRECT_APPLICATION_PRESET_ID:
+                result = self.store.executeAction(installed)
+            else:
+                action = self._pinnedPresetAction(
+                    item, installed, catalogLoaded, catalogPreset
+                )
+                result = self.store.executeAction(installed, action)
+            succeeded = bool(result)
+        except _PinnedCardNotice as notice:
+            level, title, message = notice.level, notice.title, str(notice)
+        except (ApplicationStoreError, OSError, ValueError) as error:
+            level, title, message = "error", "执行预设失败", str(error)
+        except Exception as error:
+            logger.exception("主页应用卡片执行失败")
+            level, title, message = "error", "执行预设失败", str(error)
+        finally:
+            with self._fileOperationLock:
+                self._fileOperationThreads.discard(threading.current_thread())
+        if not self._shuttingDown:
+            self._pinnedCardFinished.emit(appId, succeeded, level, title, message)
+
+    def _pinnedPresetAction(self, item, installed, catalogLoaded, catalogPreset):
+        localPreset = next(
+            (
+                preset
+                for preset in installed.metadata.get("presets", [])
+                if isinstance(preset, dict)
+                and str(preset.get("id", "")) == str(item["preset_id"])
+            ),
+            None,
         )
-        self._startLaunch(
-            appId,
-            lambda: self._executePreset(appId, item["preset_id"], catalogPreset),
+        action = None
+        if catalogLoaded:
+            if catalogPreset is not None:
+                catalogAction = self._catalogExternalAction(catalogPreset)
+                if catalogAction is not None:
+                    action = catalogAction
+                elif (
+                    isinstance(catalogPreset.get("action"), dict)
+                    and catalogPreset["action"].get("type") == "program"
+                    and isinstance(localPreset, dict)
+                ):
+                    action = localPreset.get("action")
+        elif isinstance(localPreset, dict):
+            action = localPreset.get("action")
+        if not isinstance(action, dict) and not catalogLoaded:
+            action = self._catalogExternalAction(item)
+        if not isinstance(action, dict):
+            raise _PinnedCardNotice(
+                "warning",
+                "主页卡片已失效",
+                "请在应用详情中重新固定这张预设卡片。",
+            )
+        return action
+
+    def _onPinnedCardFinished(self, appId, succeeded, level, title, message):
+        if self._shuttingDown or appId not in self._launching:
+            return
+        self._launching.discard(appId)
+        self._downloadStates.pop(appId, None)
+        self._updateVisibleCardState(appId)
+        self._updateDetailAction()
+        if message:
+            self._showPinnedCardNotice(level, title, message)
+        if not succeeded:
+            self.pinnedCardFailed.emit()
+
+    def _showPinnedCardNotice(self, level, title, message):
+        show = InfoBar.warning if level == "warning" else InfoBar.error
+        show(
+            title,
+            message,
+            duration=3000 if level == "warning" else 4000,
+            position=InfoBarPosition.BOTTOM_RIGHT,
+            parent=self.window(),
         )
+
+    def refreshPinnedCards(self):
+        cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
+        self._refreshPinStates(cards)
+        self.pinnedCardsChanged.emit(cards)
 
     def clearCachedImages(self):
         self.imagePaths.clear()

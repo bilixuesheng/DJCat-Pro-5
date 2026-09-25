@@ -1,7 +1,7 @@
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QInputDevice
 from PySide6.QtWidgets import QApplication, QScroller, QWidget
 from PySide6.QtTest import QTest
@@ -357,16 +357,29 @@ class TrayControlNavigationTest(TestCase):
         activateWindow.assert_called_once_with()
         activateCard.assert_called_once_with("全屏投送")
 
-    def testLazyApplicationPageForwardsLaunchFailure(self):
+    def testLazyApplicationPageForwardsPinnedCardFailure(self):
         from app.view.windows.main_window import LazyAppStorePage
+
+        class LoadedPage(QWidget):
+            pinnedCardsChanged = Signal(object)
+            pinnedCardFailed = Signal()
+
+            def __init__(self, parent=None):
+                super().__init__(parent)
+                self.items = []
+
+            def executePinnedCard(self, item):
+                self.items.append(item)
 
         page = LazyAppStorePage()
         self.addCleanup(page.deleteLater)
         failures = []
-        page.launchFailed.connect(lambda: failures.append(True))
+        page.pinnedCardFailed.connect(lambda: failures.append(True))
+        with patch("app.view.pages.app_store_page.AppStorePage", LoadedPage):
+            page.executePinnedCard({"app_id": 7, "preset_id": 0})
 
-        page.ensureLoaded().launchFailed.emit()
-
+        self.assertEqual(page.page.items, [{"app_id": 7, "preset_id": 0}])
+        page.page.pinnedCardFailed.emit()
         self.assertEqual(failures, [True])
 
     def testTrayCustomCardDoesNotShowWindowOnSuccess(self):
@@ -395,9 +408,20 @@ class TrayControlNavigationTest(TestCase):
         showWindow.assert_not_called()
         activateCard.assert_called_once_with("custom:one")
 
-    def testApplicationLaunchFailureShowsWindow(self):
-        with patch.object(self.window, "show") as show:
-            self.window.appStorePage.launchFailed.emit()
+    def testApplicationCardShowsWindowOnlyWhenLaunchFails(self):
+        items = []
+        with patch.object(self.window, "_showMainWindow") as showWindow:
+            self.window.appStorePage.executePinnedCard = items.append
+            self.window._onPinnedHomeCardClicked({"app_id": 7})
+            self.assertEqual(items, [{"app_id": 7}])
+            showWindow.assert_not_called()
+
+        with (
+            patch.object(self.window, "show") as show,
+            patch.object(self.window, "raise_"),
+            patch.object(self.window, "activateWindow"),
+        ):
+            self.window.appStorePage.pinnedCardFailed.emit()
 
         show.assert_called_once_with()
 
