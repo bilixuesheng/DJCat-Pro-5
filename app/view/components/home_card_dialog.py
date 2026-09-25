@@ -41,12 +41,12 @@ from qfluentwidgets import FluentIcon as FIF
 from app.common.home_cards import (
     ACTION_TYPES,
     HomeCardError,
-    extract_icon_images,
-    icon_for_data,
-    new_id,
-    normalize_action,
-    save_icon_image,
-    validate_action,
+    extractIconImages,
+    iconForData,
+    newId,
+    normalizeAction,
+    saveIconImage,
+    validateAction,
 )
 from app.view.components.icon_grid import IconGrid, IconGridItem
 from app.view.components.scroll_area import ScrollArea
@@ -195,7 +195,7 @@ class ActionRow(CardWidget):
 
     def __init__(self, action: dict, parent=None):
         super().__init__(parent)
-        self.action = normalize_action(action) or {"id": new_id(), "type": "delay", "seconds": 1}
+        self.action = normalizeAction(action) or {"id": newId(), "type": "delay", "seconds": 1}
         self.dragHandle = DragHandleButton(self)
         self.summary = StrongBodyLabel(self)
         self.detail = CaptionLabel(self)
@@ -233,7 +233,7 @@ class ActionRow(CardWidget):
         self.setData(self.action)
 
     def setData(self, action: dict):
-        self.action = normalize_action(action) or self.action
+        self.action = normalizeAction(action) or self.action
         action_type = self.action["type"]
         self.summary.setText(ACTION_LABELS[action_type])
         if action_type == "program":
@@ -463,7 +463,7 @@ class ActionSequenceEditor(QWidget):
             _showError(noticeParent, "无法保存", "至少添加一个动作")
             return False
         for action in actions:
-            error = validate_action(action)
+            error = validateAction(action)
             if error:
                 _showError(noticeParent, "动作无效", error)
                 return False
@@ -505,7 +505,7 @@ class ActionEditorDialog(_ResponsiveMessageBox):
         self.viewLayout.addWidget(self.typeCombo)
         self.viewLayout.addWidget(self.scrollArea)
         self.setPreferredSize(620, 560)
-        self._action = normalize_action(action) if action else None
+        self._action = normalizeAction(action) if action else None
         self._load(self._action)
         self.yesButton.setText("保存")
         self.cancelButton.setText("取消")
@@ -638,7 +638,7 @@ class ActionEditorDialog(_ResponsiveMessageBox):
 
     def getData(self) -> dict:
         action_type = ACTION_TYPES[self.typeCombo.currentIndex()]
-        old_id = self._action.get("id") if self._action else new_id()
+        old_id = self._action.get("id") if self._action else newId()
         widgets = self._widgets[action_type]
         if action_type == "program":
             return {"id": old_id, "type": action_type, "target": widgets[0].text().strip(), "arguments": widgets[1].text(), "working_dir": widgets[2].text().strip(), "wait": widgets[3].isChecked()}
@@ -649,7 +649,7 @@ class ActionEditorDialog(_ResponsiveMessageBox):
         return {"id": old_id, "type": action_type, "seconds": widgets[0].value()}
 
     def validate(self) -> bool:
-        error = validate_action(self.getData())
+        error = validateAction(self.getData())
         if error:
             _showError(self, "动作无效", error)
             return False
@@ -794,7 +794,7 @@ class IconPickerDialog(_ResponsiveMessageBox):
         if not path:
             return
         try:
-            images = extract_icon_images(path)
+            images = extractIconImages(path)
         except HomeCardError as error:
             _showError(self, "图标读取失败", str(error))
             return
@@ -825,7 +825,7 @@ class CustomCardDialog(_ResponsiveMessageBox):
     def __init__(self, data=None, parent=None):
         super().__init__(parent)
         data = deepcopy(data) if isinstance(data, dict) else {}
-        self.cardId = data.get("id") or new_id()
+        self.cardId = data.get("id") or newId()
         self._icon = deepcopy(data.get("icon") or {"type": "fluent", "name": "APPLICATION"})
         self._staged_image = None
         self.titleLabel = SubtitleLabel("编辑主页卡片" if data else "新建主页卡片", self)
@@ -838,7 +838,7 @@ class CustomCardDialog(_ResponsiveMessageBox):
         self.descriptionEdit = LineEdit(self)
         self.descriptionEdit.setMaxLength(120)
         self.descriptionEdit.setPlaceholderText("简短说明卡片用途")
-        self.iconPreview = IconWidget(icon_for_data(self._icon), self)
+        self.iconPreview = IconWidget(iconForData(self._icon), self)
         self.iconPreview.setFixedSize(40, 40)
         setFluentToolTip(self.iconPreview, "当前图标")
         self.iconCard = SimpleCardWidget(self)
@@ -860,7 +860,7 @@ class CustomCardDialog(_ResponsiveMessageBox):
         icon_card_layout.addWidget(self.iconSelectButton)
         initial_actions = data.get("actions") if data else None
         if not initial_actions:
-            initial_actions = [{"id": new_id(), "type": "program", "target": "", "arguments": "", "working_dir": "", "wait": False}]
+            initial_actions = [{"id": newId(), "type": "program", "target": "", "arguments": "", "working_dir": "", "wait": False}]
         self.actionEditor = ActionSequenceEditor(initial_actions, self)
         self.actionList = self.actionEditor.actionList
         self.addActionButton = self.actionEditor.addActionButton
@@ -911,7 +911,7 @@ class CustomCardDialog(_ResponsiveMessageBox):
         if selected["type"] == "fluent":
             self._icon = selected
             self._staged_image = None
-            self.iconPreview.setIcon(icon_for_data(self._icon))
+            self.iconPreview.setIcon(iconForData(self._icon))
         else:
             self._staged_image = image
             self._icon = {"type": "image"}
@@ -929,7 +929,7 @@ class CustomCardDialog(_ResponsiveMessageBox):
             return False
         if self._staged_image is not None:
             try:
-                self._icon = {"type": "file", "file": save_icon_image(self._staged_image)}
+                self._icon = {"type": "file", "file": saveIconImage(self._staged_image)}
                 self._staged_image = None
             except HomeCardError as error:
                 _showError(self, "无法保存图标", str(error))

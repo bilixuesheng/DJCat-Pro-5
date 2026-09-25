@@ -66,7 +66,7 @@ from app.common.application_store import (
 )
 from app.common.home_cards import (
     DIRECT_APPLICATION_PRESET_ID,
-    normalize_pinned_cards,
+    normalizePinnedCards,
 )
 from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
@@ -1559,7 +1559,7 @@ class AppStorePage(QWidget):
             if ad.get("image_url") == url:
                 self.adFlipView.setItemImage(index, QPixmap(path))
 
-        pinnedCards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
+        pinnedCards = normalizePinnedCards(cfg.pinnedHomeCards.value)
         pinnedChanged = pinnedCards != cfg.pinnedHomeCards.value
         updatedCards = []
         for item in pinnedCards:
@@ -1590,7 +1590,7 @@ class AppStorePage(QWidget):
         self._loadCatalog()
 
     def _syncPinnedMetadata(self):
-        cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
+        cards = normalizePinnedCards(cfg.pinnedHomeCards.value)
         if not cards:
             return
         apps = {int(app["id"]): app for app in self._mergedApps()}
@@ -2658,7 +2658,7 @@ class AppStorePage(QWidget):
     def _pinnedKeys(self):
         return {
             (item["app_id"], item["preset_id"])
-            for item in normalize_pinned_cards(cfg.pinnedHomeCards.value)
+            for item in normalizePinnedCards(cfg.pinnedHomeCards.value)
         }
 
     def _togglePin(self, app, preset):
@@ -2684,7 +2684,7 @@ class AppStorePage(QWidget):
         self._updateVisibleCardState(int(app["id"]))
 
     def _togglePinnedCard(self, app, presetId, title, description, action):
-        cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
+        cards = normalizePinnedCards(cfg.pinnedHomeCards.value)
         key = (int(app["id"]), int(presetId))
         existing = next(
             (
@@ -2720,7 +2720,7 @@ class AppStorePage(QWidget):
         the process can stall on antivirus scans; the result arrives through
         `pinnedCardFailed` instead of a return value.
         """
-        cards = normalize_pinned_cards([item])
+        cards = normalizePinnedCards([item])
         if not cards:
             self._showPinnedCardNotice(
                 "warning", "预设卡片无效", "请重新固定这张主页卡片。"
@@ -2857,7 +2857,7 @@ class AppStorePage(QWidget):
         )
 
     def refreshPinnedCards(self):
-        cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
+        cards = normalizePinnedCards(cfg.pinnedHomeCards.value)
         self._refreshPinStates(cards)
         self.pinnedCardsChanged.emit(cards)
 

@@ -18,7 +18,7 @@ from app.common.home_card_tasks import (
     OPEN_HOME_CARD_ACTION,
     SCHEDULED_HOME_CARD_TRIGGER,
     SILENT_STARTUP_EVENT,
-    normalize_home_card_tasks,
+    normalizeHomeCardTasks,
 )
 from app.config.cfg import HOME_CARD_SCHEMA_VERSION, cfg, migrateConfig
 from app.view.components.task_picker import TouchTimePicker
@@ -113,7 +113,7 @@ class HomeCardTaskDataTest(TestCase):
             }
         )
 
-        tasks = normalize_home_card_tasks([first, second, None])
+        tasks = normalizeHomeCardTasks([first, second, None])
 
         self.assertEqual(len(tasks), 2)
         self.assertNotEqual(tasks[0]["id"], tasks[1]["id"])
@@ -126,7 +126,7 @@ class HomeCardTaskDataTest(TestCase):
         )
 
     def testMalformedValuesBecomeSafeEditableTasks(self):
-        tasks = normalize_home_card_tasks(
+        tasks = normalizeHomeCardTasks(
             [
                 {
                     "name": "",
@@ -159,7 +159,7 @@ class HomeCardTaskDataTest(TestCase):
             }
         )
 
-        normalized = normalize_home_card_tasks([task])[0]
+        normalized = normalizeHomeCardTasks([task])[0]
 
         self.assertEqual(normalized["trigger"], APPLICATION_HOME_CARD_TRIGGER)
         self.assertEqual(normalized["event"], SILENT_STARTUP_EVENT)
@@ -587,7 +587,7 @@ class HomeCardTaskRuntimeTest(TestCase):
         )
         cfg.set(cfg.homeCardTasks, [task])
         with (
-            patch("app.common.home_cards.execute_action", return_value=None) as execute,
+            patch("app.common.home_cards.executeAction", return_value=None) as execute,
             patch("app.view.windows.main_window.QApplication.quit") as quitApp,
         ):
             self.window.requestQuit()

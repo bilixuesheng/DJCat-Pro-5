@@ -23,7 +23,7 @@ from qfluentwidgets import (
 )
 from qfluentwidgets import FluentIcon as FIF
 
-from app.common.edge_tts import DEFAULT_EDGE_VOICE, load_chinese_voices
+from app.common.edge_tts import DEFAULT_EDGE_VOICE, loadChineseVoices
 from app.config.cfg import cfg
 from app.view.components.task_page import (
     ScheduledTaskCard,
@@ -89,7 +89,7 @@ class ChineseVoiceLoader(QObject):
     @staticmethod
     def _fetch():
         try:
-            return load_chinese_voices(), ""
+            return loadChineseVoices(), ""
         except Exception as exception:
             return [], str(exception)
 

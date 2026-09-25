@@ -47,10 +47,10 @@ from qfluentwidgets import FluentIcon as FIF
 
 from app.common.home_cards import (
     ActionSequenceWorker,
-    icon_for_data,
-    normalize_custom_cards,
-    normalize_pinned_cards,
-    remove_cached_icon,
+    iconForData,
+    normalizeCustomCards,
+    normalizePinnedCards,
+    removeCachedIcon,
 )
 from app.config.cfg import DEFAULT_HOME_CARDS, cfg
 from app.view.components.banner_widget import BannerWidget
@@ -409,7 +409,7 @@ class HomePage(ScrollArea):
             card.dragMoved.connect(self._moveCard)
             card.dragFinished.connect(self._finishCardDrag)
 
-        customCards = normalize_custom_cards(cfg.customHomeCards.value)
+        customCards = normalizeCustomCards(cfg.customHomeCards.value)
         if customCards != cfg.customHomeCards.value:
             cfg.set(cfg.customHomeCards, customCards)
         for data in customCards:
@@ -488,7 +488,7 @@ class HomePage(ScrollArea):
         )
 
     def setApplicationCards(self, cards) -> list[dict]:
-        cards = normalize_pinned_cards(cards)
+        cards = normalizePinnedCards(cards)
         updatedCards = {
             f"app:{item['app_id']}:{item['preset_id']}": item
             for item in cards
@@ -543,7 +543,7 @@ class HomePage(ScrollArea):
         return cards
 
     def _addCustomCard(self, data, persist=True):
-        normalized = normalize_custom_cards([data])
+        normalized = normalizeCustomCards([data])
         if not normalized:
             return None
         data = normalized[0]
@@ -553,7 +553,7 @@ class HomePage(ScrollArea):
         if old_card is not None:
             old_card.deleteLater()
         card = ActionCard(
-            icon_for_data(data.get("icon")),
+            iconForData(data.get("icon")),
             data["title"],
             data.get("description", ""),
             self.cardsWidget,
@@ -697,12 +697,12 @@ class HomePage(ScrollArea):
         old_icon = data.get("icon")
         new_icon = updated.get("icon")
         if old_icon != new_icon:
-            remove_cached_icon(old_icon)
+            removeCachedIcon(old_icon)
         with self._cardsLock:
             self._customCardData[card_id] = updated
         card = self.all_cards.get(f"custom:{card_id}")
         if card is not None:
-            card.setCardData(icon_for_data(new_icon), updated["title"], updated["description"])
+            card.setCardData(iconForData(new_icon), updated["title"], updated["description"])
         self._saveCustomCards()
         self._renderCards()
 
@@ -724,7 +724,7 @@ class HomePage(ScrollArea):
             return
         for worker in self._customWorkers.get(card_id, []):
             worker.cancel()
-        remove_cached_icon(data.get("icon"))
+        removeCachedIcon(data.get("icon"))
         with self._cardsLock:
             self._customCardData.pop(card_id, None)
         key = f"custom:{card_id}"

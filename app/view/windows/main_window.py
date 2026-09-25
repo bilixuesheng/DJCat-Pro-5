@@ -51,9 +51,9 @@ from app.common.home_card_tasks import (
     HOME_CARD_TASK_KEY,
     SCHEDULED_HOME_CARD_TRIGGER,
     SILENT_STARTUP_EVENT,
-    normalize_home_card_tasks,
+    normalizeHomeCardTasks,
 )
-from app.common.home_cards import ActionSequenceWorker, normalize_pinned_cards
+from app.common.home_cards import ActionSequenceWorker, normalizePinnedCards
 from app.common.update_download import (
     MAX_UPDATE_BYTES,
     UpdateDownloadWorker,
@@ -392,7 +392,7 @@ class MainWindow(MSFluentWindow):
         cfg.windowTitle.valueChanged.connect(self._updateWindowTitle)
         cfg.applicationIconSource.valueChanged.connect(self._updateApplicationIcon)
         cfg.applicationIconPath.valueChanged.connect(self._updateApplicationIcon)
-        homeCardTasks = normalize_home_card_tasks(cfg.homeCardTasks.value)
+        homeCardTasks = normalizeHomeCardTasks(cfg.homeCardTasks.value)
         if homeCardTasks != cfg.homeCardTasks.value:
             cfg.set(cfg.homeCardTasks, homeCardTasks)
 
@@ -521,9 +521,9 @@ class MainWindow(MSFluentWindow):
         self._lastScheduleCheck = None
 
     def _deferredCleanupEdgeSpeech(self):
-        from app.common.edge_tts import cleanup_edge_speech_files
+        from app.common.edge_tts import cleanupEdgeSpeechFiles
 
-        cleanup_edge_speech_files()
+        cleanupEdgeSpeechFiles()
 
     def _ensureAudioBackend(self):
         if self.player is not None:
@@ -893,7 +893,7 @@ class MainWindow(MSFluentWindow):
         QProcess.startDetached("shutdown.exe", ["/s", "/t", "0"])
 
     def _handleHomeCardTask(self, rawTask):
-        tasks = normalize_home_card_tasks([rawTask])
+        tasks = normalizeHomeCardTasks([rawTask])
         if self._resourcesShutdown or not tasks:
             return
         task = tasks[0]
@@ -932,7 +932,7 @@ class MainWindow(MSFluentWindow):
     def _runApplicationHomeCardTasks(self, event):
         if not cfg.homeCardTasksEnabled.value:
             return
-        for task in normalize_home_card_tasks(cfg.homeCardTasks.value):
+        for task in normalizeHomeCardTasks(cfg.homeCardTasks.value):
             if (
                 task["enabled"]
                 and task["trigger"] == APPLICATION_HOME_CARD_TRIGGER
@@ -968,7 +968,7 @@ class MainWindow(MSFluentWindow):
             self._navToHome()
 
     def _getHomeCardTaskActions(self, taskId):
-        for task in normalize_home_card_tasks(cfg.homeCardTasks.value):
+        for task in normalizeHomeCardTasks(cfg.homeCardTasks.value):
             if task["id"] == taskId and task["mode"] == CUSTOM_HOME_CARD_TASK:
                 return task["actions"]
         return None
@@ -979,7 +979,7 @@ class MainWindow(MSFluentWindow):
             task = next(
                 (
                     item
-                    for item in normalize_home_card_tasks(cfg.homeCardTasks.value)
+                    for item in normalizeHomeCardTasks(cfg.homeCardTasks.value)
                     if item["id"] == taskId
                 ),
                 {"name": "自动任务"},
@@ -1119,7 +1119,7 @@ class MainWindow(MSFluentWindow):
 
     def _onAppStoreCacheCleared(self):
         self.appStorePage.clearCachedImages()
-        cards = normalize_pinned_cards(cfg.pinnedHomeCards.value)
+        cards = normalizePinnedCards(cfg.pinnedHomeCards.value)
         changed = False
         for card in cards:
             if card.get("icon_path"):
@@ -1133,13 +1133,13 @@ class MainWindow(MSFluentWindow):
         self.appStorePage.executePinnedCard(item)
 
     def _onPinnedHomeCardRemoved(self, item):
-        normalized = normalize_pinned_cards([item])
+        normalized = normalizePinnedCards([item])
         if not normalized:
             return
         key = (normalized[0]["app_id"], normalized[0]["preset_id"])
         cards = [
             card
-            for card in normalize_pinned_cards(cfg.pinnedHomeCards.value)
+            for card in normalizePinnedCards(cfg.pinnedHomeCards.value)
             if (card["app_id"], card["preset_id"]) != key
         ]
         cfg.set(cfg.pinnedHomeCards, cards)

@@ -10,7 +10,7 @@ DEFAULT_EDGE_VOICE = "zh-CN-XiaoxiaoNeural"
 EDGE_SPEECH_PREFIX = "djcat-edge-tts-"
 
 
-def cleanup_edge_speech_files(directory=None):
+def cleanupEdgeSpeechFiles(directory=None):
     root = Path(directory or tempfile.gettempdir())
     failed = []
     try:
@@ -25,24 +25,24 @@ def cleanup_edge_speech_files(directory=None):
     return failed
 
 
-def filter_chinese_voices(voices):
+def filterChineseVoices(voices):
     """Return normalized Edge TTS voices whose locale is Chinese."""
     result = []
     seen = set()
 
     for voice in voices:
         locale = str(voice.get("Locale", ""))
-        short_name = str(voice.get("ShortName", ""))
-        if not locale.lower().startswith("zh-") or not short_name or short_name in seen:
+        shortName = str(voice.get("ShortName", ""))
+        if not locale.lower().startswith("zh-") or not shortName or shortName in seen:
             continue
 
-        seen.add(short_name)
+        seen.add(shortName)
         gender = "女声" if voice.get("Gender") == "Female" else "男声"
-        friendly_name = str(voice.get("FriendlyName", "")).strip() or short_name
+        friendlyName = str(voice.get("FriendlyName", "")).strip() or shortName
         result.append(
             {
-                "name": short_name,
-                "label": f"{friendly_name}（{locale} · {gender}）",
+                "name": shortName,
+                "label": f"{friendlyName}（{locale} · {gender}）",
                 "locale": locale,
                 "gender": gender,
             }
@@ -51,29 +51,29 @@ def filter_chinese_voices(voices):
     return sorted(result, key=lambda item: (item["locale"], item["name"]))
 
 
-def load_chinese_voices():
+def loadChineseVoices():
     """Load the current Chinese-only Edge TTS voice catalog from the network."""
     import asyncio
     import edge_tts
 
-    return filter_chinese_voices(asyncio.run(edge_tts.list_voices()))
+    return filterChineseVoices(asyncio.run(edge_tts.list_voices()))
 
 
-def synthesize_edge_speech(text, voice, output_path):
+def synthesizeEdgeSpeech(text, voice, outputPath):
     """Synthesize text to an MP3 file with Edge TTS."""
     import asyncio
     import edge_tts
 
     communicate = edge_tts.Communicate(text=text, voice=voice)
-    asyncio.run(communicate.save(str(output_path)))
+    asyncio.run(communicate.save(str(outputPath)))
 
 
 class EdgeSpeechWorker(QObject):
     finished = Signal(int, str, str)
 
-    def __init__(self, request_id, text, voice, parent=None):
+    def __init__(self, requestId, text, voice, parent=None):
         super().__init__(parent)
-        self.request_id = request_id
+        self.requestId = requestId
         self.text = text
         self.voice = voice
         self._cancelEvent = threading.Event()
@@ -86,16 +86,16 @@ class EdgeSpeechWorker(QObject):
         os.close(descriptor)
 
         try:
-            synthesize_edge_speech(self.text, self.voice, path)
+            synthesizeEdgeSpeech(self.text, self.voice, path)
         except Exception as error:
             Path(path).unlink(missing_ok=True)
             message = "" if self._cancelEvent.is_set() else str(error)
-            self.finished.emit(self.request_id, "", message)
+            self.finished.emit(self.requestId, "", message)
             return
 
         if self._cancelEvent.is_set():
             Path(path).unlink(missing_ok=True)
-            self.finished.emit(self.request_id, "", "")
+            self.finished.emit(self.requestId, "", "")
             return
 
-        self.finished.emit(self.request_id, path, "")
+        self.finished.emit(self.requestId, path, "")

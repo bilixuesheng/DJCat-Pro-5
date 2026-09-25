@@ -26,9 +26,9 @@ from app.common.home_card_tasks import (
     OPEN_HOME_CARD_ACTION,
     SCHEDULED_HOME_CARD_TRIGGER,
     SILENT_STARTUP_EVENT,
-    normalize_home_card_tasks,
+    normalizeHomeCardTasks,
 )
-from app.common.home_cards import new_id
+from app.common.home_cards import newId
 from app.config.cfg import cfg
 from app.view.components.home_card_dialog import ActionSequenceEditor
 from app.view.components.task_page import (
@@ -304,7 +304,7 @@ def create_home_card_task_form(
     if not actions:
         actions = [
             {
-                "id": new_id(),
+                "id": newId(),
                 "type": "program",
                 "target": "",
                 "arguments": "",
@@ -420,7 +420,7 @@ class AddHomeCardTaskDialog(ScheduledTaskDialog):
         return False
 
     def getData(self):
-        return {"id": new_id(), **super().getData()}
+        return {"id": newId(), **super().getData()}
 
 
 class HomeCardTaskCard(ScheduledTaskCard):
@@ -506,7 +506,7 @@ class HomeCardTaskPage(ScheduledTaskPage):
             card.setHomeCards(self._homeCards)
 
     def _normalizeTasks(self, tasks):
-        return normalize_home_card_tasks(tasks)
+        return normalizeHomeCardTasks(tasks)
 
     def _createCard(self, task):
         return HomeCardTaskCard(task, self._homeCards, self.scrollArea, self.view)

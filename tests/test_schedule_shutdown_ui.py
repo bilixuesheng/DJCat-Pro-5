@@ -723,7 +723,7 @@ class ScheduleShutdownUiTest(TestCase):
         self.assertFalse(isValid(panel))
 
     @patch(
-        "app.view.pages.schedule_page.load_chinese_voices",
+        "app.view.pages.schedule_page.loadChineseVoices",
         return_value=[],
     )
     def testVoiceLoaderIgnoresResultAfterOwnerIsDestroyed(self, loadVoices):
@@ -763,7 +763,7 @@ class ScheduleShutdownUiTest(TestCase):
         secondResult = QSignalSpy(second.finished)
         try:
             with patch(
-                "app.view.pages.schedule_page.load_chinese_voices",
+                "app.view.pages.schedule_page.loadChineseVoices",
                 side_effect=load,
             ) as loadVoices:
                 first.start()

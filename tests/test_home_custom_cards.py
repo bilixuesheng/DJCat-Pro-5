@@ -17,11 +17,11 @@ from qfluentwidgets import (
 
 from app.common.home_cards import (
     ActionSequenceWorker,
-    execute_action,
-    extract_icon_images,
-    normalize_custom_cards,
-    normalize_pinned_cards,
-    validate_action,
+    executeAction,
+    extractIconImages,
+    normalizeCustomCards,
+    normalizePinnedCards,
+    validateAction,
 )
 from app.config.cfg import DEFAULT_HOME_CARDS, cfg
 from app.view.components.home_card_dialog import (
@@ -515,7 +515,7 @@ class HomeCustomCardTest(TestCase):
                 state["actions"] = [second, added]
 
         worker = ActionSequenceWorker("card", get_actions)
-        with mock.patch("app.common.home_cards.execute_action", side_effect=fake_execute):
+        with mock.patch("app.common.home_cards.executeAction", side_effect=fake_execute):
             worker._run()
         self.assertEqual(calls, ["one", "two", "three"])
 
@@ -540,7 +540,7 @@ class HomeCustomCardTest(TestCase):
         cancel = threading.Event()
         cancel.set()
 
-        error = execute_action(
+        error = executeAction(
             {"type": "program", "target": "demo.exe", "wait": True},
             cancel,
         )
@@ -558,7 +558,7 @@ class HomeCustomCardTest(TestCase):
         cancel.is_set.return_value = False
         cancel.wait.return_value = True
 
-        error = execute_action(
+        error = executeAction(
             {"type": "program", "target": "demo.exe", "wait": True},
             cancel,
         )
@@ -621,7 +621,7 @@ class HomeCustomCardTest(TestCase):
         self.assertEqual(self.page.findChildren(RoundMenu), [])
 
     def testNormalizeSkipsInvalidCardsAndRepairsDuplicateActionIds(self):
-        cards = normalize_custom_cards(
+        cards = normalizeCustomCards(
             [
                 {"title": "缺动作"},
                 {
@@ -671,7 +671,7 @@ class HomeCustomCardTest(TestCase):
             "title": "打开应用",
             "action": {"type": "program", "target": "demo.exe"},
         }
-        cards = normalize_pinned_cards(
+        cards = normalizePinnedCards(
             [None, {"app_id": "broken"}, valid, dict(valid)]
         )
 
@@ -684,7 +684,7 @@ class HomeCustomCardTest(TestCase):
         )
 
     def testDirectApplicationPinnedCardUsesReservedZeroPresetId(self):
-        cards = normalize_pinned_cards(
+        cards = normalizePinnedCards(
             [
                 {
                     "app_id": 7,
@@ -778,7 +778,7 @@ class HomeCustomCardTest(TestCase):
     @mock.patch("app.common.home_cards.subprocess.Popen")
     def testProgramArgumentsAreStartedWithoutShell(self, popen):
         popen.return_value.poll.return_value = 0
-        error = execute_action(
+        error = executeAction(
             {
                 "type": "program",
                 "target": "demo.exe",
@@ -798,7 +798,7 @@ class HomeCustomCardTest(TestCase):
     @mock.patch("app.common.home_cards.subprocess.Popen")
     def testShellUsesConfiguredConsoleMode(self, popen):
         popen.return_value.poll.return_value = 0
-        error = execute_action(
+        error = executeAction(
             {"type": "shell", "command": "echo ready", "show_console": True},
             threading.Event(),
         )
@@ -809,14 +809,14 @@ class HomeCustomCardTest(TestCase):
     @mock.patch("app.common.home_cards.webbrowser.open", return_value=True)
     def testUrlAddsHttpsWhenMissing(self, open_url):
         self.assertIsNone(
-            execute_action({"type": "url", "target": "example.com"}, threading.Event())
+            executeAction({"type": "url", "target": "example.com"}, threading.Event())
         )
         open_url.assert_called_once_with("https://example.com", new=2)
 
     def testActionValidationRejectsUnsafeUrl(self):
-        self.assertIn("HTTP", validate_action({"type": "url", "target": "file:///bad"}))
+        self.assertIn("HTTP", validateAction({"type": "url", "target": "file:///bad"}))
         self.assertEqual(
-            validate_action({"type": "url", "target": "https://["}),
+            validateAction({"type": "url", "target": "https://["}),
             "网页地址无效",
         )
 
@@ -825,4 +825,4 @@ class HomeCustomCardTest(TestCase):
         shell32 = Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "shell32.dll"
         if not shell32.exists():
             self.skipTest("shell32.dll not found")
-        self.assertGreater(len(extract_icon_images(shell32)), 1)
+        self.assertGreater(len(extractIconImages(shell32)), 1)
