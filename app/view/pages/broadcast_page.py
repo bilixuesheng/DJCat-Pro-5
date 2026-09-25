@@ -845,7 +845,7 @@ def _streamAIMarkdown(request, emitChunk):
             response.close()
 
 
-class _InlineAIMarkdownRequest(QObject):
+class _AIMarkdownRequest(QObject):
     chunkReceived = Signal(str)
     conversionFinished = Signal(int, int, int)
     conversionFailed = Signal(str, int, int, int)
@@ -888,9 +888,6 @@ class _InlineAIMarkdownRequest(QObject):
 
 class AIMarkdownDialog(MessageBoxBase):
     quotaReceived = Signal(int, int, int, object, str)
-    chunkReceived = Signal(str)
-    conversionFinished = Signal(int, int, int)
-    conversionFailed = Signal(str, int, int, int)
 
     def __init__(self, text, parent=None):
         super().__init__(parent)
@@ -903,10 +900,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self._cost = 1
         self._peakEnabled = None
         self._quotaRequestRunning = False
-        self._cancelEvent = threading.Event()
-        self._responseLock = threading.Lock()
-        self._activeResponse = None
-        self._resultChunks = []
+        self._request = None
         self._pendingChunks = []
 
         self.titleLabel = SubtitleLabel("AI 整理 Markdown", self)
@@ -937,9 +931,6 @@ class AIMarkdownDialog(MessageBoxBase):
         self.cancelButton.setText("取消")
         self.inputEdit.textChanged.connect(self._refreshStartButton)
         self.quotaReceived.connect(self._onQuotaReceived)
-        self.chunkReceived.connect(self._appendChunk)
-        self.conversionFinished.connect(self._onConversionFinished)
-        self.conversionFailed.connect(self._onConversionFailed)
 
         self._quotaTimer = QTimer(self)
         self._quotaTimer.setInterval(30_000)
@@ -959,7 +950,7 @@ class AIMarkdownDialog(MessageBoxBase):
             self.widget.setFixedWidth(min(680, max(0, event.size().width() - 80)))
 
     def resultText(self):
-        return "".join(self._resultChunks)
+        return self._result
 
     def validate(self):
         if self._finished:
@@ -1002,22 +993,22 @@ class AIMarkdownDialog(MessageBoxBase):
     def _startConversion(self):
         self._running = True
         self._result = ""
-        self._resultChunks.clear()
         self._pendingChunks.clear()
-        self._cancelEvent.clear()
         self.inputEdit.clear()
         self.inputEdit.setReadOnly(True)
         self.yesButton.setEnabled(False)
         self.cancelButton.setEnabled(True)
         self.cancelButton.setText("取消整理")
         self._glow.start()
-        threading.Thread(target=self._streamConversion, daemon=True).start()
-
-    def _streamConversion(self):
-        _streamAIMarkdown(self, self.chunkReceived.emit)
+        request = _AIMarkdownRequest(self._source, self)
+        request.chunkReceived.connect(self._appendChunk)
+        request.conversionFinished.connect(self._onConversionFinished)
+        request.conversionFailed.connect(self._onConversionFailed)
+        request.stopped.connect(request.deleteLater)
+        self._request = request
+        request.start()
 
     def _appendChunk(self, chunk):
-        self._resultChunks.append(chunk)
         self._pendingChunks.append(chunk)
         if not self._flushTimer.isActive():
             self._flushTimer.start()
@@ -1033,11 +1024,9 @@ class AIMarkdownDialog(MessageBoxBase):
         self.inputEdit.ensureCursorVisible()
 
     def _cancelConversion(self):
-        self._cancelEvent.set()
-        with self._responseLock:
-            response = self._activeResponse
-        if response is not None:
-            response.close()
+        if self._request is not None:
+            self._request.cancel()
+            self._request = None
         self._running = False
         self._glow.stop()
 
@@ -1056,6 +1045,7 @@ class AIMarkdownDialog(MessageBoxBase):
         self._refreshStartButton()
 
     def _onConversionFinished(self, remaining, limit, cost):
+        self._request = None
         self._flushTimer.stop()
         self._flushChunks()
         if not self._result.strip():
@@ -1078,9 +1068,9 @@ class AIMarkdownDialog(MessageBoxBase):
         self.cancelButton.setText("取消")
 
     def _onConversionFailed(self, message, remaining, limit, cost):
+        self._request = None
         self._flushTimer.stop()
         self._pendingChunks.clear()
-        self._resultChunks.clear()
         self._result = ""
         self._running = False
         if remaining >= 0:
@@ -1384,7 +1374,7 @@ class BroadcastEditPage(QWidget):
             "content": self.contentInput.toPlainText(),
             "isMarkdown": True,
         }
-        request = _InlineAIMarkdownRequest(snapshot["content"], self)
+        request = _AIMarkdownRequest(snapshot["content"], self)
         request.chunkReceived.connect(
             lambda chunk, current=request: self._appendInlineAIChunk(
                 current, chunk

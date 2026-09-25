@@ -100,7 +100,7 @@ class FullscreenTaskCloseTest(TestCase):
         page.contentInput.setPlainText("数学97页")
 
         with patch(
-            "app.view.pages.broadcast_page._InlineAIMarkdownRequest.start"
+            "app.view.pages.broadcast_page._AIMarkdownRequest.start"
         ):
             page._onBroadcast()
 
@@ -134,7 +134,7 @@ class FullscreenTaskCloseTest(TestCase):
         page.contentInput.setPlainText("整理前正文")
 
         with patch(
-            "app.view.pages.broadcast_page._InlineAIMarkdownRequest.start"
+            "app.view.pages.broadcast_page._AIMarkdownRequest.start"
         ):
             page._onBroadcast()
 

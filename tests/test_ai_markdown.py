@@ -19,6 +19,7 @@ from app.view.pages.broadcast_page import (
     AIMarkdownDialog,
     BroadcastEditPage,
     BroadcastWindow,
+    _AIMarkdownRequest,
     _iterSseContent,
 )
 from app.view.pages.setting_page import CUSTOM_STYLE_PLACEHOLDER, SettingPage
@@ -160,15 +161,15 @@ class AIMarkdownTest(unittest.TestCase):
         with patch.object(AIMarkdownDialog, "_fetchQuota"):
             dialog = AIMarkdownDialog("原内容", parent)
         self.addCleanup(dialog.close)
-        response = MagicMock()
+        request = MagicMock()
         dialog._running = True
-        dialog._activeResponse = response
+        dialog._request = request
 
         dialog.reject()
 
-        self.assertTrue(dialog._cancelEvent.is_set())
+        request.cancel.assert_called_once_with()
+        self.assertIsNone(dialog._request)
         self.assertFalse(dialog._running)
-        response.close.assert_called_once()
 
         with patch.object(AIMarkdownDialog, "_fetchQuota"):
             batchingDialog = AIMarkdownDialog("", parent)
@@ -368,13 +369,6 @@ class AIMarkdownTest(unittest.TestCase):
         self.assertIn("要求输出：\n- 做大册103页", prompt)
 
     def testClientSendsEnabledCustomStyle(self):
-        parent = QWidget()
-        parent.resize(760, 500)
-        self.addCleanup(parent.close)
-        with patch.object(AIMarkdownDialog, "_fetchQuota"):
-            dialog = AIMarkdownDialog("原内容", parent)
-        self.addCleanup(dialog.close)
-
         response = MagicMock()
         response.__enter__.return_value = response
         response.headers = {}
@@ -393,25 +387,22 @@ class AIMarkdownTest(unittest.TestCase):
             try:
                 cfg.set(cfg.aiMarkdownCustomStyleEnabled, True)
                 cfg.set(cfg.aiMarkdownCustomStyle, "只使用列表")
-                dialog._source = "原内容"
                 with patch(
                     "app.view.pages.broadcast_page.requests.post",
                     return_value=response,
                 ) as post:
-                    dialog._streamConversion()
+                    _AIMarkdownRequest("原内容")._stream()
                 self.assertEqual(
                     post.call_args.kwargs["json"]["custom_style"],
                     "只使用列表",
                 )
 
                 cfg.set(cfg.aiMarkdownCustomStyleEnabled, False)
-                dialog._result = ""
-                dialog._finished = False
                 with patch(
                     "app.view.pages.broadcast_page.requests.post",
                     return_value=response,
                 ) as post:
-                    dialog._streamConversion()
+                    _AIMarkdownRequest("原内容")._stream()
                 self.assertNotIn("custom_style", post.call_args.kwargs["json"])
             finally:
                 cfg.set(cfg.aiMarkdownCustomStyleEnabled, oldEnabled)
