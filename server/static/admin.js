@@ -195,25 +195,6 @@
         ...table.querySelectorAll("tbody > tr[data-sort-id]"),
     ];
 
-    // 附属行（行内编辑表单等）标 data-sort-follows="<所属行 id>"，紧跟在所属行后面，
-    // 和它作为一整块移动。只挪排序行会把编辑表单留在原位、挂到别的行下面，
-    // 方向键也会被夹在中间的附属行挡住。
-    const companionRows = (row) => {
-        const rows = [];
-        let next = row.nextElementSibling;
-        while (next && next.dataset.sortFollows === row.dataset.sortId) {
-            rows.push(next);
-            next = next.nextElementSibling;
-        }
-        return rows;
-    };
-
-    const rowBlockEnd = (row) => companionRows(row).at(-1) || row;
-
-    const moveRowBlock = (body, row, reference) => {
-        [row, ...companionRows(row)].forEach((item) => body.insertBefore(item, reference));
-    };
-
     const refreshTableOrder = (table) => {
         sortableRows(table).forEach((row, index) => {
             const position = row.querySelector("[data-order-position]");
@@ -256,14 +237,22 @@
         if (!body) return;
         let drag = null;
         let scrollFrame = null;
-        table.dataset.sortRevision = sortableRows(table)
-            .map((row) => row.dataset.sortId).join(",");
+        const syncRevision = () => {
+            table.dataset.sortRevision = sortableRows(table)
+                .map((row) => row.dataset.sortId).join(",");
+        };
+        syncRevision();
+        // 表体可能被服务端返回的新行整块替换（恢复默认示例），状态跟着新行重算。
+        table.addEventListener("admin:rows-replaced", () => {
+            refreshTableOrder(table);
+            syncRevision();
+        });
 
         const restore = (ids) => {
             const rows = new Map(sortableRows(table).map((row) => [row.dataset.sortId, row]));
             ids.forEach((id) => {
                 const row = rows.get(id);
-                if (row) moveRowBlock(body, row, null);
+                if (row) body.insertBefore(row, null);
             });
             refreshTableOrder(table);
         };
@@ -289,12 +278,12 @@
             const bounds = target.getBoundingClientRect();
             const reference = clientY < bounds.top + bounds.height / 2
                 ? target
-                : rowBlockEnd(target).nextElementSibling;
-            if (reference === drag.row || reference === rowBlockEnd(drag.row).nextElementSibling) return;
+                : target.nextElementSibling;
+            if (reference === drag.row || reference === drag.row.nextElementSibling) return;
             const positions = window.matchMedia("(prefers-reduced-motion: reduce)").matches
                 ? null
                 : new Map(sortableRows(table).map((row) => [row, row.offsetTop]));
-            moveRowBlock(body, drag.row, reference);
+            body.insertBefore(drag.row, reference);
             positions?.forEach((top, row) => {
                 if (row === drag.row || top === row.offsetTop) return;
                 row.animate(
@@ -363,64 +352,56 @@
         document.addEventListener("pointerup", handlePointerUp);
         document.addEventListener("pointercancel", handlePointerCancel);
 
-        table.querySelectorAll(".drag-handle").forEach((handle) => {
-            handle.addEventListener("pointerdown", (event) => {
-                if (event.button !== 0 || table.dataset.sortSaving === "true") return;
-                const row = handle.closest("tr[data-sort-id]");
-                const bounds = row.getBoundingClientRect();
-                const ghost = document.createElement("table");
-                const ghostRow = row.cloneNode(true);
-                ghost.className = "sort-drag-ghost";
-                ghost.setAttribute("aria-hidden", "true");
-                ghost.style.left = `${bounds.left}px`;
-                ghost.style.top = `${bounds.top}px`;
-                ghost.style.width = `${bounds.width}px`;
-                [...row.cells].forEach((cell, index) => {
-                    ghostRow.cells[index].style.width = `${cell.getBoundingClientRect().width}px`;
-                });
-                ghost.append(document.createElement("tbody"));
-                ghost.tBodies[0].append(ghostRow);
-                document.body.append(ghost);
-                drag = {
-                    pointerId: event.pointerId,
-                    row,
-                    handle,
-                    ghost,
-                    startY: event.clientY,
-                    order: sortableRows(table).map((item) => item.dataset.sortId),
-                    changed: false,
-                    clientX: event.clientX,
-                    clientY: event.clientY,
-                };
-                handle.setPointerCapture(event.pointerId);
-                row.classList.add("is-dragging");
-                table.classList.add("is-sorting");
-                event.preventDefault();
+        // 事件挂在表体上而不是每个手柄上，表体换成新行后拖拽照样可用。
+        body.addEventListener("pointerdown", (event) => {
+            const handle = event.target.closest(".drag-handle");
+            if (!handle || event.button !== 0 || table.dataset.sortSaving === "true") return;
+            const row = handle.closest("tr[data-sort-id]");
+            const bounds = row.getBoundingClientRect();
+            const ghost = document.createElement("table");
+            const ghostRow = row.cloneNode(true);
+            ghost.className = "sort-drag-ghost";
+            ghost.setAttribute("aria-hidden", "true");
+            ghost.style.left = `${bounds.left}px`;
+            ghost.style.top = `${bounds.top}px`;
+            ghost.style.width = `${bounds.width}px`;
+            [...row.cells].forEach((cell, index) => {
+                ghostRow.cells[index].style.width = `${cell.getBoundingClientRect().width}px`;
             });
+            ghost.append(document.createElement("tbody"));
+            ghost.tBodies[0].append(ghostRow);
+            document.body.append(ghost);
+            drag = {
+                pointerId: event.pointerId,
+                row,
+                handle,
+                ghost,
+                startY: event.clientY,
+                order: sortableRows(table).map((item) => item.dataset.sortId),
+                changed: false,
+                clientX: event.clientX,
+                clientY: event.clientY,
+            };
+            handle.setPointerCapture(event.pointerId);
+            row.classList.add("is-dragging");
+            table.classList.add("is-sorting");
+            event.preventDefault();
+        });
 
-            handle.addEventListener("keydown", (event) => {
-                if (!["ArrowUp", "ArrowDown"].includes(event.key)
-                    || table.dataset.sortSaving === "true") return;
-                const row = handle.closest("tr[data-sort-id]");
-                let sibling = event.key === "ArrowUp"
-                    ? row.previousElementSibling
-                    : rowBlockEnd(row).nextElementSibling;
-                while (sibling && !sibling.matches("tr[data-sort-id]")) {
-                    sibling = event.key === "ArrowUp"
-                        ? sibling.previousElementSibling
-                        : sibling.nextElementSibling;
-                }
-                if (!sibling) return;
-                const previousOrder = sortableRows(table).map((item) => item.dataset.sortId);
-                moveRowBlock(
-                    body,
-                    row,
-                    event.key === "ArrowUp" ? sibling : rowBlockEnd(sibling).nextElementSibling,
-                );
-                refreshTableOrder(table);
-                persist(previousOrder);
-                event.preventDefault();
-            });
+        body.addEventListener("keydown", (event) => {
+            const handle = event.target.closest(".drag-handle");
+            if (!handle || !["ArrowUp", "ArrowDown"].includes(event.key)
+                || table.dataset.sortSaving === "true") return;
+            const row = handle.closest("tr[data-sort-id]");
+            const sibling = event.key === "ArrowUp"
+                ? row.previousElementSibling
+                : row.nextElementSibling;
+            if (!sibling?.matches("tr[data-sort-id]")) return;
+            const previousOrder = sortableRows(table).map((item) => item.dataset.sortId);
+            body.insertBefore(row, event.key === "ArrowUp" ? sibling : sibling.nextElementSibling);
+            refreshTableOrder(table);
+            persist(previousOrder);
+            event.preventDefault();
         });
         window.addEventListener("blur", () => {
             if (drag) finishDrag(drag.pointerId, false);
@@ -467,10 +448,31 @@
         });
     };
 
+    // 服务端在 JSON 里带 fill（{key: 值} 写进 [data-fill=key] 的输入框）或
+    // replace（{key: HTML} 换掉 [data-replace=key] 的内容），页面就地更新，不刷新。
+    const applyPayload = (payload) => {
+        Object.entries(payload.fill || {}).forEach(([key, value]) => {
+            document.querySelectorAll(`[data-fill="${CSS.escape(key)}"]`).forEach((field) => {
+                field.value = value;
+            });
+        });
+        Object.entries(payload.replace || {}).forEach(([key, html]) => {
+            document.querySelectorAll(`[data-replace="${CSS.escape(key)}"]`).forEach((target) => {
+                target.innerHTML = html;
+                const table = target.closest("[data-sortable-table]");
+                if (!table) return;
+                table.dispatchEvent(new CustomEvent("admin:rows-replaced"));
+                const count = document.querySelector("[data-item-count]");
+                if (count) count.textContent = String(sortableRows(table).length);
+            });
+        });
+    };
+
     const submitAsync = async (form) => {
         if (form.dataset.submitting === "true") return;
         form.dataset.submitting = "true";
         setButtonLoading(form, true);
+        let navigating = false;
         try {
             const response = await fetch(form.action, {
                 method: (form.method || "POST").toUpperCase(),
@@ -490,12 +492,18 @@
             if (!response.ok || !payload) {
                 throw new Error(payload?.message || "操作失败，请稍后重试");
             }
+            if (payload.redirect) {
+                // 提示由服务端闪存到目标页显示；按钮保持加载状态直到离开本页。
+                navigating = true;
+                window.location.assign(payload.redirect);
+                return;
+            }
             if (form.dataset.resetKind) updateQuotaLabels(form);
+            applyPayload(payload);
             showToast(payload?.message || "操作已完成", payload?.category || "success");
             if (form.dataset.removeOnSuccess) {
                 const target = form.closest(form.dataset.removeOnSuccess);
                 const table = target?.closest("table");
-                if (target?.dataset.sortId) companionRows(target).forEach((row) => row.remove());
                 target?.remove();
                 refreshTableOrder(table);
                 if (table?.matches("[data-sortable-table]")) {
@@ -517,8 +525,10 @@
         } catch (error) {
             showToast(error.message || "操作失败，请稍后重试", "error");
         } finally {
-            delete form.dataset.submitting;
-            setButtonLoading(form, false);
+            if (!navigating) {
+                delete form.dataset.submitting;
+                setButtonLoading(form, false);
+            }
         }
     };
 
@@ -577,29 +587,24 @@
         cancelButton.focus();
     };
 
-    document.querySelectorAll("form[data-confirm]").forEach((form) => {
-        form.addEventListener("submit", (event) => {
-            if (form.dataset.confirmed === "true") return;
+    // 委托到 document：服务端换进来的新行里的表单同样生效。
+    document.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-confirm]");
+        if (!button?.form) return;
+        event.preventDefault();
+        showConfirm(button.form, button);
+    });
+
+    document.addEventListener("submit", (event) => {
+        const form = event.target;
+        if (form.dataset.confirm && form.dataset.confirmed !== "true") {
             event.preventDefault();
             showConfirm(form);
-        });
-    });
-
-    document.querySelectorAll("button[data-confirm]").forEach((button) => {
-        const form = button.form;
-        if (!form) return;
-        button.addEventListener("click", (event) => {
-            event.preventDefault();
-            showConfirm(form, button);
-        });
-    });
-
-    document.querySelectorAll("form[data-async-form]").forEach((form) => {
-        form.addEventListener("submit", (event) => {
-            if (form.dataset.confirm && form.dataset.confirmed !== "true") return;
-            if (form.dataset.confirmed === "true") delete form.dataset.confirmed;
-            event.preventDefault();
-            submitAsync(form);
-        });
+            return;
+        }
+        if (!form.matches("[data-async-form]")) return;
+        delete form.dataset.confirmed;
+        event.preventDefault();
+        submitAsync(form);
     });
 })();

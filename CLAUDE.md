@@ -161,7 +161,9 @@ AI Markdown 数据库的 schema 初始化缓存同时使用文件身份和 SQLit
 
 `server/templates/admin_base.html` 拥有 Admin Console 的共享导航布局；`server/static/admin.css` 和 `server/static/admin.js` 拥有后台共用的导航、表格拖拽和异步交互，不在各页面模板复制相同逻辑。移动端打开侧边栏时锁定页面滚动，但导航列表本身必须保留独立的纵向触控滚动。
 
-共享排序表的每一行可以带附属行（如行内编辑表单），附属行标 `data-sort-follows="<所属行 id>"` 并紧跟所属行，拖拽、方向键和恢复顺序时整块移动。所有排序接口都接收 admin.js 提交的 `item_id` / `expected_item_id`，页面不得改写 `window.fetch` 去适配别的载荷格式。
+后台能不刷新就不刷新。异步表单（`data-async-form`）的结果由服务端 JSON 决定页面怎么变：`redirect` 表示成功后跳到别的页面，提示经 flash 带过去，失败时停在原页不动；`fill` 把值写进 `[data-fill]` 输入框；`replace` 用服务端渲染的 HTML 换掉 `[data-replace]` 的内容，排序表、确认框和异步表单的事件都挂在外层，换进来的新行照常可用。后台的 CSP 不允许内联脚本，页面交互只能写进 admin.js。编辑长内容用独立页面，不在排序表里插行内编辑表单。
+
+所有排序接口都接收 admin.js 提交的 `item_id` / `expected_item_id`，页面不得改写 `window.fetch` 去适配别的载荷格式。
 
 Catalog Order 由 `server/app_store.py` 按稳定 ID 写入数据库。拖拽和键盘排序提交完整新顺序及原始顺序快照；服务端在事务内核对原始顺序，过期快照返回 HTTP 409。保存失败或拖拽取消时，浏览器恢复原顺序；拖拽浮影只是临时视觉状态，不参与命中测试或持久化。Application Preset 排序必须限定在所属 Application 内。
 

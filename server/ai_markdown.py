@@ -522,6 +522,14 @@ def _saveSystemPrompt(systemPrompt):
         database.commit()
 
 
+def _resetSystemPrompt():
+    # 删掉而不是写入默认原文：没有保存值时一直跟随代码里的默认模板，
+    # 以后默认模板更新也能生效。
+    with closing(_connect()) as database:
+        database.execute("DELETE FROM settings WHERE key = 'system_prompt'")
+        database.commit()
+
+
 def _registerMachine(machineId):
     now = _nowIso()
     with closing(_connect()) as database:
@@ -1058,10 +1066,30 @@ def _isAjaxRequest():
 
 
 def _adminResponse(
-    message, category, endpoint, status=200, urlValues=None, renderer=None
+    message,
+    category,
+    endpoint,
+    status=200,
+    urlValues=None,
+    renderer=None,
+    navigate=False,
+    data=None,
 ):
+    """Answer an admin form the way it was submitted.
+
+    An async form gets JSON: ``navigate`` tells admin.js to go to ``endpoint``
+    (the message is flashed so it shows up there), ``data`` carries values the
+    page updates in place. A plain form gets the flash and a redirect.
+    """
     if _isAjaxRequest():
-        return jsonify(message=message, category=category), status
+        if navigate:
+            flash(message, category)
+            return jsonify(
+                message=message,
+                category=category,
+                redirect=url_for(endpoint, **(urlValues or {})),
+            ), status
+        return jsonify(message=message, category=category, **(data or {})), status
     flash(message, category)
     if renderer is not None:
         return renderer(), status
@@ -1478,18 +1506,39 @@ def _approveConversionLog(logId, inputContent, outputContent):
         if cursor.rowcount != 1:
             database.rollback()
             return False
-        maxOrder = database.execute(
-            "SELECT COALESCE(MAX(sort_order), -1) FROM prompt_examples"
-        ).fetchone()[0]
-        database.execute(
-            """
-            INSERT INTO prompt_examples(input_content, output_content, sort_order, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (inputContent, outputContent, maxOrder + 1, now),
-        )
+        _appendPromptExample(database, inputContent, outputContent, now)
         database.commit()
     return True
+
+
+def _appendPromptExample(database, inputContent, outputContent, now):
+    maxOrder = database.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) FROM prompt_examples"
+    ).fetchone()[0]
+    database.execute(
+        """
+        INSERT INTO prompt_examples(input_content, output_content, sort_order, created_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (inputContent, outputContent, maxOrder + 1, now),
+    )
+
+
+def _addPromptExample(inputContent, outputContent):
+    with closing(_connect()) as database:
+        database.execute("BEGIN IMMEDIATE")
+        _appendPromptExample(database, inputContent, outputContent, _nowIso())
+        database.commit()
+
+
+def _getPromptExample(exampleId):
+    with closing(_connect()) as database:
+        row = database.execute(
+            "SELECT id, input_content, output_content FROM prompt_examples "
+            "WHERE id = ?",
+            (exampleId,),
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def _updatePromptExample(exampleId, inputContent, outputContent):
@@ -1617,6 +1666,19 @@ def adminPrompt():
             return _adminResponse("系统提示词已保存", "success", "adminPrompt")
 
 
+@app.post("/admin/ai/markdown/prompt/reset")
+@_loginRequired
+def adminPromptReset():
+    _checkCsrf()
+    _resetSystemPrompt()
+    return _adminResponse(
+        "已恢复默认提示词",
+        "success",
+        "adminPrompt",
+        data={"fill": {"system_prompt": DEFAULT_PROMPT_TEMPLATE}},
+    )
+
+
 @app.get("/admin/ai/markdown/logs/")
 @_loginRequired
 def adminConversionLogs():
@@ -1646,12 +1708,19 @@ def adminConversionLogAdd(logId):
     log = _getConversionLog(logId)
     if not log:
         return _adminResponse("未找到该记录", "error", "adminConversionLogs", 404)
+    return _renderConversionLogAdd(log)
+
+
+def _renderConversionLogAdd(log, inputContent=None, outputContent=None):
     return render_template(
         "admin_ai_log_add.html",
         csrf_token=_csrfToken(),
         current_page="ai_logs",
         log=log,
-        mode="add",
+        input_content=log["input_content"] if inputContent is None else inputContent,
+        output_content=(
+            log["output_content"] if outputContent is None else outputContent
+        ),
     )
 
 
@@ -1666,11 +1735,22 @@ def adminConversionLogAddSubmit(logId):
     outputContent = request.form.get("output_content", "").strip()
     if not inputContent or not outputContent:
         return _adminResponse(
-            "输入和输出内容不能为空", "error", "adminConversionLogs", 400
+            "输入和输出内容不能为空",
+            "error",
+            "adminConversionLogs",
+            400,
+            renderer=lambda: _renderConversionLogAdd(
+                log, request.form.get("input_content", ""),
+                request.form.get("output_content", ""),
+            ),
         )
     if not _approveConversionLog(logId, inputContent, outputContent):
-        return _adminResponse("这条记录已加入过示例", "info", "adminConversionLogs")
-    return _adminResponse("示例已加入提示词", "success", "adminConversionLogs")
+        return _adminResponse(
+            "这条记录已加入过示例", "info", "adminConversionLogs", navigate=True
+        )
+    return _adminResponse(
+        "示例已加入提示词", "success", "adminConversionLogs", navigate=True
+    )
 
 
 @app.get("/admin/ai/markdown/logs/review")
@@ -1751,19 +1831,71 @@ def adminPromptExamples():
     )
 
 
-@app.post("/admin/ai/markdown/examples/<int:exampleId>/edit")
+def _renderPromptExampleForm(exampleId=None, inputContent="", outputContent=""):
+    return render_template(
+        "admin_ai_example.html",
+        csrf_token=_csrfToken(),
+        current_page="ai_examples",
+        example_id=exampleId,
+        input_content=inputContent,
+        output_content=outputContent,
+    )
+
+
+def _submittedPromptExample(exampleId=None):
+    """The posted example, or the response that turns it away."""
+    rawInput = request.form.get("input_content", "")
+    rawOutput = request.form.get("output_content", "")
+    inputContent, outputContent = rawInput.strip(), rawOutput.strip()
+    if inputContent and outputContent:
+        return inputContent, outputContent, None
+    return None, None, _adminResponse(
+        "输入和输出内容不能为空",
+        "error",
+        "adminPromptExamples",
+        400,
+        renderer=lambda: _renderPromptExampleForm(exampleId, rawInput, rawOutput),
+    )
+
+
+@app.route("/admin/ai/markdown/examples/new", methods=["GET", "POST"])
+@_loginRequired
+def adminPromptExampleNew():
+    if request.method == "GET":
+        return _renderPromptExampleForm()
+    _checkCsrf()
+    inputContent, outputContent, rejected = _submittedPromptExample()
+    if rejected:
+        return rejected
+    _addPromptExample(inputContent, outputContent)
+    return _adminResponse(
+        "示例已加入", "success", "adminPromptExamples", navigate=True
+    )
+
+
+@app.route(
+    "/admin/ai/markdown/examples/<int:exampleId>/edit", methods=["GET", "POST"]
+)
 @_loginRequired
 def adminPromptExampleEdit(exampleId):
-    _checkCsrf()
-    inputContent = request.form.get("input_content", "").strip()
-    outputContent = request.form.get("output_content", "").strip()
-    if not inputContent or not outputContent:
-        return _adminResponse(
-            "输入和输出内容不能为空", "error", "adminPromptExamples", 400
+    if request.method == "GET":
+        example = _getPromptExample(exampleId)
+        if not example:
+            return _adminResponse(
+                "未找到该示例", "error", "adminPromptExamples", 404
+            )
+        return _renderPromptExampleForm(
+            exampleId, example["input_content"], example["output_content"]
         )
+    _checkCsrf()
+    inputContent, outputContent, rejected = _submittedPromptExample(exampleId)
+    if rejected:
+        return rejected
     if not _updatePromptExample(exampleId, inputContent, outputContent):
         return _adminResponse("未找到该示例", "error", "adminPromptExamples", 404)
-    return _adminResponse("示例已更新", "success", "adminPromptExamples")
+    return _adminResponse(
+        "示例已更新", "success", "adminPromptExamples", navigate=True
+    )
 
 
 @app.post("/admin/ai/markdown/examples/<int:exampleId>/delete")
@@ -1800,7 +1932,17 @@ def adminPromptExamplesReorder():
 def adminPromptExamplesReset():
     _checkCsrf()
     _resetPromptExamples()
-    return _adminResponse("已恢复默认示例", "success", "adminPromptExamples")
+    rows = render_template(
+        "_ai_example_rows.html",
+        csrf_token=_csrfToken(),
+        examples=_allPromptExamples(),
+    )
+    return _adminResponse(
+        "已恢复默认示例",
+        "success",
+        "adminPromptExamples",
+        data={"replace": {"prompt-examples": rows}},
+    )
 
 
 @app.get("/admin/ai/markdown/machines/")

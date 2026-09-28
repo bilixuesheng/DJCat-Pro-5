@@ -616,9 +616,9 @@ class AIAdminTest(TestCase):
         self.assertIn("sidebar-open", css)
         self.assertIn("translateX(-105%)", css)
         self.assertIn("Escape", javascript)
-        self.assertIn("form[data-confirm]", javascript)
+        self.assertIn("form.dataset.confirm", javascript)
         self.assertIn("form.requestSubmit", javascript)
-        self.assertIn("form[data-async-form]", javascript)
+        self.assertIn("[data-async-form]", javascript)
         self.assertIn("[data-dashboard-stats-url]", javascript)
         self.assertIn("visibilitychange", javascript)
         self.assertIn("10_000", javascript)
@@ -636,7 +636,7 @@ class AIAdminTest(TestCase):
         )
         self.assertRegex(css, r"\.sidebar-toggle \{\s*width: 40px;\s*height: 40px;")
         self.assertIn(
-            'if (form.dataset.confirm && form.dataset.confirmed !== "true") return;',
+            'if (form.dataset.confirm && form.dataset.confirmed !== "true") {',
             javascript,
         )
         self.assertNotIn("submitter.dataset.confirmed", javascript)

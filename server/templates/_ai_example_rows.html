@@ -1,0 +1,21 @@
+{% for example in examples %}
+    <tr data-sort-id="{{ example.id }}">
+        <td>
+            <span class="drag-order"><button class="drag-handle" type="button" aria-label="拖动调整顺序，方向键也可调整">⠿</button><code data-order-position>{{ '%02d'|format(loop.index) }}</code></span>
+        </td>
+        <td class="cell-truncate">{{ example.input_content }}</td>
+        <td class="cell-truncate">{{ example.output_content }}</td>
+        <td>{{ example.created_at }}</td>
+        <td>
+            <div class="table-actions">
+                <a class="table-action" href="{{ url_for('adminPromptExampleEdit', exampleId=example.id) }}">编辑</a>
+                <form method="post" action="{{ url_for('adminPromptExampleDelete', exampleId=example.id) }}" data-async-form data-remove-on-success="tr" data-confirm="确认删除这条示例吗？">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button class="table-action" type="submit">删除</button>
+                </form>
+            </div>
+        </td>
+    </tr>
+{% else %}
+    <tr><td class="empty" colspan="5">还没有示例，可以新增、从整理记录加入或恢复默认示例。</td></tr>
+{% endfor %}
