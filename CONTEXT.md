@@ -234,6 +234,12 @@ _Avoid_: 便携 ZIP 的文件格式、Application 的安装目录
 切换 Installed Mode 与 Portable Mode 时，复制整个 App Data Directory 并改写配置中的绝对路径。迁移发生在进程退出阶段，运行中不切换路径。
 _Avoid_: 只复制 `UserConfig.json`、运行中热切换路径
 
+### 窗口
+
+**Resize Band（缩放命中带）**:
+可缩放窗口沿边缘的一圈区域，在其中按下并拖动会改变窗口大小。主窗口和窗口化的 Projection 各有一条；主窗口右上角的最小化、最大化、关闭三个按钮上没有 Resize Band，按下去一律是点按钮。
+_Avoid_: 边框（窗口化时那条 1 px 灰线才是边框）、缩放像素、拖拽边
+
 ### 设置
 
 **Setting Section**:
@@ -269,3 +275,6 @@ _Avoid_: 搜索结果（设置页不再有结果列表）、筛选项
 
 > **Dev:** "在设置里搜'背景颜色'，页面会只留下匹配的卡片吗？"
 > **Domain expert:** "不会。设置搜索只弹 Setting Suggestion，点一条才跳到对应的 Setting Route，页面本身从不筛选。"
+
+> **Dev:** "把主窗口的边框再调宽一点，手指好拖。"
+> **Domain expert:** "你说的是 Resize Band，不是边框。可以加宽，但它在右上角三个按钮上始终让位，按钮上一律是点击。"

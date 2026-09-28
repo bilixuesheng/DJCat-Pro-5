@@ -1,6 +1,7 @@
 import json
 import re
 import subprocess
+import sys
 import threading
 import time
 from collections import deque
@@ -10,8 +11,10 @@ from pathlib import Path
 from loguru import logger
 from PySide6.QtCore import (
     QObject,
+    QPoint,
     QPropertyAnimation,
     QProcess,
+    QRect,
     Qt,
     QTimer,
     QUrl,
@@ -38,6 +41,12 @@ from qfluentwidgets import (
     setTheme,
     setThemeColor,
 )
+
+if sys.platform == "win32":
+    from ctypes.wintypes import MSG
+
+    import win32con
+    import win32gui
 
 from app.common.application_icon import applicationIcon
 from app.common.application_version import isUpdateAvailable
@@ -463,6 +472,33 @@ class MainWindow(MSFluentWindow):
             self.RESIZE_BORDER_PIXELS_AT_300_PERCENT
             * ratio
             / self.RESIZE_BORDER_REFERENCE_DPR
+        )
+
+    def nativeEvent(self, eventType, message):
+        handled, result = super().nativeEvent(eventType, message)
+        if sys.platform != "win32" or not handled:
+            return handled, result
+        msg = MSG.from_address(int(message))
+        # HTLEFT…HTBOTTOMRIGHT 是连续的八个缩放命中码；Win11 最大化按钮的 HTMAXBUTTON 不在其中，贴靠布局照旧。
+        if (
+            msg.message == win32con.WM_NCHITTEST
+            and win32con.HTLEFT <= result <= win32con.HTBOTTOMRIGHT
+            and self._isOnTitleBarButton(msg)
+        ):
+            return True, win32con.HTCLIENT
+        return handled, result
+
+    def _isOnTitleBarButton(self, msg) -> bool:
+        # 组件库按光标位置判断命中带，但触控按下时光标可能还停在别处；这里用消息里的坐标。
+        x = (msg.lParam & 0xFFFF) - (0x10000 if msg.lParam & 0x8000 else 0)
+        y = ((msg.lParam >> 16) & 0xFFFF) - (0x10000 if msg.lParam & 0x80000000 else 0)
+        x, y = win32gui.ScreenToClient(msg.hWnd, (x, y))
+        scale = self.devicePixelRatioF()
+        position = QPoint(int(x // scale), int(y // scale))
+        return any(
+            button.isVisibleTo(self)
+            and QRect(button.mapTo(self, QPoint(0, 0)), button.size()).contains(position)
+            for button in (self.titleBar.minBtn, self.titleBar.maxBtn, self.titleBar.closeBtn)
         )
 
     def _connectScreenChanged(self):
