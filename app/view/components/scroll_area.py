@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from qfluentwidgets import CardWidget
+
 if sys.platform == "darwin":
     from qfluentwidgets import ScrollArea as FluentScrollArea
 else:
@@ -55,8 +57,9 @@ _touchPressTargets = weakref.WeakSet()
 def registerTouchPressTarget(widget) -> None:
     """Let a custom-painted widget drop its pressed cell when a touch turns into a scroll.
 
-    The widget must provide ``cancelTouchPress()``. Buttons need no registration:
-    the guard finds every pressed ``QAbstractButton`` under the scroll area.
+    The widget must provide ``cancelTouchPress()``. Buttons and cards need no
+    registration: the guard finds every pressed ``QAbstractButton`` and
+    ``CardWidget`` under the scroll area.
     """
     _touchPressTargets.add(widget)
 
@@ -90,10 +93,15 @@ class _TouchScrollGuard(QObject):
         return None
 
     @staticmethod
-    def _cancelPressedButtons(scrollArea):
+    def _cancelPresses(scrollArea):
         for button in scrollArea.findChildren(QAbstractButton):
             if button.isDown():
                 button.setDown(False)
+        # 卡片的按下态只有松开能复位，而起滑后的那次松开会被这里吞掉。
+        for card in scrollArea.findChildren(CardWidget):
+            if card.isPressed:
+                card.isPressed = False
+                card._updateBackgroundColor()
         for target in tuple(_touchPressTargets):
             try:
                 if scrollArea.isAncestorOf(target):
@@ -122,7 +130,7 @@ class _TouchScrollGuard(QObject):
                 distance = (position - self.touchStart).manhattanLength()
                 if distance >= QApplication.startDragDistance():
                     self.suppressScrollArea = self.activeScrollArea
-                    self._cancelPressedButtons(self.activeScrollArea)
+                    self._cancelPresses(self.activeScrollArea)
             return False
 
         if eventType in (QEvent.Type.TouchEnd, QEvent.Type.TouchCancel):
@@ -130,7 +138,7 @@ class _TouchScrollGuard(QObject):
             self.activeScrollArea = None
             self.touchStart = None
             if eventType == QEvent.Type.TouchCancel and activeScrollArea is not None:
-                self._cancelPressedButtons(activeScrollArea)
+                self._cancelPresses(activeScrollArea)
             return False
 
         if eventType not in (
@@ -157,7 +165,7 @@ class _TouchScrollGuard(QObject):
         ):
             if self.activeScrollArea is None:
                 self.suppressScrollArea = None
-            self._cancelPressedButtons(scrollArea)
+            self._cancelPresses(scrollArea)
             event.accept()
             return True
 

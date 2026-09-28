@@ -50,6 +50,8 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 **`ScrollArea` 统一仲裁单指触控滚动与子控件点击。** 从按钮、下拉框或卡片上起滑时，移动达到系统拖动阈值后必须取消该触控序列的按压和释放，不能在滚动结束时触发原控件；未达到阈值的短按仍按正常点击处理。页面不得各自复制这套判定。HomePage 进入卡片编辑态时由排序手势独占触控，并依靠卡片拖动的边缘自动滚动跨越视口；退出编辑态后恢复页面触控滚动。
 
+**触控按下由 Qt 在落指瞬间合成，不用 Windows 从触控生成的鼠标消息。** Windows 要先分辨轻点、拖动和长按，按下要等抬手或移动才发出，控件按住时就没有按下态。`djcat.py` 用 `withQtTouchPress()` 给 QApplication 加 `-platform windows:nomousefromtouch`；已显式指定平台（`-platform`、`QT_QPA_PLATFORM`，如 offscreen 测试和 CI）时不加，也不得改用环境变量设置，否则 DJCat 启动的 Application 会继承它。因为按下立即到达，从控件上起滑必然先出现按下态，起滑取消要把它们全部复位：按钮的 `isDown`、`CardWidget` 的 `isPressed`，以及登记过的自绘目标；起滑后的松开被仲裁吞掉，控件自己不会复位。长按交给 Windows，不另做长按菜单。理由见 `docs/adr/0004-touch-press-synthesized-by-qt.md`。
+
 需要让出触控的模式调用 `ScrollArea.setTouchScrollSuppressed()`，它把拖动阈值抬到手指够不到的距离，不释放手势；页面不得自己 `QScroller.ungrabGesture()`，也不得对已抓过的 viewport 再调 `QScroller.grabGesture()`（它会先自行 ungrab 再重抓）。不是 `ScrollArea` 的 viewport（Projection 正文的 `QTextEdit`、`MarkdownView`）用 `scroll_area.setTouchScrollSuppressed(viewport, ...)` 做同一件事。Application Store 页面本身不滚动，两个选项卡和详情两栏各自是 `ScrollArea`，进出详情不抑制也不释放任何手势。
 
 **Tray Menu 不拥有 Home Card。** 它只根据 HomePage 提供的入口快照重建菜单，并把稳定 key 交回 MainWindow/HomePage 执行。
@@ -257,7 +259,7 @@ Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` �
 
 ```text
 set working directory
-  → SingletonApplication (Windows single instance + IPC)
+  → SingletonApplication (Windows single instance + IPC; Qt synthesizes touch presses on Windows)
   → unlockQtAnimations (before any QWidget animation is created)
   → optimizeFluentDialogs + optimizeFluentMenus (before MainWindow or its popups are created)
   → cacheFluentSvgIcons (before any QFluentWidgets icon is painted)
