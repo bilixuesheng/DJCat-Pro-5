@@ -191,7 +191,7 @@ _Avoid_: theme、CSS、System Prompt
 _Avoid_: request log（那是额度和计费的元数据记录）、history、转化记录
 
 **Prompt Example**:
-已审批并纳入系统提示词的 few-shot 输入输出对。管理员从 Conversion Log 中选取并编辑后加入；运行时按顺序动态拼接到提示词模板中。
+纳入系统提示词的 few-shot 输入输出对。来源有两种：管理员从 Conversion Log 中选取并编辑后加入，或在后台直接编写；两者加入后没有区别。运行时按顺序动态拼接到提示词模板之后，模板本身不应再写示例。
 _Avoid_: sample、template、system prompt（Prompt Example 是提示词的一部分，不是提示词本身）
 
 ### 更新
