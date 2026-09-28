@@ -366,6 +366,7 @@ def __init__(self, parent=None):
 - 页面关闭时先设置 shutdown/cancel 状态，再等待有文件提交风险的线程；超时后也不能让回调访问已销毁控件。
 - 可计算总字节数的下载使用确定进度；无法可靠估计的文件操作使用不确定进度，不伪造百分比。
 - 新的私有 Qt/Windows API 必须封装、可失败、可回退，并有锁定版本的真实二进制验证。
+- 依赖 QFluentWidgets `exec(pos, ani, aniType)` 签名的菜单 Python 子类，在自己的类体里重新声明 `exec`（如 `exec = CompleterMenu.exec`）：PySide6 在实例上查找 `exec` 时跳过继承来的 Python 重写，落到 `QMenu.exec`（6.9–6.11 均如此）。托盘 `AcrylicMenu` 走原生 `QMenu.exec` 属于 v5.1.2 固定行为，保持原样。
 - 取窗口所在屏幕用 `app/platform/screens.py` 的 `screenFor()`，不得调用 `QWidget.screen()` 或 `QWindow.screen()`（原因见 `screens.py` 文件头）。只需要设备像素比时直接用 `devicePixelRatioF()`。`tests/test_screens.py` 会扫描 `app/` 拦下新的调用。
 
 ### Comments
