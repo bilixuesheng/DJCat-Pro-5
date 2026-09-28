@@ -16,6 +16,10 @@ class SettingSuggestionMenu(CompleterMenu):
 
     suggestionActivated = Signal(object)
 
+    # PySide6 在实例上查找 exec 时跳过继承来的 Python 重写，直接落到 QMenu.exec；
+    # CompleterMenu.popup() 要传 aniType，必须在本类重新声明。
+    exec = CompleterMenu.exec
+
     def __init__(self, lineEdit):
         super().__init__(lineEdit)
         self._suggestions = []

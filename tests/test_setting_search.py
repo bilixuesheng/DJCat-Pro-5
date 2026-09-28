@@ -435,6 +435,8 @@ class SettingSearchTest(TestCase):
         self.assertEqual(
             self.window.settingSuggestionMenu.items, ["主页横幅亮度"]
         )
+        # 槽函数里的异常只会被打印，列表填好后 popup() 仍可能失败；必须断言弹窗真的出现。
+        self.assertTrue(self.window.settingSuggestionMenu.isVisible())
 
         self.window.settingSuggestionMenu.suggestionActivated.emit(
             page.searchSuggestions("横幅亮度")[0]
