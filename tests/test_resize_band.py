@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
-from PySide6.QtCore import QEvent
+from PySide6.QtCore import QEvent, QPoint
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import MSFluentWindow
 
@@ -63,15 +63,20 @@ class MainWindowResizeBandTest(TestCase):
             self.screenToClient = nativeGui.ScreenToClient
             return self.window.nativeEvent(b"windows_generic_MSG", 1)
 
+    def _titleBarPoint(self, button, x, y):
+        point = button.mapTo(self.window, QPoint(x, y))
+        return point.x(), point.y()
+
     def testTitleBarButtonsNeverStartAResize(self):
+        titleBar = self.window.titleBar
         width = self.window.width()
-        for scale in (1, 3):
-            for x, y, libraryHitTest in (
-                (width - 1, 0, HIT_TESTS.HTTOPRIGHT),
-                (width - 1, 20, HIT_TESTS.HTRIGHT),
-                (width - 20, 2, HIT_TESTS.HTTOP),
-                (width - 46 - 20, 2, HIT_TESTS.HTTOP),
-                (width - 92 - 20, 2, HIT_TESTS.HTTOP),
+        for scale in (1, 1.5, 3):
+            for (x, y), libraryHitTest in (
+                ((width - 1, 0), HIT_TESTS.HTTOPRIGHT),
+                ((width - 1, titleBar.closeBtn.height() - 1), HIT_TESTS.HTRIGHT),
+                (self._titleBarPoint(titleBar.closeBtn, 20, 2), HIT_TESTS.HTTOP),
+                (self._titleBarPoint(titleBar.maxBtn, 20, 2), HIT_TESTS.HTTOP),
+                (self._titleBarPoint(titleBar.minBtn, 0, 0), HIT_TESTS.HTTOP),
             ):
                 with self.subTest(scale=scale, x=x, y=y):
                     self.assertEqual(
@@ -82,12 +87,13 @@ class MainWindowResizeBandTest(TestCase):
                     self.screenToClient.assert_called_with(123, (-123, -234))
 
     def testResizeBandRemainsBesideTheTitleBarButtons(self):
+        titleBar = self.window.titleBar
         width = self.window.width()
-        for scale in (1, 3):
-            for x, y, libraryHitTest in (
-                (width - 138 - 5, 2, HIT_TESTS.HTTOP),
-                (width - 1, 40, HIT_TESTS.HTRIGHT),
-                (0, 0, HIT_TESTS.HTTOPLEFT),
+        for scale in (1, 1.5, 3):
+            for (x, y), libraryHitTest in (
+                (self._titleBarPoint(titleBar.minBtn, -1, 0), HIT_TESTS.HTTOP),
+                ((width - 1, titleBar.closeBtn.height()), HIT_TESTS.HTRIGHT),
+                ((0, 0), HIT_TESTS.HTTOPLEFT),
             ):
                 with self.subTest(scale=scale, x=x, y=y):
                     self.assertEqual(
@@ -96,8 +102,8 @@ class MainWindowResizeBandTest(TestCase):
                     )
 
     def testMaximizeButtonKeepsSnapLayouts(self):
-        width = self.window.width()
+        x, y = self._titleBarPoint(self.window.titleBar.maxBtn, 20, 2)
         self.assertEqual(
-            self._hitTest(width - 46 - 20, 2, HIT_TESTS.HTMAXBUTTON, 1),
+            self._hitTest(x, y, HIT_TESTS.HTMAXBUTTON, 1),
             (True, HIT_TESTS.HTMAXBUTTON),
         )

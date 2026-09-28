@@ -12,11 +12,9 @@ from loguru import logger
 from PySide6.QtCore import (
     QObject,
     QPoint,
-    QPointF,
     QPropertyAnimation,
     QProcess,
     QRect,
-    QRectF,
     Qt,
     QTimer,
     QUrl,
@@ -496,10 +494,10 @@ class MainWindow(MSFluentWindow):
         y = ((msg.lParam >> 16) & 0xFFFF) - (0x10000 if msg.lParam & 0x80000000 else 0)
         x, y = win32gui.ScreenToClient(msg.hWnd, (x, y))
         scale = self.devicePixelRatioF()
-        position = QPointF(x / scale, y / scale)
+        position = QPoint(int(x // scale), int(y // scale))
         return any(
             button.isVisibleTo(self)
-            and QRectF(QRect(button.mapTo(self, QPoint(0, 0)), button.size())).contains(position)
+            and QRect(button.mapTo(self, QPoint(0, 0)), button.size()).contains(position)
             for button in (self.titleBar.minBtn, self.titleBar.maxBtn, self.titleBar.closeBtn)
         )
 
