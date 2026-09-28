@@ -1,7 +1,9 @@
 """Conversion Log review and Prompt Example management on the Admin Console."""
 
+import re
 from contextlib import closing
 from datetime import datetime, timedelta
+from pathlib import Path
 from unittest import TestCase
 
 from werkzeug.datastructures import MultiDict
@@ -169,3 +171,130 @@ class PromptExampleOrderTest(TestCase):
         ).get_data(as_text=True)
         # 排序的载荷格式归 admin.js 所有；页面改写全局 fetch 会让所有请求都经过它。
         self.assertNotIn("window.fetch", page)
+
+
+AJAX = {"X-Requested-With": "XMLHttpRequest"}
+
+
+class PromptExampleEditingTest(TestCase):
+    setUp = test_ai_admin.AIAdminTest.setUp
+    _csrf = test_ai_admin.AIAdminTest._csrf
+    _login = ConversionLogReviewTest._login
+
+    def _post(self, path, csrf, headers=AJAX, **fields):
+        return self.client.post(
+            path,
+            base_url=BASE_URL,
+            data={"csrf_token": csrf, **fields},
+            headers=headers,
+        )
+
+    def testNewExampleIsAppendedLastAndSendsTheBrowserBackToTheList(self):
+        csrf = self._login()
+        before = ai_markdown._allPromptExamples()
+
+        response = self._post(
+            "/admin/ai/markdown/examples/new",
+            csrf,
+            input_content=" 化学做练习册12页 ",
+            output_content="- 练习册12页",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["redirect"].endswith("/admin/ai/markdown/examples/"))
+        after = ai_markdown._allPromptExamples()
+        self.assertEqual(after[:-1], before)
+        self.assertEqual(after[-1]["input_content"], "化学做练习册12页")
+
+    def testABlankExampleIsTurnedAwayWithoutNavigating(self):
+        csrf = self._login()
+        before = ai_markdown._allPromptExamples()
+
+        response = self._post(
+            "/admin/ai/markdown/examples/new",
+            csrf,
+            input_content="只有输入",
+            output_content="   ",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("redirect", response.json)
+        self.assertEqual(ai_markdown._allPromptExamples(), before)
+
+    def testEditingHappensOnItsOwnPage(self):
+        csrf = self._login()
+        example = ai_markdown._allPromptExamples()[0]
+        path = f"/admin/ai/markdown/examples/{example['id']}/edit"
+
+        page = self.client.get(path, base_url=BASE_URL).get_data(as_text=True)
+        self.assertIn(example["input_content"].split("\n")[0], page)
+
+        response = self._post(
+            path, csrf, input_content="新输入", output_content="新输出"
+        )
+
+        self.assertTrue(response.json["redirect"].endswith("/admin/ai/markdown/examples/"))
+        updated = ai_markdown._allPromptExamples()[0]
+        self.assertEqual(
+            (updated["id"], updated["input_content"], updated["output_content"]),
+            (example["id"], "新输入", "新输出"),
+        )
+
+    def testEditingAMissingExampleGoesBackToTheList(self):
+        self._login()
+        response = self.client.get(
+            "/admin/ai/markdown/examples/9999/edit", base_url=BASE_URL
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.location.endswith("/admin/ai/markdown/examples/"))
+
+    def testResettingExamplesReturnsTheNewRows(self):
+        csrf = self._login()
+        ai_markdown._deletePromptExample(ai_markdown._allPromptExamples()[0]["id"])
+
+        response = self._post("/admin/ai/markdown/examples/reset", csrf)
+
+        rows = response.json["replace"]["prompt-examples"]
+        ids = [example["id"] for example in ai_markdown._allPromptExamples()]
+        self.assertEqual(len(ids), len(ai_markdown.DEFAULT_EXAMPLES))
+        self.assertEqual(
+            [int(value) for value in re.findall(r'data-sort-id="(\d+)"', rows)], ids
+        )
+
+    def testResettingThePromptLeavesOneCopyOfTheExamples(self):
+        csrf = self._login()
+        # 从旧版升级、比对没通过的库：示例既在提示词正文里，也在示例表里。
+        ai_markdown._saveSystemPrompt(ai_markdown._LEGACY_SYSTEM_PROMPT)
+        self.assertEqual(ai_markdown._systemPrompt("").count("原输入："), 8)
+
+        response = self._post("/admin/ai/markdown/prompt/reset", csrf)
+
+        self.assertEqual(
+            response.json["fill"]["system_prompt"],
+            ai_markdown.DEFAULT_PROMPT_TEMPLATE,
+        )
+        self.assertIsNone(ai_markdown._setting("system_prompt"))
+        prompt = ai_markdown._systemPrompt("")
+        self.assertEqual(prompt.count("此处给一些格式示例："), 1)
+        self.assertEqual(prompt.count("原输入："), len(ai_markdown.DEFAULT_EXAMPLES))
+
+    def testAddingFromTheLogListSendsTheBrowserBackToTheLogs(self):
+        csrf = self._login()
+        logId = ConversionLogReviewTest._log(self)
+
+        response = self._post(
+            f"/admin/ai/markdown/logs/{logId}/add",
+            csrf,
+            input_content="英语做97页",
+            output_content="- 做97页",
+        )
+
+        self.assertTrue(response.json["redirect"].endswith("/admin/ai/markdown/logs/"))
+        self.assertEqual(ai_markdown._getConversionLog(logId)["status"], "approved")
+
+    def testAdminTemplatesHaveNoInlineScript(self):
+        # 后台 CSP 不允许内联脚本，写在模板里的 <script> 在浏览器里根本不会执行。
+        templates = Path(ai_markdown.__file__).parent / "templates"
+        for template in templates.glob("*.html"):
+            for tag in re.findall(r"<script\b[^>]*>", template.read_text("utf-8")):
+                self.assertIn("src=", tag, template.name)

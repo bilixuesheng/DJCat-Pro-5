@@ -10,6 +10,12 @@
         <h1>提示词</h1>
         <p>编辑发送给模型的全局规则模板。示例部分在「提示词示例」页面管理，运行时会自动拼接到模板之后。</p>
     </div>
+    <div class="page-header-actions">
+        <form method="post" action="{{ url_for('adminPromptReset') }}" data-async-form data-confirm="确定恢复为默认提示词？当前提示词将被替换。">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button button-danger" type="submit">恢复默认提示词</button>
+        </form>
+    </div>
 </header>
 
 <form class="prompt-form" method="post" action="{{ url_for('adminPrompt') }}" data-async-form>
@@ -18,9 +24,9 @@
         <div><span class="section-index">01</span><h2 id="prompt-title">全局系统提示词</h2></div>
         <span class="prompt-char-limit">最多 {{ max_system_prompt_length }} 个字符</span>
     </div>
-    <textarea name="system_prompt" rows="26" maxlength="{{ max_system_prompt_length }}" required aria-labelledby="prompt-title">{{ system_prompt }}</textarea>
+    <textarea name="system_prompt" rows="26" maxlength="{{ max_system_prompt_length }}" required aria-labelledby="prompt-title" data-fill="system_prompt">{{ system_prompt }}</textarea>
     <div class="prompt-footer">
-        <p>规则修改会应用于下一次转换请求。请保留示例和输出格式要求，避免加入 API Key 等敏感信息。</p>
+        <p>规则修改会应用于下一次转换请求。示例请在「提示词示例」页面管理，不要写在这里；请保留输出格式要求，避免加入 API Key 等敏感信息。</p>
         <button class="button button-primary" type="submit">保存提示词</button>
     </div>
 </form>

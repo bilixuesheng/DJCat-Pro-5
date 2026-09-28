@@ -1742,6 +1742,12 @@ td small { color: var(--muted); }
         align-items: flex-end;
         flex-direction: column;
     }
+    .page-header-actions.page-header-buttons {
+        flex-flow: row wrap;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 12px;
+    }
     .section-heading-actions {
         width: 100%;
         justify-content: flex-start;
