@@ -345,7 +345,7 @@ class HomeCustomCardTest(TestCase):
         try:
             grid = dialog.gridWidget
             grid._pressed = grid.indexOfKey("ADD")
-            _TouchScrollGuard._cancelPressedButtons(dialog.scrollArea)
+            _TouchScrollGuard._cancelPresses(dialog.scrollArea)
             self.assertIsNone(grid._pressed)
         finally:
             dialog.deleteLater()
