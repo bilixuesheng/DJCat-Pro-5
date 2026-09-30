@@ -14,6 +14,7 @@ Windows 上 Qt 6 默认把触控的 `WM_POINTER` 消息交回 `DefWindowProc`，
 
 - 显式指定了平台（命令行 `-platform` 或 `QT_QPA_PLATFORM`，如 offscreen 测试）时不附加这个参数。也不能改用环境变量设置，否则 DJCat 启动的 Application 会继承它。
 - 按下在落指瞬间到达，所以从控件上起滑时一定会先出现按下态。`ScrollArea` 的起滑取消因此必须覆盖所有可按控件：按钮、`CardWidget` 的 `isPressed` 和登记过的自绘目标。起滑后的松开由触控仲裁吞掉，控件自己不会复位。
-- 长按行为没有经过真机验证。按 Qt 6.10 源码推断：Windows 的长按圈仍会出现；抬手时 Qt 合成的左键松开照常算一次点击；系统仍会经 `WM_CONTEXTMENU` 送来右键菜单事件，所以输入框和 Markdown 链接的长按菜单应当保留。如果真机上菜单不弹，再自己实现长按菜单并关掉系统长按，两路不能同时开着，否则一次长按会弹两次菜单。
+- 长按不再有系统的右键菜单。真机验证推翻了当初的推断：即使系统仍发来 `WM_CONTEXTMENU`，Qt 也会丢弃所有由鼠标触发的这类消息（`QGuiApplicationPrivate::processContextMenuEvent`：Widgets do not care about mouse triggered context menu events）。所以 `app/platform/touch_input.py` 自己补上长按：Qt 合成的左键按下后，手指在 `mousePressAndHoldInterval` 内没挪过拖动阈值，就向指下控件发一个 `QContextMenuEvent`，与鼠标右键走同一条路径。菜单弹出后抬手的松开落在菜单上，菜单不会把没见过按下的松开当成点击；没有控件弹菜单时，抬手照常算一次点击，与鼠标按住再松开一致。
+- 标题栏拖动也失效了：qframelesswindow 把拖动交给系统的移动循环（`SC_MOVE | HTCAPTION`），这个循环跟着系统的左键走，而手指的左键按下是 Qt 自己合成的，系统那边还没按下，循环立刻结束；只有手指先挪够距离、系统已经补发按下时才偶尔能拖动。`touch_input.py` 让手指在标题栏上的拖动改由 Qt 直接 `move()` 窗口，最大化时先还原；鼠标拖动仍交给系统，保留贴边吸附。
 - 自己接管 `TouchBegin` 的控件（横幅、主页编辑态卡片、动作排序把手）不再额外收到系统合成的鼠标事件。
-- 回退只需去掉这个启动参数。
+- 回退只需去掉这个启动参数。长按和标题栏的补丁只认 Qt 合成的鼠标事件，参数去掉后自然不再生效。

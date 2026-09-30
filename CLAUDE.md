@@ -50,7 +50,7 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 **`ScrollArea` 统一仲裁单指触控滚动与子控件点击。** 从按钮、下拉框或卡片上起滑时，移动达到系统拖动阈值后必须取消该触控序列的按压和释放，不能在滚动结束时触发原控件；未达到阈值的短按仍按正常点击处理。页面不得各自复制这套判定。HomePage 进入卡片编辑态时由排序手势独占触控，并依靠卡片拖动的边缘自动滚动跨越视口；退出编辑态后恢复页面触控滚动。
 
-**触控按下由 Qt 在落指瞬间合成，不用 Windows 从触控生成的鼠标消息。** Windows 要先分辨轻点、拖动和长按，按下要等抬手或移动才发出，控件按住时就没有按下态。`djcat.py` 用 `withQtTouchPress()` 给 QApplication 加 `-platform windows:nomousefromtouch`；已显式指定平台（`-platform`、`QT_QPA_PLATFORM`，如 offscreen 测试和 CI）时不加，也不得改用环境变量设置，否则 DJCat 启动的 Application 会继承它。因为按下立即到达，从控件上起滑必然先出现按下态，起滑取消要把它们全部复位：按钮的 `isDown`、`CardWidget` 的 `isPressed`，以及登记过的自绘目标；起滑后的松开被仲裁吞掉，控件自己不会复位。长按交给 Windows，不另做长按菜单。理由见 `docs/adr/0004-touch-press-synthesized-by-qt.md`。
+**触控按下由 Qt 在落指瞬间合成，不用 Windows 从触控生成的鼠标消息。** Windows 要先分辨轻点、拖动和长按，按下要等抬手或移动才发出，控件按住时就没有按下态。`djcat.py` 用 `withQtTouchPress()` 给 QApplication 加 `-platform windows:nomousefromtouch`；已显式指定平台（`-platform`、`QT_QPA_PLATFORM`，如 offscreen 测试和 CI）时不加，也不得改用环境变量设置，否则 DJCat 启动的 Application 会继承它。因为按下立即到达，从控件上起滑必然先出现按下态，起滑取消要把它们全部复位：按钮的 `isDown`、`CardWidget` 的 `isPressed`，以及登记过的自绘目标；起滑后的松开被仲裁吞掉，控件自己不会复位。Qt 会丢掉由鼠标触发的 `WM_CONTEXTMENU`，系统的移动循环也跟不上 Qt 合成的按下，所以 `app/platform/touch_input.py` 补上两件事：手指按住不动满 `mousePressAndHoldInterval` 就向指下控件发 `QContextMenuEvent`，与鼠标右键同一条路径；手指拖标题栏时由 Qt 直接 `move()` 窗口，鼠标拖动仍交给系统。两者都只认 `MouseEventSynthesizedByQt`，页面不得另写长按菜单或标题栏拖动。理由见 `docs/adr/0004-touch-press-synthesized-by-qt.md`。
 
 需要让出触控的模式调用 `ScrollArea.setTouchScrollSuppressed()`，它把拖动阈值抬到手指够不到的距离，不释放手势；页面不得自己 `QScroller.ungrabGesture()`，也不得对已抓过的 viewport 再调 `QScroller.grabGesture()`（它会先自行 ungrab 再重抓）。不是 `ScrollArea` 的 viewport（Projection 正文的 `QTextEdit`、`MarkdownView`）用 `scroll_area.setTouchScrollSuppressed(viewport, ...)` 做同一件事。Application Store 页面本身不滚动，两个选项卡和详情两栏各自是 `ScrollArea`，进出详情不抑制也不释放任何手势。
 
@@ -224,6 +224,7 @@ Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` �
 | `app/platform/shadow_effect.py` | Silhouette Shadow：按尺寸缓存模糊的圆角矩形投影 |
 | `app/platform/menu_animation.py` | QFluentWidgets 全局 Menu Reveal 管理器适配，不改变原版展开视觉 |
 | `app/platform/icon_cache.py` | QFluentWidgets SVG 图标解析缓存，只缓存资源路径和源码 |
+| `app/platform/touch_input.py` | Qt 合成触控鼠标后系统不再提供的两件事：长按弹出右键菜单、手指拖标题栏移动窗口 |
 | `app/platform/screens.py` | 取窗口所在屏幕，绕开 PySide 把 QScreen 挂成控件子对象的返回值启发式 |
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
@@ -263,6 +264,7 @@ Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` �
 set working directory
   → SingletonApplication (Windows single instance + IPC; Qt synthesizes touch presses on Windows)
   → unlockQtAnimations (before any QWidget animation is created)
+  → enableTouchLongPress (application-wide long press opens context menus)
   → optimizeFluentDialogs + optimizeFluentMenus (before MainWindow or its popups are created)
   → cacheFluentSvgIcons (before any QFluentWidgets icon is painted)
   → installTranslators (Qt qtbase + QFluentWidgets Chinese strings)

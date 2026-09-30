@@ -81,6 +81,7 @@ from app.config.constants import (
 )
 from app.config.paths import APP_DIR, ASSET_DIR, UPDATE_STAGING_DIR, UPDATE_ZIP_PATH
 from app.platform.application import raiseWindow
+from app.platform.touch_input import enableTouchTitleBarDrag
 from app.signal_bus import signalBus
 from app.view.components.setting_suggestion_menu import SettingSuggestionMenu
 from app.view.pages.home_page import HomePage
@@ -1056,6 +1057,7 @@ class MainWindow(MSFluentWindow):
         self.schedulePage = None
         self.homeCardTaskPage = None
         self.shutdownPage = None
+        enableTouchTitleBarDrag(self.titleBar)
         self.searchEdit = SearchLineEdit(self.titleBar)
         self.searchEdit.setClearButtonEnabled(True)
         self.searchEdit.setPlaceholderText("搜索设置")
