@@ -64,11 +64,29 @@ def registerTouchPressTarget(widget) -> None:
     _touchPressTargets.add(widget)
 
 
+# 拖动本身就是操作的控件（色板、滑块）。从它们上起滑归控件，不滚动、不取消按压、不吞松开。
+_touchDragTargets = weakref.WeakSet()
+
+
+def registerTouchDragTarget(widget) -> None:
+    """Give every touch that starts on ``widget`` to the widget instead of the scroll area."""
+    _touchDragTargets.add(widget)
+
+
+def _isTouchDragTarget(widget) -> bool:
+    while widget is not None:
+        if widget in _touchDragTargets:
+            return True
+        widget = widget.parentWidget()
+    return False
+
+
 class _TouchScrollGuard(QObject):
     def __init__(self, application):
         super().__init__(application)
         self.activeScrollArea = None
         self.suppressScrollArea = None
+        self.dragTargetScrollArea = None
         self.touchStart = None
         application.installEventFilter(self)
 
@@ -109,15 +127,39 @@ class _TouchScrollGuard(QObject):
             except RuntimeError:
                 _touchPressTargets.discard(target)
 
+    def _yieldToDragTarget(self):
+        # 触控先经手势管理器再到这里，scroller 已记下按下；抬高阈值时顺带把它停掉。
+        scrollArea = self.activeScrollArea
+        self.activeScrollArea = None
+        self.touchStart = None
+        if not scrollArea.isTouchScrollSuppressed:
+            scrollArea.setTouchScrollSuppressed(True)
+            self.dragTargetScrollArea = scrollArea
+
+    def _restoreAfterDragTarget(self):
+        scrollArea = self.dragTargetScrollArea
+        self.dragTargetScrollArea = None
+        if scrollArea is None:
+            return
+        try:
+            scrollArea.setTouchScrollSuppressed(False)
+        except RuntimeError:
+            pass
+
     def eventFilter(self, obj, event):
         eventType = event.type()
         if eventType == QEvent.Type.TouchBegin:
+            self._restoreAfterDragTarget()
             self.activeScrollArea = self._scrollAreaFor(obj)
             self.suppressScrollArea = None
             if self.activeScrollArea is not None and event.points():
                 self.touchStart = event.points()[0].globalPosition().toPoint()
             else:
                 self.touchStart = None
+            if self.touchStart is not None and _isTouchDragTarget(
+                QApplication.widgetAt(self.touchStart)
+            ):
+                self._yieldToDragTarget()
             return False
 
         if eventType == QEvent.Type.TouchUpdate:
@@ -137,6 +179,7 @@ class _TouchScrollGuard(QObject):
             activeScrollArea = self.activeScrollArea
             self.activeScrollArea = None
             self.touchStart = None
+            self._restoreAfterDragTarget()
             if eventType == QEvent.Type.TouchCancel and activeScrollArea is not None:
                 self._cancelPresses(activeScrollArea)
             return False

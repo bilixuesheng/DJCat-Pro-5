@@ -50,6 +50,8 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 **`ScrollArea` 统一仲裁单指触控滚动与子控件点击。** 从按钮、下拉框或卡片上起滑时，移动达到系统拖动阈值后必须取消该触控序列的按压和释放，不能在滚动结束时触发原控件；未达到阈值的短按仍按正常点击处理。页面不得各自复制这套判定。HomePage 进入卡片编辑态时由排序手势独占触控，并依靠卡片拖动的边缘自动滚动跨越视口；退出编辑态后恢复页面触控滚动。
 
+拖动本身就是操作的控件（色板、滑块）用 `scroll_area.registerTouchDragTarget()` 登记：从它们上起滑的整个触控序列归控件，所在 `ScrollArea` 在这一序列内抬高拖动阈值、不取消按压、不吞松开，抬手后复原。颜色选择弹窗的色板和亮度滑块、设置里的横幅亮度、Broadcast Task 的音量滑块都已登记；新增放在 `ScrollArea` 里的滑块同样登记。组件库弹窗里的滚动区（如 `ColorDialog` 的 `SingleDirectionScrollArea`）不抓触控手势，要换成项目 `ScrollArea`（见 `app/view/components/color_dialog.py`），不另写一套触控；这类弹窗在 `done()` 里停止 scroller 并释放一次手势，与 `_ResponsiveMessageBox` 相同，视口随弹窗销毁，不会再抓。
+
 **触控按下由 Qt 在落指瞬间合成，不用 Windows 从触控生成的鼠标消息。** Windows 要先分辨轻点、拖动和长按，按下要等抬手或移动才发出，控件按住时就没有按下态。`djcat.py` 用 `withQtTouchPress()` 给 QApplication 加 `-platform windows:nomousefromtouch`；已显式指定平台（`-platform`、`QT_QPA_PLATFORM`，如 offscreen 测试和 CI）时不加，也不得改用环境变量设置，否则 DJCat 启动的 Application 会继承它。因为按下立即到达，从控件上起滑必然先出现按下态，起滑取消要把它们全部复位：按钮的 `isDown`、`CardWidget` 的 `isPressed`，以及登记过的自绘目标；起滑后的松开被仲裁吞掉，控件自己不会复位。Qt 会丢掉由鼠标触发的 `WM_CONTEXTMENU`，系统的移动循环也跟不上 Qt 合成的按下，所以 `app/platform/touch_input.py` 补上两件事：手指按住不动满 `mousePressAndHoldInterval` 就向指下控件发 `QContextMenuEvent`，与鼠标右键同一条路径；手指拖标题栏时由 Qt 直接 `move()` 窗口，鼠标拖动仍交给系统。两者都只认 `MouseEventSynthesizedByQt`，页面不得另写长按菜单或标题栏拖动。另有一处原因未查明的兜底：触屏上手指点弹出窗口里的按钮（时间选择器的勾和叉）只亮不点，offscreen 复现不出来，所以手指在弹出窗口的按钮上按下又在它上面抬起、而点击没有发生时，由 `touch_input.py` 补一次点击；只作用于弹出窗口，滚动区里的起滑取消不受影响。理由见 `docs/adr/0004-touch-press-synthesized-by-qt.md`。
 
 需要让出触控的模式调用 `ScrollArea.setTouchScrollSuppressed()`，它把拖动阈值抬到手指够不到的距离，不释放手势；页面不得自己 `QScroller.ungrabGesture()`，也不得对已抓过的 viewport 再调 `QScroller.grabGesture()`（它会先自行 ungrab 再重抓）。不是 `ScrollArea` 的 viewport（Projection 正文的 `QTextEdit`、`MarkdownView`）用 `scroll_area.setTouchScrollSuppressed(viewport, ...)` 做同一件事。Application Store 页面本身不滚动，两个选项卡和详情两栏各自是 `ScrollArea`，进出详情不抑制也不释放任何手势。
@@ -239,6 +241,7 @@ Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` �
 | `app/view/components/busy_glow.py` | Busy Glow 的几何、配色和绘制；不知道 AI Markdown 的业务规则 |
 | `app/view/components/setting_section.py` | Setting Section 的下钻容器、导航行、推移动画和命中高亮 |
 | `app/view/components/setting_preview.py` | Setting Preview：按真实排布复刻整个主窗口（标题栏／导航栏／横幅／卡片）、投送与倒计时窗口（标题／正文或大时间／角落按钮，按钮位置跟随对应配置）、软件图标四处用法、主题小窗和标题栏＋Windows 通知区域 |
+| `app/view/components/color_dialog.py` | QFluentWidgets 颜色选择弹窗换上项目 `ScrollArea`，色板和亮度滑块登记为触控拖动目标 |
 | `app/view/components/setting_suggestion_menu.py` | Setting Suggestion 弹窗；选中后交回 Route，不把文本写回搜索框 |
 | `app/common/application_icon.py` | Application Icon 的解析：主窗口、启动页、托盘与 Tray Menu“主页”共用一处 |
 | `pyqt_github_markdown/` | 项目内置 Markdown 渲染器；不承载 DJCat 业务规则 |

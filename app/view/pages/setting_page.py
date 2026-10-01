@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     BodyLabel,
     BreadcrumbBar,
-    ColorDialog,
     ColorSettingCard as FluentColorSettingCard,
     ComboBoxSettingCard,
     FluentIcon,
@@ -57,6 +56,8 @@ from app.config.cfg import (
 from app.config.constants import APP_NAME, AUTHOR, AUTHOR_URL, VERSION, YEAR
 from app.config.paths import LOG_DIR
 from app.signal_bus import signalBus
+from app.view.components.color_dialog import ColorDialog
+from app.view.components.scroll_area import registerTouchDragTarget
 from app.view.components.setting_card_group import CollapsibleSettingCard
 from app.view.components.setting_preview import (
     CLOCK_CONTENT,
@@ -497,6 +498,7 @@ class SettingPage(QWidget):
             "主页横幅亮度",
             "调节横幅背景图片的亮度",
         )
+        registerTouchDragTarget(self.bannerBrightnessCard.slider)
         self.bannerScaleCard = ComboBoxSettingCard(
             cfg.bannerScaleMode,
             FluentIcon.ZOOM_IN,
