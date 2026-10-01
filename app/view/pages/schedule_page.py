@@ -25,6 +25,7 @@ from qfluentwidgets import FluentIcon as FIF
 
 from app.common.edge_tts import DEFAULT_EDGE_VOICE, loadChineseVoices
 from app.config.cfg import cfg
+from app.view.components.scroll_area import registerTouchDragTarget
 from app.view.components.task_page import (
     ScheduledTaskCard,
     ScheduledTaskDialog,
@@ -206,6 +207,7 @@ def createTaskForm(parentWidget, initialData=None):
     volumeSlider.setRange(0, 100)
     volumeSlider.setValue(data.get("volume", 100))
     volumeSlider.setFixedWidth(170)
+    registerTouchDragTarget(volumeSlider)
     volumeLabel = QLabel(str(volumeSlider.value()), form)
     volumeLabel.setFixedWidth(24)
     volumeLabel.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
