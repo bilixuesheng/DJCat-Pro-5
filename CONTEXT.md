@@ -200,6 +200,10 @@ _Avoid_: sample、template、system prompt（Prompt Example 是提示词的一�
 DJCat Pro 5 自身的新版本，通过专用更新信息和更新 ZIP 交付，DJCat 退出后由独立的更新器整目录替换程序目录。它独立于 Application Store，不使用 Application Catalog 或 Package。
 _Avoid_: Application Update；不加限定地称 update
 
+**Update Toast（更新通知卡）**:
+一次 Client Update 下载从开始到完成或失败，主窗口右下角始终是同一张卡片：下载中显示进度且不可关闭，完成时提供立即更新或稍后，失败时提供重试。它只属于 Client Update；Application Update 的进度显示在 Application Store 的按钮上。
+_Avoid_: 进度条（那只是卡片底边的一条线）、StateToolTip、ProgressToast（QFluentWidgets Pro 的组件名）
+
 **Client Version**:
 用户可见的 DJCat 版本号，唯一来源是 `app/common/config.py`。
 _Avoid_: Python Distribution Version、把构建元数据中的 `+` 版本展示给用户
