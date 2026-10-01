@@ -9,7 +9,7 @@ screens a tap on a popup's button (the time picker's check mark) lights it up an
 does not click, which offscreen never reproduces, so popup buttons get a safety net.
 """
 
-from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QContextMenuEvent, QGuiApplication
 from PySide6.QtWidgets import QAbstractButton, QApplication
 from shiboken6 import isValid
@@ -164,8 +164,13 @@ class _TouchTitleBarDrag(QObject):
     """Drag the window by hand when a finger drags the title bar.
 
     qframelesswindow hands title-bar drags to the system move loop, which gives up at
-    once for a finger. Mouse drags keep the system loop and its snapping.
+    once for a finger. Mouse drags keep the system loop and its snapping. The window
+    gets no WM_ENTERSIZEMOVE / WM_EXITSIZEMOVE for a finger drag, so the drag reports
+    its own start and end.
     """
+
+    moveStarted = Signal()
+    moveFinished = Signal()
 
     def __init__(self, titleBar):
         super().__init__(titleBar)
@@ -196,8 +201,11 @@ class _TouchTitleBarDrag(QObject):
         if self.pressPosition is None:
             return False
         if eventType == QEvent.Type.MouseButtonRelease:
+            moved = self.grabOffset is not None
             self.pressPosition = None
             self.grabOffset = None
+            if moved:
+                self.moveFinished.emit()
             return False
 
         # 标题栏的 mouseMoveEvent 会启动系统移动，触控的移动一律在这里吃掉。
@@ -205,6 +213,7 @@ class _TouchTitleBarDrag(QObject):
             if (position - self.pressPosition).manhattanLength() < QApplication.startDragDistance():
                 return True
             self.grabOffset = self._grabOffset()
+            self.moveStarted.emit()
         self.titleBar.window().move(position - self.grabOffset)
         return True
 
@@ -220,6 +229,6 @@ class _TouchTitleBarDrag(QObject):
         return QPoint(round(ratio * normalWidth), offset.y())
 
 
-def enableTouchTitleBarDrag(titleBar) -> None:
+def enableTouchTitleBarDrag(titleBar) -> _TouchTitleBarDrag:
     """Let a finger drag the window by this qframelesswindow title bar."""
-    _TouchTitleBarDrag(titleBar)
+    return _TouchTitleBarDrag(titleBar)

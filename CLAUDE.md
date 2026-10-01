@@ -38,6 +38,8 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 **`app/platform/icon_cache.py` 独占 QFluentWidgets SVG 图标的解析缓存。** 它替换 `drawSvgIcon` 和 `writeSvg`，只缓存内容不会变的来源——`:/` 资源路径和 SVG 源码字节，磁盘路径照旧每次读取；两份缓存各有上限。页面不得自己另建图标缓存。
 
+**`app/platform/background_effect.py` 独占 Background Effect。** 选项、默认值和每种材质的挂法都照 Ghost Downloader 的"窗口背景透明材质"，只作用于主窗口。MainWindow 关掉组件库自带的云母，在构造、每次显示和每次换主题时按 `cfg.backgroundEffect` 重挂；选了材质时窗口底色透明。三处有意照搬 Ghost 的行为保持原样：Win10 上也列出 Mica 和 MicaAlt，选中后材质不生效、窗口透明；Win10 的主窗口按 `AcrylicWindow.updateFrameless` 去框；不跟随系统的"透明效果"开关。Win10 的 Acrylic 跟不上移动中的窗口，所以移动期间换成透明渐变、结束后挂回：鼠标和系统移动走 `MainWindow.nativeEvent` 的 `WM_ENTERSIZEMOVE`／`WM_EXITSIZEMOVE`；手指拖标题栏不经过系统移动循环，由 `touch_input.py` 拖动对象的 `moveStarted`／`moveFinished` 报告。
+
 **`app/platform/dialog_animation.py` 独占 QFluentWidgets 蒙层弹窗的公共适配。** 它为卡片装上 Silhouette Shadow 并接管 `showEvent` 和 `done`，时序见"Animation scheduling"。弹窗中的下拉框仍属于 Menu Reveal；页面不得重复修补组件库或改变原有动画曲线。
 
 **`app/view/components/setting_section.py` 独占设置页的层级导航。** Setting Section 的下钻、返回、面包屑对应的 Setting Route，以及层级之间的推移动画都由它提供；页面只负责装配内容。推移沿用 `SlideNavigationTransitionInfo`：进入下一级时旧页左移出场、新页自右入场，返回时反向，两页共用同一条 `cubic-bezier(0,0,0,1)` 曲线和 300 ms 时长并交叉淡入淡出，不得改成"旧页原地淡出"。位移 150 px 是设备无关像素，不得再乘 `devicePixelRatio`。动画期间只改 `pos` 和不透明度，不碰布局。推移的是两页起步时各 `grab()` 一次的快照，真页面在推移期间隐藏；不得再给整页 `ScrollArea` 挂 `QGraphicsOpacityEffect`。理由见 `docs/adr/0003-settings-drill-in-navigation.md`。
@@ -225,6 +227,7 @@ Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` �
 | `app/platform/menu_animation.py` | QFluentWidgets 全局 Menu Reveal 管理器适配，不改变原版展开视觉 |
 | `app/platform/icon_cache.py` | QFluentWidgets SVG 图标解析缓存，只缓存资源路径和源码 |
 | `app/platform/touch_input.py` | Qt 合成触控鼠标后系统不再提供的两件事：长按弹出右键菜单、手指拖标题栏移动窗口；外加弹出窗口按钮的轻点兜底 |
+| `app/platform/background_effect.py` | Background Effect：照 Ghost Downloader 给主窗口挂 Windows 透明材质，Win10 的 Acrylic 在窗口移动时暂停模糊 |
 | `app/platform/screens.py` | 取窗口所在屏幕，绕开 PySide 把 QScreen 挂成控件子对象的返回值启发式 |
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |

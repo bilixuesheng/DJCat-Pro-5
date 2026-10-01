@@ -103,7 +103,7 @@ class TouchTitleBarDragTest(TestCase):
 
     def _window(self):
         window = MSFluentWindow()
-        enableTouchTitleBarDrag(window.titleBar)
+        self.titleBarDrag = enableTouchTitleBarDrag(window.titleBar)
         window.resize(500, 400)
         window.move(100, 100)
         window.show()
@@ -144,6 +144,19 @@ class TouchTitleBarDragTest(TestCase):
         self._drag(window, QPoint(1, 1))
 
         self.assertEqual(window.pos(), before)
+
+    def testFingerDragReportsItsStartAndEndOnceButATapReportsNothing(self):
+        window = self._window()
+        events = []
+        self.titleBarDrag.moveStarted.connect(lambda: events.append("started"))
+        self.titleBarDrag.moveFinished.connect(lambda: events.append("finished"))
+
+        self._drag(window, QPoint(120, 80))
+        self.assertEqual(events, ["started", "finished"])
+
+        # 先拖后点：两次按下落在同一处会被当成双击标题栏。
+        self._drag(window, QPoint(1, 1))
+        self.assertEqual(events, ["started", "finished"])
 
     def testFingerDragRestoresMaximizedWindowUnderTheFinger(self):
         window = self._window()
