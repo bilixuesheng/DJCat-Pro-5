@@ -78,11 +78,11 @@ def main():
         withQtTouchPress,
     )
     from app.platform.animation_timer import unlockQtAnimations
-    from app.platform.touch_input import enableTouchLongPress
+    from app.platform.touch_input import enableTouchInput
 
     app = SingletonApplication(withQtTouchPress(sys.argv))
     unlockQtAnimations()
-    enableTouchLongPress(app)
+    enableTouchInput(app)
     isSilent = "--silence" in sys.argv
     activationPending = False
 
