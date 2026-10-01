@@ -24,6 +24,7 @@ from app.view.components.setting_section import (
     SettingNavigationCard,
 )
 from app.view.pages.setting_page import SettingPage
+from tests.support import isolateCfg
 
 TOP_LEVEL_SECTIONS = [
     "横幅设置",
@@ -235,6 +236,21 @@ class SettingSectionTest(TestCase):
                 self.assertIn(backgroundCard, view.settingCards())
                 self.assertEqual(len(view.settingCards()), 4)
                 self.assertEqual(view.navigationCards(), ())
+
+    def testAppearanceSectionOffersGhostDownloadersBackgroundEffects(self):
+        isolateCfg(self)
+        page = self.buildPage()
+        card = page.backgroundEffectCard
+
+        self.assertIn(card, page.sectionStack.view("personalization.appearance").settingCards())
+        self.assertEqual(card.titleLabel.text(), "窗口背景透明材质")
+        self.assertEqual(
+            [card.comboBox.itemText(i) for i in range(card.comboBox.count())],
+            ["Acrylic", "Mica", "MicaAlt", "Aero", "None"],
+        )
+
+        card.comboBox.setCurrentIndex(0)
+        self.assertEqual(cfg.backgroundEffect.value, "Acrylic")
 
     def testShortSectionListDoesNotStretchToThePageBottom(self):
         page = self.buildPage()

@@ -240,6 +240,10 @@ _Avoid_: 只复制 `UserConfig.json`、运行中热切换路径
 可缩放窗口沿边缘的一圈区域，在其中按下并拖动会改变窗口大小。主窗口和窗口化的 Projection 各有一条；主窗口右上角的最小化、最大化、关闭三个按钮上没有 Resize Band，按下去一律是点按钮。
 _Avoid_: 边框（窗口化时那条 1 px 灰线才是边框）、缩放像素、拖拽边
 
+**Background Effect（窗口背景透明材质）**:
+由 Windows 在主窗口背后合成的透明材质，可选 Acrylic、Mica、MicaAlt、Aero 或 None，切换后立即生效；未设置时 Win11 为 Mica、Win10 为 None。只作用于主窗口和画在主窗口上的蒙层弹窗；投送、考试倒计时和全屏时钟各自的背景设置以及 Tray Menu 的亚克力都不受它影响。
+_Avoid_: 背景（投送、倒计时和时钟的背景设置）、卡片材质、透明度
+
 ### 设置
 
 **Setting Section**:

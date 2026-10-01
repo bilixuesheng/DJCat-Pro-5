@@ -55,6 +55,7 @@ from app.config.cfg import (
 )
 from app.config.constants import APP_NAME, AUTHOR, AUTHOR_URL, VERSION, YEAR
 from app.config.paths import LOG_DIR
+from app.platform.background_effect import BACKGROUND_EFFECTS
 from app.signal_bus import signalBus
 from app.view.components.color_dialog import ColorDialog
 from app.view.components.scroll_area import registerTouchDragTarget
@@ -439,6 +440,13 @@ class SettingPage(QWidget):
             texts=["浅色", "深色", "跟随系统设置"],
         )
         self.themeColorCard = ThemeColorSettingCard()
+        self.backgroundEffectCard = ComboBoxSettingCard(
+            cfg.backgroundEffect,
+            FluentIcon.TRANSPARENT,
+            "窗口背景透明材质",
+            "设置窗口背景透明效果和透明材质",
+            texts=list(BACKGROUND_EFFECTS),
+        )
         self.applicationIconSourceCard = ComboBoxSettingCard(
             cfg.applicationIconSource,
             FluentIcon.APPLICATION,
@@ -943,11 +951,13 @@ class SettingPage(QWidget):
             "personalization.appearance",
             "外观",
             FluentIcon.PALETTE,
-            "应用主题和主题色",
+            "应用主题、主题色和窗口背景透明材质",
             "personalization",
         )
         appearance.addPreview(ThemePreview())
-        appearance.addCardList([self.themeModeCard, self.themeColorCard])
+        appearance.addCardList(
+            [self.themeModeCard, self.themeColorCard, self.backgroundEffectCard]
+        )
         applicationIcon = self._addSection(
             "personalization.icon",
             "软件图标",

@@ -20,6 +20,7 @@ from PySide6.QtCore import (
     QUrl,
     Signal,
 )
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication, QGraphicsOpacityEffect, QVBoxLayout, QWidget
 from shiboken6 import isValid
 from qfluentwidgets import FluentIcon as FIF
@@ -38,6 +39,8 @@ from qfluentwidgets import (
     StateToolTip,
     SubtitleLabel,
     Theme,
+    isDarkTheme,
+    qconfig,
     setTheme,
     setThemeColor,
 )
@@ -47,6 +50,7 @@ if sys.platform == "win32":
 
     import win32con
     import win32gui
+    from qframelesswindow import AcrylicWindow
 
 from app.common.application_icon import applicationIcon
 from app.common.application_version import isUpdateAvailable
@@ -81,6 +85,12 @@ from app.config.constants import (
 )
 from app.config.paths import APP_DIR, ASSET_DIR, UPDATE_STAGING_DIR, UPDATE_ZIP_PATH
 from app.platform.application import raiseWindow
+from app.platform.background_effect import (
+    applyBackgroundEffect,
+    isWin10,
+    suspendAcrylic,
+    suspendsAcrylicDuringMove,
+)
 from app.platform.touch_input import enableTouchTitleBarDrag
 from app.signal_bus import signalBus
 from app.view.components.setting_suggestion_menu import SettingSuggestionMenu
@@ -367,6 +377,8 @@ class MainWindow(MSFluentWindow):
         self._geometryApplied = False
         self._screenChangeConnected = False
         super().__init__(parent=None)
+        # Background Effect 接管组件库自带的 Win11 云母，否则显示和换主题时它会把云母盖回来。
+        self.setMicaEffectEnabled(False)
         self._updateResizeBorderWidth()
         self._connectScreenChanged()
         self.splashScreen = None
@@ -399,6 +411,9 @@ class MainWindow(MSFluentWindow):
         setThemeColor(cfg.customThemeColor.value)
         self._toggleTheme(cfg.customThemeMode.value)
         cfg.customThemeMode.valueChanged.connect(self._toggleTheme)
+        self._applyBackgroundEffect()
+        cfg.backgroundEffect.valueChanged.connect(self._applyBackgroundEffect)
+        qconfig.themeChangedFinished.connect(self._applyBackgroundEffect)
         cfg.windowTitle.valueChanged.connect(self._updateWindowTitle)
         cfg.applicationIconSource.valueChanged.connect(self._updateApplicationIcon)
         cfg.applicationIconPath.valueChanged.connect(self._updateApplicationIcon)
@@ -475,11 +490,43 @@ class MainWindow(MSFluentWindow):
             / self.RESIZE_BORDER_REFERENCE_DPR
         )
 
+    def updateFrameless(self):
+        if isWin10():
+            # 照 Ghost：Win10 上按 AcrylicWindow 的方式去框，亚克力和 Aero 才铺得满窗口。
+            AcrylicWindow.updateFrameless(self)
+        else:
+            super().updateFrameless()
+
+    def _normalBackgroundColor(self):
+        if sys.platform == "win32" and cfg.backgroundEffect.value != "None":
+            return QColor(0, 0, 0, 0)
+        return super()._normalBackgroundColor()
+
+    def _applyBackgroundEffect(self, *_args, removeFirst=True):
+        if sys.platform != "win32":
+            return
+        applyBackgroundEffect(self, cfg.backgroundEffect.value, isDarkTheme(), removeFirst)
+        self.setBackgroundColor(self._normalBackgroundColor())
+
+    def _onWindowMoveStarted(self):
+        if suspendsAcrylicDuringMove(cfg.backgroundEffect.value):
+            suspendAcrylic(self)
+
+    def _onWindowMoveFinished(self):
+        if suspendsAcrylicDuringMove(cfg.backgroundEffect.value):
+            applyBackgroundEffect(self, "Acrylic", isDarkTheme(), removeFirst=False)
+
     def nativeEvent(self, eventType, message):
         handled, result = super().nativeEvent(eventType, message)
-        if sys.platform != "win32" or not handled:
+        if sys.platform != "win32":
             return handled, result
         msg = MSG.from_address(int(message))
+        if msg.message == win32con.WM_ENTERSIZEMOVE:
+            self._onWindowMoveStarted()
+        elif msg.message == win32con.WM_EXITSIZEMOVE:
+            self._onWindowMoveFinished()
+        if not handled:
+            return handled, result
         # HTLEFT…HTBOTTOMRIGHT 是连续的八个缩放命中码；Win11 最大化按钮的 HTMAXBUTTON 不在其中，贴靠布局照旧。
         if (
             msg.message == win32con.WM_NCHITTEST
@@ -1057,7 +1104,9 @@ class MainWindow(MSFluentWindow):
         self.schedulePage = None
         self.homeCardTaskPage = None
         self.shutdownPage = None
-        enableTouchTitleBarDrag(self.titleBar)
+        touchDrag = enableTouchTitleBarDrag(self.titleBar)
+        touchDrag.moveStarted.connect(self._onWindowMoveStarted)
+        touchDrag.moveFinished.connect(self._onWindowMoveFinished)
         self.searchEdit = SearchLineEdit(self.titleBar)
         self.searchEdit.setClearButtonEnabled(True)
         self.searchEdit.setPlaceholderText("搜索设置")
@@ -1904,6 +1953,9 @@ class MainWindow(MSFluentWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
+        if sys.platform == "win32":
+            self.windowEffect.addWindowAnimation(self.winId())
+            self._applyBackgroundEffect(removeFirst=False)
         self._connectScreenChanged()
         if not self._geometryApplied:
             self._geometryApplied = True

@@ -14,6 +14,7 @@ from qfluentwidgets import (
 )
 
 from app.config.paths import CONFIG_PATH
+from app.platform.background_effect import BACKGROUND_EFFECTS, defaultBackgroundEffect
 
 THEME_COLOR_PRESETS = (
     ("树人绿", (49, 101, 49)),
@@ -71,6 +72,12 @@ class Config(QConfig):
         "ThemeMode",
         "System",
         OptionsValidator(["Light", "Dark", "System"]),
+    )
+    backgroundEffect = OptionsConfigItem(
+        "Personalization",
+        "BackgroundEffect",
+        defaultBackgroundEffect(),
+        OptionsValidator(list(BACKGROUND_EFFECTS)),
     )
     themeColorPreset = OptionsConfigItem(
         "Personalization",
