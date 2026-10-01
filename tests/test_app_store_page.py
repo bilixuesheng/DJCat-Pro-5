@@ -284,24 +284,135 @@ class AppStorePageTest(TestCase):
             [1, 2, 0],
         )
 
-    def testProgressUpdatesExistingCardAndDisablesAction(self):
+    def testProgressUpdatesExistingCardWithCancellableRing(self):
         apps = _apps(1)
         self.page._allAppsForPage = lambda: apps
         self.page._renderAll()
         card = self.page.allGrid.itemAtPosition(0, 0).widget()
         self.page._downloadJobs[0] = object()
+        self.page._downloadStates[0] = "下载中"
 
         self.page._onDownloadProgress(0, 50, 100)
         self.page._downloadJobs.pop(0)
+        self.page._downloadStates.pop(0)
 
+        button = card.actionButton
         self.assertIs(self.page.allGrid.itemAtPosition(0, 0).widget(), card)
-        self.assertEqual(card.actionButton.text(), "下载中 50%")
-        self.assertFalse(card.actionButton.isEnabled())
+        self.assertEqual(button.text(), "")
+        self.assertTrue(button.isEnabled())
+        self.assertEqual(button.toolTip(), "取消下载")
+        self.assertFalse(button.ring.isHidden())
+        self.assertEqual(button.ring.value(), 50)
         self.assertFalse(card.removeButton.isEnabled())
-        self.assertEqual(card.actionButton._progress, 50)
 
-    def testDisabledProgressAlignsWithButtonCornersAndUsesThemeColor(self):
-        button = ActionProgressButton("下载中")
+    def testDownloadRingKeepsPageTextAndEnabledStateUntilItCloses(self):
+        button = ActionProgressButton("不支持")
+        self.addCleanup(button.deleteLater)
+        button.setEnabled(False)
+
+        button.setDownloadProgress(37, "取消下载")
+        button.setText("下载中")
+        button.setEnabled(False)
+
+        self.assertEqual(button.text(), "")
+        self.assertTrue(button.isEnabled())
+
+        button.clearProgress()
+
+        self.assertEqual(button.text(), "下载中")
+        self.assertFalse(button.isEnabled())
+        self.assertEqual(button.toolTip(), "")
+        self.assertTrue(button.ring.isHidden())
+        self.assertTrue(button.spinner.isHidden())
+
+    def testPressOnDownloadRingSurvivesProgressRefresh(self):
+        button = ActionProgressButton("下载")
+        self.addCleanup(button.deleteLater)
+        button.resize(120, 32)
+        button.show()
+        clicked = QSignalSpy(button.clicked)
+        button.setDownloadProgress(10, "取消下载")
+
+        QTest.mousePress(button, Qt.MouseButton.LeftButton)
+        # 页面每次进度刷新的顺序：先按状态设文字和可用性，再设进度。
+        button.setText("下载中")
+        button.setEnabled(False)
+        button.setDownloadProgress(20, "取消下载")
+        QTest.mouseRelease(button, Qt.MouseButton.LeftButton)
+
+        self.assertEqual(clicked.count(), 1)
+
+    def testDownloadShowsRingOrSpinnerWithStopSquare(self):
+        button = ActionProgressButton("下载")
+        self.addCleanup(button.deleteLater)
+        button.resize(120, 32)
+        image = QImage(button.size(), QImage.Format.Format_ARGB32)
+        center = (button.width() // 2, button.height() // 2)
+        white = QColor(255, 255, 255)
+
+        for progress, ringShown in ((0, False), (37, True), (100, False)):
+            with self.subTest(progress=progress):
+                button.setDownloadProgress(progress, "取消下载")
+                self.assertEqual(button.ring.isHidden(), not ringShown)
+                self.assertEqual(button.spinner.isHidden(), ringShown)
+                self.assertEqual(
+                    button.spinner.aniGroup.state()
+                    == QAbstractAnimation.State.Running,
+                    not ringShown,
+                )
+                image.fill(Qt.GlobalColor.transparent)
+                button.render(image)
+                self.assertEqual(image.pixelColor(*center), white)
+
+        button.setInstalling("安装中")
+        image.fill(Qt.GlobalColor.transparent)
+        button.render(image)
+
+        self.assertFalse(button.spinner.isHidden())
+        self.assertTrue(button.ring.isHidden())
+        self.assertTrue(button.isEnabled())
+        self.assertEqual(button.toolTip(), "安装中")
+        self.assertNotEqual(image.pixelColor(*center), white)
+
+    def testDownloadRingAnimatesFromTheCurrentDisplayedValue(self):
+        button = ActionProgressButton("下载")
+        self.addCleanup(button.deleteLater)
+        ring = button.ring
+
+        button.setDownloadProgress(40, "取消下载")
+        self.assertEqual(ring.ani.duration(), 150)
+        self.assertEqual(ring.val, 0)
+        ring.ani.setCurrentTime(75)
+        halfway = ring.val
+        self.assertGreater(halfway, 0)
+        self.assertLess(halfway, 40)
+
+        button.setDownloadProgress(80, "取消下载")
+        self.assertEqual(ring.val, halfway)
+        ring.ani.setCurrentTime(75)
+        self.assertGreater(ring.val, halfway)
+        self.assertLess(ring.val, 80)
+        ring.ani.setCurrentTime(150)
+        self.assertEqual(ring.val, 80)
+
+    def testDownloadRingRestartsFromZeroWithoutRewinding(self):
+        button = ActionProgressButton("下载")
+        self.addCleanup(button.deleteLater)
+        ring = button.ring
+        button.setDownloadProgress(60, "取消下载")
+        ring.ani.setCurrentTime(75)
+
+        button.clearProgress()
+
+        self.assertEqual(ring.val, 0)
+        self.assertEqual(ring.ani.state(), QAbstractAnimation.State.Stopped)
+
+        button.setDownloadProgress(5, "取消下载")
+        ring.ani.setCurrentTime(1)
+        self.assertLess(ring.val, 5)
+
+    def testLineProgressAlignsWithButtonCornersAndUsesThemeColor(self):
+        button = ActionProgressButton("打开中")
         self.addCleanup(button.deleteLater)
         button.resize(120, 32)
         button.setEnabled(False)
@@ -309,82 +420,43 @@ class AppStorePageTest(TestCase):
         image.fill(Qt.GlobalColor.transparent)
         button.render(image)
         background = QImage(image)
-
-        button.setProgress(100)
-        button._progressAnimation.setCurrentTime(
-            button._progressAnimation.duration()
-        )
-        button.render(image)
+        button.setLineProgress()
 
         color = qconfig.themeColor.value
         y = button.height() - 1
-        self.assertEqual(image.pixelColor(6, y), color)
-        self.assertEqual(image.pixelColor(button.width() - 7, y), color)
-        for x in (*range(5), *range(button.width() - 5, button.width())):
-            self.assertEqual(image.pixelColor(x, y), background.pixelColor(x, y))
-        for x in (5, button.width() - 6):
-            self.assertNotEqual(image.pixelColor(x, y), color)
-            self.assertNotEqual(image.pixelColor(x, y), background.pixelColor(x, y))
+        width = button.width() - 10
+        segment = max(24.0, width * 0.28)
+        # 让亮段先贴住左端、再贴住右端。
+        for offset, inside, edge, outside in (
+            (segment / (width + segment), 6, 5, range(5)),
+            (
+                width / (width + segment),
+                button.width() - 7,
+                button.width() - 6,
+                range(button.width() - 5, button.width()),
+            ),
+        ):
+            with self.subTest(offset=offset):
+                button._lineOffset = offset
+                image.fill(Qt.GlobalColor.transparent)
+                button.render(image)
+                self.assertEqual(image.pixelColor(inside, y), color)
+                self.assertNotEqual(image.pixelColor(edge, y), color)
+                self.assertNotEqual(
+                    image.pixelColor(edge, y), background.pixelColor(edge, y)
+                )
+                for x in outside:
+                    self.assertEqual(
+                        image.pixelColor(x, y), background.pixelColor(x, y)
+                    )
 
-    def testPartialProgressEndsWithRoundedCap(self):
-        button = ActionProgressButton("下载中 50%")
+    def testLineProgressUsesUpdatedThemeColor(self):
+        button = ActionProgressButton("卸载中")
         self.addCleanup(button.deleteLater)
         button.resize(120, 32)
         button.setEnabled(False)
-        button.setProgress(50)
-        button._progressAnimation.setCurrentTime(
-            button._progressAnimation.duration()
-        )
-        image = QImage(button.size(), QImage.Format.Format_ARGB32)
-
-        button.render(image)
-
-        y = button.height() - 1
-        color = qconfig.themeColor.value
-        self.assertEqual(image.pixelColor(button.width() // 2 - 2, y), color)
-        self.assertNotEqual(image.pixelColor(button.width() // 2 - 1, y), color)
-
-    def testDeterminateProgressAnimatesFromTheCurrentDisplayedValue(self):
-        button = ActionProgressButton("下载中")
-        self.addCleanup(button.deleteLater)
-
-        button.setProgress(40)
-        self.assertEqual(button._progressAnimation.duration(), 150)
-        self.assertEqual(button._displayProgress, 0)
-        button._progressAnimation.setCurrentTime(75)
-        halfway = button._displayProgress
-        self.assertGreater(halfway, 0)
-        self.assertLess(halfway, 40)
-
-        button.setProgress(80)
-        self.assertEqual(button._displayProgress, halfway)
-        button._progressAnimation.setCurrentTime(75)
-        self.assertGreater(button._displayProgress, halfway)
-        self.assertLess(button._displayProgress, 80)
-        button._progressAnimation.setCurrentTime(150)
-        self.assertEqual(button._displayProgress, 80)
-
-    def testIndeterminateProgressHandsOffToAnimatedProgressAtZero(self):
-        button = ActionProgressButton("下载中 0%")
-        self.addCleanup(button.deleteLater)
-        button.setProgress(indeterminate=True)
-
-        button.setProgress(25)
-
-        self.assertFalse(button._progressTimer.isActive())
-        self.assertEqual(button._displayProgress, 0)
-        self.assertEqual(
-            button._progressAnimation.state(),
-            QAbstractAnimation.State.Running,
-        )
-
-    def testIndeterminateProgressUsesUpdatedThemeColor(self):
-        button = ActionProgressButton("下载中 0%")
-        self.addCleanup(button.deleteLater)
-        button.resize(120, 32)
-        button.setEnabled(False)
-        button.setProgress(indeterminate=True)
-        button._progressOffset = 0.5
+        button.setLineProgress()
+        button._lineOffset = 0.5
         image = QImage(button.size(), QImage.Format.Format_ARGB32)
         originalColor = QColor(qconfig.themeColor.value)
         updatedColor = QColor("#b74291")
@@ -399,30 +471,47 @@ class AppStorePageTest(TestCase):
         finally:
             qconfig.set(qconfig.themeColor, originalColor, save=False)
 
-    def testZeroDownloadProgressIsIndeterminateOnCardsAndDetails(self):
+    def testZeroDownloadProgressSpinsOnCardsAndDetails(self):
         app = _apps(1)[0]
         appId = app["id"]
         card = ApplicationCard()
         self.addCleanup(card.deleteLater)
         self.page._downloadJobs[appId] = object()
-        self.page._downloadStates[appId] = "下载中 0%"
+        self.page._downloadStates[appId] = "下载中"
         self.page._downloadProgress[appId] = 0
         self.page.currentApp = app
 
         self.page._setCardState(card, app)
         self.page._updateDetailAction()
 
-        self.assertTrue(card.actionButton._indeterminate)
-        self.assertTrue(self.page.detailAction._indeterminate)
+        buttons = (card.actionButton, self.page.detailAction)
+        for button in buttons:
+            self.assertFalse(button.spinner.isHidden())
+            self.assertTrue(button.ring.isHidden())
+            self.assertTrue(button.isEnabled())
 
         self.page._onDownloadProgress(appId, 1, 100)
         self.page._setCardState(card, app)
         self.page._downloadJobs.pop(appId)
+        self.page._downloadStates.pop(appId)
 
-        self.assertFalse(card.actionButton._indeterminate)
-        self.assertEqual(card.actionButton._progress, 1)
-        self.assertFalse(self.page.detailAction._indeterminate)
-        self.assertEqual(self.page.detailAction._progress, 1)
+        for button in buttons:
+            self.assertTrue(button.spinner.isHidden())
+            self.assertFalse(button.ring.isHidden())
+            self.assertEqual(button.ring.value(), 1)
+
+    def testUpdateDownloadOffersToCancelTheUpdate(self):
+        app = _apps(1)[0] | {"installed": True, "update_available": True}
+        appId = app["id"]
+        self.page._downloadJobs[appId] = object()
+        self.page._downloadStates[appId] = "下载中"
+        self.page.currentApp = app
+
+        self.page._updateDetailAction()
+        self.page._downloadJobs.pop(appId)
+        self.page._downloadStates.pop(appId)
+
+        self.assertEqual(self.page.detailAction.toolTip(), "取消更新")
 
     def testRerenderReusesVisibleCardsWithoutABlankFrame(self):
         first = _apps(1)
@@ -1549,8 +1638,8 @@ class AppStorePageTest(TestCase):
             ):
                 self.assertEqual(button.text(), "打开中")
                 self.assertFalse(button.isEnabled())
-                self.assertTrue(button._indeterminate)
-                self.assertTrue(button._progressTimer.isActive())
+                self.assertTrue(button._lineShown)
+                self.assertTrue(button._lineTimer.isActive())
             self.assertFalse(installedCard.removeButton.isEnabled())
 
             self.page._onAppAction(app)
@@ -1566,8 +1655,8 @@ class AppStorePageTest(TestCase):
             ):
                 self.assertEqual(button.text(), "打开")
                 self.assertTrue(button.isEnabled())
-                self.assertFalse(button._indeterminate)
-                self.assertFalse(button._progressTimer.isActive())
+                self.assertFalse(button._lineShown)
+                self.assertFalse(button._lineTimer.isActive())
             self.assertTrue(installedCard.removeButton.isEnabled())
             self.assertNotIn(app["id"], self.page._downloadStates)
         finally:
@@ -1591,10 +1680,10 @@ class AppStorePageTest(TestCase):
         showError.assert_called_once()
         self.assertEqual(card.actionButton.text(), "打开")
         self.assertTrue(card.actionButton.isEnabled())
-        self.assertFalse(card.actionButton._indeterminate)
+        self.assertFalse(card.actionButton._lineShown)
         self.assertEqual(self.page.detailAction.text(), "打开")
         self.assertTrue(self.page.detailAction.isEnabled())
-        self.assertFalse(self.page.detailAction._indeterminate)
+        self.assertFalse(self.page.detailAction._lineShown)
         self.assertNotIn(app["id"], self.page._downloadStates)
 
     def testApplicationLaunchThreadFailureRestoresButtons(self):
@@ -1620,9 +1709,9 @@ class AppStorePageTest(TestCase):
         self.assertNotIn(app["id"], self.page._downloadStates)
         self.assertEqual(card.actionButton.text(), "打开")
         self.assertTrue(card.actionButton.isEnabled())
-        self.assertFalse(card.actionButton._indeterminate)
+        self.assertFalse(card.actionButton._lineShown)
         self.assertTrue(self.page.detailAction.isEnabled())
-        self.assertFalse(self.page.detailAction._indeterminate)
+        self.assertFalse(self.page.detailAction._lineShown)
 
     def testApplicationLaunchThreadStartFailureRestoresButtons(self):
         app = _apps(1)[0] | {
@@ -1670,21 +1759,92 @@ class AppStorePageTest(TestCase):
         self.page._updateDetailAction()
         self.assertEqual(self.page.detailAction.text(), "更新")
 
-    def testInstallAndUninstallUseIndeterminateProgress(self):
+    def testInstallSpinsWithoutStopSquareAndUninstallUsesLine(self):
         app = _apps(1)[0]
+        appId = app["id"]
         card = ApplicationCard()
         self.addCleanup(card.deleteLater)
 
-        self.page._installing.add(app["id"])
+        self.page._installing.add(appId)
+        self.page._downloadStates[appId] = "安装中"
         self.page._setCardState(card, app)
-        self.assertTrue(card.actionButton._indeterminate)
-        self.assertTrue(card.actionButton._progressTimer.isActive())
+        button = card.actionButton
+        self.assertFalse(button.spinner.isHidden())
+        self.assertFalse(button._cancellable)
+        self.assertTrue(button.isEnabled())
+        self.assertEqual(button.text(), "")
+        self.assertEqual(button.toolTip(), "安装中")
+        self.assertFalse(button._lineTimer.isActive())
 
         self.page._installing.clear()
-        self.page._uninstalling.add(app["id"])
+        self.page._uninstalling.add(appId)
+        self.page._downloadStates[appId] = "卸载中"
+        self.page._setCardState(card, app)
         self.page.currentApp = app
         self.page._updateDetailAction()
-        self.assertTrue(self.page.detailAction._indeterminate)
+        self.page._uninstalling.clear()
+        self.page._downloadStates.clear()
+
+        for button in (card.actionButton, self.page.detailAction):
+            self.assertTrue(button.spinner.isHidden())
+            self.assertTrue(button._lineTimer.isActive())
+            self.assertEqual(button.text(), "卸载中")
+            self.assertFalse(button.isEnabled())
+
+    def testClickDuringInstallDoesNothing(self):
+        app = _apps(1)[0]
+        self.page._installing.add(app["id"])
+        self.page._downloadStates[app["id"]] = "安装中"
+        self.page.store.downloadSlots = Mock()
+
+        with patch(
+            "app.view.pages.app_store_page.downloadWorker"
+        ) as worker, patch.object(self.page, "_startLaunch") as launch:
+            self.page._onAppAction(app)
+        self.page._installing.clear()
+        self.page._downloadStates.clear()
+
+        worker.assert_not_called()
+        launch.assert_not_called()
+        self.page.store.downloadSlots.acquire.assert_not_called()
+
+    def testClickingDownloadingActionCancelsSilently(self):
+        app = _apps(1)[0]
+        appId = app["id"]
+        self.page._allAppsForPage = lambda: [app]
+        self.page._renderAll()
+        card = self.page.allGrid.itemAtPosition(0, 0).widget()
+        button = card.actionButton
+        worker = _DownloadWorker()
+        self.page.store.downloadSlots = Mock()
+
+        with patch(
+            "app.view.pages.app_store_page.downloadWorker",
+            return_value=worker,
+        ), patch.object(InfoBar, "error") as showError, patch.object(
+            InfoBar, "warning"
+        ) as showWarning:
+            button.click()
+            self.assertIn(appId, self.page._downloadJobs)
+            self.assertEqual(button.toolTip(), "取消下载")
+
+            button.click()
+            worker.cancel.assert_called_once_with()
+            self.assertIn(appId, self.page._downloadJobs)
+
+            worker.finished.emit("", "", True)
+
+        showError.assert_not_called()
+        showWarning.assert_not_called()
+        self.page.store.downloadSlots.acquire.assert_called_once_with()
+        self.page.store.downloadSlots.release.assert_called_once_with()
+        self.assertNotIn(appId, self.page._downloadJobs)
+        self.assertNotIn(appId, self.page._downloadStates)
+        self.assertEqual(button.text(), "下载")
+        self.assertTrue(button.isEnabled())
+        self.assertTrue(button.ring.isHidden())
+        self.assertTrue(button.spinner.isHidden())
+        self.assertEqual(button.toolTip(), "")
 
     def testDirectPinnedCardUsesLocalManifestAction(self):
         installed = object()
