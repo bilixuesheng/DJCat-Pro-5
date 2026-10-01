@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from PySide6.QtCore import QEvent, QRect, QSize
+from PySide6.QtCore import QAbstractAnimation, QEvent, QRect, QSize
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from shiboken6 import delete
@@ -899,7 +899,7 @@ class UpdateWindowLifecycleTest(TestCase):
             toast = self.window._updateToast
             self.assertIsInstance(toast, UpdateToast)
             self.assertIsNone(toast._progress)
-            self._waitForToastToLand(toast)
+            self._finishToastSlideIn(toast)
             firstGeometry = toast.geometry()
             worker.progressChanged.emit(50, 100, 1024, 32)
             QTest.qWait(120)
@@ -952,13 +952,13 @@ class UpdateWindowLifecycleTest(TestCase):
 
         self.assertEqual(workerFactory.call_args.args[0], DOWNLOAD_URL)
 
-    def _waitForToastToLand(self, toast):
-        # InfoBarManager 的滑入动画名义上 200 ms，整套测试跑满时会被拖慢，按落点等。
-        deadline = time.monotonic() + 3
-        while toast.x() + toast.width() != self.window.width() - 24:
-            if time.monotonic() > deadline:
-                self.fail("Update Toast 没有滑到右下角")
-            QTest.qWait(10)
+    @staticmethod
+    def _finishToastSlideIn(toast):
+        # 直接把 InfoBarManager 的滑入动画拨到终点：整套测试里前面的托盘用例会让全局动画
+        # 驱动停摆，按真实时间等永远等不到。
+        slide = toast.property("slideAni")
+        if slide is not None and slide.state() == QAbstractAnimation.State.Running:
+            slide.setCurrentTime(slide.duration())
 
     def _startStubbedDownload(self, version="9999.0.0"):
         worker = DownloadWorkerStub("", Path())

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import time
-
 import pytest
-from PySide6.QtCore import QEvent
+from PySide6.QtCore import QAbstractAnimation, QEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 from qfluentwidgets import InfoBarIcon
@@ -32,13 +30,16 @@ def rightEdge(toast):
     return toast.x() + toast.width()
 
 
+def finishAnimation(animation):
+    # 直接拨到终点，不等 Qt 的动画时钟：整套测试里前面的用例可能让全局动画驱动停摆，
+    # 定时器和排队调用照常，动画却一帧不走。
+    if animation is not None and animation.state() == QAbstractAnimation.State.Running:
+        animation.setCurrentTime(animation.duration())
+
+
 def settle(toast):
-    # 等 InfoBarManager 的滑入动画把卡片送到右下角。动画名义上 200 ms，但整套测试跑满时
-    # 定时器会被拖慢，固定等一段时间不可靠。
-    deadline = time.monotonic() + 3
-    while rightEdge(toast) != toast.parentWidget().width() - 24:
-        assert time.monotonic() < deadline, "Update Toast 没有滑到右下角"
-        QTest.qWait(10)
+    """让 InfoBarManager 的滑入动画走完，卡片落到它的终点。"""
+    finishAnimation(toast.property("slideAni"))
 
 
 def testDownloadingReservesWidthAndHasNoCloseButton(host):
@@ -68,10 +69,17 @@ def testProgressAnimatesAndFallsBackToIndeterminate(host):
     toast.setDownloadProgress("40%", 40)
     assert toast._progress == 40
     assert not toast._indeterminateTimer.isActive()
-    QTest.qWait(30)
+    animation = toast._progressAnimation
+    assert animation.duration() == 150
+    animation.setCurrentTime(75)
     assert 0 < toast._displayProgress < 40
-    QTest.qWait(250)
-    assert toast._displayProgress == 40
+    halfway = toast._displayProgress
+
+    # 动画途中又来新进度：从当前显示值接着追，不从 0 重放。
+    toast.setDownloadProgress("60%", 60)
+    assert animation.startValue() == halfway
+    finishAnimation(animation)
+    assert toast._displayProgress == 60
 
     toast.setDownloadProgress("下载失败，正在重试 1/3...")
     assert toast._progress is None
@@ -163,9 +171,9 @@ def testStateChangeDuringSlideInLandsAtTheNewSize(host):
     # 否则最后几帧会把卡片拉回按旧宽度算的位置。
     toast = UpdateToast(host)
     toast.startDownload("正在下载更新 v5.3.0", "正在连接下载服务器...", WIDEST)
+    assert toast.property("slideAni").state() == QAbstractAnimation.State.Running
     toast.failDownload("更新下载失败", "HTTP 403")
 
     settle(toast)
-    QTest.qWait(300)
 
     assert rightEdge(toast) == host.width() - 24
