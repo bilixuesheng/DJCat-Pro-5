@@ -141,6 +141,8 @@ AppStorePage 本身不滚动：选项卡栏固定在顶部，"已安装"和"全�
 
 Client Update 与 Application Store 的 Package 下载共用 `app/common/update_download.py` 中的 `UpdateDownloadWorker`。它只接受全程 HTTPS 的下载，调用方必须传入 `validator`：Client Update 用 `validateClientUpdateZip`，它放在轻量模块里，MainWindow 不能为此提前导入 `application_store`。支持分段的下载默认以 8 个工作线程开始；后续智能扩容和全局并发限制仍由共享下载器统一控制，不能按界面各自复制线程配置。
 
+**`app/view/components/update_toast.py` 独占 Update Toast。** Client Update 下载从开始到完成或失败都由同一张卡片表达，MainWindow 只给标题和正文、接 `installClicked`／`retryClicked`；不用 `StateToolTip`，也不另弹「下载完成」或「下载失败」的 InfoBar。下载中没有 ×；宽度在开始时按最长的进度文字预留一次，进度刷新只换文字不重新量尺寸。没有有效百分比（连接中、服务器不给总大小、重试中）时显示不确定线，确定进度沿用应用市场按钮的 150 ms 属性动画。换状态时先藏起按钮容器再换按钮，并在 `_adjustText()` 之后再 `adjustSize()` 一次，少了任何一步卡片都会停在被撑宽的尺寸；随后照 InfoBarManager 的规则重摆位置，滑入或下落动画还在跑时只改它的终点，不直接 `move()`，否则卡片会被动画拉回按旧宽度算的位置（下载一开始就失败时必然发生）。卡片在场时检查到同一版本不再弹「检测到新版本」。结构借鉴 Ghost Downloader 3 的 `progress_toast.py`，来源见文件头。
+
 Client Update 下载完成后，MainWindow 使用后台 `UpdateApplyWorker` 解压更新 ZIP 到暂存目录并启动 `updater.exe`，期间显示不可取消且只含不确定进度环的蒙层弹窗。确认更新器进程创建成功后才关闭 DJCat；启动失败时关闭蒙层并保留当前进程显示错误，不能在 GUI 线程等待更新器启动。更新包在更新器进程创建成功之后才删除，任何一步失败都还能重来；残留的包由下次启动的 `clearUpdateDirectory()` 清掉。
 
 `updater.exe` 的提交点是整目录换名，不是逐文件复制：更新包换名到 `<APP_DIR>.new`，原目录换名为 `<APP_DIR>.backup`，再把新目录换成 `APP_DIR`；失败时把备份换回去。更新器不能从 `APP_DIR` 里面运行，它先把自己复制到 `%TEMP%\djcat_updater` 再以 `CREATE_NO_WINDOW` 重启；路径比对前把 `/` 规范成 `\`。
@@ -242,6 +244,7 @@ Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` �
 | `app/view/pages/timer_window.py` | Exam Countdown 与 Fullscreen Clock 共用的窗口：背景、全屏／窗口化切换、字号、角落按钮与关闭确认；子类只给配置项和各自的时间与控件 |
 | `app/view/components/` | 多页面复用的 Markdown、背景、滚动和设置卡片组件 |
 | `app/view/components/busy_glow.py` | Busy Glow 的几何、配色和绘制；不知道 AI Markdown 的业务规则 |
+| `app/view/components/update_toast.py` | Update Toast 的三种状态、按钮和底边进度线；不知道下载、版本和安装的规则 |
 | `app/view/components/setting_section.py` | Setting Section 的下钻容器、导航行、推移动画和命中高亮 |
 | `app/view/components/setting_preview.py` | Setting Preview：按真实排布复刻整个主窗口（标题栏／导航栏／横幅／卡片）、投送与倒计时窗口（标题／正文或大时间／角落按钮，按钮位置跟随对应配置）、软件图标四处用法、主题小窗和标题栏＋Windows 通知区域 |
 | `app/view/components/color_dialog.py` | QFluentWidgets 颜色选择弹窗换上项目 `ScrollArea`，色板和亮度滑块登记为触控拖动目标 |
