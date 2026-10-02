@@ -5,6 +5,7 @@ from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QInputDevice
 from PySide6.QtWidgets import QApplication, QScroller, QWidget
 from PySide6.QtTest import QTest
+from shiboken6 import isValid
 from qfluentwidgets import FluentIcon as FIF, RoundMenu
 
 from app.config.cfg import cfg
@@ -458,8 +459,12 @@ class TrayMenuTest(TestCase):
         self.parent = QWidget()
 
     def tearDown(self):
+        # processEvents() 不执行 deleteLater。托盘不真正删掉，就会一直连着全局 cfg 信号，之后每次
+        # 改 cfg 都在所有残留托盘上重建菜单：整个类跑完残留一万多个控件，下一个调 qWait 的测试
+        # 要先花好几秒删它们，这期间事件循环被占住，刚启动的动画一帧都走不了。
         self.parent.deleteLater()
-        self.app.processEvents()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.assertFalse(isValid(self.parent), "托盘和菜单没有随测试一起删掉")
 
     def _createTray(self):
         from app.view.shell.tray import SystemTrayIcon
@@ -493,7 +498,6 @@ class TrayMenuTest(TestCase):
         with patch.object(SystemTrayIcon, "_rebuildMenu") as rebuildMenu:
             tray = SystemTrayIcon(self.parent, cards)
 
-        self.addCleanup(tray.deleteLater)
         self.assertEqual(tray._homeCards, cards)
         rebuildMenu.assert_called_once_with()
 
@@ -591,6 +595,19 @@ class TrayMenuTest(TestCase):
             )
         finally:
             tray.deleteLater()
+
+    def testRebuildingAMenuThatWasShownDeletesTheOldMenuSafely(self):
+        tray = self._createTray()
+        oldMenu = tray.menu
+        oldMenu.show()
+        self.app.processEvents()
+        oldMenu.hide()
+
+        cfg.set(cfg.showBroadcastTrayAction, not cfg.showBroadcastTrayAction.value)
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+        self.assertIsNot(tray.menu, oldMenu)
+        self.assertFalse(isValid(oldMenu))
 
     def testHiddenTaskActionIsAbsentFromMenu(self):
         cfg.set(cfg.showBroadcastTrayAction, False)

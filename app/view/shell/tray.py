@@ -69,6 +69,11 @@ class _TrayMenuActionListWidget(MenuActionListWidget):
 
 
 class AcrylicMenu(RoundMenu):
+    # setStyle() 不接管样式对象，菜单的样式表还会把它包进 QStyleSheetStyle、只留一个裸指针。
+    # 不在 Python 这边留着，它在菜单建好时就被回收，之后菜单一用样式（比如析构时清焦点）
+    # 就踩到已释放的内存，整个进程崩溃。所有托盘菜单共用这一份，留到进程结束。
+    _menuStyle = None
+
     def __init__(self, title="", parent=None):
         QMenu.__init__(self, parent)
         self._useSquareCorners = (
@@ -99,7 +104,9 @@ class AcrylicMenu(RoundMenu):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMouseTracking(True)
-        self.setStyle(CustomMenuStyle())
+        if AcrylicMenu._menuStyle is None:
+            AcrylicMenu._menuStyle = CustomMenuStyle()
+        self.setStyle(AcrylicMenu._menuStyle)
 
         self.hBoxLayout.addWidget(self.view, 1, Qt.AlignmentFlag.AlignCenter)
         self.hBoxLayout.setContentsMargins(0, 0, 0, 0)
