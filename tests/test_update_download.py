@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from PySide6.QtCore import QEvent, QRect, QSize
+from PySide6.QtCore import QAbstractAnimation, QEvent, QRect, QSize
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from shiboken6 import delete
@@ -38,6 +38,7 @@ from app.config.constants import (
     DOWNLOAD_URL,
     normalizeReleaseVersion,
 )
+from app.view.components.update_toast import UpdateToast
 from app.view.pages.setting_page import SettingPage
 from app.view.windows.main_window import (
     InstallerLaunchDialog,
@@ -133,61 +134,6 @@ class InfoBarStub:
 class ButtonStub:
     def __init__(self, *_, **__):
         self.clicked = SignalStub()
-
-
-class StateToolTipStub:
-    def __init__(self, title, content, parent):
-        self.title = title
-        self.content = content
-        self.parent = parent
-        self.state = None
-        self.shown = False
-        self.hidden = False
-        self.contentLabel = Mock()
-        self.contentLabel.sizeHint.return_value.width.return_value = 300
-        self.titleLabel = Mock()
-        self.titleLabel.sizeHint.return_value.width.return_value = 100
-        self.closeButton = Mock()
-        self.fixedWidth = 0
-        self.closedSignal = SignalStub()
-        self.destroyed = SignalStub()
-        self.deleted = False
-        self.position = (0, 0)
-        self.suitablePosCalls = 0
-
-    def getSuitablePos(self):
-        self.suitablePosCalls += 1
-        return (0, 0)
-
-    def move(self, *position):
-        if len(position) == 1:
-            self.position = position[0]
-        else:
-            self.position = position
-
-    def show(self):
-        self.shown = True
-
-    def hide(self):
-        self.hidden = True
-
-    def setContent(self, content):
-        self.content = content
-
-    def setState(self, state):
-        self.state = state
-
-    def setFixedWidth(self, width):
-        self.fixedWidth = width
-
-    def deleteLater(self):
-        self.deleted = True
-
-    def width(self):
-        return self.fixedWidth
-
-    def y(self):
-        return self.position[1]
 
 
 class DownloadWorkerStub:
@@ -923,7 +869,7 @@ class UpdateWindowLifecycleTest(TestCase):
         self.app.processEvents()
         self.quotaPatcher.stop()
 
-    def testClickingDownloadClosesVersionBarAndStartsStateToolTip(self):
+    def testClickingDownloadClosesVersionBarAndStartsUpdateToast(self):
         InfoBarStub.instances.clear()
         self.window.show()
         self.app.processEvents()
@@ -934,10 +880,6 @@ class UpdateWindowLifecycleTest(TestCase):
             patch("app.view.windows.main_window.InfoBar", InfoBarStub),
             patch("app.view.windows.main_window.PrimaryPushButton", ButtonStub),
             patch("app.view.windows.main_window.PushButton", ButtonStub),
-            patch(
-                "app.view.windows.main_window.StateToolTip",
-                StateToolTipStub,
-            ),
             patch(
                 "app.view.windows.main_window.UpdateDownloadWorker",
                 return_value=worker,
@@ -954,12 +896,18 @@ class UpdateWindowLifecycleTest(TestCase):
             )
             versionBar = InfoBarStub.instances[-1]
             versionBar.widgets[0].clicked.emit()
+            toast = self.window._updateToast
+            self.assertIsInstance(toast, UpdateToast)
+            self.assertIsNone(toast._progress)
+            self._finishToastSlideIn(toast)
+            firstGeometry = toast.geometry()
             worker.progressChanged.emit(50, 100, 1024, 32)
             QTest.qWait(120)
             self.app.processEvents()
-            firstY = self.window._downloadStateToolTip.y()
+            self.assertEqual(toast._progress, 50)
             worker.retrying.emit(1, 3, "temporary")
-            self.assertIn("正在重试 1/3", self.window._downloadStateToolTip.content)
+            self.assertIn("正在重试 1/3", toast.contentLabel.text())
+            self.assertIsNone(toast._progress)
             worker.progressChanged.emit(60, 100, 2048, 32)
             QTest.qWait(120)
             self.app.processEvents()
@@ -967,11 +915,18 @@ class UpdateWindowLifecycleTest(TestCase):
         self.assertTrue(versionBar.closed)
         self.assertIsNone(self.window._updateInfoBar)
         self.assertTrue(thread.started)
-        self.assertTrue(self.window._downloadStateToolTip.shown)
-        self.assertIn("60%", self.window._downloadStateToolTip.content)
-        self.assertIn("32 线程", self.window._downloadStateToolTip.content)
-        self.assertEqual(self.window._downloadStateToolTip.y(), firstY)
-        self.assertEqual(self.window._downloadStateToolTip.suitablePosCalls, 1)
+        self.assertIs(self.window._updateToast, toast)
+        self.assertTrue(toast.isVisible())
+        self.assertTrue(toast.closeButton.isHidden())
+        self.assertIn("v9999.0.0", toast.titleLabel.text())
+        self.assertIn("60%", toast.contentLabel.text())
+        self.assertNotIn("线程", toast.contentLabel.text())
+        self.assertEqual(toast._progress, 60)
+        self.assertEqual(toast.geometry(), firstGeometry)
+        self.assertEqual(
+            toast.x() + toast.width(),
+            self.window.width() - 24,
+        )
         workerFactory.assert_called_once()
         self.assertEqual(workerFactory.call_args.args[0], DOWNLOAD_URL)
         self.assertIs(
@@ -985,10 +940,6 @@ class UpdateWindowLifecycleTest(TestCase):
         thread = ThreadStub(lambda: None, True)
         with (
             patch(
-                "app.view.windows.main_window.StateToolTip",
-                StateToolTipStub,
-            ),
-            patch(
                 "app.view.windows.main_window.UpdateDownloadWorker",
                 return_value=worker,
             ) as workerFactory,
@@ -1001,43 +952,112 @@ class UpdateWindowLifecycleTest(TestCase):
 
         self.assertEqual(workerFactory.call_args.args[0], DOWNLOAD_URL)
 
-    def testStartingAnotherDownloadDisposesOnlyThePreviousTooltip(self):
-        oldToolTip = StateToolTipStub("old", "old", self.window)
-        oldToolTip.destroyed.connect(
-            lambda _=None, current=oldToolTip: self.window._clearDownloadStateToolTip(
-                current
-            )
-        )
-        self.window._downloadStateToolTip = oldToolTip
+    @staticmethod
+    def _finishToastSlideIn(toast):
+        # 直接把 InfoBarManager 的滑入动画拨到终点：整套测试里前面的托盘用例会让全局动画
+        # 驱动停摆，按真实时间等永远等不到。
+        slide = toast.property("slideAni")
+        if slide is not None and slide.state() == QAbstractAnimation.State.Running:
+            slide.setCurrentTime(slide.duration())
+
+    def _startStubbedDownload(self, version="9999.0.0"):
         worker = DownloadWorkerStub("", Path())
-        thread = ThreadStub(lambda: None, True)
         with (
-            patch(
-                "app.view.windows.main_window.StateToolTip",
-                StateToolTipStub,
-            ),
             patch(
                 "app.view.windows.main_window.UpdateDownloadWorker",
                 return_value=worker,
             ),
             patch(
                 "app.view.windows.main_window.threading.Thread",
-                return_value=thread,
+                return_value=ThreadStub(lambda: None, True),
             ),
         ):
-            self.window._startUpdateDownload("5.0.0-pre.22")
+            self.window._startUpdateDownload(version)
+        return worker
 
-        newToolTip = self.window._downloadStateToolTip
-        self.assertIsNot(newToolTip, oldToolTip)
-        self.assertTrue(oldToolTip.hidden)
-        self.assertTrue(oldToolTip.deleted)
-        oldToolTip.destroyed.emit(object())
-        self.assertIs(self.window._downloadStateToolTip, newToolTip)
+    def testDownloadFailureTurnsTheSameToastIntoRetry(self):
+        self.window.show()
+        worker = self._startStubbedDownload()
+        toast = self.window._updateToast
 
-    def testDownloadProgressIsCoalescedBeforeUpdatingTooltip(self):
-        toolTip = StateToolTipStub("", "", self.window)
-        self.window._downloadStateToolTip = toolTip
+        with patch("app.view.windows.main_window.InfoBar.error") as showError:
+            worker.finished.emit("", "HTTP 503", False)
 
+        showError.assert_not_called()
+        self.assertIs(self.window._updateToast, toast)
+        self.assertEqual(toast.titleLabel.text(), "更新下载失败")
+        self.assertEqual(toast.contentLabel.text(), "HTTP 503")
+        self.assertFalse(toast.retryButton.isHidden())
+        self.assertTrue(toast.installButton.isHidden())
+        self.assertFalse(toast.closeButton.isHidden())
+
+        with (
+            patch(
+                "app.view.windows.main_window.UpdateDownloadWorker",
+                return_value=DownloadWorkerStub("", Path()),
+            ) as workerFactory,
+            patch(
+                "app.view.windows.main_window.threading.Thread",
+                return_value=ThreadStub(lambda: None, True),
+            ),
+        ):
+            toast.retryButton.click()
+
+        workerFactory.assert_called_once()
+        self.assertIs(self.window._updateToast, toast)
+        self.assertIn("v9999.0.0", toast.titleLabel.text())
+        self.assertTrue(toast.closeButton.isHidden())
+        self.assertTrue(toast._buttonBox.isHidden())
+        self.assertIsNone(toast._progress)
+
+    def testInstallButtonAppliesTheDownloadedPackage(self):
+        self.window.show()
+        worker = self._startStubbedDownload()
+        toast = self.window._updateToast
+        zipPath = Path(tempfile.gettempdir()) / "DJCat-Pro-update.zip"
+        worker.finished.emit(str(zipPath), "", False)
+
+        self.assertFalse(toast.installButton.isHidden())
+        self.assertFalse(toast.laterButton.isHidden())
+        self.assertTrue(toast.retryButton.isHidden())
+        self.assertFalse(toast.closeButton.isHidden())
+        with patch.object(self.window, "_applyUpdate") as applyUpdate:
+            toast.installButton.click()
+
+        applyUpdate.assert_called_once_with(zipPath)
+
+    def testMissingPackageTurnsToastIntoRetry(self):
+        self.window.show()
+        self.window._downloadVersion = "9999.0.0"
+        missing = Path(tempfile.gettempdir()) / "missing-DJCat-Pro-update.zip"
+        self.assertFalse(missing.exists())
+
+        self.window._applyUpdate(missing)
+
+        toast = self.window._updateToast
+        self.assertEqual(toast.titleLabel.text(), "无法安装更新")
+        self.assertFalse(toast.retryButton.isHidden())
+        self.assertIsNone(self.window._updateApplyWorker)
+
+    def testSameVersionCheckDoesNotStackOnTheUpdateToast(self):
+        self.window.show()
+        self._startStubbedDownload("9999.0.0")
+
+        self.window._onUpdateChecked(
+            {"latest_version": "9999.0.0", "update_note": "note"},
+            "",
+            True,
+        )
+        self.assertIsNone(self.window._updateInfoBar)
+
+        self.window._onUpdateChecked(
+            {"latest_version": "9999.1.0", "update_note": "note"},
+            "",
+            True,
+        )
+        self.assertIsNotNone(self.window._updateInfoBar)
+
+    def testDownloadProgressIsCoalescedBeforeUpdatingToast(self):
         with patch.object(self.window, "_onUpdateDownloadProgress") as update:
             self.window._queueUpdateDownloadProgress(10, 100, 1, 4)
             self.window._queueUpdateDownloadProgress(20, 100, 2, 4)
@@ -1046,19 +1066,17 @@ class UpdateWindowLifecycleTest(TestCase):
 
         update.assert_called_once_with(20, 100, 2, 4)
 
-    def testDisposingAlreadyDeletedStateToolTipIsSafe(self):
-        from qfluentwidgets import StateToolTip
-
-        toolTip = StateToolTip("", "", self.window)
-        self.window._downloadStateToolTip = toolTip
-        delete(toolTip)
+    def testDisposingAlreadyDeletedUpdateToastIsSafe(self):
+        toast = UpdateToast(self.window)
+        self.window._updateToast = toast
+        delete(toast)
         with (
             patch("app.view.windows.main_window.cfg.set"),
             patch("app.view.windows.main_window.QApplication.quit") as quitApp,
         ):
             self.window.requestQuit()
 
-        self.assertIsNone(self.window._downloadStateToolTip)
+        self.assertIsNone(self.window._updateToast)
         quitApp.assert_called_once_with()
 
     def testDestroyedUpdateInfoBarClearsCapturedReference(self):
@@ -1181,31 +1199,22 @@ class UpdateWindowLifecycleTest(TestCase):
         self.assertFalse(self.window.isVisible())
         self.assertFalse(worker.canceled)
 
-    def testCompletedDownloadRestoresHiddenWindowBeforeInfoBar(self):
-        worker = DownloadWorkerStub("", Path())
-        toolTip = StateToolTipStub("", "", self.window)
+    def testCompletedDownloadRestoresHiddenWindowBeforeInstallChoice(self):
+        worker = self._startStubbedDownload()
+        toast = self.window._updateToast
         self.window._downloadWorker = worker
-        self.window._downloadStateToolTip = toolTip
-        self.window._downloadVersion = "9999.0.0"
         self.window.hide()
 
         with tempfile.TemporaryDirectory() as tempDir:
-            installer = Path(tempDir) / "DJCat-Pro.exe"
-            installer.write_bytes(b"MZ")
-            with patch.object(
-                self.window,
-                "_showInstallUpdateInfoBar",
-            ) as showInfoBar:
-                self.window._onUpdateDownloadFinished(
-                    str(installer),
-                    "",
-                    False,
-                )
+            installer = Path(tempDir) / "DJCat-Pro.zip"
+            installer.write_bytes(b"PK")
+            self.window._onUpdateDownloadFinished(str(installer), "", False)
 
         self.assertTrue(self.window.isVisible())
         self.assertTrue(worker.deleted)
-        self.assertTrue(toolTip.state)
-        showInfoBar.assert_called_once()
+        self.assertIs(self.window._updateToast, toast)
+        self.assertEqual(toast.titleLabel.text(), "v9999.0.0 下载完成")
+        self.assertFalse(toast.installButton.isHidden())
 
     def testTrayExitCancelsDownloadAndWaitsBeforeQuitting(self):
         worker = DownloadWorkerStub("", Path())
@@ -1428,8 +1437,8 @@ class UpdateWindowLifecycleTest(TestCase):
             patch.object(self.window.appStorePage, "shutdown") as appStoreShutdown,
             patch.object(
                 self.window,
-                "_disposeDownloadStateToolTip",
-            ) as disposeToolTip,
+                "_disposeUpdateToast",
+            ) as disposeToast,
         ):
             self.window._shutdownResources()
             self.window._shutdownResources()
@@ -1443,7 +1452,7 @@ class UpdateWindowLifecycleTest(TestCase):
         downloadWorker.cancel.assert_called_once_with()
         homeShutdown.assert_called_once_with()
         appStoreShutdown.assert_called_once_with()
-        disposeToolTip.assert_called_once_with()
+        disposeToast.assert_called_once_with()
         self.assertIsNone(self.window._navigationTarget)
         self.assertIsNone(self.window._pendingNavigation)
 
@@ -1473,7 +1482,8 @@ class UpdateWindowLifecycleTest(TestCase):
             for name, payload in zipEntries.items():
                 zf.writestr(name, payload)
 
-        infoBar = Mock()
+        toast = Mock()
+        self.window._updateToast = toast
         dialog = InstallerLaunchDialogStub()
         InlineThreadStub.instances.clear()
         with (
@@ -1499,7 +1509,7 @@ class UpdateWindowLifecycleTest(TestCase):
             patch("app.view.windows.main_window.QApplication.quit") as quitApp,
             patch.object(MainWindow, "_shutdownResources"),
         ):
-            self.window._applyUpdate(zipFile, infoBar)
+            self.window._applyUpdate(zipFile)
 
         return SimpleNamespace(
             appDir=appDir,
@@ -1507,7 +1517,7 @@ class UpdateWindowLifecycleTest(TestCase):
             zipFile=zipFile,
             popen=popen,
             dialog=dialog,
-            infoBar=infoBar,
+            toast=toast,
             quitApp=quitApp,
         )
 
@@ -1540,7 +1550,8 @@ class UpdateWindowLifecycleTest(TestCase):
             run.quitApp.assert_called_once_with()
 
         self.assertTrue(run.dialog.shown)
-        run.infoBar.close.assert_called_once_with()
+        run.toast.close.assert_called_once_with()
+        self.assertIsNone(self.window._updateToast)
         self.assertIsNone(self.window._updateApplyWorker)
         self.assertIsNone(self.window._updateApplyDialog)
 
@@ -1572,7 +1583,6 @@ class UpdateWindowLifecycleTest(TestCase):
         self.assertIsNone(self.window._updateApplyWorker)
 
     def testUpdateApplyFailureClosesDialogAndKeepsApplicationOpen(self):
-        infoBar = Mock()
         dialog = InstallerLaunchDialogStub()
         thread = ThreadStub(lambda: None, True)
         with tempfile.TemporaryDirectory() as tempDir:
@@ -1598,7 +1608,7 @@ class UpdateWindowLifecycleTest(TestCase):
                     "app.view.windows.main_window.QApplication.quit"
                 ) as quitApp,
             ):
-                self.window._applyUpdate(zipFile, infoBar)
+                self.window._applyUpdate(zipFile)
                 self.window._updateApplyWorker.run()
 
         self.assertTrue(dialog.finished)
