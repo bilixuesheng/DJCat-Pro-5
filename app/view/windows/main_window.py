@@ -36,7 +36,6 @@ from qfluentwidgets import (
     PushButton,
     SearchLineEdit,
     SplashScreen,
-    StateToolTip,
     SubtitleLabel,
     Theme,
     isDarkTheme,
@@ -94,12 +93,15 @@ from app.platform.background_effect import (
 from app.platform.touch_input import enableTouchTitleBarDrag
 from app.signal_bus import signalBus
 from app.view.components.setting_suggestion_menu import SettingSuggestionMenu
+from app.view.components.update_toast import UpdateToast
 from app.view.pages.home_page import HomePage
 from app.view.shell.tray import SystemTrayIcon
 
 
 SCHEDULE_CATCH_UP_LIMIT = timedelta(seconds=60)
 SHUTDOWN_CATCH_UP_LIMIT = timedelta(seconds=5)
+# Update Toast 下载中的宽度按这个大小的进度文字预留：更新包上限 1 GiB，以 MB 计时数字最长。
+WIDEST_DOWNLOAD_SIZE = 1023.9 * 1024**2
 
 
 class CustomSplashScreen(SplashScreen):
@@ -385,7 +387,8 @@ class MainWindow(MSFluentWindow):
         self._updateInfoBar = None
         self._updateCheckInfoBar = None
         self._pendingUpdateNotification = None
-        self._downloadStateToolTip = None
+        self._updateToast = None
+        self._downloadedUpdateZip = None
         self._downloadWorker = None
         self._pendingDownloadProgress = None
         self._downloadVersion = ""
@@ -1569,6 +1572,9 @@ class MainWindow(MSFluentWindow):
                     parent=self,
                 )
             return
+        # Update Toast 已经在讲这个版本，再叠一张「检测到新版本」只会多一个点了没反应的按钮。
+        if self._updateToast is not None and str(latestVersion) == self._downloadVersion:
+            return
 
         note = str(data.get("update_note", ""))
         note = re.sub(
@@ -1643,25 +1649,15 @@ class MainWindow(MSFluentWindow):
             return
 
         self._closeUpdateInfoBar()
-        self._disposeDownloadStateToolTip()
 
         self._downloadVersion = str(version)
         self._quitAfterDownload = False
-        toolTip = StateToolTip(
-            "正在下载更新",
+        self._ensureUpdateToast().startDownload(
+            f"正在下载更新 v{self._downloadVersion}",
             "正在连接下载服务器...",
-            self,
-        )
-        self._downloadStateToolTip = toolTip
-        toolTip.move(toolTip.getSuitablePos())
-        toolTip.show()
-        toolTip.closedSignal.connect(
-            lambda current=toolTip: self._onDownloadStateToolTipClosed(current)
-        )
-        toolTip.destroyed.connect(
-            lambda _=None, current=toolTip: self._clearDownloadStateToolTip(
-                current
-            )
+            self._formatDownloadProgress(
+                WIDEST_DOWNLOAD_SIZE, WIDEST_DOWNLOAD_SIZE, WIDEST_DOWNLOAD_SIZE
+            ),
         )
 
         self._downloadWorker = UpdateDownloadWorker(
@@ -1690,61 +1686,60 @@ class MainWindow(MSFluentWindow):
             return
         self._onUpdateDownloadProgress(*progress)
 
-    def _onUpdateDownloadProgress(self, downloaded, total, speed, threads):
-        if self._downloadStateToolTip is None:
+    def _onUpdateDownloadProgress(self, downloaded, total, speed, _threads):
+        if self._updateToast is None:
             return
-
-        downloadedText = self._formatDownloadSize(downloaded)
-        if total > 0:
-            percent = min(100, int(downloaded * 100 / total))
-            totalText = self._formatDownloadSize(total)
-            progressText = f"{percent}% · {downloadedText} / {totalText}"
-        else:
-            progressText = f"已下载 {downloadedText}"
-        speedText = self._formatDownloadSize(speed)
-        content = f"{progressText} · {speedText}/s · {threads} 线程"
-        self._downloadStateToolTip.setContent(content)
-        contentWidth = self._downloadStateToolTip.contentLabel.sizeHint().width()
-        titleWidth = self._downloadStateToolTip.titleLabel.sizeHint().width()
-        self._downloadStateToolTip.setFixedWidth(
-            max(256, contentWidth + 56, titleWidth + 56)
-        )
-        self._downloadStateToolTip.closeButton.move(
-            self._downloadStateToolTip.width() - 24,
-            19,
-        )
-        self._downloadStateToolTip.move(
-            self.width() - self._downloadStateToolTip.width() - 24,
-            self._downloadStateToolTip.y(),
+        progress = None
+        if total > 0 and downloaded > 0:
+            progress = min(100, int(downloaded * 100 / total))
+        self._updateToast.setDownloadProgress(
+            self._formatDownloadProgress(downloaded, total, speed),
+            progress,
         )
 
     def _onUpdateDownloadRetrying(self, retry, retryCount, _error):
-        if self._downloadStateToolTip is not None:
-            self._downloadStateToolTip.setContent(
+        if self._updateToast is not None:
+            self._updateToast.setDownloadProgress(
                 f"下载失败，正在重试 {retry}/{retryCount}..."
             )
 
-    def _onDownloadStateToolTipClosed(self, toolTip=None):
-        if toolTip is None:
-            toolTip = self._downloadStateToolTip
-        if toolTip is None or self._downloadStateToolTip is not toolTip:
-            return
-        self._downloadStateToolTip = None
-        toolTip.deleteLater()
+    def _ensureUpdateToast(self):
+        toast = self._updateToast
+        if toast is not None and isValid(toast):
+            return toast
+        toast = UpdateToast(self)
+        toast.installClicked.connect(self._installDownloadedUpdate)
+        toast.retryClicked.connect(
+            lambda: self._startUpdateDownload(self._downloadVersion)
+        )
+        toast.destroyed.connect(
+            lambda _=None, current=toast: self._clearUpdateToast(current)
+        )
+        self._updateToast = toast
+        return toast
 
-    def _clearDownloadStateToolTip(self, toolTip=None):
-        if toolTip is None or self._downloadStateToolTip is toolTip:
-            self._downloadStateToolTip = None
+    def _clearUpdateToast(self, toast=None):
+        if toast is None or self._updateToast is toast:
+            self._updateToast = None
 
-    def _disposeDownloadStateToolTip(self):
-        toolTip = self._downloadStateToolTip
-        if toolTip is None:
+    def _disposeUpdateToast(self):
+        toast = self._updateToast
+        if toast is None:
             return
-        self._downloadStateToolTip = None
-        if not isValid(toolTip):
-            return
-        toolTip.hide()
-        toolTip.deleteLater()
+        self._updateToast = None
+        if isValid(toast):
+            toast.close()
+
+    @classmethod
+    def _formatDownloadProgress(cls, downloaded, total, speed):
+        downloadedText = cls._formatDownloadSize(downloaded)
+        if total > 0:
+            percent = min(100, int(downloaded * 100 / total))
+            totalText = cls._formatDownloadSize(total)
+            progressText = f"{percent}% · {downloadedText} / {totalText}"
+        else:
+            progressText = f"已下载 {downloadedText}"
+        return f"{progressText} · {cls._formatDownloadSize(speed)}/s"
 
     @staticmethod
     def _formatDownloadSize(size):
@@ -1772,66 +1767,36 @@ class MainWindow(MSFluentWindow):
             return
 
         if canceled:
-            self._disposeDownloadStateToolTip()
+            self._disposeUpdateToast()
             return
 
         self._showMainWindow()
 
         if error:
-            self._disposeDownloadStateToolTip()
-            InfoBar.error(
-                "更新下载失败",
-                error,
-                duration=5000,
-                position=InfoBarPosition.BOTTOM_RIGHT,
-                parent=self,
-            )
+            self._ensureUpdateToast().failDownload("更新下载失败", error)
             return
 
-        if self._downloadStateToolTip is not None:
-            self._downloadStateToolTip.setContent("更新包下载完成")
-            self._downloadStateToolTip.setState(True)
-
-        self._showInstallUpdateInfoBar(Path(zipPath))
-
-    def _showInstallUpdateInfoBar(self, zipPath):
-        infoBar = InfoBar(
-            icon=FIF.UPDATE,
-            title=f"v{self._downloadVersion} 下载完成",
-            content="是否立即安装更新？",
-            orient=Qt.Orientation.Horizontal,
-            isClosable=True,
-            duration=-1,
-            position=InfoBarPosition.BOTTOM_RIGHT,
-            parent=self,
+        self._downloadedUpdateZip = Path(zipPath)
+        self._ensureUpdateToast().finishDownload(
+            f"v{self._downloadVersion} 下载完成",
+            "是否立即安装更新？",
         )
-        infoBar.widgetLayout.addSpacing(10)
 
-        installButton = PrimaryPushButton(FIF.UPDATE, "立即更新")
-        installButton.clicked.connect(
-            lambda: self._applyUpdate(zipPath, infoBar)
-        )
-        infoBar.addWidget(installButton)
+    def _installDownloadedUpdate(self):
+        if self._downloadedUpdateZip is not None:
+            self._applyUpdate(self._downloadedUpdateZip)
 
-        laterButton = PushButton("稍后更新")
-        laterButton.clicked.connect(infoBar.close)
-        infoBar.addWidget(laterButton)
-        infoBar.show()
-
-    def _applyUpdate(self, zipPath, infoBar):
+    def _applyUpdate(self, zipPath):
         if self._updateApplyWorker is not None:
             return
         if not zipPath.is_file():
-            InfoBar.error(
+            self._ensureUpdateToast().failDownload(
                 "无法安装更新",
                 "更新包已不存在，请重新下载。",
-                duration=4000,
-                position=InfoBarPosition.BOTTOM_RIGHT,
-                parent=self,
             )
             return
 
-        infoBar.close()
+        self._disposeUpdateToast()
         dialog = InstallerLaunchDialog(self)
         worker = UpdateApplyWorker(zipPath)
         thread = threading.Thread(target=worker.run, daemon=True)
@@ -1944,7 +1909,7 @@ class MainWindow(MSFluentWindow):
         self._closeUpdateInfoBar()
         self._closeUpdateCheckInfoBar()
         self._pendingUpdateNotification = None
-        self._disposeDownloadStateToolTip()
+        self._disposeUpdateToast()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
