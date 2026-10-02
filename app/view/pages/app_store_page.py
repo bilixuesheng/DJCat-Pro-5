@@ -11,7 +11,6 @@ from PySide6.QtCore import (
     QObject,
     QParallelAnimationGroup,
     QPoint,
-    Property,
     QPropertyAnimation,
     QRectF,
     QSize,
@@ -20,7 +19,7 @@ from PySide6.QtCore import (
     QUrl,
     Signal,
 )
-from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
     QAbstractButton,
     QAbstractScrollArea,
@@ -42,12 +41,14 @@ from qfluentwidgets import (
     CaptionLabel,
     DrillInTransitionStackedWidget,
     HorizontalFlipView,
+    IndeterminateProgressRing,
     InfoBar,
     InfoBarPosition,
     MessageBox,
     PipsPager,
     Pivot,
     PrimaryPushButton,
+    ProgressRing,
     PushButton,
     StrongBodyLabel,
     SubtitleLabel,
@@ -55,6 +56,7 @@ from qfluentwidgets import (
     ToggleToolButton,
     ToolButton,
     TransitionStackedWidget,
+    isDarkTheme,
     qconfig,
 )
 from qfluentwidgets import FluentIcon as FIF
@@ -76,6 +78,10 @@ from app.view.components.tool_tip import setFluentToolTip
 SHUTDOWN_WAIT_SECONDS = 0.5
 ALL_APPS_PAGE_SIZE = 6
 APPLICATION_CARD_HEIGHT = 168
+PROGRESS_RING_SIZE = 16
+STOP_SQUARE_SIZE = 6
+PROGRESS_LINE_HEIGHT = 3
+BUTTON_CORNER_RADIUS = 5  # 与 QFluentWidgets 按钮样式表的 border-radius 一致
 CONTENT_MARGINS = (12, 8, 20, 24)
 _LIVE_CATALOG_URI_SCHEMES = frozenset({"classisland"})
 def _releaseSlotAfterExit(thread, downloadSlots):
@@ -397,96 +403,157 @@ class CatalogImageWorker(QObject):
 
 
 class ActionProgressButton(PrimaryPushButton):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._progress = None
-        self._displayProgress = 0.0
-        self._indeterminate = False
-        self._progressOffset = 0.0
-        self._progressAnimation = QPropertyAnimation(
-            self, b"displayProgress", self
-        )
-        self._progressAnimation.setDuration(150)
-        self._progressTimer = QTimer(self)
-        self._progressTimer.setInterval(30)
-        self._progressTimer.timeout.connect(self._advanceProgress)
+    # 下载和安装期间的样子移植自 Ghost-Downloader-3 的 InstallButton
+    # （app/view/components/install_button.py，同为 GPL-3.0）：文字让位给进度环或转圈，
+    # 可取消时中间画停止方块。打开和卸载仍显示文字，底边一条不确定进度线。
+    _ringShown = False
+    _cancellable = False
 
-    def setProgress(self, progress=None, indeterminate=False):
-        self._indeterminate = bool(indeterminate)
-        if self._indeterminate:
-            self._progressAnimation.stop()
-            self._progress = None
-            self._displayProgress = 0.0
-            self._progressTimer.start()
-        else:
-            self._progressTimer.stop()
-            self._progressOffset = 0.0
-            if progress is None:
-                self._progressAnimation.stop()
-                self._progress = None
-                self._displayProgress = 0.0
-            else:
-                target = max(0, min(100, int(progress)))
-                if (
-                    self._progress == target
-                    and self._progressAnimation.state()
-                    == QAbstractAnimation.State.Running
-                ):
-                    return
-                self._progress = target
-                self._progressAnimation.stop()
-                if self._displayProgress == target:
-                    self.update()
-                    return
-                self._progressAnimation.setStartValue(self._displayProgress)
-                self._progressAnimation.setEndValue(float(target))
-                self._progressAnimation.start()
+    # 不能写在 __init__ 里：PushButton(text, parent) 会再调一次 self.__init__(parent)，
+    # 子类的 __init__ 就跑两遍。组件库在基类构造末尾调用一次 _postInit()。
+    def _postInit(self):
+        super()._postInit()
+        self._text = ""
+        self._enabled = True
+        self._lineShown = False
+        self._lineOffset = 0.0
+        self._lineTimer = QTimer(self)
+        self._lineTimer.setInterval(30)
+        self._lineTimer.timeout.connect(self._advanceLine)
+        self.ring = ProgressRing(self)
+        self.spinner = IndeterminateProgressRing(self, start=False)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        for ring in (self.ring, self.spinner):
+            ring.setFixedSize(PROGRESS_RING_SIZE, PROGRESS_RING_SIZE)
+            ring.setStrokeWidth(2)
+            ring.setCustomBarColor(QColor(255, 255, 255), QColor(0, 0, 0))
+            ring.setCustomBackgroundColor(
+                QColor(255, 255, 255, 90), QColor(0, 0, 0, 60)
+            )
+            ring.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            ring.hide()
+            layout.addWidget(ring, 0, Qt.AlignmentFlag.AlignCenter)
+
+    # 页面每次刷新状态都会重设文字和可用性；进度环显示期间只记下，环收起时再还原。
+    # 不能先禁用再启用：禁用会丢掉正在进行的按压，进度更新时点下的取消就落空了。
+    def setText(self, text):
+        self._text = text
+        super().setText("" if self._ringShown else text)
+
+    def setEnabled(self, enabled):
+        self._enabled = bool(enabled)
+        super().setEnabled(self._enabled or self._ringShown)
+
+    def setDownloadProgress(self, progress, toolTip):
+        """下载中：1–99 显示进度环，0 和 100 显示转圈；都带停止方块，点按即取消。"""
+        self._showRing(toolTip, cancellable=True)
+        progress = max(0, min(100, int(progress)))
+        downloading = 0 < progress < 100
+        self.ring.setValue(progress)
+        self.ring.setVisible(downloading)
+        self._setSpinning(not downloading)
+
+    def setInstalling(self, toolTip):
+        self._showRing(toolTip, cancellable=False)
+        self.ring.hide()
+        self._setSpinning(True)
+
+    def setLineProgress(self):
+        self._hideRing()
+        if not self._lineShown:
+            self._lineShown = True
+            self._lineOffset = 0.0
+            self._lineTimer.start()
         self.update()
 
-    def _getDisplayProgress(self):
-        return self._displayProgress
-
-    def _setDisplayProgress(self, progress):
-        self._displayProgress = float(progress)
+    def clearProgress(self):
+        self._hideRing()
+        self._lineShown = False
+        self._lineTimer.stop()
         self.update()
 
-    def _advanceProgress(self):
-        self._progressOffset = (self._progressOffset + 0.025) % 1.0
+    def _showRing(self, toolTip, cancellable):
+        self._lineShown = False
+        self._lineTimer.stop()
+        self._cancellable = cancellable
+        if not self._ringShown:
+            self._ringShown = True
+            super().setText("")
+            # 下载时点按取消。安装不可取消，按钮也不禁用：禁用的灰底上看不清转圈，点击由页面忽略。
+            super().setEnabled(True)
+        setFluentToolTip(self, toolTip)
+        self.update()
+
+    def _hideRing(self):
+        if not self._ringShown:
+            return
+        self._ringShown = False
+        self._cancellable = False
+        super().setText(self._text)
+        super().setEnabled(self._enabled)
+        self.setToolTip("")
+        self.ring.hide()
+        self._setSpinning(False)
+        # 直接归零不放动画：下次下载出现进度时，环不能先从上次的位置倒退回来。
+        self.ring.setValue(0)
+        self.ring.ani.stop()
+        self.ring.setVal(0)
+
+    def _setSpinning(self, spinning):
+        if spinning and self.spinner.isHidden():
+            self.spinner.show()
+            self.spinner.start()
+        elif not spinning and not self.spinner.isHidden():
+            self.spinner.stop()
+            self.spinner.hide()
+
+    def _advanceLine(self):
+        self._lineOffset = (self._lineOffset + 0.025) % 1.0
         self.update()
 
     def paintEvent(self, event):
         super().paintEvent(event)
-        if self._progress is None and not self._indeterminate:
-            return
-        inset = 5.0
-        width = max(0.0, self.width() - inset * 2.0)
-        if width <= 0:
-            return
-        track = QRectF(inset, self.height() - 2.0, width, 2.0)
+        if self._cancellable:
+            self._drawStopSquare()
+        elif self._lineShown:
+            self._drawLine()
+
+    def _drawStopSquare(self):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0) if isDarkTheme() else QColor(255, 255, 255))
+        rect = QRectF(
+            (self.width() - STOP_SQUARE_SIZE) / 2,
+            (self.height() - STOP_SQUARE_SIZE) / 2,
+            STOP_SQUARE_SIZE,
+            STOP_SQUARE_SIZE,
+        )
+        painter.drawRoundedRect(rect, 1.5, 1.5)
+
+    def _drawLine(self):
+        # 与 Update Toast 同一画法：线铺满全宽，只由按钮自己的圆角裁切，两端跟着圆弧走。
+        width = float(self.width())
+        top = self.height() - PROGRESS_LINE_HEIGHT
+        segment = max(24.0, width * 0.28)
+        x = -segment + (width + segment) * self._lineOffset
         color = QColor(qconfig.themeColor.value)
         trackColor = QColor(color)
         trackColor.setAlpha(75)
-        painter.setBrush(trackColor)
-        painter.drawRoundedRect(track, 1.0, 1.0)
-        painter.setClipRect(track)
-        if self._indeterminate:
-            segment = max(24.0, width * 0.28)
-            x = track.left() - segment + (width + segment) * self._progressOffset
-            fill = QRectF(x, track.top(), segment, track.height())
-        else:
-            fill = QRectF(
-                track.left(),
-                track.top(),
-                width * self._displayProgress / 100.0,
-                track.height(),
-            )
-        painter.setBrush(color)
-        painter.drawRoundedRect(fill, 1.0, 1.0)
-
-    displayProgress = Property(float, _getDisplayProgress, _setDisplayProgress)
+        button = QPainterPath()
+        button.addRoundedRect(
+            QRectF(self.rect()), BUTTON_CORNER_RADIUS, BUTTON_CORNER_RADIUS
+        )
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        for rect, brush in (
+            (QRectF(0.0, top, width, PROGRESS_LINE_HEIGHT), trackColor),
+            (QRectF(x, top, segment, PROGRESS_LINE_HEIGHT), color),
+        ):
+            bar = QPainterPath()
+            bar.addRect(rect)
+            painter.fillPath(button.intersected(bar), brush)
 
 
 class ApplicationCard(CardWidget):
@@ -623,9 +690,6 @@ class ApplicationCard(CardWidget):
         )
         self.pinButton.setAccessibleName(tooltip)
         setFluentToolTip(self.pinButton, tooltip)
-
-    def setProgress(self, progress=None, indeterminate=False) -> None:
-        self.actionButton.setProgress(progress, indeterminate)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -1690,7 +1754,7 @@ class AppStorePage(QWidget):
             directKey in self._pinnedKeys(),
             removeEnabled=installedPage and appId not in self._downloadStates,
         )
-        self._applyProgress(card, appId)
+        self._applyProgress(card.actionButton, app)
 
     def _actionState(self, app, showUpdate):
         """Text and enabled state of an app's main button, shared by card and detail."""
@@ -1705,18 +1769,19 @@ class AppStorePage(QWidget):
             return ("打开" if hasOpenAction else "未配置打开动作"), hasOpenAction
         return ("下载" if supported else "不支持"), supported
 
-    def _applyProgress(self, button, appId):
-        if (
-            appId in self._launching
-            or appId in self._installing
-            or appId in self._uninstalling
-        ):
-            button.setProgress(indeterminate=True)
-        elif appId in self._downloadJobs:
-            progress = self._downloadProgress.get(appId, 0)
-            button.setProgress(progress, indeterminate=not progress)
+    def _applyProgress(self, button, app):
+        appId = int(app["id"])
+        if appId in self._downloadJobs:
+            button.setDownloadProgress(
+                self._downloadProgress.get(appId, 0),
+                "取消更新" if app.get("installed") else "取消下载",
+            )
+        elif appId in self._installing:
+            button.setInstalling("安装中")
+        elif appId in self._launching or appId in self._uninstalling:
+            button.setLineProgress()
         else:
-            button.setProgress()
+            button.clearProgress()
 
     def _renderGrid(self, layout, apps, installedPage=False):
         cards = []
@@ -2151,7 +2216,7 @@ class AppStorePage(QWidget):
         actionText, enabled = self._actionState(self.currentApp, showUpdate=True)
         self.detailAction.setText(actionText)
         self.detailAction.setEnabled(enabled and not busy)
-        self._applyProgress(self.detailAction, appId)
+        self._applyProgress(self.detailAction, self.currentApp)
         for openButton, pinButton, available, pinned in self._presetActionButtons:
             openButton.setEnabled(available and not busy)
             pinButton.setEnabled((available or pinned) and not busy)
@@ -2162,6 +2227,12 @@ class AppStorePage(QWidget):
 
     def _onAppAction(self, app, allowUpdate=True):
         appId = int(app["id"])
+        job = self._downloadJobs.get(appId)
+        if job is not None:
+            # 取消后由 worker 的 finished(canceled=True) 统一复位按钮并释放下载名额。
+            _thread, worker = job
+            worker.cancel()
+            return
         if self._isBusy(appId):
             return
         if app.get("installed") and (
@@ -2189,7 +2260,7 @@ class AppStorePage(QWidget):
             InfoBar.error("无法开始下载", str(error), duration=4000, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
             return
         self._downloadJobs[appId] = (thread, worker)
-        self._downloadStates[appId] = "下载中 0%"
+        self._downloadStates[appId] = "下载中"
         self._downloadProgress[appId] = 0
         worker.progressChanged.connect(
             lambda done, total, _speed, _workers, appId=appId: self._downloadProgressSignal.emit(
@@ -2342,9 +2413,7 @@ class AppStorePage(QWidget):
     def _onDownloadProgress(self, appId, done, total):
         if appId not in self._downloadJobs:
             return
-        percent = int(done * 100 / total) if total else 0
-        self._downloadStates[appId] = f"下载中 {percent}%"
-        self._downloadProgress[appId] = percent
+        self._downloadProgress[appId] = int(done * 100 / total) if total else 0
         self._updateVisibleCardState(appId)
         if self.currentApp and int(self.currentApp["id"]) == appId:
             self._updateDetailAction()
