@@ -19,7 +19,7 @@ from PySide6.QtCore import (
     QUrl,
     Signal,
 )
-from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
     QAbstractButton,
     QAbstractScrollArea,
@@ -80,6 +80,8 @@ ALL_APPS_PAGE_SIZE = 6
 APPLICATION_CARD_HEIGHT = 168
 PROGRESS_RING_SIZE = 16
 STOP_SQUARE_SIZE = 6
+PROGRESS_LINE_HEIGHT = 3
+BUTTON_CORNER_RADIUS = 5  # 与 QFluentWidgets 按钮样式表的 border-radius 一致
 CONTENT_MARGINS = (12, 8, 20, 24)
 _LIVE_CATALOG_URI_SCHEMES = frozenset({"classisland"})
 def _releaseSlotAfterExit(thread, downloadSlots):
@@ -531,24 +533,27 @@ class ActionProgressButton(PrimaryPushButton):
         painter.drawRoundedRect(rect, 1.5, 1.5)
 
     def _drawLine(self):
-        inset = 5.0
-        width = max(0.0, self.width() - inset * 2.0)
-        if width <= 0:
-            return
-        track = QRectF(inset, self.height() - 2.0, width, 2.0)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
+        # 与 Update Toast 同一画法：线铺满全宽，只由按钮自己的圆角裁切，两端跟着圆弧走。
+        width = float(self.width())
+        top = self.height() - PROGRESS_LINE_HEIGHT
+        segment = max(24.0, width * 0.28)
+        x = -segment + (width + segment) * self._lineOffset
         color = QColor(qconfig.themeColor.value)
         trackColor = QColor(color)
         trackColor.setAlpha(75)
-        painter.setBrush(trackColor)
-        painter.drawRoundedRect(track, 1.0, 1.0)
-        painter.setClipRect(track)
-        segment = max(24.0, width * 0.28)
-        x = track.left() - segment + (width + segment) * self._lineOffset
-        painter.setBrush(color)
-        painter.drawRoundedRect(QRectF(x, track.top(), segment, track.height()), 1.0, 1.0)
+        button = QPainterPath()
+        button.addRoundedRect(
+            QRectF(self.rect()), BUTTON_CORNER_RADIUS, BUTTON_CORNER_RADIUS
+        )
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        for rect, brush in (
+            (QRectF(0.0, top, width, PROGRESS_LINE_HEIGHT), trackColor),
+            (QRectF(x, top, segment, PROGRESS_LINE_HEIGHT), color),
+        ):
+            bar = QPainterPath()
+            bar.addRect(rect)
+            painter.fillPath(button.intersected(bar), brush)
 
 
 class ApplicationCard(CardWidget):

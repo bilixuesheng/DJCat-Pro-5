@@ -411,7 +411,7 @@ class AppStorePageTest(TestCase):
         ring.ani.setCurrentTime(1)
         self.assertLess(ring.val, 5)
 
-    def testLineProgressAlignsWithButtonCornersAndUsesThemeColor(self):
+    def testLineProgressFollowsButtonCornersWithFlatSegmentEnds(self):
         button = ActionProgressButton("打开中")
         self.addCleanup(button.deleteLater)
         button.resize(120, 32)
@@ -421,34 +421,45 @@ class AppStorePageTest(TestCase):
         button.render(image)
         background = QImage(image)
         button.setLineProgress()
-
-        color = qconfig.themeColor.value
-        y = button.height() - 1
-        width = button.width() - 10
+        width, height = button.width(), button.height()
         segment = max(24.0, width * 0.28)
-        # 让亮段先贴住左端、再贴住右端。
-        for offset, inside, edge, outside in (
-            (segment / (width + segment), 6, 5, range(5)),
-            (
-                width / (width + segment),
-                button.width() - 7,
-                button.width() - 6,
-                range(button.width() - 5, button.width()),
-            ),
+        color = qconfig.themeColor.value
+
+        def renderSegmentAt(x):
+            button._lineOffset = (x + segment) / (width + segment)
+            image.fill(Qt.GlobalColor.transparent)
+            button.render(image)
+
+        # 亮段盖住一端时，最底下一行被按钮圆角裁掉，往里抗锯齿过渡到满色；线高 3 px。
+        bottom = height - 1
+        for x, outer, corner, inner in (
+            (0.0, (0, 1), 2, 6),
+            (width - segment, (width - 1, width - 2), width - 3, width - 7),
         ):
-            with self.subTest(offset=offset):
-                button._lineOffset = offset
-                image.fill(Qt.GlobalColor.transparent)
-                button.render(image)
-                self.assertEqual(image.pixelColor(inside, y), color)
-                self.assertNotEqual(image.pixelColor(edge, y), color)
-                self.assertNotEqual(
-                    image.pixelColor(edge, y), background.pixelColor(edge, y)
-                )
-                for x in outside:
+            with self.subTest(x=x):
+                renderSegmentAt(x)
+                for px in outer:
                     self.assertEqual(
-                        image.pixelColor(x, y), background.pixelColor(x, y)
+                        image.pixelColor(px, bottom), background.pixelColor(px, bottom)
                     )
+                self.assertNotEqual(image.pixelColor(corner, bottom), color)
+                self.assertNotEqual(
+                    image.pixelColor(corner, bottom),
+                    background.pixelColor(corner, bottom),
+                )
+                for y in range(height - 3, height):
+                    self.assertEqual(image.pixelColor(inner, y), color)
+                self.assertEqual(
+                    image.pixelColor(inner, height - 4),
+                    background.pixelColor(inner, height - 4),
+                )
+
+        # 亮段在中间时是平头：边缘一列三行都是满色，紧挨着的外侧只有轨道色。
+        renderSegmentAt(40.0)
+        for y in range(height - 3, height):
+            self.assertEqual(image.pixelColor(40, y), color)
+            self.assertNotEqual(image.pixelColor(39, y), color)
+            self.assertNotEqual(image.pixelColor(39, y), background.pixelColor(39, y))
 
     def testLineProgressUsesUpdatedThemeColor(self):
         button = ActionProgressButton("卸载中")
