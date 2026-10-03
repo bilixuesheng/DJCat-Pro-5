@@ -238,6 +238,14 @@ _Avoid_: 便携 ZIP 的文件格式、Application 的安装目录
 切换 Installed Mode 与 Portable Mode 时，复制整个 App Data Directory 并改写配置中的绝对路径。迁移发生在进程退出阶段，运行中不切换路径。
 _Avoid_: 只复制 `UserConfig.json`、运行中热切换路径
 
+**Cache（缓存）**:
+DJCat 在本机留下、清理后不影响任何设置或已安装内容的数据：Application Store 的图片和临时 Package，以及除正在写入那一份之外的日志。图片和 Package 清理后会在需要时重新下载，日志删掉就没有了。它属于整个 DJCat，不只属于 Application Store。
+_Avoid_: 应用市场缓存（它不再只装 Application Store 的东西）；把 Custom Home Card 的图标当缓存（那是用户数据）
+
+**Log（日志）**:
+DJCat 运行时按天写下的诊断记录，以及更新器在程序目录留下的那份更新记录，都只保留最近 14 天。按天的日志属于 App Data Directory，Client Update 和 Storage Migration 之后仍在。用户可以随 Cache 一起清理，正在写入的那一份除外。
+_Avoid_: 错误日志（设置里的入口叫法，它记录的不只是错误）
+
 ### 窗口
 
 **Resize Band（缩放命中带）**:

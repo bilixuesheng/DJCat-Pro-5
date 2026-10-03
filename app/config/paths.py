@@ -15,7 +15,6 @@ APP_DIR = (
     if getattr(sys, "frozen", False) or "__compiled__" in globals()
     else Path(__file__).resolve().parents[2]
 )
-LOG_DIR = APP_DIR / "Log"
 USER_DATA_DIR = Path(
     QStandardPaths.writableLocation(
         QStandardPaths.StandardLocation.GenericDataLocation
@@ -35,6 +34,7 @@ else:
         APP_DATA_DIR = USER_DATA_DIR
         _PORTABLE_FALLBACK_FAILED = True
 CONFIG_PATH = APP_DATA_DIR / "UserConfig.json"
+LOG_DIR = APP_DATA_DIR / "Log"
 UPDATE_DIR = APP_DIR / "Updata"
 UPDATE_ZIP_PATH = UPDATE_DIR / "DJCat-Pro.zip"
 UPDATE_STAGING_DIR = UPDATE_DIR / "staging"
@@ -87,6 +87,11 @@ def migrateAppData(target: Path) -> None:
     target = Path(target)
     if source == target:
         return
+    from loguru import logger
+
+    # 日志在 App Data Directory 里，loguru 开着当天的文件：先关掉才能把日志完整复制过去，
+    # Portable → Installed 最后给源目录改名时，Windows 也不允许改名还开着文件的目录。
+    logger.remove()
     if not isPortable():
         staging = target.with_name(f"{target.name}.migrating")
         if staging.exists():

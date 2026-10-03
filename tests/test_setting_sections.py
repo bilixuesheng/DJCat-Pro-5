@@ -14,6 +14,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from shiboken6 import delete
 
+from app.common.application_store import ApplicationStoreError
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
 from app.config.paths import LOG_DIR
@@ -298,27 +299,63 @@ class SettingSectionTest(TestCase):
         page = self.buildPage()
 
         self.assertIn(
-            page.clearAppStoreCacheCard,
+            page.cacheCard,
             page.sectionStack.view("software").settingCards(),
         )
         self.assertNotIn(
-            page.clearAppStoreCacheCard,
+            page.cacheCard,
             page.sectionStack.view("about").settingCards(),
         )
 
+    @patch("app.view.pages.setting_page.clearableLogSize", return_value=512)
     @patch("app.view.pages.setting_page.appStoreImageCache")
-    def testCacheCardShowsSizeAndDisablesTrashButtonWhenEmpty(self, imageCache):
-        imageCache.size.return_value = 1536
+    def testCacheCardCountsLogsAndDisablesTrashButtonWhenEmpty(
+        self, imageCache, logSize
+    ):
+        imageCache.size.return_value = 1024
         page = self.buildPage()
 
-        self.assertEqual(page.clearAppStoreCacheCard.sizeLabel.text(), "1.5 KB")
-        self.assertTrue(page.clearAppStoreCacheCard.clearButton.isEnabled())
+        self.assertEqual(page.cacheCard.sizeLabel.text(), "1.5 KB")
+        self.assertTrue(page.cacheCard.clearButton.isEnabled())
 
         imageCache.size.return_value = 0
-        page._refreshAppStoreCacheSize()
+        logSize.return_value = 0
+        page._refreshCacheSize()
 
-        self.assertEqual(page.clearAppStoreCacheCard.sizeLabel.text(), "0 B")
-        self.assertFalse(page.clearAppStoreCacheCard.clearButton.isEnabled())
+        self.assertEqual(page.cacheCard.sizeLabel.text(), "0 B")
+        self.assertFalse(page.cacheCard.clearButton.isEnabled())
+
+    @patch("app.view.pages.setting_page.InfoBar")
+    @patch("app.view.pages.setting_page.clearLogs")
+    @patch("app.view.pages.setting_page.clearAppStoreCache")
+    def testClearingCacheAlsoClearsLogs(self, clearAppStoreCache, clearLogs, infoBar):
+        page = self.buildPage()
+        cleared = []
+        page.appStoreCacheCleared.connect(lambda: cleared.append(True))
+
+        page.cacheCard.clicked.emit()
+
+        clearAppStoreCache.assert_called_once_with()
+        clearLogs.assert_called_once_with()
+        self.assertEqual(cleared, [True])
+        infoBar.success.assert_called_once()
+
+    @patch("app.view.pages.setting_page.InfoBar")
+    @patch("app.view.pages.setting_page.clearLogs")
+    @patch(
+        "app.view.pages.setting_page.clearAppStoreCache",
+        side_effect=ApplicationStoreError("有应用正在下载或安装，请完成后再清理缓存"),
+    )
+    def testRefusedClearLeavesLogsAlone(self, _clearAppStoreCache, clearLogs, infoBar):
+        page = self.buildPage()
+        cleared = []
+        page.appStoreCacheCleared.connect(lambda: cleared.append(True))
+
+        page.cacheCard.clicked.emit()
+
+        clearLogs.assert_not_called()
+        self.assertEqual(cleared, [])
+        infoBar.error.assert_called_once()
 
     def testWindowTitleSettingDefaultsToApplicationName(self):
         page = self.buildPage()
