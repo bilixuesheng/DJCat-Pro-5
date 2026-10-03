@@ -27,6 +27,7 @@ from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import (
     DrillInTransitionStackedWidget,
     InfoBar,
+    InfoBarIcon,
     InfoBarPosition,
     IndeterminateProgressRing,
     MessageBoxBase,
@@ -1464,7 +1465,10 @@ class MainWindow(MSFluentWindow):
     def _onExceptionCaught(self, message: str):
         from app.config.paths import LOG_DIR
 
-        infoBar = InfoBar.error(
+        # 不用 InfoBar.error()：它当场 show()，滑入终点按加按钮之前的宽度算定，
+        # 加上按钮后右边多出的一截就落在窗口外。
+        infoBar = InfoBar(
+            icon=InfoBarIcon.ERROR,
             title="软件可能遇到异常",
             content="请将本地报错日志发送给开发者。",
             orient=Qt.Orientation.Horizontal,
@@ -1478,6 +1482,7 @@ class MainWindow(MSFluentWindow):
             lambda: QProcess.startDetached("explorer", [str(LOG_DIR)])
         )
         infoBar.addWidget(openLogBtn)
+        infoBar.show()
 
     def checkForUpdates(self, manual: bool = False):
         if self._resourcesShutdown:
