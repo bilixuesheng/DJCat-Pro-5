@@ -7,6 +7,8 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
+from loguru import logger
+
 from app.config import paths
 
 
@@ -259,6 +261,30 @@ class StorageModeTest(TestCase):
                 "icon_path"
             ]
             self.assertTrue(iconPath.startswith(str(target)))
+
+    def testMigrationClosesTheLogBeforeMovingIt(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "program" / "DJCatPro"
+            target = root / "user" / "DJCatPro"
+            config = self._writeConfig(source)
+            log = source / "Log" / "djcatpro日志_2026-10-03.log"
+            handler = logger.add(str(log))
+            logger.info("迁移之前")
+
+            with (
+                patch.object(paths, "APP_DATA_DIR", source),
+                patch.object(paths, "PORTABLE_DATA_DIR", source),
+                patch.object(paths, "CONFIG_PATH", config),
+            ):
+                paths.migrateAppData(target)
+
+            with self.assertRaises(ValueError):
+                logger.remove(handler)
+            self.assertIn(
+                "迁移之前",
+                (target / "Log" / log.name).read_text(encoding="utf-8"),
+            )
 
     def testRebaseMatchesStoredPathsThatWereNeverResolved(self):
         """APP_DATA_DIR is not resolved, so neither are the paths stored in the config.

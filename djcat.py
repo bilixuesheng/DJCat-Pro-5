@@ -53,19 +53,6 @@ def installTranslators(app):
     app.installTranslator(app._fluentTranslator)
 
 
-def configureLogging():
-    from loguru import logger
-    from app.config.paths import LOG_DIR
-
-    logger.add(
-        str(LOG_DIR / "djcatpro日志_{time:YYYY-MM-DD}.log"),
-        rotation="00:00",
-        retention="14 days",
-        enqueue=True,
-        encoding="utf-8",
-    )
-
-
 def main():
     if getattr(sys, "frozen", False) or "__compiled__" in globals():
         os.chdir(os.path.dirname(sys.executable))
@@ -100,6 +87,7 @@ def main():
     from PySide6.QtGui import QColor
     from qfluentwidgets import qconfig, setThemeColor
 
+    from app.common.logs import configureLogging
     from app.common.update_download import clearUpdateDirectory, restoreUpdaterBinary
     from app.config.cfg import cfg, migrateConfig
     from app.config.paths import CONFIG_PATH

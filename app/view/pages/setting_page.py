@@ -46,6 +46,7 @@ from app.common.application_store import (
     appStoreImageCache,
     clearAppStoreCache,
 )
+from app.common.logs import clearableLogSize, clearLogs
 from app.config.cfg import (
     BANNER_IMAGE_PRESETS,
     BANNER_PRESET_SCALE_MODES,
@@ -149,7 +150,7 @@ class CacheSettingCard(SettingCard):
         super().__init__(
             FluentIcon.FOLDER,
             "缓存",
-            "缓存应用图片和临时安装包，清理后会在需要时重新下载",
+            "应用图片、临时安装包和运行日志；清理不影响设置和已安装的应用",
             parent,
         )
         self.sizeLabel = BodyLabel("0 B", self)
@@ -724,7 +725,7 @@ class SettingPage(QWidget):
             "在系统启动时静默运行电教猫 Pro",
             cfg.autoRun,
         )
-        self.clearAppStoreCacheCard = CacheSettingCard()
+        self.cacheCard = CacheSettingCard()
         from app.config.paths import APP_DATA_DIR, isPortable
 
         portable = isPortable()
@@ -736,7 +737,7 @@ class SettingPage(QWidget):
             "安装版将配置和应用数据保存在用户目录；便携版保存在程序旁，"
             f"适用于系统盘有还原的情况。当前：{currentMode}（{APP_DATA_DIR}）",
         )
-        self._refreshAppStoreCacheSize()
+        self._refreshCacheSize()
 
         self.authorCard = HyperlinkCard(
             AUTHOR_URL,
@@ -987,7 +988,7 @@ class SettingPage(QWidget):
                 self.checkUpdateCard,
                 self.autoRunCard,
                 self.storageModeCard,
-                self.clearAppStoreCacheCard,
+                self.cacheCard,
             ]
         )
 
@@ -1023,7 +1024,7 @@ class SettingPage(QWidget):
             modeItem.valueChanged.connect(self._refreshConditionalCards)
         self.autoRunCard.checkedChanged.connect(self._onAutoRunChanged)
         self.aboutCard.clicked.connect(self._onAboutCardClicked)
-        self.clearAppStoreCacheCard.clicked.connect(self._onClearAppStoreCache)
+        self.cacheCard.clicked.connect(self._onClearCache)
         self.storageModeCard.clicked.connect(self._onStorageModeClicked)
         self.errorLogCard.clicked.connect(self._onOpenErrorLogClicked)
         self.aiQuotaReceived.connect(self._onAIQuotaReceived)
@@ -1105,8 +1106,9 @@ class SettingPage(QWidget):
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(LOG_DIR)))
 
-    def _onClearAppStoreCache(self) -> None:
+    def _onClearCache(self) -> None:
         try:
+            # 有应用正在下载或安装时这一步就拒绝，日志也留着不动：要么全清，要么不清。
             clearAppStoreCache()
         except (ApplicationStoreError, OSError) as error:
             InfoBar.error(
@@ -1117,11 +1119,12 @@ class SettingPage(QWidget):
                 parent=self.window(),
             )
             return
-        self.clearAppStoreCacheCard.setCacheSize(0)
+        clearLogs()
+        self._refreshCacheSize()
         self.appStoreCacheCleared.emit()
         InfoBar.success(
             "缓存已清理",
-            "应用市场缓存已删除。",
+            "应用图片、临时安装包和日志已删除。",
             duration=3000,
             position=InfoBarPosition.BOTTOM_RIGHT,
             parent=self.window(),
@@ -1255,16 +1258,16 @@ class SettingPage(QWidget):
         self.navigateToRoute(suggestion.routeKey, highlightCard=suggestion.card)
 
     def showEvent(self, event) -> None:
-        self._refreshAppStoreCacheSize()
+        self._refreshCacheSize()
         self._refreshAIQuota()
         super().showEvent(event)
 
-    def _refreshAppStoreCacheSize(self) -> None:
+    def _refreshCacheSize(self) -> None:
         try:
             size = appStoreImageCache.size()
         except OSError:
             size = 0
-        self.clearAppStoreCacheCard.setCacheSize(size)
+        self.cacheCard.setCacheSize(size + clearableLogSize())
 
     def flushPendingSave(self) -> None:
         for card in (self.aiStyleCard, self.windowTitleCard, self.trayTooltipCard):

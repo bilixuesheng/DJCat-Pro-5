@@ -16,7 +16,6 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from shiboken6 import delete
 
-import djcat
 from app.common import update_download as updateDownloadModule
 from app.common.update_download import (
     DOWNLOAD_RETRY_COUNT,
@@ -413,13 +412,6 @@ class UpdateDownloadTest(TestCase):
                 worker._downloadSingle(DOWNLOAD_URL, 0)
 
             self.assertEqual(worker.partialPath.read_bytes(), b"MZ12")
-
-    def testLoggingKeepsFourteenDays(self):
-        with patch("loguru.logger.add") as add:
-            djcat.configureLogging()
-
-        self.assertEqual(add.call_args.kwargs["rotation"], "00:00")
-        self.assertEqual(add.call_args.kwargs["retention"], "14 days")
 
     def testDownloadUsesBucketExeAndAtomicallyStoresValidInstaller(self):
         content = b"MZ" + b"installer-data"

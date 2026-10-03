@@ -177,17 +177,20 @@ Catalog Order 由 `server/app_store.py` 按稳定 ID 写入数据库。拖拽和
 
 ### 配置和文件
 
-`app/config/paths.py` 是 App Data Directory 及其所有派生目录的唯一来源。其他模块使用 `CONFIG_PATH`、`PROGRAM_DIR`、`APP_STORE_CACHE_DIR` 和 `HOME_CARD_ICON_DIR`，不得自行重新拼接另一套根目录。
+`app/config/paths.py` 是 App Data Directory 及其所有派生目录的唯一来源。其他模块使用 `CONFIG_PATH`、`LOG_DIR`、`PROGRAM_DIR`、`APP_STORE_CACHE_DIR` 和 `HOME_CARD_ICON_DIR`，不得自行重新拼接另一套根目录。
 
 Storage Migration 的安全约束：
 
 - 迁移必须发生在 `qconfig.load` 之后、进程退出阶段；运行中的模块仍使用启动时的路径常量。
+- `migrateAppData()` 先 `logger.remove()` 再复制：日志在 App Data Directory 里，开着的日志文件复制不全，Windows 也不允许给还开着文件的 Portable 源目录改名。迁移之后的退出日志不再落盘。
 - Installed → Portable 先写入 `.migrating`，成功后再提交为 Portable 目录；失败时清理临时目录，原数据和当前模式不变。
 - Portable → Installed 复制并改写目标配置成功后，才把 Portable 源目录改名为唯一 `.bak` 目录；源目录仍存在时下一次启动仍保持 Portable Mode。
 - 只改写配置值中位于旧 App Data Directory 下的绝对路径，不改写普通文案或外部路径。
 - 每次启动只读取当前 App Data Directory 的 `UserConfig.json`；迁移后的 Installed Application 连同清单和安装目录继续支持打开、更新及卸载，不回退读取旧模式目录。
 
-**ImageCache** 拥有应用图片和临时 Package 所在缓存根目录的清理互斥。存在下载或安装操作时拒绝清缓存；设置页只发出用户意图并显示 `ImageCache.size()`。
+**ImageCache** 拥有应用图片和临时 Package 所在缓存根目录的清理互斥。设置页「应用」里的「缓存」卡片是 Cache：ImageCache 加上可清理的日志。存在下载或安装操作时整次拒绝，日志也不清；设置页只发出用户意图，显示 `ImageCache.size()` 与 `clearableLogSize()` 之和。
+
+**`app/common/logs.py` 独占 Log。** 日志每天一份，写在 App Data Directory 下的 `LOG_DIR`，因此 Client Update（Portable Mode 的 `DJCatPro` 被改名进新目录，Installed Mode 不碰用户目录）和 Storage Migration 之后都还在；保留 14 天。loguru 设了 `rotation` 后只在跨零点轮转时执行 `retention`，进程退出时不执行，每天开关机的电脑从不触发，所以 `configureLogging()` 启动时先按同一期限自己清一次。更新器的 `updater.log` 留在 `APP_DIR`（它可能以提权身份运行，找不准用户的 App Data Directory），同样按 14 天清、随 Cache 清理。清理 Cache 时跳过最新的一份日志：loguru 正写着它，Windows 上删不掉；显示的大小也不算它，否则清完按钮仍亮着。旧版本留在 `APP_DIR\Log` 的日志在启动时搬进 `LOG_DIR`，同名文件不覆盖。
 
 Custom Home Card 的图标选择器用 `app/view/components/icon_grid.py` 的 `IconGrid` 一个控件绘制整个图标库，不为每个图标建 `ToggleToolButton`。`IconGrid` 按 `ToggleToolButton` 的样式表配色和 FlowLayout 的排布绘制，背景状态和图标都按设备像素缓存成位图；提示沿用 QFluentWidgets `ToolTip`。自绘的可按区域控件通过 `scroll_area.registerTouchPressTarget()` 登记，触控起滑时与按钮一样被取消按压。
 
@@ -250,6 +253,7 @@ Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` �
 | `app/view/components/color_dialog.py` | QFluentWidgets 颜色选择弹窗换上项目 `ScrollArea`，色板和亮度滑块登记为触控拖动目标 |
 | `app/view/components/setting_suggestion_menu.py` | Setting Suggestion 弹窗；选中后交回 Route，不把文本写回搜索框 |
 | `app/common/application_icon.py` | Application Icon 的解析：主窗口、启动页、托盘与 Tray Menu“主页”共用一处 |
+| `app/common/logs.py` | Log 的位置、14 天保留、Cache 中可清理的日志，以及旧 `APP_DIR\Log` 的迁入 |
 | `pyqt_github_markdown/` | 项目内置 Markdown 渲染器；不承载 DJCat 业务规则 |
 
 `app/common/application_version.py` 只包含架构和版本比较等纯函数，允许 MainWindow 在启动阶段导入。重量较大的 `app/common/application_store.py`、Custom Home Card 编辑器和 Markdown 渲染器分别在对应页面、编辑操作或更新日志首次需要时导入；`edge_tts` 依赖只在实际查询音色或合成语音时导入。
@@ -277,7 +281,7 @@ set working directory
   → optimizeFluentDialogs + optimizeFluentMenus (before MainWindow or its popups are created)
   → cacheFluentSvgIcons (before any QFluentWidgets icon is painted)
   → installTranslators (Qt qtbase + QFluentWidgets Chinese strings)
-  → configure logging and clear stale Client Update files
+  → configure logging (adopt legacy APP_DIR\Log, drop logs older than 14 days) and clear stale Client Update files
   → qconfig.load(CONFIG_PATH, cfg)
   → MainWindow(isSilent)
       → HomePage eagerly
@@ -381,6 +385,7 @@ def __init__(self, parent=None):
 - 页面关闭时先设置 shutdown/cancel 状态，再等待有文件提交风险的线程；超时后也不能让回调访问已销毁控件。
 - 可计算总字节数的下载使用确定进度；无法可靠估计的文件操作使用不确定进度，不伪造百分比。
 - 新的私有 Qt/Windows API 必须封装、可失败、可回退，并有锁定版本的真实二进制验证。
+- 要加按钮的 InfoBar 先构造 `InfoBar(...)`、`addWidget()` 完再 `show()`，不用 `InfoBar.error()` 这类便捷方法后再加：它们当场显示，InfoBarManager 按加控件前的宽度算定滑入终点，多出的部分落在窗口外。
 - 依赖 QFluentWidgets `exec(pos, ani, aniType)` 签名的菜单 Python 子类，在自己的类体里重新声明 `exec`（如 `exec = CompleterMenu.exec`）：PySide6 在实例上查找 `exec` 时跳过继承来的 Python 重写，落到 `QMenu.exec`（6.9–6.11 均如此）。托盘 `AcrylicMenu` 走原生 `QMenu.exec` 属于 v5.1.2 固定行为，保持原样。
 - 取窗口所在屏幕用 `app/platform/screens.py` 的 `screenFor()`，不得调用 `QWidget.screen()` 或 `QWindow.screen()`（原因见 `screens.py` 文件头）。只需要设备像素比时直接用 `devicePixelRatioF()`。`tests/test_screens.py` 会扫描 `app/` 拦下新的调用。
 
