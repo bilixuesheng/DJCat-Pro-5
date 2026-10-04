@@ -47,7 +47,7 @@ _Avoid_: Tray Home Card、复制卡片、独立托盘动作
 ### 课堂展示
 
 **Projection**:
-"全屏投送"产生的一次文字展示，由标题和正文组成，正文可使用纯文本或 Markdown。Projection 可全屏或窗口化显示，也可 Collapse 为 Restore Bubble。启用启动恢复后，程序退出时仍未关闭的 Projection 会在下一次启动时自动恢复。
+"全屏投送"产生的一次文字展示，由标题和正文组成，正文可使用纯文本或 Markdown。Projection 可全屏或窗口化显示，也可 Collapse 为 Floating Button。启用启动恢复后，程序退出时仍未关闭的 Projection 会在下一次启动时自动恢复。
 _Avoid_: Broadcast（项目中 Broadcast Task 指音频定时播报，不是文字展示）、投屏（不传输屏幕或视频）、presentation
 
 **Projection Snapshot**:
@@ -67,12 +67,16 @@ Projection、Exam Countdown 或 Fullscreen Clock 显示在屏幕上的那个窗�
 _Avoid_: 全屏窗口（它也可以窗口化）、主窗口
 
 **Collapse（收起）**:
-Projection 的 Display Window 暂时让出屏幕、变成 Restore Bubble 的操作；按钮文字是"最小化"，但窗口不进任务栏。只有 Projection 能 Collapse。
+Projection 的 Display Window 暂时让出屏幕、变成 Floating Button 的操作；按钮文字是"最小化"，但窗口不进任务栏。只有 Projection 能 Collapse。
 _Avoid_: minimize、最小化（仅保留在按钮文字中）、隐藏
 
-**Restore Bubble（恢复圆钮）**:
+**Floating Button（悬浮按钮）**:
 Projection Collapse 后浮在屏幕角落的主题色圆形按钮，可拖动；点按后 Display Window 回到 Collapse 前的全屏或窗口化。
-_Avoid_: 恢复入口、悬浮球、mini window
+_Avoid_: 恢复入口、恢复圆钮、悬浮球、mini window
+
+**Window Transition（窗口过渡动画）**:
+Display Window 在全屏、窗口化和 Floating Button 之间切换时，外形从起点连续变到终点的过渡；过渡期间画面是静止的。可在设置里整体关闭，关闭后直接跳到终点。
+_Avoid_: 最大化动画（没有最大化）、缩放动画（圆角和内容也在变）、切页过渡（那是主窗口里的页面切换）
 
 ### 定时与自动任务
 
