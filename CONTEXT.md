@@ -47,7 +47,7 @@ _Avoid_: Tray Home Card、复制卡片、独立托盘动作
 ### 课堂展示
 
 **Projection**:
-"全屏投送"产生的一次文字展示，由标题和正文组成，正文可使用纯文本或 Markdown。Projection 可全屏或窗口化显示，也可收起为恢复入口。启用启动恢复后，程序退出时仍未关闭的 Projection 会在下一次启动时自动恢复。
+"全屏投送"产生的一次文字展示，由标题和正文组成，正文可使用纯文本或 Markdown。Projection 可全屏或窗口化显示，也可 Collapse 为 Restore Bubble。启用启动恢复后，程序退出时仍未关闭的 Projection 会在下一次启动时自动恢复。
 _Avoid_: Broadcast（项目中 Broadcast Task 指音频定时播报，不是文字展示）、投屏（不传输屏幕或视频）、presentation
 
 **Projection Snapshot**:
@@ -61,6 +61,18 @@ _Avoid_: timer、Scheduled Task
 **Fullscreen Clock**:
 "全屏时钟"显示当前系统时间，默认全屏展示，也可配置为固定大小的窗口。关闭后不保存状态。
 _Avoid_: Exam Countdown、timer、Scheduled Task
+
+**Display Window（展示窗口）**:
+Projection、Exam Countdown 或 Fullscreen Clock 显示在屏幕上的那个窗口，可在全屏和窗口化之间切换；窗口化时是带阴影的圆角卡片。
+_Avoid_: 全屏窗口（它也可以窗口化）、主窗口
+
+**Collapse（收起）**:
+Projection 的 Display Window 暂时让出屏幕、变成 Restore Bubble 的操作；按钮文字是"最小化"，但窗口不进任务栏。只有 Projection 能 Collapse。
+_Avoid_: minimize、最小化（仅保留在按钮文字中）、隐藏
+
+**Restore Bubble（恢复圆钮）**:
+Projection Collapse 后浮在屏幕角落的主题色圆形按钮，可拖动；点按后 Display Window 回到 Collapse 前的全屏或窗口化。
+_Avoid_: 恢复入口、悬浮球、mini window
 
 ### 定时与自动任务
 
