@@ -559,6 +559,8 @@ class MarkdownRendererTest(TestCase):
         openUrl.assert_called_once()
 
         window.btnWin.click()
+        # 点击开始一次 Window Transition，切换在动画层盖上之后才执行；直接跳到终点。
+        window.transition.finish()
         self.assertTrue(window.isWindowed)
 
     def testWindowedBroadcastUsesBodyForWindowDragging(self):

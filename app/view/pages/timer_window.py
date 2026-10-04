@@ -11,6 +11,7 @@ from app.view.components.window_background import (
     WINDOW_SHADOW_MARGIN,
     WindowBackground,
 )
+from app.view.components.window_transition import WindowTransition, backgroundSurface
 from app.view.pages.broadcast_page import (
     VerticalButton,
     placeCornerButtons,
@@ -50,6 +51,7 @@ class TimerWindow(FramelessWindow):
         )
         self.background.lower()
         self.background.setGeometry(self.contentsRect())
+        self.transition = WindowTransition(self)
 
         self.isWindowed = False
         self._closeFlyout = None
@@ -123,6 +125,14 @@ class TimerWindow(FramelessWindow):
         placeCornerButtons(self.btnContainer, self.contentsRect(), self._buttonsAtLeft())
 
     def toggleWindowMode(self):
+        if self.transition.isRunning():
+            return
+        self.transition.run(self._surface, self._switchWindowMode, self._surface)
+
+    def _surface(self):
+        return backgroundSurface(self.background)
+
+    def _switchWindowMode(self):
         self.isWindowed = not self.isWindowed
         self._refreshTime()
         self._setupCornerButtons()
@@ -222,6 +232,7 @@ class TimerWindow(FramelessWindow):
         self._closeFlyout = showCloseConfirmation(self, self.btnClose, self.closeMessage)
 
     def closeEvent(self, event):
+        self.transition.cancel()
         if self._closeFlyout is not None:
             self._closeFlyout.hide()
             self._closeFlyout.deleteLater()

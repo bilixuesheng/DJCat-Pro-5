@@ -2,7 +2,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QApplication, QGraphicsDropShadowEffect, QWidget
 
 from app.platform import shadow_effect
@@ -85,3 +85,35 @@ class SilhouetteShadowEffectTest(TestCase):
             shadow_effect._cachedSilhouette(width, 600, 8, 12)
         total = sum(image.sizeInBytes() for image in shadow_effect._blurCache.values())
         self.assertLessEqual(total, shadow_effect._BLUR_CACHE_BYTES)
+
+    def testNinePatchShadowMatchesABlurOfTheWholeShape(self):
+        def paint(draw):
+            image = QImage(360, 260, QImage.Format.Format_ARGB32_Premultiplied)
+            image.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(image)
+            draw(painter)
+            painter.end()
+            return image
+
+        rect = QRectF(40, 30, 280, 200)
+        stretched = paint(lambda p: shadow_effect.paintSilhouetteShadow(p, rect, 8, 12, 1.0))
+        whole = paint(
+            lambda p: p.drawImage(
+                rect.adjusted(-12, -12, 12, 12),
+                shadow_effect._cachedSilhouette(280, 200, 8, 12),
+            )
+        )
+
+        # 中间那块垫在形状底下，有意不画；其余部分与整块模糊一致。
+        centre = rect.adjusted(20, 20, -20, -20).toRect()
+        worst = 0
+        for y in range(whole.height()):
+            for x in range(whole.width()):
+                if centre.contains(x, y):
+                    continue
+                worst = max(worst, abs(whole.pixelColor(x, y).alpha() - stretched.pixelColor(x, y).alpha()))
+        self.assertLessEqual(worst, 3)
+
+        blurs = len(shadow_effect._blurCache)
+        paint(lambda p: shadow_effect.paintSilhouetteShadow(p, rect.adjusted(0, 0, 90, 30), 8, 12, 1.0))
+        self.assertEqual(len(shadow_effect._blurCache), blurs)

@@ -90,6 +90,9 @@ class Config(QConfig):
         "CustomThemeColor",
         QColor(*THEME_COLOR_PRESETS[0][1]),
     )
+    windowTransitionEnabled = ConfigItem(
+        "Personalization", "WindowTransition", True, BoolValidator()
+    )
     applicationIconSource = OptionsConfigItem(
         "Personalization",
         "ApplicationIconSource",
