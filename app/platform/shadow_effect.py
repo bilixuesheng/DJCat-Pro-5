@@ -86,6 +86,63 @@ class SilhouetteShadowEffect(QGraphicsDropShadowEffect):
         return self._tinted
 
 
+def paintSilhouetteShadow(
+    painter: QPainter,
+    rect: QRectF,
+    cornerRadius: float,
+    blurRadius: float,
+    opacity: float,
+) -> None:
+    """Paint the black Silhouette Shadow of a rounded ``rect`` straight onto ``painter``.
+
+    For shapes that change size every frame (the Window Transition): the blur is made
+    once for the smallest rounded rect with the same corner radius and stretched as a
+    nine-patch, so a new size costs no new blur. Like the effect, ``blurRadius`` is in
+    device pixels. The centre patch lies under the shape and is left out, so a shape
+    drawn semi-transparent over it is not darkened from below.
+    """
+    if opacity <= 0 or rect.width() <= 0 or rect.height() <= 0:
+        return
+    device = painter.device()
+    ratio = device.devicePixelRatioF() if device is not None else 1.0
+    radius = round(max(0.0, min(cornerRadius, rect.width() / 2, rect.height() / 2)) * ratio)
+    margin = math.ceil(blurRadius)
+    # 离开四角 radius + 2 × margin 之后，阴影沿边方向不再变化，可以拉伸；中间留 2 px。
+    corner = radius + 2 * margin
+    side = 2 * (radius + margin) + 2
+    width = round(rect.width() * ratio)
+    height = round(rect.height() * ratio)
+    outer = rect.adjusted(-margin / ratio, -margin / ratio, margin / ratio, margin / ratio)
+
+    painter.save()
+    painter.setOpacity(painter.opacity() * opacity)
+    if width < side or height < side:
+        painter.drawImage(outer, _cachedSilhouette(max(1, width), max(1, height), radius, blurRadius))
+        painter.restore()
+        return
+    image = _cachedSilhouette(side, side, radius, blurRadius)
+    full = image.width()
+    sources = (0, corner, full - corner, full)
+    step = corner / ratio
+    xs = (outer.left(), outer.left() + step, outer.right() - step, outer.right())
+    ys = (outer.top(), outer.top() + step, outer.bottom() - step, outer.bottom())
+    for row in range(3):
+        for column in range(3):
+            if row == column == 1:
+                continue
+            painter.drawImage(
+                QRectF(xs[column], ys[row], xs[column + 1] - xs[column], ys[row + 1] - ys[row]),
+                image,
+                QRectF(
+                    sources[column],
+                    sources[row],
+                    sources[column + 1] - sources[column],
+                    sources[row + 1] - sources[row],
+                ),
+            )
+    painter.restore()
+
+
 def _cachedSilhouette(width: int, height: int, cornerRadius: float, blur: float) -> QImage:
     key = (width, height, cornerRadius, blur)
     image = _blurCache.get(key)

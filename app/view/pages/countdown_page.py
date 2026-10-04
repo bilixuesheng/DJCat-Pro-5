@@ -145,6 +145,7 @@ class CountdownWindow(TimerWindow):
         self.controlsWidget.setVisible(shown)
 
     def startCountdown(self, title, seconds, voiceEnabled, endTitle=DEFAULT_END_TITLE):
+        self.transition.cancel()
         self.titleText = title
         self.endTitleText = endTitle
         self.voiceEnabled = voiceEnabled

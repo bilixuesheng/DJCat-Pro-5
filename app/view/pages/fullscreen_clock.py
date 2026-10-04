@@ -26,6 +26,7 @@ class FullscreenClockWindow(TimerWindow):
         self.timer.timeout.connect(self._refreshTime)
 
     def startClock(self):
+        self.transition.cancel()
         self.timer.stop()
         self.isWindowed = cfg.fullscreenClockStartWindowed.value
         self._refreshTime()

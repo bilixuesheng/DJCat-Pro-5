@@ -253,6 +253,18 @@ class SettingSectionTest(TestCase):
         card.comboBox.setCurrentIndex(0)
         self.assertEqual(cfg.backgroundEffect.value, "Acrylic")
 
+    def testAppearanceSectionSwitchesWindowTransitionsForAllDisplayWindows(self):
+        isolateCfg(self)
+        page = self.buildPage()
+        card = page.windowTransitionCard
+
+        self.assertIn(card, page.sectionStack.view("personalization.appearance").settingCards())
+        self.assertEqual(card.titleLabel.text(), "窗口过渡动画")
+        self.assertTrue(cfg.windowTransitionEnabled.defaultValue)
+
+        card.switchButton.setChecked(False)
+        self.assertFalse(cfg.windowTransitionEnabled.value)
+
     def testShortSectionListDoesNotStretchToThePageBottom(self):
         page = self.buildPage()
         page.resize(900, 1200)

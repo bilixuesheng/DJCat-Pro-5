@@ -34,7 +34,7 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 **`app/platform/menu_animation.py` 独占 QFluentWidgets 的 Menu Reveal 适配。** 它只替换 `DROP_DOWN` 和 `PULL_UP` 两种动画管理器，并把 `RoundMenu.setShadowEffect` 换成 Silhouette Shadow；其他动画类型及页面组件不再分别接管菜单动画。菜单展开期间不暂停弹窗卡片的阴影：卡片阴影已缓存，暂停和恢复反而各引起一次整卡重绘并让阴影闪一下。Tray Menu 的 `AcrylicMenu` 不走 `RoundMenu.__init__`，不受影响。
 
-**`app/platform/shadow_effect.py` 独占 Silhouette Shadow。** 弹窗卡片（圆角 10）、菜单面板（圆角 9）和 Projection／Exam Countdown／Fullscreen Clock 的窗口化背景（圆角 8）都用它；新的不透明圆角容器要阴影时同样用它，不要再直接挂 `QGraphicsDropShadowEffect`。它是 `QGraphicsDropShadowEffect` 的子类，`color`、`blurRadius`、`offset` 属性和属性动画照常可用；模糊仍交给 Qt 生成，与原版逐像素相差不超过 2 个色阶。
+**`app/platform/shadow_effect.py` 独占 Silhouette Shadow。** 弹窗卡片（圆角 10）、菜单面板（圆角 9）和 Projection／Exam Countdown／Fullscreen Clock 的窗口化背景（圆角 8）都用它；新的不透明圆角容器要阴影时同样用它，不要再直接挂 `QGraphicsDropShadowEffect`。它是 `QGraphicsDropShadowEffect` 的子类，`color`、`blurRadius`、`offset` 属性和属性动画照常可用；模糊仍交给 Qt 生成，与原版逐像素相差不超过 2 个色阶。尺寸逐帧变化的形状（Window Transition 的动画层）用 `paintSilhouetteShadow()` 直接画：同一圆角只模糊一次最小尺寸，按九宫格拉伸，中间那块垫在形状底下不画。
 
 **`app/platform/icon_cache.py` 独占 QFluentWidgets SVG 图标的解析缓存。** 它替换 `drawSvgIcon` 和 `writeSvg`，只缓存内容不会变的来源——`:/` 资源路径和 SVG 源码字节，磁盘路径照旧每次读取；两份缓存各有上限。页面不得自己另建图标缓存。
 
@@ -102,7 +102,7 @@ Broadcast Task、Home Card Task 和 Shutdown Task 都按各自 `cfg` 列表的�
 
 MainWindow 的单一调度循环在对应管理页面从未打开时也必须执行 Scheduled Task。Broadcast Task 和固定时间 Home Card Task 最多补偿最近 60 秒内被模态窗口或主线程阻塞错过的触发；Shutdown Task 只补偿最近 5 秒，避免恢复运行后执行过期关机。软件行为 Home Card Task 完全不参与时间匹配。一次定时触发由任务种类、计划时刻和稳定任务 ID 去重。
 
-Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence；任务被删除或切换模式后，尚未开始的动作停止。同一任务仍在运行时跳过新触发，不弹出并发确认框。Existing-card 模式在触发时解析当前 Home Card 快照，不复制源卡片数据；关闭 Projection 时同时识别正常窗口和悬浮恢复入口，关闭未打开的功能不创建页面、不报错。
+Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence；任务被删除或切换模式后，尚未开始的动作停止。同一任务仍在运行时跳过新触发，不弹出并发确认框。Existing-card 模式在触发时解析当前 Home Card 快照，不复制源卡片数据；关闭 Projection 时同时识别正常窗口和 Floating Button，关闭未打开的功能不创建页面、不报错。
 
 ### 应用市场
 
@@ -214,6 +214,8 @@ Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` �
 
 背景图片按物理像素缩放后标上设备像素比，缓存键包含设备像素比，与主页横幅同理。Projection、Exam Countdown 与 Fullscreen Clock 的窗口化背景、图片裁剪和边框共用 8 px 圆角；首次显示前启用透明窗口表面，不依赖 Win11 系统圆角。Qt 阴影只附着在背景组件上，四周各留 12 px 透明空间，Exam Countdown 与 Fullscreen Clock 的可见内容仍为 600 × 190，Projection 初始可见尺寸仍为可用屏幕的一半；字体、布局与角落按钮按 `contentsRect()` 定位，不能把阴影空间算进正文尺寸。切回全屏（含保留任务栏模式）时清除透明边距、圆角、边框和阴影，背景重新铺满窗口。Projection 保留窗口化缩放：Windows 命中测试使用消息中的坐标，按 DPI 转为背景局部坐标，在可见圆角边界内侧 12 px、外侧 2 px 的圆角区域判断四边及四角，不将透明阴影外沿作为边框。圆角外的空白和角落按钮不触发缩放；全屏禁用缩放。
 
+**`app/view/components/window_transition.py` 独占 Window Transition。** 三个 Display Window 的全屏／窗口化切换，以及 Projection 的 Collapse 和从 Floating Button 恢复，都经 `WindowTransition.run(source, change, target)`；`source`、`target` 返回两端的 `TransitionSurface`，Display Window 一端由 `backgroundSurface()` 给出，Floating Button 一端由它自己的 `transitionSurface()` 给出。顺序不能换：先让置顶透明层画出起点快照，确认它画到屏幕上之后才把真窗口调成全透明并执行 `change`，等终点窗口尺寸落定（真全屏由系统异步改尺寸）再截终点快照，250 ms `OutCubic` 形变完先画出末帧、再还原真窗口的不透明度、下一轮才撤掉透明层。反过来做，任意一步都会闪出桌面或让卡片跳一下。快照经 `WindowBackground.grabCard()` 截取，不带阴影：阴影也垫在透明圆角底下，带着截会和动画层自己画的阴影叠成两层。形变两端快照只按矩形裁、阴影也不裁，与真窗口逐像素一致；途中才按插值后的圆角裁。重绘按屏幕刷新率自限，只重画形状经过的区域。过渡期间 Display Window 和 Floating Button 的按钮看 `isRunning()` 直接忽略；开始和关闭 Display Window 不播放过渡，`start*()` 与 `closeEvent()` 调 `cancel()` 丢掉尚未执行的切换。`cfg.windowTransitionEnabled` 关掉时 `run()` 直接执行切换。理由见 `docs/adr/0005-window-transition-snapshot.md`。
+
 **`app/view/components/busy_glow.py` 独占 Busy Glow。** AI Markdown 对话框和 Projection 编辑器内联整理的输入框共用同一个 `BusyGlowOverlay`；它是输入框的兄弟层而不是子控件，不碰输入框的样式表，也不要回到 QSS 渐变边框。光晕启动时用 `dialog_animation.fadeDialogShadow()` 把卡片阴影渐隐、结束时渐回。
 
 改动 Busy Glow 前先读 `docs/adr/0002-busy-glow-custom-paint.md`。要守住的：重绘自限 60 Hz；已长出的部分是以底边中点为中心的单段圆弧，入场窗口乘进渐变 alpha，不另画遮罩；锥形渐变按周长弧长参数化，几何变化时在 `resizeEvent` 重建，动画期间只转相位、改 alpha；光晕在 `HALO_PIXEL` 倍的低分辨率缓冲里画，只有边线按设备像素描，不要退回多遍宽笔叠加；深色主题光晕按 `Plus` 加性合成、边线正常叠加，深浅主题是两套配方。
@@ -248,6 +250,7 @@ Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` �
 | `app/view/components/` | 多页面复用的 Markdown、背景、滚动和设置卡片组件 |
 | `app/view/components/busy_glow.py` | Busy Glow 的几何、配色和绘制；不知道 AI Markdown 的业务规则 |
 | `app/view/components/update_toast.py` | Update Toast 的三种状态、按钮和底边进度线；不知道下载、版本和安装的规则 |
+| `app/view/components/window_transition.py` | Window Transition：Display Window 在全屏、窗口化和 Floating Button 之间切换的快照形变、动画层和交接顺序 |
 | `app/view/components/setting_section.py` | Setting Section 的下钻容器、导航行、推移动画和命中高亮 |
 | `app/view/components/setting_preview.py` | Setting Preview：按真实排布复刻整个主窗口（标题栏／导航栏／横幅／卡片）、投送与倒计时窗口（标题／正文或大时间／角落按钮，按钮位置跟随对应配置）、软件图标四处用法、主题小窗和标题栏＋Windows 通知区域 |
 | `app/view/components/color_dialog.py` | QFluentWidgets 颜色选择弹窗换上项目 `ScrollArea`，色板和亮度滑块登记为触控拖动目标 |
@@ -345,7 +348,7 @@ Tray Menu quit → MainWindow.requestQuit()
 - 不承诺 Presented Frame 数；DWM、VSync 和绘制耗时仍可限制屏幕实际帧率。
 - Qt 版本或打包布局变化导致私有符号不可用时必须安全退回默认动画驱动；升级 PySide6 时需要在 Windows x64 重新验证导出符号和端到端动画时长。
 
-1 ms 间隔只对改位置和透明度的动画是净收益。凡是每帧要调操作系统或强制同步布局的回调，都必须自己限流，否则 tick 变密等于把这类开销放大十几倍：`setMask` 在顶层菜单上落到 `SetWindowRgn`，`QLayout.activate()` 是不受 `LayoutRequest` 事件压缩保护的同步重排。只打脏标记的调用（`setFixedHeight`、`update()`）由 Qt 自行合并，不要给它们加限流——那只会让控件几何落后于动画值。
+1 ms 间隔只对改位置和透明度的动画是净收益。凡是每帧要调操作系统或强制同步布局的回调，都必须自己限流，否则 tick 变密等于把这类开销放大十几倍：`setMask` 在顶层菜单上落到 `SetWindowRgn`，`QLayout.activate()` 是不受 `LayoutRequest` 事件压缩保护的同步重排。只打脏标记的调用（`setFixedHeight`、`update()`）由 Qt 自行合并，不要给它们加限流——那只会让控件几何落后于动画值。顶层透明窗口是例外：它的每次重绘都要把位图交给系统合成，Window Transition 的整屏动画层因此按屏幕刷新率自限，Busy Glow 自限 60 Hz。
 
 Menu Reveal 是另一层独立优化：保留 QFluentWidgets 原始的 250 ms 时长、`OutQuad` 缓动、窗口位移、逐帧遮罩和阴影，只把每次属性变化触发的 viewport 强制刷新合并为动画结束时的一次；悬停状态同步仍逐帧执行。逐帧遮罩只按位移去重，不能改成按时间采样（遮罩滞后于窗口位置会让内容错位）。不能改成只淡入、删除遮罩或阴影，也不能把 `NONE`、`FADE_IN_DROP_DOWN` 等其他管理器替换成下拉实现。
 

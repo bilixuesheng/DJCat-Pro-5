@@ -9,6 +9,7 @@ from qfluentwidgets import isDarkTheme, qconfig
 from app.platform.shadow_effect import SilhouetteShadowEffect
 
 WINDOW_SHADOW_MARGIN = 12
+WINDOW_SHADOW_ALPHA = 100
 WINDOW_CORNER_RADIUS = 8
 # 倒计时和全屏时钟的默认背景（配置值"主题色"，设置页显示为"默认黑色"）不论主题都是黑底。
 TIMER_THEME_BACKGROUND = QColor("black")
@@ -72,6 +73,28 @@ class WindowBackground(QWidget):
         self._borderVisible = visible
         self.update()
 
+    def cornerRadius(self) -> float:
+        return self._cornerRadius
+
+    def castsShadow(self) -> bool:
+        shadow = self.graphicsEffect()
+        return shadow is not None and shadow.isEnabled()
+
+    def grabCard(self) -> QPixmap:
+        """The window's pixels over this background, without the shadow it casts.
+
+        The shadow also lies under the transparent rounded corners; a snapshot that
+        kept it there would get a second shadow from whoever draws one around it.
+        """
+        shadow = self.graphicsEffect() if self.castsShadow() else None
+        if shadow is not None:
+            shadow.setEnabled(False)
+        try:
+            return self.window().grab(self.geometry())
+        finally:
+            if shadow is not None:
+                shadow.setEnabled(True)
+
     def setRoundedWindow(self, enabled: bool, shadow: bool = True) -> None:
         """``shadow=False`` keeps the rounded corners for in-page previews,
         which sit inside a scroll area and must not cast a window shadow."""
@@ -88,7 +111,7 @@ class WindowBackground(QWidget):
             shadow = SilhouetteShadowEffect(WINDOW_CORNER_RADIUS, self)
             shadow.setBlurRadius(WINDOW_SHADOW_MARGIN * self.devicePixelRatioF())
             shadow.setOffset(0, 0)
-            shadow.setColor(QColor(0, 0, 0, 100))
+            shadow.setColor(QColor(0, 0, 0, WINDOW_SHADOW_ALPHA))
             self.setGraphicsEffect(shadow)
         if shadow is not None:
             shadow.setEnabled(enabled)

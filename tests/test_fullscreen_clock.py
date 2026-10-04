@@ -17,6 +17,8 @@ class FullscreenClockTest(TestCase):
 
     def setUp(self):
         isolateCfg(self)
+        # 这里只看切换后的样子；Window Transition 本身见 test_window_transition。
+        cfg.set(cfg.windowTransitionEnabled, False, save=False)
         self.window = FullscreenClockWindow()
         self.window.resize(720, 240)
         self.window.show()

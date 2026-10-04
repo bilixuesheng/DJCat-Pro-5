@@ -448,6 +448,12 @@ class SettingPage(QWidget):
             "设置窗口背景透明效果和透明材质",
             texts=list(BACKGROUND_EFFECTS),
         )
+        self.windowTransitionCard = SwitchSettingCard(
+            FluentIcon.BACK_TO_WINDOW,
+            "窗口过渡动画",
+            "全屏投送、考试倒计时和全屏时钟在全屏、窗口化和收起之间切换时播放动画",
+            cfg.windowTransitionEnabled,
+        )
         self.applicationIconSourceCard = ComboBoxSettingCard(
             cfg.applicationIconSource,
             FluentIcon.APPLICATION,
@@ -952,12 +958,17 @@ class SettingPage(QWidget):
             "personalization.appearance",
             "外观",
             FluentIcon.PALETTE,
-            "应用主题、主题色和窗口背景透明材质",
+            "应用主题、主题色、窗口背景透明材质和窗口过渡动画",
             "personalization",
         )
         appearance.addPreview(ThemePreview())
         appearance.addCardList(
-            [self.themeModeCard, self.themeColorCard, self.backgroundEffectCard]
+            [
+                self.themeModeCard,
+                self.themeColorCard,
+                self.backgroundEffectCard,
+                self.windowTransitionCard,
+            ]
         )
         applicationIcon = self._addSection(
             "personalization.icon",

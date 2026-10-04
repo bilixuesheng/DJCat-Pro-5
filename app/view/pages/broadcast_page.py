@@ -63,6 +63,11 @@ from app.view.components.window_background import (
     projectionThemeBackground,
     projectionTitleColor,
 )
+from app.view.components.window_transition import (
+    TransitionSurface,
+    WindowTransition,
+    backgroundSurface,
+)
 
 
 def showActionConfirmation(
@@ -255,6 +260,10 @@ class _BroadcastContentDragFilter(QObject):
 
 
 class FloatingMiniWindow(QWidget):
+    """The Floating Button a collapsed Projection leaves in a screen corner."""
+
+    IDLE_OPACITY = 0.5
+
     restoreSignal = Signal()
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -269,7 +278,8 @@ class FloatingMiniWindow(QWidget):
 
         self.btn.installEventFilter(self)
 
-        self.setWindowOpacity(0.5)
+        self._opacity = self.IDLE_OPACITY
+        self.setWindowOpacity(self._opacity)
         self._dragPos = QPoint()
         self._isDragging = False
 
@@ -293,10 +303,10 @@ class FloatingMiniWindow(QWidget):
     def eventFilter(self, obj, event):
         if obj == self.btn:
             if event.type() == QEvent.Type.Enter:
-                self.setWindowOpacity(1.0)
+                self._setOpacity(1.0)
                 return False
             elif event.type() == QEvent.Type.Leave:
-                self.setWindowOpacity(0.5)
+                self._setOpacity(self.IDLE_OPACITY)
                 return False
             elif event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 self._isDragging = False
@@ -316,6 +326,27 @@ class FloatingMiniWindow(QWidget):
                 self._dragPos = QPoint()
                 return True
         return super().eventFilter(obj, event)
+
+    def _setOpacity(self, opacity):
+        self._opacity = opacity
+        self.setWindowOpacity(opacity)
+
+    def showAt(self, position):
+        # 窗口不透明度交给 WindowTransition：它先把按钮藏成全透明，形变结束才还原到这里记下的值。
+        self._opacity = self.IDLE_OPACITY
+        self._updateStyle()
+        self.move(position)
+        self.show()
+
+    def transitionSurface(self):
+        return TransitionSurface(
+            self,
+            self.rect(),
+            self.width() / 2,
+            opacity=self._opacity,
+            fill=QColor(qconfig.themeColor.value),
+            icon=self.btn.icon().pixmap(self.btn.iconSize(), self.devicePixelRatioF()),
+        )
 
 class BroadcastWindow(FramelessWindow):
     editClicked = Signal()
@@ -348,6 +379,7 @@ class BroadcastWindow(FramelessWindow):
         self.background.lower()
         self.background.setGeometry(self.contentsRect())
         qconfig.themeChanged.connect(self.background.refresh)
+        self.transition = WindowTransition(self)
 
         self.vBoxLayout = QVBoxLayout(self)
         self.vBoxLayout.setContentsMargins(40, 20, 40, 0)
@@ -466,12 +498,21 @@ class BroadcastWindow(FramelessWindow):
         )
 
     def startBroadcast(self):
+        self.transition.cancel()
         self.isWindowed = False
         self.setupLayout()
         self._updateButtonsState()
         self._applyWindowState()
 
     def toggleWindowMode(self):
+        if self.transition.isRunning():
+            return
+        self.transition.run(self._surface, self._switchWindowMode, self._surface)
+
+    def _surface(self):
+        return backgroundSurface(self.background)
+
+    def _switchWindowMode(self):
         self.isWindowed = not self.isWindowed
         self._updateButtonsState()
         self._applyWindowState()
@@ -647,22 +688,36 @@ class BroadcastWindow(FramelessWindow):
         return False
 
     def minimizeToMini(self):
+        if self.transition.isRunning():
+            return
+        self.transition.run(
+            self._surface,
+            self._collapse,
+            self.miniWindow.transitionSurface,
+        )
+
+    def _collapse(self):
         self.hide()
-        self.miniWindow._updateStyle()
-        self.miniWindow.show()
         rect = screenFor(self).availableGeometry()
         if cfg.broadcastActionButtonPosition.value == "右下角":
-            self.miniWindow.move(
+            position = QPoint(
                 rect.left() + rect.width() - 150,
                 rect.top() + rect.height() - 150,
             )
         else:
-            self.miniWindow.move(
-                rect.left() + 50,
-                rect.top() + rect.height() - 150,
-            )
+            position = QPoint(rect.left() + 50, rect.top() + rect.height() - 150)
+        self.miniWindow.showAt(position)
 
     def restoreFromMini(self):
+        if self.transition.isRunning():
+            return
+        self.transition.run(
+            self.miniWindow.transitionSurface,
+            self._restore,
+            self._surface,
+        )
+
+    def _restore(self):
         self.miniWindow.hide()
         self.show()
         self.raise_()
@@ -685,6 +740,7 @@ class BroadcastWindow(FramelessWindow):
         )
 
     def closeEvent(self, event):
+        self.transition.cancel()
         self._removeContentDragFilter()
         if self._closeFlyout is not None:
             self._closeFlyout.hide()
