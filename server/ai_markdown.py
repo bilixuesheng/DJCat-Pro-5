@@ -1,5 +1,6 @@
 import hashlib
 import json
+import mimetypes
 import os
 import re
 import secrets
@@ -142,6 +143,9 @@ CUSTOM_STYLE_PREFIX = """
 
 以上为系统默认提示词，以下为用户希望自定义的微调提示词，若规则有冲突，请以下面的内容为准：
 """
+
+# Windows 上 mimetypes 读注册表，那里没有 .woff2，字体会被当成 application/octet-stream 返回。
+mimetypes.add_type("font/woff2", ".woff2")
 
 app = Flask(__name__)
 app.config.update(
