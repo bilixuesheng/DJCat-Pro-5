@@ -169,6 +169,8 @@ AI Markdown 数据库的 schema 初始化缓存同时使用文件身份和 SQLit
 
 `server/templates/admin_base.html` 拥有 Admin Console 的共享导航布局；`server/static/admin.css` 和 `server/static/admin.js` 拥有后台共用的导航、表格拖拽和异步交互，不在各页面模板复制相同逻辑。移动端打开侧边栏时锁定页面滚动，但导航列表本身必须保留独立的纵向触控滚动。
 
+后台整页用衬线，控件、表格和仪表盘数字也不例外，只有代码、链接和提示词编辑框用等宽。西文用 Anthropic Serif：40px 起的大字用 Display，其余用 Text，`server/static/fonts/` 只放页面用到的 6 个字重的 WOFF2，新增字重从原始字体包转换。它没有汉字，中文用思源宋体（Noto Serif SC，OFL）的一个整包：GB2312 子集、可变字重截到 400–600，后台界面的汉字都在里面，子集外的生僻字落到系统宋体；改界面文案用到 GB2312 以外的字时要重新出子集。中文句子里的弯引号也交给它显示成全角，靠的是同一文件挂上 `unicode-range` 的第二个 `@font-face`。后台响应一律 `no-store`，唯一例外是 `/static/fonts/` 下成功返回的字体，按一年 `immutable` 缓存，所以换字体文件时要连文件名一起改。
+
 后台能不刷新就不刷新。异步表单（`data-async-form`）的结果由服务端 JSON 决定页面怎么变：`redirect` 表示成功后跳到别的页面，提示经 flash 带过去，失败时停在原页不动；`fill` 把值写进 `[data-fill]` 输入框；`replace` 用服务端渲染的 HTML 换掉 `[data-replace]` 的内容，排序表、确认框和异步表单的事件都挂在外层，换进来的新行照常可用。后台的 CSP 不允许内联脚本，页面交互只能写进 admin.js。编辑长内容用独立页面，不在排序表里插行内编辑表单。
 
 所有排序接口都接收 admin.js 提交的 `item_id` / `expected_item_id`，页面不得改写 `window.fetch` 去适配别的载荷格式。

@@ -44,8 +44,8 @@
             </div>
         </section>
 
-        <section class=”form-section” aria-labelledby=”app-action-title”>
-            <div class=”form-section-title”><span>03</span><div><h2 id=”app-action-title”>打开动作</h2><p>安装后卡片和详情页的”打开”按钮使用。</p></div></div>
+        <section class="form-section" aria-labelledby="app-action-title">
+            <div class="form-section-title"><span>03</span><div><h2 id="app-action-title">打开动作</h2><p>安装后卡片和详情页的“打开”按钮使用。</p></div></div>
             <div class="form-fields two-columns" data-action-form>
                 <label>类型<select name="open_action_type" data-action-type><option value="">不设置</option><option value="program" {% if form.open_action_type == 'program' %}selected{% endif %}>程序</option><option value="url" {% if form.open_action_type == 'url' %}selected{% endif %}>HTTPS 网页</option><option value="uri" {% if form.open_action_type == 'uri' %}selected{% endif %}>系统协议</option></select></label>
                 <label>目标<input name="open_action_target" data-action-target maxlength="2048" value="{{ form.open_action_target or '' }}" placeholder="classisland.exe 或 https://example.com"></label>
