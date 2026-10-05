@@ -1269,7 +1269,12 @@ def _resetMachine(alias):
 @app.after_request
 def secureResponses(response):
     if request.path.startswith("/admin") or _onAdminHost():
-        response.headers["Cache-Control"] = "no-store"
+        # 字体不含敏感信息，不缓存的话每翻一页都要重新下载；换字体时连文件名一起改。
+        response.headers["Cache-Control"] = (
+            "public, max-age=31536000, immutable"
+            if request.path.startswith("/static/fonts/") and response.status_code == 200
+            else "no-store"
+        )
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; style-src 'self'; img-src 'self' data:; "
             "frame-ancestors 'none'; form-action 'self'; base-uri 'none'"

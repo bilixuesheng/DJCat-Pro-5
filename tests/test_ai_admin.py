@@ -560,6 +560,35 @@ class AIAdminTest(TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def testAdminFontsAreCachedWhilePagesStayUncached(self):
+        adminHost = "https://dash.djcatpro.top"
+        cssResponse = self.client.get("/static/admin.css", base_url=adminHost)
+        css = cssResponse.get_data(as_text=True)
+        cssResponse.close()
+        self.assertEqual(cssResponse.headers["Cache-Control"], "no-store")
+        self.assertIn("--font-serif:   'Anthropic Serif Text', Georgia,", css)
+        self.assertIn("--font-display: 'Anthropic Serif Display', Georgia,", css)
+        self.assertNotIn("--font-sans", css)
+
+        fontPaths = set(re.findall(r"url\('(fonts/[^']+\.woff2)'\)", css))
+        self.assertEqual(len(fontPaths), 6)
+        for fontPath in fontPaths:
+            fontResponse = self.client.get(f"/static/{fontPath}", base_url=adminHost)
+            self.assertEqual(fontResponse.status_code, 200, fontPath)
+            self.assertEqual(fontResponse.mimetype, "font/woff2")
+            self.assertTrue(fontResponse.get_data().startswith(b"wOF2"), fontPath)
+            fontResponse.close()
+            self.assertEqual(
+                fontResponse.headers["Cache-Control"],
+                "public, max-age=31536000, immutable",
+            )
+
+        missingFont = self.client.get("/static/fonts/missing.woff2", base_url=adminHost)
+        self.assertEqual(missingFont.status_code, 404)
+        self.assertEqual(missingFont.headers["Cache-Control"], "no-store")
+        login = self.client.get("/admin/login", base_url=adminHost)
+        self.assertEqual(login.headers["Cache-Control"], "no-store")
+
     def testAdminFeedbackUsesToastAndPageMotion(self):
         self._login()
         settings = self._settingsPage()

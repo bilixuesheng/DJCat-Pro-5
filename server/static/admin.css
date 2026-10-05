@@ -8,12 +8,51 @@
    1. Design Tokens
    -------------------------------------------------------------------------- */
 
+/* Anthropic Serif 没有汉字，中文由后面的宋体补上。只放页面用到的字重。
+   字体按一年缓存（见 secureResponses），换字体文件时连文件名一起改。 */
+@font-face {
+    font-family: 'Anthropic Serif Text';
+    src: url('fonts/AnthropicSerif-Text-Regular.woff2') format('woff2');
+    font-weight: 400;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'Anthropic Serif Text';
+    src: url('fonts/AnthropicSerif-Text-Medium.woff2') format('woff2');
+    font-weight: 500;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'Anthropic Serif Text';
+    src: url('fonts/AnthropicSerif-Text-Semibold.woff2') format('woff2');
+    font-weight: 600;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'Anthropic Serif Display';
+    src: url('fonts/AnthropicSerif-Display-Light.woff2') format('woff2');
+    font-weight: 300;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'Anthropic Serif Display';
+    src: url('fonts/AnthropicSerif-Display-Regular.woff2') format('woff2');
+    font-weight: 400;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'Anthropic Serif Display';
+    src: url('fonts/AnthropicSerif-Display-Medium.woff2') format('woff2');
+    font-weight: 500;
+    font-display: swap;
+}
+
 :root {
     color-scheme: light;
 
-    /* Typography — 页面衬线，控件无衬线；只用系统字体，不依赖外部字体服务 */
-    --font-serif: Georgia, 'Songti SC', 'STSong', 'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', serif;
-    --font-sans:  -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+    /* Typography — 整页衬线：40px 起的大字用 Display，其余用 Text；只有代码、链接和提示词编辑框用等宽 */
+    --font-serif:   'Anthropic Serif Text', Georgia, 'Songti SC', 'STSong', 'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', serif;
+    --font-display: 'Anthropic Serif Display', Georgia, 'Songti SC', 'STSong', 'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', serif;
 
     font-family: var(--font-serif);
 
@@ -104,8 +143,6 @@ body {
 
 a { color: inherit; text-decoration: none; }
 button, input, select, textarea { font: inherit; }
-/* 小字号宋体在 Windows 上发虚，可操作控件和密集表格保留无衬线体。 */
-button, input, select, textarea, table, .button, .table-action { font-family: var(--font-sans); }
 
 button {
     cursor: pointer;
@@ -359,7 +396,6 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
 }
 .page-context {
     color: var(--muted);
-    font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
     font-size: 10px;
     letter-spacing: 0.04em;
 }
@@ -559,11 +595,7 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
 }
 .page-header > div { min-width: 0; }
 
-.eyebrow,
-.section-index,
-.page-context {
-    font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
-}
+.section-index { font-variant-numeric: tabular-nums; }
 .eyebrow {
     margin-bottom: 12px;
     color: var(--clay-text);
@@ -578,6 +610,7 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
     margin: 0;
     overflow-wrap: anywhere;
     word-break: break-word;
+    font-family: var(--font-display);
     font-size: clamp(40px, 5vw, 58px);
     font-weight: 400;
     line-height: 1.12;
@@ -676,7 +709,7 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
 .figure-value {
     margin: 18px 0 0;
     color: var(--ink);
-    font-family: var(--font-sans);
+    font-family: var(--font-display);
     font-size: clamp(44px, 5vw, 60px);
     font-weight: 300;
     line-height: 1;
@@ -691,7 +724,6 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
     flex-wrap: wrap;
     gap: 6px;
     color: var(--muted-strong);
-    font-family: var(--font-sans);
     font-size: 12px;
     font-variant-numeric: tabular-nums;
 }
@@ -704,7 +736,6 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
     align-items: center;
     gap: 7px;
     color: var(--ink-secondary);
-    font-family: var(--font-sans);
     font-variant-numeric: tabular-nums;
 }
 
@@ -872,6 +903,7 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
 .quota-panel small { color: rgba(245, 241, 235, 0.60); font-size: 12px; }
 .quota-panel strong {
     margin: auto 0 1px;
+    font-family: var(--font-display);
     font-size: 46px;
     font-weight: 500;
     line-height: 1;
@@ -912,9 +944,9 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
 }
 .form-section-title > span {
     color: var(--clay-text);
-    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
     font-size: 10px;
     letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
 }
 .form-section-title h2 {
     margin: 0;
@@ -1154,7 +1186,6 @@ input[type="checkbox"] {
 }
 .prompt-header > span {
     color: var(--muted);
-    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
     font-size: 10px;
 }
 .prompt-form textarea {
@@ -1180,6 +1211,7 @@ input[type="checkbox"] {
     gap: 8px;
 }
 .machine-count strong {
+    font-family: var(--font-display);
     font-size: 40px;
     font-weight: 500;
     line-height: 1;
@@ -1230,7 +1262,6 @@ th, td {
 }
 th {
     color: var(--muted-strong);
-    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
     font-size: 10px;
     font-weight: 500;
     letter-spacing: 0.04em;
@@ -1413,9 +1444,9 @@ td small { color: var(--muted); }
 
 .pagination-indicator {
     color: var(--muted-strong);
-    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
     font-size: 12px;
     letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
 }
 
 
@@ -1457,9 +1488,9 @@ td small { color: var(--muted); }
 
 .prompt-char-limit {
     color: var(--muted);
-    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
     font-size: 11px;
     letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
 }
 
 
@@ -1526,12 +1557,13 @@ td small { color: var(--muted); }
 .login-copy .eyebrow { color: var(--ink-secondary); }
 .login-copy h1 {
     margin: 16px 0 0;
+    font-family: var(--font-display);
     font-size: clamp(42px, 6vw, 68px);
     font-weight: 400;
     line-height: 1.12;
     letter-spacing: -0.015em;
 }
-/* 宋体没有真斜体，浏览器合成的倾斜很难看，只用颜色强调。 */
+/* 强调的是中文，Anthropic Serif 没有汉字，斜体只会让浏览器把宋体硬拉斜，所以只用颜色强调。 */
 .login-copy h1 em {
     color: var(--clay);
     font-style: normal;
@@ -1549,7 +1581,6 @@ td small { color: var(--muted); }
     z-index: 1;
     margin-top: auto;
     color: var(--muted-strong);
-    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
     font-size: 10px;
 }
 .login-form-panel {

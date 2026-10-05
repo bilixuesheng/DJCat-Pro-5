@@ -776,6 +776,8 @@ class AppStoreServerTest(TestCase):
         self.assertIn("程序参数", body)
         self.assertNotIn("参数 JSON", body)
         self.assertNotIn('name="recommended"', body)
+        self.assertIn('<div class="form-section-title"><span>03</span>', body)
+        self.assertNotRegex(body, r"=”")
 
         self._createApp()
         listing = self.client.get("/admin/app-store/apps/", base_url="https://dash.djcatpro.top")
