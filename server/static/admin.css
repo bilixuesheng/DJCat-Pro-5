@@ -8,7 +8,8 @@
    1. Design Tokens
    -------------------------------------------------------------------------- */
 
-/* Anthropic Serif 没有汉字，中文由后面的宋体补上。只放页面用到的字重。
+/* 西文用 Anthropic Serif，只放页面用到的字重；它没有汉字，中文用思源宋体（Noto Serif SC）
+   的 GB2312 子集，可变字重 400–600，子集外的生僻字落到系统宋体。
    字体按一年缓存（见 secureResponses），换字体文件时连文件名一起改。 */
 @font-face {
     font-family: 'Anthropic Serif Text';
@@ -46,13 +47,27 @@
     font-weight: 500;
     font-display: swap;
 }
+@font-face {
+    font-family: 'Noto Serif SC';
+    src: url('fonts/NotoSerifSC-GB2312.woff2') format('woff2');
+    font-weight: 400 600;
+    font-display: swap;
+}
+/* Anthropic Serif 也有弯引号，但又窄又小；中文句子里的引号改由思源宋体按全角显示。同一个文件，不会多下载。 */
+@font-face {
+    font-family: 'Noto Serif SC Quotes';
+    src: url('fonts/NotoSerifSC-GB2312.woff2') format('woff2');
+    font-weight: 400 600;
+    font-display: swap;
+    unicode-range: U+2018-2019, U+201C-201D;
+}
 
 :root {
     color-scheme: light;
 
     /* Typography — 整页衬线：40px 起的大字用 Display，其余用 Text；只有代码、链接和提示词编辑框用等宽 */
-    --font-serif:   'Anthropic Serif Text', Georgia, 'Songti SC', 'STSong', 'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', serif;
-    --font-display: 'Anthropic Serif Display', Georgia, 'Songti SC', 'STSong', 'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', serif;
+    --font-serif:   'Noto Serif SC Quotes', 'Anthropic Serif Text', Georgia, 'Noto Serif SC', 'Source Han Serif SC', 'Noto Serif CJK SC', 'Songti SC', 'STSong', serif;
+    --font-display: 'Noto Serif SC Quotes', 'Anthropic Serif Display', Georgia, 'Noto Serif SC', 'Source Han Serif SC', 'Noto Serif CJK SC', 'Songti SC', 'STSong', serif;
 
     font-family: var(--font-serif);
 
@@ -1563,7 +1578,7 @@ td small { color: var(--muted); }
     line-height: 1.12;
     letter-spacing: -0.015em;
 }
-/* 强调的是中文，Anthropic Serif 没有汉字，斜体只会让浏览器把宋体硬拉斜，所以只用颜色强调。 */
+/* 强调的是中文，宋体没有真斜体，浏览器合成的倾斜很难看，只用颜色强调。 */
 .login-copy h1 em {
     color: var(--clay);
     font-style: normal;

@@ -566,12 +566,20 @@ class AIAdminTest(TestCase):
         css = cssResponse.get_data(as_text=True)
         cssResponse.close()
         self.assertEqual(cssResponse.headers["Cache-Control"], "no-store")
-        self.assertIn("--font-serif:   'Anthropic Serif Text', Georgia,", css)
-        self.assertIn("--font-display: 'Anthropic Serif Display', Georgia,", css)
+        self.assertIn(
+            "--font-serif:   'Noto Serif SC Quotes', 'Anthropic Serif Text', Georgia, 'Noto Serif SC',",
+            css,
+        )
+        self.assertIn(
+            "--font-display: 'Noto Serif SC Quotes', 'Anthropic Serif Display', Georgia, 'Noto Serif SC',",
+            css,
+        )
+        self.assertIn("unicode-range: U+2018-2019, U+201C-201D;", css)
         self.assertNotIn("--font-sans", css)
 
         fontPaths = set(re.findall(r"url\('(fonts/[^']+\.woff2)'\)", css))
-        self.assertEqual(len(fontPaths), 6)
+        self.assertEqual(len(fontPaths), 7)
+        self.assertIn("fonts/NotoSerifSC-GB2312.woff2", fontPaths)
         for fontPath in fontPaths:
             fontResponse = self.client.get(f"/static/{fontPath}", base_url=adminHost)
             self.assertEqual(fontResponse.status_code, 200, fontPath)
