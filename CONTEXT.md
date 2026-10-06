@@ -232,6 +232,14 @@ _Avoid_: 安装版、便携版（与 Installed Mode、Portable Mode 混淆）；
 同一 Application 在 Application Catalog 中的版本高于 Installed Application 时形成的更新。Application Store 的"全部"分类保持发现和打开语义，Application Update 只在"已安装"和详情页提供。
 _Avoid_: Client Update；不加限定地称 update
 
+**Server Version（服务端版本）**:
+整个服务端的版本号，与 Client Version 各自独立编号（例如客户端 5.2.0 时服务端为 1.4.8）。AI Markdown 接口、Application Catalog 接口和 Admin Console 同属一个服务端，共用这一个版本号。
+_Avoid_: 后台版本号（不只是后台页面）、Client Version
+
+**Server Update（服务端更新）**:
+管理员在 Admin Console 中把服务端换成更新的 Server Version 的一次操作。换的是整个服务端，不影响任何已安装的 DJCat 或 Application。
+_Avoid_: 后台更新、部署（部署指首次安装和 Nginx 配置）；Client Update、Application Update；不加限定地称 update
+
 **Application Download Count**:
 服务端记录的 Application 下载请求累计值。不证明 Package 已完整下载或安装；数值来自 Application Catalog，不由客户端本地推算。
 _Avoid_: 本机安装次数、当前用户下载次数、完成安装次数
@@ -304,6 +312,9 @@ _Avoid_: 搜索结果（设置页不再有结果列表）、筛选项
 
 > **Dev:** "发现新版本后直接走应用市场更新就行吗？"
 > **Domain expert:** "先说清是哪一种版本。Client Update 更新 DJCat；Application Update 更新市场里的某个 Application。"
+
+> **Dev:** "后台点了更新，学生机上的 DJCat 也会跟着升级吗？"
+> **Domain expert:** "不会。那是 Server Update，只换服务端，Server Version 从 1.4.8 往上走；DJCat 5.2.0 要等 Client Update。"
 
 > **Dev:** "在设置里搜'背景颜色'，页面会只留下匹配的卡片吗？"
 > **Domain expert:** "不会。设置搜索只弹 Setting Suggestion，点一条才跳到对应的 Setting Route，页面本身从不筛选。"
