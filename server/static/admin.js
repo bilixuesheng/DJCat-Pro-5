@@ -468,6 +468,27 @@
         });
     };
 
+    // Server Update 先回应、再让 gunicorn 换 worker：等到新 worker 报出新版本才跳转，
+    // 否则刷新出来的还是旧 worker 渲染的旧版本。重启期间 Nginx 可能短暂返回 502。
+    const waitForVersion = async ({ url, version, commit }) => {
+        const deadline = Date.now() + 90000;
+        while (Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            try {
+                const response = await fetch(url, {
+                    credentials: "same-origin",
+                    cache: "no-store",
+                    headers: { Accept: "application/json" },
+                });
+                const running = response.ok ? await response.json() : null;
+                if (running?.version === version && running?.commit === commit) return;
+            } catch (_) {
+                // 旧 worker 已停、新 worker 还没起来，下一轮再问。
+            }
+        }
+        throw new Error("新版本没有按时启动，请到宝塔面板查看 Python 项目日志");
+    };
+
     const submitAsync = async (form) => {
         if (form.dataset.submitting === "true") return;
         form.dataset.submitting = "true";
@@ -494,6 +515,7 @@
             }
             if (payload.redirect) {
                 // 提示由服务端闪存到目标页显示；按钮保持加载状态直到离开本页。
+                if (payload.awaitVersion) await waitForVersion(payload.awaitVersion);
                 navigating = true;
                 window.location.assign(payload.redirect);
                 return;

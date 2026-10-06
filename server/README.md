@@ -13,8 +13,11 @@
 cd /www/wwwroot/djcat-ai
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-install -d -o www -g www -m 700 /www/server/data/djcat-ai
+install -d -o www -g www -m 700 /www/wwwroot/djcat-ai/data
+chown -R www:www /www/wwwroot/djcat-ai
 ```
+
+项目目录和 `.venv` 都要归运行服务的 `www` 所有，后台的「服务端更新」才能替换代码、安装依赖。`data/` 在项目目录里，但 Nginx 只把请求反代给 gunicorn，不把项目目录当静态文件提供，外网访问不到；Server Update 也从不碰它。
 
 生成管理员密码哈希、Session 密钥、设置加密密钥和机器限额盐：
 
@@ -28,7 +31,7 @@ install -d -o www -g www -m 700 /www/server/data/djcat-ai
 在宝塔 Python 项目的环境变量中逐行配置：
 
 ```text
-DJCATAI_DATABASE_PATH=/www/server/data/djcat-ai/usage.sqlite3
+DJCATAI_DATABASE_PATH=/www/wwwroot/djcat-ai/data/usage.sqlite3
 DJCATAI_RATE_LIMIT_SALT=最后一条命令生成的固定随机值
 DJCATAI_ADMIN_HOST=dash.djcatpro.top
 DJCATAI_ADMIN_USERNAME=管理员用户名
@@ -45,7 +48,37 @@ Gunicorn 示例：
 .venv/bin/gunicorn --workers 2 --threads 4 --bind 127.0.0.1:18080 ai_markdown:app
 ```
 
+不要开 `--preload`（`preload_app`）：Server Update 靠给 gunicorn 主进程发 `SIGHUP` 换上新代码，预加载时新 worker 不会重新导入。
+
 首次进入面板后，在“AI 配置”中填写 API Key、模型、每日额度和高峰开关。也可以保留 `DEEPSEEK_API_KEY` 环境变量作为回退值。
+
+## 服务端更新
+
+服务端有自己的版本号 Server Version，写在 `server/version.py`，和客户端版本各自编号。把改了版本号的代码合并进 main，就算发布了一个新版本；只改代码不改版本号，后台不会提示更新。为什么这样设计，见 `docs/adr/0006-server-self-update.md`。
+
+在后台「系统 → 服务端更新」点「检查更新」，服务端从 GitHub 读取 main 上的版本号，比已安装的高就列出这之间改过 `server/` 的提交。点「更新」后依次：
+
+1. 下载检查时读到的那个提交的压缩包，只取 `server/`；
+2. `requirements.txt` 有变化时，以 `www` 身份把依赖装进 `.venv`；
+3. 用新代码连一份数据库副本试导入，失败就放弃；
+4. 把数据库备份到数据库旁边的 `server-update/`（只留最近 3 份），当前代码存为「上一版本」；
+5. 逐个替换文件，并删掉上一版装过、新版已经没有的文件；
+6. 回应页面之后给 gunicorn 主进程发 `SIGHUP`，页面等新 worker 报出新版本再刷新。
+
+任何一步失败，旧代码都原样保留、继续运行。`.venv`、`data/`、`gunicorn_conf.py`、`uwsgi.ini`、`server.zip` 和 `__pycache__` 永远不碰。新版本若升级了 gunicorn 本身，还要到宝塔面板重启一次项目。
+
+服务器需要能访问 `api.github.com`、`codeload.github.com` 和 PyPI。
+
+回滚把当前版本和上一版本对调，不还原数据库，也不降级依赖。后台打不开时在终端回滚，再到宝塔面板重启项目：
+
+```bash
+cd /www/wwwroot/djcat-ai
+sudo -u www DJCATAI_DATABASE_PATH=/www/wwwroot/djcat-ai/data/usage.sqlite3 .venv/bin/python server_update.py rollback
+```
+
+数据库坏了才需要用备份：先在宝塔面板停止项目，把 `data/server-update/` 里最新的 `database-*.sqlite3` 复制回 `data/usage.sqlite3`，再启动。
+
+第一次使用这个功能的版本（1.4.8）要手动部署：把 `server/` 的内容上传到项目目录覆盖，再到宝塔面板重启项目。之后的版本都在后台更新。
 
 ## 应用市场双域名部署
 
