@@ -1,0 +1,46 @@
+{% extends "admin_base.html" %}
+
+{% block title %}服务端更新{% endblock %}
+{% block page_name %}服务端更新{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <div class="eyebrow">服务端</div>
+        <h1>服务端更新</h1>
+        <p>从 GitHub 上的 {{ repository }} 获取 main 分支上发布的服务端版本，替换代码后平滑重启。数据库、虚拟环境和宝塔的配置文件都不受影响。</p>
+    </div>
+</header>
+
+<div class="config-form">
+    <section class="form-section" aria-labelledby="server-version-title">
+        <div class="form-section-title"><span>01</span><div><h2 id="server-version-title">版本</h2><p>回滚把当前版本和上一版本对调，数据库保持不变。</p></div></div>
+        <div class="server-version">
+            <dl>
+                <div><dt>正在运行</dt><dd>{{ server_version }}{% if server_commit %} <code>{{ server_commit[:7] }}</code>{% endif %}</dd></div>
+                {% if installed[0] and installed[0] != server_version %}
+                <div><dt>已替换为</dt><dd>{{ installed[0] }} <small>等待重启</small></dd></div>
+                {% endif %}
+                <div><dt>上一版本</dt><dd>{% if previous %}{{ previous[0] }}{% if previous[1] %} <code>{{ previous[1][:7] }}</code>{% endif %}{% else %}<small>第一次更新之后才会有</small>{% endif %}</dd></div>
+            </dl>
+            {% if previous %}
+            <form method="post" action="{{ url_for('server_update.rollback') }}" data-async-form data-confirm="确定回滚到 {{ previous[0] }}？数据库保持不变，服务会平滑重启。">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="button button-secondary" type="submit">回滚到 {{ previous[0] }}</button>
+            </form>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="form-section" aria-labelledby="server-check-title">
+        <div class="form-section-title"><span>02</span><div><h2 id="server-check-title">检查更新</h2><p>main 上的服务端版本号比已安装的高时才提供更新。</p></div></div>
+        <div class="server-check">
+            <form method="post" action="{{ url_for('server_update.check') }}" data-async-form>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="button button-primary" type="submit">检查更新</button>
+            </form>
+            <div data-replace="server-update-check"><p class="server-check-note">点「检查更新」查询 main 分支上的服务端版本。</p></div>
+        </div>
+    </section>
+</div>
+{% endblock %}

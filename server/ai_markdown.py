@@ -1082,8 +1082,9 @@ def _adminResponse(
     """Answer an admin form the way it was submitted.
 
     An async form gets JSON: ``navigate`` tells admin.js to go to ``endpoint``
-    (the message is flashed so it shows up there), ``data`` carries values the
-    page updates in place. A plain form gets the flash and a redirect.
+    (the message is flashed so it shows up there), ``data`` carries what else
+    admin.js acts on: values the page updates in place, or the version to wait
+    for before navigating. A plain form gets the flash and a redirect.
     """
     if _isAjaxRequest():
         if navigate:
@@ -1092,6 +1093,7 @@ def _adminResponse(
                 message=message,
                 category=category,
                 redirect=url_for(endpoint, **(urlValues or {})),
+                **(data or {}),
             ), status
         return jsonify(message=message, category=category, **(data or {})), status
     flash(message, category)
@@ -2012,12 +2014,22 @@ def adminLogout():
 
 try:
     from .app_store import marketplaceStats, registerAppStore
+    from .server_update import registerServerUpdate
 except ImportError:
     from app_store import marketplaceStats, registerAppStore
+    from server_update import registerServerUpdate
 
 registerAppStore(
     app,
     connect=_connect,
+    loginRequired=_loginRequired,
+    csrfToken=_csrfToken,
+    checkCsrf=_checkCsrf,
+    adminResponse=_adminResponse,
+)
+registerServerUpdate(
+    app,
+    databasePath=lambda: DATABASE_PATH,
     loginRequired=_loginRequired,
     csrfToken=_csrfToken,
     checkCsrf=_checkCsrf,

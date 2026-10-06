@@ -171,11 +171,19 @@ AI Markdown 数据库的 schema 初始化缓存同时使用文件身份和 SQLit
 
 后台整页用衬线，控件、表格和仪表盘数字也不例外，只有代码、链接和提示词编辑框用等宽。西文用 Anthropic Serif：40px 起的大字用 Display，其余用 Text，`server/static/fonts/` 只放页面用到的 6 个字重的 WOFF2，新增字重从原始字体包转换。它没有汉字，中文用思源宋体（Noto Serif SC，OFL）的一个整包：GB2312 子集、可变字重截到 400–600，后台界面的汉字都在里面，子集外的生僻字落到系统宋体；改界面文案用到 GB2312 以外的字时要重新出子集。中文句子里的弯引号也交给它显示成全角，靠的是同一文件挂上 `unicode-range` 的第二个 `@font-face`。后台响应一律 `no-store`，唯一例外是 `/static/fonts/` 下成功返回的字体，按一年 `immutable` 缓存，所以换字体文件时要连文件名一起改。
 
-后台能不刷新就不刷新。异步表单（`data-async-form`）的结果由服务端 JSON 决定页面怎么变：`redirect` 表示成功后跳到别的页面，提示经 flash 带过去，失败时停在原页不动；`fill` 把值写进 `[data-fill]` 输入框；`replace` 用服务端渲染的 HTML 换掉 `[data-replace]` 的内容，排序表、确认框和异步表单的事件都挂在外层，换进来的新行照常可用。后台的 CSP 不允许内联脚本，页面交互只能写进 admin.js。编辑长内容用独立页面，不在排序表里插行内编辑表单。
+后台能不刷新就不刷新。异步表单（`data-async-form`）的结果由服务端 JSON 决定页面怎么变：`redirect` 表示成功后跳到别的页面，提示经 flash 带过去，失败时停在原页不动；`fill` 把值写进 `[data-fill]` 输入框；`replace` 用服务端渲染的 HTML 换掉 `[data-replace]` 的内容，排序表、确认框和异步表单的事件都挂在外层，换进来的新行照常可用。`redirect` 同时带 `awaitVersion` 时，先轮询其中的地址，等它报出指定的版本和提交再跳转，Server Update 靠它等新 worker 起来。后台的 CSP 不允许内联脚本，页面交互只能写进 admin.js。编辑长内容用独立页面，不在排序表里插行内编辑表单。
 
 所有排序接口都接收 admin.js 提交的 `item_id` / `expected_item_id`，页面不得改写 `window.fetch` 去适配别的载荷格式。
 
 Catalog Order 由 `server/app_store.py` 按稳定 ID 写入数据库。拖拽和键盘排序提交完整新顺序及原始顺序快照；服务端在事务内核对原始顺序，过期快照返回 HTTP 409。保存失败或拖拽取消时，浏览器恢复原顺序；拖拽浮影只是临时视觉状态，不参与命中测试或持久化。Application Preset 排序必须限定在所属 Application 内。
+
+### 服务端更新
+
+**`server/server_update.py` 独占 Server Update。** 服务端自己从写死的 GitHub 仓库下载、替换代码并给 gunicorn 主进程发 `SIGHUP`，理由见 `docs/adr/0006-server-self-update.md`。仓库地址不得改成可配置：后台密码泄露时，攻击者最多只能把服务端更新到已发布的版本。是否提供更新只看 Server Version（`server/version.py`，与 Client Version 各自编号），同版本号的新提交不提示。点「更新」时页面交回检查时读到的提交，服务端只装这一个，并先用 compare 接口确认它在 main 上：GitHub 按提交号也能取到 fork 里的提交，不核实就等于能装任意代码。`SERVER_COMMIT` 由 `.gitattributes` 的 `export-subst` 在压缩包里填上，更新后按换上的 `version.py` 报版本，与新 worker 读到的一致。
+
+一次更新的顺序是下载并只取 `server/` → 依赖有变化时 pip 安装 → 用数据库副本试导入（导入 `ai_markdown` 就会迁移表结构，不能连正在用的数据库）→ 备份数据库（数据库旁的 `server-update/`，留 3 份）→ 当前代码连同记录存进一个快照目录 → 逐个原子替换，中途出错全部复原 → 快照目录一次改名成为上一版本 → 回应发完后才 `SIGHUP`。任何一步失败，旧代码都原样保留；复原不了的时候保留快照并在报错里给出路径，不删唯一的旧副本。pip 不设超时，被杀到一半会留下装了一半的 `.venv`。只写包里的文件，`.venv`、`data/`、宝塔的配置文件和 `__pycache__` 永远不碰；新版删掉的文件只按上一次更新记下的清单删除，第一次更新一个都不删。回滚就是当前版本和上一版本对调，不还原数据库、不降级依赖。同一时间只能有一个更新或回滚，后来的直接失败而不是排队。
+
+页面等新 worker 报出新版本才刷新：`admin.js` 收到 `awaitVersion` 时轮询 `/admin/server-update/running`，不能一回应就跳转，否则刷新出来的还是旧 worker。gunicorn 不能开 `preload_app`，`graceful_timeout` 要放到 150 秒，否则 `SIGHUP` 换下的旧 worker 会打断进行中的 AI 整理；新版若升级了 gunicorn 本身，`SIGHUP` 换不了主进程，页面提示到宝塔面板重启。
 
 ### 配置和文件
 
@@ -269,6 +277,8 @@ Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` �
 |---|---|
 | `server/ai_markdown.py` | Machine Identity、Daily Quota、AI Markdown Conversion 和管理接口 |
 | `server/app_store.py` | Application Catalog、下载重定向/计数和应用市场管理页面 |
+| `server/server_update.py` | Server Update：检查 main 上的 Server Version、下载替换、回滚，以及「服务端更新」页面 |
+| `server/version.py` | Server Version 的唯一来源 |
 | `server/templates/admin_base.html` | Admin Console 的共享页面结构、侧边栏和导航入口 |
 | `server/static/admin.css`、`server/static/admin.js` | Admin Console 的共享样式、移动端导航、目录排序和异步表单 |
 

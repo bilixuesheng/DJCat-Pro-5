@@ -1,0 +1,20 @@
+{% if check %}
+<div class="server-release">
+    <h3>{{ check.version }} <code>{{ check.commit[:7] }}</code></h3>
+    {% if check.titles %}
+    <ul>
+        {% for title in check.titles %}<li>{{ title }}</li>{% endfor %}
+    </ul>
+    {% else %}
+    <p class="server-check-note">不知道正在运行的版本对应哪个提交，列不出这次的改动。</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('server_update.apply') }}" data-async-form data-confirm="确定更新到 {{ check.version }}？更新前会备份数据库，服务会平滑重启。">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="version" value="{{ check.version }}">
+        <input type="hidden" name="commit" value="{{ check.commit }}">
+        <button class="button button-primary" type="submit">更新到 {{ check.version }}</button>
+    </form>
+</div>
+{% else %}
+<p class="server-check-note">已是最新版本。</p>
+{% endif %}
