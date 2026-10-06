@@ -209,6 +209,14 @@ class ServerUpdateTest(TestCase):
                 self.assertEqual(self.read("ai_markdown.py"), "VALUE = 'old'\n")
                 self.assertFalse((Path(self.tempDir.name) / "escaped.py").exists())
 
+    def testApplyReportsTheVersionFileItInstalled(self):
+        unfilled = 'SERVER_VERSION = "1.4.9"\nSERVER_COMMIT = "$Format:%H$"\n'
+        self.release("1.4.9", {"version.py": unfilled})
+
+        result = self.updater.apply("1.4.9")
+
+        self.assertEqual((result.version, result.commit), ("1.4.9", ""))
+
     def testFilesDroppedFromThePackageAreRemovedOnlyOnceTheyWereInstalledByAnUpdate(self):
         self.write("templates/hand_added.html", "not from any package")
         self.release("1.4.9", {"templates/admin_old.html": "shipped in 1.4.9"})
