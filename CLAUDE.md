@@ -179,11 +179,11 @@ Catalog Order 由 `server/app_store.py` 按稳定 ID 写入数据库。拖拽和
 
 ### 服务端更新
 
-**`server/server_update.py` 独占 Server Update。** 服务端自己从写死的 GitHub 仓库下载、替换代码并给 gunicorn 主进程发 `SIGHUP`，理由见 `docs/adr/0006-server-self-update.md`。仓库地址不得改成可配置：后台密码泄露时，攻击者最多只能把服务端更新到已发布的版本。是否提供更新只看 Server Version（`server/version.py`，与 Client Version 各自编号），同版本号的新提交不提示；下载锁定到检查时读到的提交，`SERVER_COMMIT` 由 `.gitattributes` 的 `export-subst` 在压缩包里填上。
+**`server/server_update.py` 独占 Server Update。** 服务端自己从写死的 GitHub 仓库下载、替换代码并给 gunicorn 主进程发 `SIGHUP`，理由见 `docs/adr/0006-server-self-update.md`。仓库地址不得改成可配置：后台密码泄露时，攻击者最多只能把服务端更新到已发布的版本。是否提供更新只看 Server Version（`server/version.py`，与 Client Version 各自编号），同版本号的新提交不提示。点「更新」时页面交回检查时读到的提交，服务端只装这一个，并先用 compare 接口确认它在 main 上：GitHub 按提交号也能取到 fork 里的提交，不核实就等于能装任意代码。`SERVER_COMMIT` 由 `.gitattributes` 的 `export-subst` 在压缩包里填上，更新后按换上的 `version.py` 报版本，与新 worker 读到的一致。
 
-一次更新的顺序是下载并只取 `server/` → 依赖有变化时 pip 安装 → 用数据库副本试导入（导入 `ai_markdown` 就会迁移表结构，不能连正在用的数据库）→ 备份数据库（数据库旁的 `server-update/`，留 3 份）→ 当前代码存为上一版本 → 逐个原子替换，中途出错全部复原 → 回应发完后才 `SIGHUP`。任何一步失败，旧代码都原样保留。只写包里的文件，`.venv`、`data/`、宝塔的配置文件和 `__pycache__` 永远不碰；新版删掉的文件只按上一次更新记下的清单删除，第一次更新一个都不删。回滚就是当前版本和上一版本对调，不还原数据库、不降级依赖。同一时间只能有一个更新或回滚，后来的直接失败而不是排队。
+一次更新的顺序是下载并只取 `server/` → 依赖有变化时 pip 安装 → 用数据库副本试导入（导入 `ai_markdown` 就会迁移表结构，不能连正在用的数据库）→ 备份数据库（数据库旁的 `server-update/`，留 3 份）→ 当前代码连同记录存进一个快照目录 → 逐个原子替换，中途出错全部复原 → 快照目录一次改名成为上一版本 → 回应发完后才 `SIGHUP`。任何一步失败，旧代码都原样保留；复原不了的时候保留快照并在报错里给出路径，不删唯一的旧副本。pip 不设超时，被杀到一半会留下装了一半的 `.venv`。只写包里的文件，`.venv`、`data/`、宝塔的配置文件和 `__pycache__` 永远不碰；新版删掉的文件只按上一次更新记下的清单删除，第一次更新一个都不删。回滚就是当前版本和上一版本对调，不还原数据库、不降级依赖。同一时间只能有一个更新或回滚，后来的直接失败而不是排队。
 
-页面等新 worker 报出新版本才刷新：`admin.js` 收到 `awaitVersion` 时轮询 `/admin/server-update/running`，不能一回应就跳转，否则刷新出来的还是旧 worker。gunicorn 不能开 `preload_app`；新版若升级了 gunicorn 本身，`SIGHUP` 换不了主进程，页面提示到宝塔面板重启。
+页面等新 worker 报出新版本才刷新：`admin.js` 收到 `awaitVersion` 时轮询 `/admin/server-update/running`，不能一回应就跳转，否则刷新出来的还是旧 worker。gunicorn 不能开 `preload_app`，`graceful_timeout` 要放到 150 秒，否则 `SIGHUP` 换下的旧 worker 会打断进行中的 AI 整理；新版若升级了 gunicorn 本身，`SIGHUP` 换不了主进程，页面提示到宝塔面板重启。
 
 ### 配置和文件
 

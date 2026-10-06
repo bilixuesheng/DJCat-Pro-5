@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -44,8 +45,6 @@ _CODELOAD = f"https://codeload.github.com/{REPOSITORY}/tar.gz"
 _PROTECTED = {".venv", "data", "gunicorn_conf.py", "uwsgi.ini", "server.zip", "__pycache__"}
 _FETCH_TIMEOUT = (10, 60)
 _TRIAL_IMPORT_TIMEOUT = 60
-# 留在 Nginx 的 150 秒以内：页面先断开、服务端还在装，管理员就不知道结果了。
-_PIP_TIMEOUT = 120
 _DATABASE_BACKUPS = 3
 _MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
 
@@ -89,7 +88,7 @@ def _fetch(url, accept=None):
         raise ServerUpdateError("下载", f"{url}：{error}") from error
 
 
-def _run(step, command, timeout, **options):
+def _run(step, command, timeout=None, **options):
     """跑一个子进程；失败或超时就让这次 Server Update 停在 step，带上输出的末尾。"""
     try:
         completed = subprocess.run(
@@ -108,10 +107,10 @@ def _run(step, command, timeout, **options):
 
 def _runPip(requirements):
     """以运行服务的用户把依赖装进当前虚拟环境。"""
+    # 不设超时：被杀到一半的 pip 会留下装了一半的 .venv；pip 自己有网络超时和重试上限。
     _run(
         "依赖",
         [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "-r", str(requirements)],
-        _PIP_TIMEOUT,
     )
 
 
@@ -134,6 +133,11 @@ def _workerRestarter():
     except OSError:
         return None
     if b"gunicorn" not in commandLine:
+        return None
+    try:
+        # 主进程以 root 运行、worker 降为 www 时没有权限发信号，那就请管理员手动重启。
+        os.kill(master, 0)
+    except OSError:
         return None
     return lambda: os.kill(master, signal.SIGHUP)
 
@@ -202,6 +206,20 @@ def _extractServer(data, destination):
     return sorted(files)
 
 
+def _readJson(path):
+    """读不到或已损坏都当没有：清单没了就按第一次更新处理，一个文件都不删。"""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def _writeJson(path, value):
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+    os.replace(temporary, path)
+
+
 def _copyFile(source, target):
     """先写到旁边的临时文件再 os.replace，正在运行的 worker 不会读到写了一半的文件。"""
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -228,32 +246,104 @@ class ServerUpdater:
             return None, ""
         return _parseVersion(text)
 
+    def previousVersion(self):
+        """可回滚到的上一版本 (版本号, 提交)；没有时为 None。"""
+        previous = self._previous()
+        return None if previous is None else (previous["version"], previous["commit"])
+
     def check(self):
         """main 上的 Server Version 比已安装的高时返回它，否则返回 None。"""
         commit = self.fetch(f"{_API}/commits/main", "application/vnd.github.sha")
         commit = commit.decode("ascii", "replace").strip()
         if not _isCommit(commit):
             raise ServerUpdateError("检查", "GitHub 返回的提交号无效")
+        version = self._versionAt(commit)
+        if not self._isNewer(version):
+            return None
+        _, installedCommit = self.installedVersion()
+        return ServerUpdateCheck(version, commit, self._titlesSince(commit, installedCommit))
+
+    def apply(self, version, commit):
+        """装上管理员确认过的那个提交：它必须在 main 上，并带着更高的 Server Version。"""
+        try:
+            with self._lock("更新"):
+                self._confirmRelease(version, commit)
+                data = self.fetch(f"{_CODELOAD}/{commit}")
+                with tempfile.TemporaryDirectory(dir=self._stateDir()) as work:
+                    package = Path(work) / "package"
+                    files = _extractServer(data, package)
+                    gunicornChanged = self._installRequirements(package)
+                    self._trialImport(package, Path(work) / "trial.sqlite3")
+                    self._backupDatabase()
+                    self._install(package, files)
+                # 按换上的 version.py 报版本：页面拿它和新 worker 导入的版本比对，两边读的是同一个文件。
+                installedVersion, installedCommit = self.installedVersion()
+        except OSError as error:
+            raise ServerUpdateError("更新", str(error)) from error
+        return ServerUpdateResult(installedVersion, installedCommit, gunicornChanged)
+
+    def rollback(self):
+        """把当前版本和上一版本对调；数据库和依赖保持不动。"""
+        try:
+            with self._lock("回滚"):
+                previous = self._previous()
+                if previous is None:
+                    raise ServerUpdateError("回滚", "没有可回滚的上一版本")
+                self._install(self._stateDir() / "previous" / "files", previous["files"])
+        except OSError as error:
+            raise ServerUpdateError("回滚", str(error)) from error
+        return ServerUpdateResult(previous["version"], previous["commit"])
+
+    def _versionAt(self, commit):
         text = self.fetch(
             f"{_API}/contents/server/version.py?ref={commit}",
             "application/vnd.github.raw",
         ).decode("utf-8", "replace")
         version, _ = _parseVersion(text)
         if version is None:
-            raise ServerUpdateError("检查", "main 上的 server/version.py 没有版本号")
-        installedVersion, installedCommit = self.installedVersion()
-        if installedVersion is not None and _versionKey(version) <= _versionKey(installedVersion):
-            return None
-        return ServerUpdateCheck(version, commit, self._titlesSince(commit, installedCommit))
+            raise ServerUpdateError("检查", "server/version.py 里没有服务端版本号")
+        return version
+
+    def _isNewer(self, version):
+        installedVersion, _ = self.installedVersion()
+        return installedVersion is None or _versionKey(version) > _versionKey(installedVersion)
+
+    def _confirmRelease(self, version, commit):
+        # GitHub 按提交号也能取到同一 fork 网络里别人的提交，只认 main 上的，
+        # 否则拿到后台密码的人就能装任意代码。
+        if not _isCommit(commit):
+            raise ServerUpdateError("检查", "提交号无效，请重新检查更新")
+        try:
+            status = json.loads(self.fetch(f"{_API}/compare/main...{commit}"))["status"]
+        except (ValueError, KeyError, TypeError) as error:
+            raise ServerUpdateError("检查", "GitHub 返回的比较结果无效") from error
+        if status not in ("identical", "behind"):
+            raise ServerUpdateError("检查", "这个提交不在 main 上")
+        if self._versionAt(commit) != version:
+            raise ServerUpdateError("检查", f"这个提交的服务端版本不是 {version}，请重新检查更新")
+        if not self._isNewer(version):
+            raise ServerUpdateError("检查", f"{version} 不比已安装的版本新")
 
     def _titlesSince(self, commit, installedCommit):
+        """两个版本之间改过 server/ 的提交标题，不含合并提交。
+
+        已安装的提交常常只改了客户端，不会出现在 server/ 的提交列表里，
+        所以截到它之前最近一个改过 server/ 的提交为止。
+        """
         if not installedCommit:
             return []
-        history = self.fetch(f"{_API}/commits?sha={commit}&path=server&per_page=100")
-        titles = []
         try:
-            for entry in json.loads(history):
-                if entry["sha"] == installedCommit:
+            newest = self.fetch(f"{_API}/commits?sha={installedCommit}&path=server&per_page=1")
+        except ServerUpdateError:
+            return []
+        try:
+            stop = next(iter(json.loads(newest)), {}).get("sha")
+            history = json.loads(
+                self.fetch(f"{_API}/commits?sha={commit}&path=server&per_page=100")
+            )
+            titles = []
+            for entry in history:
+                if entry["sha"] == stop:
                     break
                 if len(entry.get("parents", ())) > 1:
                     continue
@@ -261,42 +351,6 @@ class ServerUpdater:
         except (ValueError, KeyError, TypeError, AttributeError) as error:
             raise ServerUpdateError("检查", "GitHub 返回的提交列表无效") from error
         return titles
-
-    def previousVersion(self):
-        """可回滚到的上一版本 (版本号, 提交)；没有时为 None。"""
-        previous = self._previous()
-        return None if previous is None else (previous["version"], previous["commit"])
-
-    def apply(self, expectedVersion):
-        """更新到 main 上的 Server Version；expectedVersion 是管理员确认时看到的版本。"""
-        with self._lock("更新"):
-            check = self.check()
-            if check is None:
-                raise ServerUpdateError("检查", "已是最新版本")
-            if check.version != expectedVersion:
-                raise ServerUpdateError(
-                    "检查", f"main 上的服务端版本已变为 {check.version}，请重新检查更新"
-                )
-            data = self.fetch(f"{_CODELOAD}/{check.commit}")
-            with tempfile.TemporaryDirectory(dir=self._stateDir()) as work:
-                package = Path(work) / "package"
-                files = _extractServer(data, package)
-                gunicornChanged = self._installRequirements(package)
-                self._trialImport(package, Path(work) / "trial.sqlite3")
-                self._backupDatabase()
-                self._install(package, files)
-            # 按换上的 version.py 报版本：页面拿它和新 worker 导入的版本比对，两边读的是同一个文件。
-            version, commit = self.installedVersion()
-        return ServerUpdateResult(version, commit, gunicornChanged)
-
-    def rollback(self):
-        """把当前版本和上一版本对调；数据库和依赖保持不动。"""
-        with self._lock("回滚"):
-            previous = self._previous()
-            if previous is None:
-                raise ServerUpdateError("回滚", "没有可回滚的上一版本")
-            self._install(self._stateDir() / "previous", previous["files"])
-        return ServerUpdateResult(previous["version"], previous["commit"])
 
     @contextmanager
     def _lock(self, step):
@@ -312,9 +366,9 @@ class ServerUpdater:
             except OSError as error:
                 raise ServerUpdateError(step, "已有更新在进行，请稍后再试") from error
             try:
-                for leftover in stateDir.iterdir():
-                    if leftover.is_dir() and leftover.name != "previous":
-                        shutil.rmtree(leftover, ignore_errors=True)
+                # 进程中途被杀留下的工作目录；没能复原时留下的 snapshot-* 是旧文件，不删。
+                for leftover in stateDir.glob("tmp*"):
+                    shutil.rmtree(leftover, ignore_errors=True)
                 yield
             finally:
                 if fcntl is None:
@@ -341,7 +395,10 @@ class ServerUpdater:
         """在子进程里导入新代码。导入时就会迁移表结构，所以连的是数据库副本。"""
         liveDatabase = self.databasePath()
         if liveDatabase.exists():
-            _copyDatabase(liveDatabase, trialDatabase)
+            try:
+                _copyDatabase(liveDatabase, trialDatabase)
+            except sqlite3.Error as error:
+                raise ServerUpdateError("试导入", f"没能复制数据库：{error}") from error
         environment = dict(
             os.environ,
             DJCATAI_DATABASE_PATH=str(trialDatabase),
@@ -361,24 +418,13 @@ class ServerUpdater:
         stateDir.mkdir(parents=True, exist_ok=True)
         return stateDir
 
-    def _readJson(self, name):
-        try:
-            return json.loads((self._stateDir() / name).read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return None
-
-    def _writeJson(self, name, value):
-        path = self._stateDir() / name
-        temporary = path.with_name(path.name + ".tmp")
-        temporary.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
-        os.replace(temporary, path)
-
     def _previous(self):
-        """上一版本的记录；被换下的文件夹不在了就当没有。"""
-        previous = self._readJson("previous.json")
-        if previous is None or not (self._stateDir() / "previous").is_dir():
+        """上一版本的记录；记录和被换下的文件放在同一个目录里，一次改名就换好。"""
+        previous = self._stateDir() / "previous"
+        record = _readJson(previous / "record.json")
+        if record is None or not (previous / "files").is_dir():
             return None
-        return previous
+        return record
 
     def _backupDatabase(self):
         liveDatabase = self.databasePath()
@@ -400,57 +446,88 @@ class ServerUpdater:
         """把 sourceDir 里的 files 换进项目目录，被换下的版本成为上一版本。"""
         stateDir = self._stateDir()
         installedVersion, installedCommit = self.installedVersion()
-        installedFiles = self._readJson("manifest.json")
+        installedFiles = _readJson(stateDir / "manifest.json")
         if installedFiles is None:
             # 从没更新过：只知道这次会覆盖哪些文件，不在包里的旧文件一个都不删。
-            installedFiles = [
-                relative for relative in files if _under(self.projectDir, relative).is_file()
-            ]
+            installedFiles = files
+        kept = [relative for relative in installedFiles if _under(self.projectDir, relative).is_file()]
         snapshot = Path(tempfile.mkdtemp(prefix="snapshot-", dir=stateDir))
+        oldFiles = snapshot / "files"
         try:
-            kept = []
-            for relative in installedFiles:
-                if _under(self.projectDir, relative).is_file():
-                    _copyFile(_under(self.projectDir, relative), _under(snapshot, relative))
-                    kept.append(relative)
-            self._replace(sourceDir, files, set(installedFiles) - set(files), snapshot, kept)
-            previous = stateDir / "previous"
-            if previous.exists():
-                shutil.rmtree(previous)
-            os.replace(snapshot, previous)
+            oldFiles.mkdir()
+            for relative in kept:
+                _copyFile(_under(self.projectDir, relative), _under(oldFiles, relative))
+            _writeJson(
+                snapshot / "record.json",
+                {"version": installedVersion, "commit": installedCommit, "files": kept},
+            )
         except OSError as error:
             shutil.rmtree(snapshot, ignore_errors=True)
-            raise ServerUpdateError("替换", str(error)) from error
-        self._writeJson(
-            "previous.json",
-            {"version": installedVersion, "commit": installedCommit, "files": kept},
-        )
-        self._writeJson("manifest.json", files)
+            raise ServerUpdateError("替换", f"没能先存下当前版本：{error}") from error
 
-    def _replace(self, sourceDir, files, removed, snapshot, kept):
-        """逐个原子替换；中途出错时删掉新加的文件、从快照放回旧文件，再把错误抛出去。"""
         created = []
         try:
-            for relative in files:
-                target = _under(self.projectDir, relative)
-                if not target.exists():
-                    created.append(target)
-                _copyFile(_under(sourceDir, relative), target)
-            for relative in removed:
-                _under(self.projectDir, relative).unlink(missing_ok=True)
-        except OSError:
-            for target in created:
-                try:
-                    target.unlink(missing_ok=True)
-                except OSError:
-                    pass
-            for relative in kept:
-                try:
-                    _copyFile(_under(snapshot, relative), _under(self.projectDir, relative))
-                except OSError:
-                    pass
-            raise
+            self._replace(sourceDir, files, set(installedFiles) - set(files), created)
+        except OSError as error:
+            unrestored = self._restore(oldFiles, kept, created)
+            if unrestored:
+                raise ServerUpdateError(
+                    "替换",
+                    f"{error}；{'、'.join(unrestored)} 没能复原，旧文件留在 {oldFiles}",
+                ) from error
+            shutil.rmtree(snapshot, ignore_errors=True)
+            raise ServerUpdateError("替换", str(error)) from error
 
+        try:
+            _writeJson(stateDir / "manifest.json", files)
+            self._keepAsPrevious(snapshot)
+        except OSError as error:
+            raise ServerUpdateError(
+                "替换",
+                f"文件已经换好，但没能记下上一版本（旧文件留在 {oldFiles}）：{error}；"
+                "请到宝塔面板重启项目",
+            ) from error
+
+    def _replace(self, sourceDir, files, removed, created):
+        """逐个原子替换；新出现的文件记进 created，出错时交给 _restore 收拾。"""
+        for relative in files:
+            target = _under(self.projectDir, relative)
+            if not target.exists():
+                created.append(target)
+            _copyFile(_under(sourceDir, relative), target)
+        for relative in removed:
+            _under(self.projectDir, relative).unlink(missing_ok=True)
+
+    def _restore(self, oldFiles, kept, created):
+        """删掉新加的文件、放回旧文件；返回没能放回的旧文件。"""
+        for target in created:
+            try:
+                target.unlink(missing_ok=True)
+            except OSError:
+                pass
+        unrestored = []
+        for relative in kept:
+            try:
+                _copyFile(_under(oldFiles, relative), _under(self.projectDir, relative))
+            except OSError:
+                unrestored.append(relative)
+        return unrestored
+
+    def _keepAsPrevious(self, snapshot):
+        stateDir = snapshot.parent
+        previous = stateDir / "previous"
+        retired = None
+        if previous.exists():
+            retired = stateDir / f"tmp-retired-{os.getpid()}-{time.monotonic_ns()}"
+            os.replace(previous, retired)
+        try:
+            os.replace(snapshot, previous)
+        except OSError:
+            if retired is not None:
+                os.replace(retired, previous)
+            raise
+        if retired is not None:
+            shutil.rmtree(retired, ignore_errors=True)
 
 def registerServerUpdate(
     app,
@@ -555,7 +632,8 @@ def registerServerUpdate(
     @loginRequired
     def apply():
         version = request.form.get("version", "")
-        return changeThenRestart(lambda: extension("updater").apply(version), "已更新到")
+        commit = request.form.get("commit", "")
+        return changeThenRestart(lambda: extension("updater").apply(version, commit), "已更新到")
 
     @blueprint.post("/rollback")
     @loginRequired

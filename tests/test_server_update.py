@@ -1,5 +1,6 @@
 import io
 import json
+import re
 import sqlite3
 import tarfile
 import tempfile
@@ -22,27 +23,67 @@ def versionFile(version, commit):
 
 
 class FakeGitHub:
-    """Serves the URLs the Server Update reads, from a published server package."""
+    """A tiny GitHub: server packages published onto main in order, or only onto a fork."""
+
+    API = f"https://api.github.com/repos/{REPO}"
 
     def __init__(self):
-        self.responses = {}
+        self.packages = {}
+        self.tarballs = {}
+        self.histories = {}
+        self.main = []
+        # 提交 → 它之前最近一个改过 server/ 的提交；没写的就当它自己改过。
+        self.newestServerCommit = {}
         self.requested = []
+        self.offline = False
 
-    def publish(self, commit, files, history=()):
-        self.responses = {
-            f"https://api.github.com/repos/{REPO}/commits/main": commit.encode(),
-            f"https://api.github.com/repos/{REPO}/contents/server/version.py?ref={commit}":
-                files["version.py"].encode(),
-            f"https://api.github.com/repos/{REPO}/commits?sha={commit}&path=server&per_page=100":
-                json.dumps(list(history)).encode(),
-            f"https://codeload.github.com/{REPO}/tar.gz/{commit}": tarball(commit, files),
-        }
+    def publish(self, commit, files, history=(), onMain=True, extraMembers=()):
+        self.packages[commit] = files
+        self.tarballs[commit] = tarball(commit, files, extraMembers)
+        self.histories[commit] = list(history)
+        if onMain:
+            self.main.append(commit)
 
     def fetch(self, url, accept=None):
         self.requested.append(url)
-        if url not in self.responses:
-            raise server_update.ServerUpdateError("下载", f"404 {url}")
-        return self.responses[url]
+        if self.offline:
+            raise server_update.ServerUpdateError("下载", "连不上 GitHub")
+        routes = (
+            (rf"{self.API}/commits/main", lambda: self.main[-1].encode()),
+            (
+                rf"{self.API}/contents/server/version\.py\?ref=(\w+)",
+                lambda sha: self.packages[sha]["version.py"].encode(),
+            ),
+            (
+                rf"{self.API}/commits\?sha=(\w+)&path=server&per_page=100",
+                lambda sha: json.dumps(self.histories[sha]).encode(),
+            ),
+            (
+                rf"{self.API}/commits\?sha=(\w+)&path=server&per_page=1",
+                lambda sha: json.dumps(
+                    [{"sha": self.newestServerCommit.get(sha, sha)}]
+                ).encode(),
+            ),
+            (rf"{self.API}/compare/main\.\.\.(\w+)", self._compare),
+            (rf"https://codeload\.github\.com/{REPO}/tar\.gz/(\w+)", self.tarballs.__getitem__),
+        )
+        for pattern, respond in routes:
+            match = re.fullmatch(pattern, url)
+            if match:
+                try:
+                    return respond(*match.groups())
+                except KeyError:
+                    break
+        raise server_update.ServerUpdateError("下载", f"404 {url}")
+
+    def _compare(self, sha):
+        if sha == self.main[-1]:
+            status = "identical"
+        elif sha in self.main:
+            status = "behind"
+        else:
+            status = "diverged"
+        return json.dumps({"status": status}).encode()
 
 
 def tarball(commit, files, extraMembers=()):
@@ -121,7 +162,7 @@ class ServerUpdateTest(TestCase):
     def read(self, name):
         return (self.projectDir / name).read_text(encoding="utf-8")
 
-    def release(self, version, changes=None, commit=NEW_COMMIT, history=()):
+    def release(self, version, changes=None, commit=NEW_COMMIT, history=(), **options):
         files = dict(self.installed)
         files["version.py"] = versionFile(version, commit)
         for name, text in (changes or {}).items():
@@ -129,8 +170,8 @@ class ServerUpdateTest(TestCase):
                 files.pop(name, None)
             else:
                 files[name] = text
-        self.github.publish(commit, files, history)
-        return files
+        self.github.publish(commit, files, history, **options)
+        return commit
 
     def testCheckOffersHigherVersionWithServerCommitTitlesSinceInstalled(self):
         self.release(
@@ -150,6 +191,23 @@ class ServerUpdateTest(TestCase):
         self.assertEqual(check.commit, NEW_COMMIT)
         self.assertEqual(
             check.titles,
+            ["fix: 字体按 font/woff2 返回", "feat: 后台一键更新服务端"],
+        )
+
+    def testCommitTitlesStopAtTheInstalledServerCodeEvenWhenTheInstalledCommitIsClientOnly(self):
+        self.github.newestServerCommit[OLD_COMMIT] = "e" * 40
+        self.release(
+            "1.4.9",
+            history=[
+                historyEntry(NEW_COMMIT, "fix: 字体按 font/woff2 返回"),
+                historyEntry("b" * 40, "feat: 后台一键更新服务端"),
+                historyEntry("e" * 40, "已安装的服务端代码"),
+                historyEntry("d" * 40, "更早的提交"),
+            ],
+        )
+
+        self.assertEqual(
+            self.updater.check().titles,
             ["fix: 字体按 font/woff2 返回", "feat: 后台一键更新服务端"],
         )
 
@@ -178,7 +236,7 @@ class ServerUpdateTest(TestCase):
             },
         )
 
-        result = self.updater.apply("1.4.9")
+        result = self.updater.apply("1.4.9", NEW_COMMIT)
 
         self.assertEqual((result.version, result.commit), ("1.4.9", NEW_COMMIT))
         self.assertEqual(self.updater.installedVersion(), ("1.4.9", NEW_COMMIT))
@@ -197,13 +255,14 @@ class ServerUpdateTest(TestCase):
         link.linkname = "/etc/passwd"
         for member, data in ((escape, b"evil"), (link, None)):
             with self.subTest(member=member.name):
-                files = self.release("1.4.9", {"ai_markdown.py": "VALUE = 'new'\n"})
-                self.github.responses[
-                    f"https://codeload.github.com/{REPO}/tar.gz/{NEW_COMMIT}"
-                ] = tarball(NEW_COMMIT, files, [(member, data)])
+                self.release(
+                    "1.4.9",
+                    {"ai_markdown.py": "VALUE = 'new'\n"},
+                    extraMembers=[(member, data)],
+                )
 
                 with self.assertRaises(server_update.ServerUpdateError) as raised:
-                    self.updater.apply("1.4.9")
+                    self.updater.apply("1.4.9", NEW_COMMIT)
 
                 self.assertEqual(raised.exception.step, "下载")
                 self.assertEqual(self.read("ai_markdown.py"), "VALUE = 'old'\n")
@@ -213,21 +272,21 @@ class ServerUpdateTest(TestCase):
         unfilled = 'SERVER_VERSION = "1.4.9"\nSERVER_COMMIT = "$Format:%H$"\n'
         self.release("1.4.9", {"version.py": unfilled})
 
-        result = self.updater.apply("1.4.9")
+        result = self.updater.apply("1.4.9", NEW_COMMIT)
 
         self.assertEqual((result.version, result.commit), ("1.4.9", ""))
 
     def testFilesDroppedFromThePackageAreRemovedOnlyOnceTheyWereInstalledByAnUpdate(self):
         self.write("templates/hand_added.html", "not from any package")
         self.release("1.4.9", {"templates/admin_old.html": "shipped in 1.4.9"})
-        self.updater.apply("1.4.9")
+        self.updater.apply("1.4.9", NEW_COMMIT)
 
         self.release(
             "1.5.0",
             {"templates/admin_old.html": None, "app_store.py": None},
             commit="f" * 40,
         )
-        self.updater.apply("1.5.0")
+        self.updater.apply("1.5.0", "f" * 40)
 
         self.assertFalse((self.projectDir / "templates/admin_old.html").exists())
         self.assertFalse((self.projectDir / "app_store.py").exists())
@@ -235,7 +294,7 @@ class ServerUpdateTest(TestCase):
 
     def testFirstUpdateRemovesNothing(self):
         self.release("1.4.9", {"app_store.py": None})
-        self.updater.apply("1.4.9")
+        self.updater.apply("1.4.9", NEW_COMMIT)
         self.assertEqual(self.read("app_store.py"), "OLD = True\n")
 
     def testNewCodeThatFailsToImportIsNeverInstalled(self):
@@ -248,7 +307,7 @@ class ServerUpdateTest(TestCase):
         )
 
         with self.assertRaises(server_update.ServerUpdateError) as raised:
-            self.updater.apply("1.4.9")
+            self.updater.apply("1.4.9", NEW_COMMIT)
 
         self.assertEqual(raised.exception.step, "试导入")
         self.assertIn("新代码坏了", raised.exception.detail)
@@ -270,13 +329,13 @@ class ServerUpdateTest(TestCase):
             },
         )
 
-        self.updater.apply("1.4.9")
+        self.updater.apply("1.4.9", NEW_COMMIT)
 
         self.assertEqual(self.usageRows(), [("DJ-000001",)])
 
     def testUnchangedRequirementsSkipPip(self):
         self.release("1.4.9")
-        result = self.updater.apply("1.4.9")
+        result = self.updater.apply("1.4.9", NEW_COMMIT)
         self.assertEqual(self.pipRuns, [])
         self.assertFalse(result.gunicornChanged)
 
@@ -284,7 +343,7 @@ class ServerUpdateTest(TestCase):
         requirements = "Flask>=3.1,<4\ngunicorn>=23,<24\nrequests>=2.32,<3\n"
         self.release("1.4.9", {"requirements.txt": requirements})
 
-        result = self.updater.apply("1.4.9")
+        result = self.updater.apply("1.4.9", NEW_COMMIT)
 
         self.assertEqual(self.pipRuns, [requirements])
         self.assertEqual(self.read("requirements.txt"), requirements)
@@ -292,7 +351,7 @@ class ServerUpdateTest(TestCase):
 
     def testGunicornRequirementChangeAsksForAPanelRestart(self):
         self.release("1.4.9", {"requirements.txt": "Flask>=3.1,<4\ngunicorn>=24,<25\n"})
-        self.assertTrue(self.updater.apply("1.4.9").gunicornChanged)
+        self.assertTrue(self.updater.apply("1.4.9", NEW_COMMIT).gunicornChanged)
 
     def testFailedDependencyInstallLeavesTheOldCode(self):
         def failingPip(requirements):
@@ -305,7 +364,7 @@ class ServerUpdateTest(TestCase):
         )
 
         with self.assertRaises(server_update.ServerUpdateError) as raised:
-            self.updater.apply("1.4.9")
+            self.updater.apply("1.4.9", NEW_COMMIT)
 
         self.assertEqual(raised.exception.step, "依赖")
         self.assertEqual(self.read("ai_markdown.py"), "VALUE = 'old'\n")
@@ -313,7 +372,7 @@ class ServerUpdateTest(TestCase):
     def testEachUpdateBacksUpTheDatabaseKeepingTheNewestThree(self):
         for index, version in enumerate(("1.4.9", "1.5.0", "1.5.1", "1.5.2")):
             self.release(version, commit=str(index + 1) * 40)
-            self.updater.apply(version)
+            self.updater.apply(version, str(index + 1) * 40)
 
         backups = sorted((self.databasePath.parent / "server-update").glob("database-*.sqlite3"))
         self.assertEqual(
@@ -331,7 +390,7 @@ class ServerUpdateTest(TestCase):
             "1.4.9",
             {"ai_markdown.py": "VALUE = 'new'\n", "static/admin.css": "body {}"},
         )
-        self.updater.apply("1.4.9")
+        self.updater.apply("1.4.9", NEW_COMMIT)
         self.assertEqual(self.updater.previousVersion(), ("1.4.8", OLD_COMMIT))
 
         result = self.updater.rollback()
@@ -365,7 +424,7 @@ class ServerUpdateTest(TestCase):
         )
 
         with self.assertRaises(server_update.ServerUpdateError) as raised:
-            self.updater.apply("1.4.9")
+            self.updater.apply("1.4.9", NEW_COMMIT)
 
         self.assertEqual(raised.exception.step, "替换")
         for name, text in self.installed.items():
@@ -377,12 +436,46 @@ class ServerUpdateTest(TestCase):
         )
         self.assertIsNone(self.updater.previousVersion())
 
-    def testApplyRefusesWhenMainMovedPastTheConfirmedVersion(self):
-        self.release("1.5.0")
-        with self.assertRaises(server_update.ServerUpdateError) as raised:
-            self.updater.apply("1.4.9")
-        self.assertIn("1.5.0", raised.exception.detail)
+    def testApplyInstallsTheCommitTheAdminConfirmedEvenAfterMainMovedOn(self):
+        self.release("1.4.9", {"ai_markdown.py": "VALUE = '1.4.9'\n"})
+        self.release("1.5.0", {"ai_markdown.py": "VALUE = '1.5.0'\n"}, commit="f" * 40)
+
+        result = self.updater.apply("1.4.9", NEW_COMMIT)
+
+        self.assertEqual((result.version, result.commit), ("1.4.9", NEW_COMMIT))
+        self.assertEqual(self.read("ai_markdown.py"), "VALUE = '1.4.9'\n")
+
+    def testApplyRefusesCommitsThatAreNotARelease(self):
+        self.release("1.4.9")
+        self.release("1.5.0", commit="f" * 40, onMain=False)
+        cases = {
+            "not on main": ("1.5.0", "f" * 40),
+            "another version": ("1.5.0", NEW_COMMIT),
+            "not higher": ("1.4.8", OLD_COMMIT),
+            "not a commit": ("1.4.9", "main"),
+        }
+        for case, (version, commit) in cases.items():
+            with self.subTest(case):
+                with self.assertRaises(server_update.ServerUpdateError) as raised:
+                    self.updater.apply(version, commit)
+                self.assertEqual(raised.exception.step, "检查")
+                self.assertNotIn(
+                    f"https://codeload.github.com/{REPO}/tar.gz/{commit}", self.github.requested
+                )
         self.assertEqual(self.updater.installedVersion(), ("1.4.8", OLD_COMMIT))
+
+    def testUnexpectedFileErrorsStillNameAStep(self):
+        self.release("1.4.9")
+        (self.databasePath.parent / "server-update").write_text("not a directory")
+        with self.assertRaises(server_update.ServerUpdateError):
+            self.updater.apply("1.4.9", NEW_COMMIT)
+
+    def testAnUnreadableDatabaseStopsTheTrialImport(self):
+        self.release("1.4.9")
+        self.databasePath.write_bytes(b"not a database" * 100)
+        with self.assertRaises(server_update.ServerUpdateError) as raised:
+            self.updater.apply("1.4.9", NEW_COMMIT)
+        self.assertEqual(raised.exception.step, "试导入")
 
     def testOnlyOneUpdateRunsAtATime(self):
         self.release("1.4.9")
@@ -397,7 +490,7 @@ class ServerUpdateTest(TestCase):
             return fetch(url, accept)
 
         self.updater.fetch = slowFetch
-        first = threading.Thread(target=self.updater.apply, args=("1.4.9",))
+        first = threading.Thread(target=self.updater.apply, args=("1.4.9", NEW_COMMIT))
         first.start()
         self.addCleanup(first.join)
         self.addCleanup(release.set)
@@ -473,13 +566,14 @@ class ServerUpdateAdminTest(TestCase):
         html = response.json["replace"]["server-update-check"]
         self.assertIn("feat: 后台一键更新服务端", html)
         self.assertIn('name="version" value="1.4.9"', html)
+        self.assertIn(f'name="commit" value="{NEW_COMMIT}"', html)
 
     def testCheckSaysUpToDateOrWhyItFailed(self):
         self.admin._login()
         self.packages.release("1.4.8")
         self.assertEqual(self.post("/admin/server-update/check").json["message"], "已是最新版本")
 
-        self.packages.github.responses.clear()
+        self.packages.github.offline = True
         response = self.post("/admin/server-update/check")
         self.assertEqual(response.status_code, 502)
         self.assertIn("检查更新失败", response.json["message"])
@@ -498,7 +592,7 @@ class ServerUpdateAdminTest(TestCase):
         self.admin._login()
         self.packages.release("1.4.9", {"ai_markdown.py": "VALUE = 'new'\n"})
 
-        response = self.post("/admin/server-update/apply", version="1.4.9")
+        response = self.post("/admin/server-update/apply", version="1.4.9", commit=NEW_COMMIT)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["message"], "已更新到 1.4.9")
@@ -522,7 +616,7 @@ class ServerUpdateAdminTest(TestCase):
         self.admin._login()
         self.packages.release("1.4.9", {"ai_markdown.py": "raise SystemExit('坏了')\n"})
 
-        response = self.post("/admin/server-update/apply", version="1.4.9")
+        response = self.post("/admin/server-update/apply", version="1.4.9", commit=NEW_COMMIT)
 
         self.assertEqual(response.status_code, 400)
         self.assertTrue(response.json["message"].startswith("试导入失败："))
@@ -533,7 +627,7 @@ class ServerUpdateAdminTest(TestCase):
     def testRollbackRestartsIntoThePreviousVersion(self):
         self.admin._login()
         self.packages.release("1.4.9")
-        self.post("/admin/server-update/apply", version="1.4.9").close()
+        self.post("/admin/server-update/apply", version="1.4.9", commit=NEW_COMMIT).close()
         page = self.get("/admin/server-update/").get_data(as_text=True)
         self.assertIn("回滚到 1.4.8", page)
 
@@ -549,7 +643,7 @@ class ServerUpdateAdminTest(TestCase):
         self.restarter = lambda: None
         self.packages.release("1.4.9", {"requirements.txt": "gunicorn>=24\n"})
 
-        response = self.post("/admin/server-update/apply", version="1.4.9")
+        response = self.post("/admin/server-update/apply", version="1.4.9", commit=NEW_COMMIT)
 
         self.assertIn("请手动重启", response.json["message"])
         self.assertNotIn("awaitVersion", response.json)
@@ -557,5 +651,5 @@ class ServerUpdateAdminTest(TestCase):
     def testGunicornUpgradeAsksForAPanelRestart(self):
         self.admin._login()
         self.packages.release("1.4.9", {"requirements.txt": "gunicorn>=24\n"})
-        response = self.post("/admin/server-update/apply", version="1.4.9")
+        response = self.post("/admin/server-update/apply", version="1.4.9", commit=NEW_COMMIT)
         self.assertIn("宝塔面板重启", response.json["message"])
