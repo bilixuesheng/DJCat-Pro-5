@@ -550,8 +550,7 @@ class MainWindow(MSFluentWindow):
         self._screenChangeConnected = True
 
     def _startMachineRegistration(self):
-        if cfg.aiMarkdownMachineCode.value:
-            return
+        # 已有 Machine Code 也每次启动报到一次，服务端据此记下 Last Seen 和 IP Location。
         self.machineRegistrationWorker = MachineRegistrationWorker()
         self.machineRegistrationWorker.finished.connect(self._onMachineRegistered)
         threading.Thread(

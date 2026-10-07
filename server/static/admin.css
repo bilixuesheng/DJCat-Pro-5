@@ -1406,6 +1406,12 @@ td code {
 /* 窄屏时时间戳在日期和时间之间换行，给机器表的操作列让出宽度。 */
 td.cell-time { white-space: normal; }
 td.cell-time span { white-space: nowrap; }
+td.cell-time .cell-location {
+    display: block;
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 12px;
+}
 
 .table-action {
     min-height: 36px;

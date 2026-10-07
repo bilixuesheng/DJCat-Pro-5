@@ -1,8 +1,8 @@
 <td><strong>{{ machine.code }}</strong></td>
 <td><code title="{{ machine.fingerprint }}">{{ machine.fingerprint[:12] }}…</code></td>
-{% for value in (machine.registered_at, machine.last_seen_at) %}{% set parts = value.partition("T") %}
-<td class="cell-time"><span>{{ parts[0] }}</span> <span>{{ parts[2] }}</span></td>
-{% endfor %}
+{% macro timestamp(value) %}{% set parts = value.partition("T") %}<span>{{ parts[0] }}</span> <span>{{ parts[2] }}</span>{% endmacro %}
+<td class="cell-time">{{ timestamp(machine.registered_at) }}</td>
+<td class="cell-time">{{ timestamp(machine.last_seen_at) }}<small class="cell-location">{{ '—' if machine.location is none else (machine.location or '未知') }}</small></td>
 <td>
     <span class="quota-cell"><meter min="0" max="{{ machine.limit }}" value="{{ machine.remaining }}">{{ machine.remaining }} / {{ machine.limit }}</meter><span data-quota-label data-limit="{{ machine.limit }}">{{ machine.remaining }} / {{ machine.limit }}</span></span>
     {% if machine.override is not none %}<span class="status-chip quota-chip {% if machine.override == 0 %}waiting{% endif %}">{{ '已停用' if machine.override == 0 else '专属' }}</span>{% endif %}

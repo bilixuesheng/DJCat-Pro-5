@@ -179,12 +179,20 @@ _Avoid_: Home Card order、全局应用排序
 _Avoid_: chat、generation、Projection
 
 **Machine Identity**:
-用于把 AI Markdown 使用量稳定归到同一台设备的匿名身份。它只服务于额度统计，不是账号或许可证。
+用于把 AI Markdown 使用量稳定归到同一台设备的匿名身份。它只服务于额度统计，不是账号或许可证。服务端只另记它的 Last Seen 和当时的 IP Location，不记 IP 本身。
 _Avoid_: account、license、raw hardware ID
 
 **Machine Code**:
 服务器为 Machine Identity 分配的用户可见别名，格式为 `DJ-` 加六位起的数字。便于用户和管理员识别额度记录，不具备认证或授权能力。
 _Avoid_: Machine Identity、activation code、license key
+
+**Last Seen（最近上线）**:
+服务端最近一次收到某个 Machine Identity 请求的时间：DJCat 每次启动时的报到、查询额度或 AI Markdown Conversion 都算。只记最近一次，不留历史；它不表示这台机器现在仍然开着。
+_Avoid_: 最后访问（旧叫法，当时只在 AI 整理时更新）、在线状态
+
+**IP Location（IP 属地）**:
+Last Seen 那次请求的来源 IP 对应的地区，国内到省和市（如「江苏 南京」），国外只到国家；查不到时为未知。学校里的电脑共用学校的出口 IP，属地通常相同。
+_Avoid_: IP、IP 地址（服务端不保存 IP 本身）、定位
 
 **Daily Quota**:
 每个 Machine Identity 每个北京时间自然日可用于 AI Markdown Conversion 的额度点数，于 0 点刷新。失败请求不最终占用额度。有 Quota Override 时取它，否则取 Default Daily Quota。

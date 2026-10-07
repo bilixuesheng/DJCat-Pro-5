@@ -21,6 +21,7 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 - Broadcast Task、Home Card Task 与 Shutdown Task 持久化在 `cfg`；对应设置页只编辑规则，MainWindow 负责按时间匹配或分发 Application Lifecycle Event。
 - Existing-card 模式的 **Home Card Task** 只保存稳定 Home Card key、用于失效提示的标题快照和打开／关闭动作；关闭只适用于 Default Home Card。Custom 模式直接拥有 Action Sequence，但不会创建 Custom Home Card。
 - AI Markdown Conversion 使用 Machine Identity 领取和结算 Daily Quota；Machine Code 只是定位该身份的可见别名。
+- **Last Seen** 与 **IP Location** 一起改写：服务端收到某个 Machine Identity 的注册、查额度或整理请求时记下时间和来源 IP 的属地，只存属地文字，不存 IP。客户端每次启动都向 `/register` 报到一次，已有 Machine Code 也一样。
 - Projection 编辑器中的"整理并投送"只在 Markdown 模式显示并独立记忆；它复用 AI Markdown Conversion，但启动恢复必须绕过整理流程并原样恢复 Projection Snapshot。已知剩余额度不够本次扣点时，按钮改为"投送（额度不足）"并按原文投送，勾选和配置都不动；查不到额度时照常整理，由服务端判断。
 - **Daily Quota** 按 Machine Identity 取：有 **Quota Override** 用它，否则用 **Default Daily Quota**。Quota Override 只改上限，不碰当天已用的点数，也不改扣点规则。
 - **Setting Section** 按 Setting Route 组成一棵树；顶层只有导航行，叶子才持有 Setting Card。Setting Suggestion 指向卡片及其 Route，不改变任何页面内容。
@@ -167,6 +168,8 @@ AI Markdown Conversion 失败时由服务端按 DeepSeek 的回应归因：只�
 
 AI Markdown 数据库的 schema 初始化缓存同时使用文件身份和 SQLite schema version；同一路径下的数据库文件被替换后必须重新初始化，普通额度和请求记录写入不能反复触发 schema 初始化。
 
+IP Location 由 `server/ip_location.py` 查随服务端发布的 ip2region IPv4 离线库 `server/ip2region_v4.xdb`（Apache-2.0 或 MIT，许可证 `server/ip2region_LICENSE.md`），不调外部接口；`api.djcatpro.top` 没有 IPv6 地址，所以不带 IPv6 库，服务端加了 IPv6 时要一并换上。来源 IP 取 Nginx 设置的 `X-Real-IP`：Nginx 用自己看到的地址覆盖它，后端只监听 127.0.0.1，所以可信。`machines.last_location` 为 NULL 表示加上属地以来还没上线过（后台显示「—」），空串表示上线了但属地查不到（显示「未知」），两者不能混用。换数据就是换掉 xdb 文件并升 Server Version；整个仓库压缩包要留在 Server Update 的 64 MB 下载上限以内。
+
 一台机器的上限一律经 `_dailyQuota(machineId)` 取：先查 `quota_overrides` 表，没有才用 `_defaultDailyQuota()`（设置键仍叫 `daily_limit`）。Quota Override 可以是 0，取上限的地方不能写 `limit or 默认值` 这类真值判断，否则停用的机器会回到默认额度。`/quota`、整理请求的 `X-RateLimit-Limit` 和后台表格都报这台机器自己的上限，所以 Quota Override 只需一次 Server Update，客户端不用跟着升级。
 
 ### 管理后台
@@ -283,7 +286,8 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 
 | Module | Responsibility |
 |---|---|
-| `server/ai_markdown.py` | Machine Identity、Daily Quota、AI Markdown Conversion 和管理接口 |
+| `server/ai_markdown.py` | Machine Identity、Daily Quota、Last Seen、AI Markdown Conversion 和管理接口 |
+| `server/ip_location.py` | IP Location：用随服务端发布的 ip2region IPv4 离线库把来源 IP 换成「省 市」 |
 | `server/app_store.py` | Application Catalog、下载重定向/计数和应用市场管理页面 |
 | `server/server_update.py` | Server Update：检查 main 上的 Server Version、下载替换、回滚，以及「服务端更新」页面 |
 | `server/version.py` | Server Version 的唯一来源 |
@@ -311,6 +315,7 @@ set working directory
       → register Lazy Pages without constructing their real pages
       → restore Application Home Card from cfg.pinnedHomeCards
       → publish the complete Home Card snapshot to the Setting page and Tray Menu
+      → report Last Seen to the AI Markdown server in a background thread
       → create tray and long-lived timers/workers
       → restore valid active Projection Snapshot only when recovery is enabled
       → dispatch startup event and, when applicable, silent-startup event

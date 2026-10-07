@@ -1,5 +1,6 @@
 import os
 import re
+import sqlite3
 import tempfile
 from contextlib import closing
 from datetime import datetime
@@ -685,6 +686,100 @@ class AIAdminTest(TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(ai_markdown._dailyQuota(machineId), 30)
+
+    def _lastSeen(self, machineId):
+        with closing(ai_markdown._connect()) as database:
+            row = database.execute(
+                "SELECT last_seen_at, last_location FROM machines WHERE machine_id = ?",
+                (machineId,),
+            ).fetchone()
+        return row["last_seen_at"], row["last_location"]
+
+    def testEveryMachineRequestRecordsLastSeenAndIPLocation(self):
+        machineId = ai_markdown._machineId("a" * 64)
+        self.client.post(
+            "/ai/markdown/register",
+            json={"machine_id": "a" * 64},
+            headers={"X-Real-IP": "114.114.114.114"},
+        )
+        self.assertEqual(self._lastSeen(machineId)[1], "江苏 南京")
+
+        with patch.object(ai_markdown, "_nowIso", return_value="2026-10-08T07:30:00+08:00"):
+            self.client.get(
+                "/ai/markdown/quota",
+                query_string={"machine_id": "a" * 64},
+                headers={"X-Real-IP": "223.5.5.5"},
+            )
+        self.assertEqual(
+            self._lastSeen(machineId), ("2026-10-08T07:30:00+08:00", "浙江 杭州")
+        )
+
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-only"}), patch.object(
+            ai_markdown, "_claimRequest", return_value=(-1, None)
+        ):
+            self.client.post(
+                "/ai/markdown",
+                json={"content": "作业", "machine_id": "a" * 64},
+                headers={"X-Real-IP": "192.168.1.20"},
+            )
+        # 内网地址查不到属地：记成空串（未知），与从没上线过的 NULL 区分开。
+        self.assertEqual(self._lastSeen(machineId)[1], "")
+
+        # 未注册的机器查额度仍是 404，不会顺手注册。
+        response = self.client.get(
+            "/ai/markdown/quota", query_string={"machine_id": "b" * 64}
+        )
+        self.assertEqual(response.status_code, 404)
+        with closing(ai_markdown._connect()) as database:
+            count = database.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
+        self.assertEqual(count, 1)
+
+    def testMachinesPageShowsLastSeenWithItsIPLocation(self):
+        for machine, ip in (("a", "114.114.114.114"), ("b", "10.0.0.8")):
+            self.client.post(
+                "/ai/markdown/register",
+                json={"machine_id": machine * 64},
+                headers={"X-Real-IP": ip},
+            )
+        with closing(ai_markdown._connect()) as database:
+            database.execute(
+                "INSERT INTO machines(machine_id, registered_at, last_seen_at) "
+                "VALUES (?, ?, ?)",
+                ("c" * 64, ai_markdown._nowIso(), ai_markdown._nowIso()),
+            )
+            database.commit()
+        self._login()
+
+        page = self._machinesPage().get_data(as_text=True)
+        self.assertIn("最近上线", page)
+        self.assertNotIn("最后访问", page)
+        locations = re.findall(r'<small class="cell-location">([^<]*)</small>', page)
+        self.assertCountEqual(locations, ["江苏 南京", "未知", "—"])
+
+    def testOldMachinesTableGainsTheLocationColumn(self):
+        with closing(sqlite3.connect(ai_markdown.DATABASE_PATH)) as database:
+            database.execute(
+                """
+                CREATE TABLE machines (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    machine_id TEXT NOT NULL UNIQUE,
+                    registered_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL
+                )
+                """
+            )
+            database.execute(
+                "INSERT INTO machines(machine_id, registered_at, last_seen_at) "
+                "VALUES ('old', '2026-09-01T08:00:00+08:00', '2026-09-01T08:00:00+08:00')"
+            )
+            database.commit()
+
+        self.assertEqual(self._lastSeen("old"), ("2026-09-01T08:00:00+08:00", None))
+        self._login()
+        self.assertIn(
+            '<small class="cell-location">—</small>',
+            self._machinesPage().get_data(as_text=True),
+        )
 
     def testAdminRequiresLoginAndCsrf(self):
         response = self.client.get(
