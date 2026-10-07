@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import sys
 
-from PySide6.QtCore import QDateTime, QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtCore import QDateTime, QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTime
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -74,13 +74,18 @@ def _textColor(dark: bool) -> QColor:
 
 
 WINDOW_PREVIEW_HEIGHT = 216
+# 投送、倒计时和时钟的角落按钮整组按这个比例画，图标才认得出。
+ACTION_BUTTON_SCALE = 0.5
+
+
+def _screenSize() -> QSize:
+    screen = QGuiApplication.primaryScreen()
+    size = screen.geometry().size() if screen is not None else QSize()
+    return size if size.height() > 0 else QSize(1920, 1080)
 
 
 def _screenAspectRatio() -> float:
-    screen = QGuiApplication.primaryScreen()
-    size = screen.geometry().size() if screen is not None else None
-    if not size or size.height() <= 0:
-        return 16 / 9
+    size = _screenSize()
     return min(2.4, max(1.25, size.width() / size.height()))
 
 
@@ -131,12 +136,54 @@ class WindowBackgroundPreview(WindowBackground):
     def _onActionPositionChanged(self, *_args) -> None:
         self.update()
 
-    def _actionButtonCount(self) -> int:
-        if self._contentKind == PROJECTION_CONTENT:
-            return 4  # 编辑 / 最小化 / 窗口化 / 关闭
+    def _screenScale(self) -> float:
+        """How much smaller than the real full-screen window the preview is."""
+        return self.height() / _screenSize().height()
+
+    def contentRect(self) -> QRectF:
+        """The real window's layout margins, scaled to the preview."""
+        scale = self._screenScale()
+        bottom = 0 if self._contentKind == PROJECTION_CONTENT else 20
+        return QRectF(self.rect()).adjusted(
+            40 * scale, 20 * scale, -40 * scale, -bottom * scale
+        )
+
+    def actionButtonIcons(self) -> list:
+        # 全屏时“窗口化”按钮画的是 COPY；按钮放左下角时整排顺序反过来。
+        icons = {
+            PROJECTION_CONTENT: [FIF.EDIT, FIF.MINIMIZE, FIF.COPY, FIF.CLOSE],
+            COUNTDOWN_CONTENT: [FIF.SYNC, FIF.COPY, FIF.CLOSE],
+            CLOCK_CONTENT: [FIF.COPY, FIF.CLOSE],
+        }[self._contentKind]
+        return icons[::-1] if self._buttonsAtLeft() else icons
+
+    def _buttonsAtLeft(self) -> bool:
+        return (
+            self._actionPositionItem is not None
+            and self._actionPositionItem.value == "左下角"
+        )
+
+    def actionButtonRects(self) -> list[QRectF]:
+        # 真实按钮 80 × 65，间距和离边都是 12。整组按比例放大到 ACTION_BUTTON_SCALE，
+        # 按屏幕比例缩小的话图标只剩几个像素。
+        scale = ACTION_BUTTON_SCALE
+        width, height, spacing = 80 * scale, 65 * scale, 12 * scale
+        count = len(self.actionButtonIcons())
+        total = count * width + (count - 1) * spacing
+        left = spacing if self._buttonsAtLeft() else self.width() - spacing - total
+        top = self.height() - spacing - height
+        return [
+            QRectF(left + index * (width + spacing), top, width, height)
+            for index in range(count)
+        ]
+
+    def projectionTitle(self) -> str:
+        return cfg.broadcastTitle.value.strip() or "投送标题"
+
+    def timerText(self) -> str:
         if self._contentKind == COUNTDOWN_CONTENT:
-            return 3  # 重置 / 窗口化 / 关闭
-        return 2  # 窗口化 / 关闭
+            return "00 : 45 : 00"
+        return QTime.currentTime().toString("HH : mm : ss")
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
@@ -144,12 +191,11 @@ class WindowBackgroundPreview(WindowBackground):
         painter.setRenderHints(
             QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
         )
-        rect = QRectF(self.rect()).adjusted(18, 16, -18, -14)
         if self._contentKind == PROJECTION_CONTENT:
-            self._paintProjection(painter, rect)
+            self._paintProjection(painter, self.contentRect())
         else:
-            self._paintTimer(painter, rect)
-        self._paintActionButtons(painter, QRectF(self.rect()))
+            self._paintTimer(painter, self.contentRect())
+        self._paintActionButtons(painter)
         painter.end()
 
     def _paintProjection(self, painter: QPainter, rect: QRectF) -> None:
@@ -161,7 +207,9 @@ class WindowBackgroundPreview(WindowBackground):
         painter.drawText(
             QRectF(rect.left(), rect.top(), rect.width(), 26),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            "投送标题",
+            QFontMetricsF(font).elidedText(
+                self.projectionTitle(), Qt.TextElideMode.ElideRight, rect.width()
+            ),
         )
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(
@@ -177,48 +225,44 @@ class WindowBackgroundPreview(WindowBackground):
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
     def _paintTimer(self, painter: QPainter, rect: QRectF) -> None:
+        # 字号和上下留白照真实窗口：标题高的 1/14，时间 9/40，三段弹性空白 1 : 1 : 2。
         title = "考试倒计时" if self._contentKind == COUNTDOWN_CONTENT else "当前时间"
-        font = QFont(self.font())
-        font.setPixelSize(13)
-        painter.setFont(font)
-        painter.setPen(QColor(255, 255, 255, 190))
+        text = self.timerText()
+        titleFont = QFont(self.font())
+        titleFont.setPixelSize(max(1, self.height() // 14))
+        titleFont.setBold(True)
+        timeFont = QFont(self.font())
+        timeFont.setPixelSize(max(1, self.height() * 9 // 40))
+        timeFont.setBold(True)
+        # 预览宽度随屏幕比例变化，4:3 屏上时间会超出两侧，和真实窗口一样按比例缩小。
+        width = QFontMetricsF(timeFont).horizontalAdvance(text)
+        if width > rect.width():
+            timeFont.setPixelSize(max(1, int(timeFont.pixelSize() * rect.width() / width)))
+        titleHeight = QFontMetricsF(titleFont).height()
+        timeHeight = QFontMetricsF(timeFont).height()
+        free = max(0.0, rect.height() - titleHeight - timeHeight) / 4
+
+        painter.setFont(titleFont)
+        painter.setPen(QColor(255, 255, 255))
+        titleTop = rect.top() + free
         painter.drawText(
-            QRectF(rect.left(), rect.top() + 12, rect.width(), 20),
-            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+            QRectF(rect.left(), titleTop, rect.width(), titleHeight),
+            Qt.AlignmentFlag.AlignCenter,
             title,
         )
-        text = "00 : 45 : 00" if self._contentKind == COUNTDOWN_CONTENT else "09 : 24 : 30"
-        font.setPixelSize(46)
-        font.setWeight(QFont.Weight.DemiBold)
-        # 预览宽度随屏幕比例变化，4:3 屏上 46 px 的时间会超出两侧。
-        width = QFontMetricsF(font).horizontalAdvance(text)
-        available = rect.width() * 0.88
-        if width > available:
-            font.setPixelSize(max(12, int(46 * available / width)))
-        painter.setFont(font)
-        painter.setPen(QColor(255, 255, 255, 235))
+        painter.setFont(timeFont)
         painter.drawText(
-            QRectF(rect.left(), rect.top() + 36, rect.width(), 60),
-            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+            QRectF(rect.left(), titleTop + titleHeight + free, rect.width(), timeHeight),
+            Qt.AlignmentFlag.AlignCenter,
             text,
         )
 
-    def _paintActionButtons(self, painter: QPainter, rect: QRectF) -> None:
-        count = self._actionButtonCount()
-        width, height, spacing, margin = 30, 38, 8, 14
-        total = count * width + (count - 1) * spacing
-        onLeft = (
-            self._actionPositionItem is not None
-            and self._actionPositionItem.value == "左下角"
-        )
-        left = rect.left() + margin if onLeft else rect.right() - margin - total
-        top = rect.bottom() - margin - height
-
+    def _paintActionButtons(self, painter: QPainter) -> None:
         dark = self._darkFurniture()
-        for index in range(count):
-            button = QRectF(left + index * (width + spacing), top, width, height)
-            primary = index == count - 1
-            # 与真实窗口的按钮同色：关闭是主题色，其余是按深浅主题的半透明底。细边让
+        foreground = QColor(255, 255, 255) if dark else QColor(0, 0, 0)
+        for icon, button in zip(self.actionButtonIcons(), self.actionButtonRects()):
+            primary = icon is FIF.CLOSE
+            # 与真实按钮同色：关闭是主题色，其余是按深浅主题的半透明底。细边让
             # 主题色的关闭按钮落在同色背景上也能分辨。
             painter.setPen(
                 QPen(QColor(255, 255, 255, 110) if dark else QColor(0, 0, 0, 40), 1)
@@ -228,18 +272,28 @@ class WindowBackgroundPreview(WindowBackground):
                 if primary
                 else QColor(255, 255, 255, 26) if dark else QColor(0, 0, 0, 13)
             )
-            painter.drawRoundedRect(button, 5, 5)
+            radius = 8 * ACTION_BUTTON_SCALE
+            painter.drawRoundedRect(button, radius, radius)
+            # 图标在上、文字在下；文字缩小后认不出，用一道横条代替。
+            color = QColor(255, 255, 255) if primary else foreground
+            iconSize = 20 * ACTION_BUTTON_SCALE
+            icon.icon(color=color).paint(
+                painter,
+                QRectF(
+                    button.center().x() - iconSize / 2,
+                    button.top() + 9 * ACTION_BUTTON_SCALE,
+                    iconSize,
+                    iconSize,
+                ).toRect(),
+            )
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(
-                QColor(255, 255, 255, 200)
-                if primary or dark
-                else QColor(0, 0, 0, 170)
-            )
+            color.setAlpha(170)
+            painter.setBrush(color)
+            barTop = button.top() + (9 + 20 + 4 + 11) * ACTION_BUTTON_SCALE - 1.25
             painter.drawRoundedRect(
-                QRectF(button.center().x() - 5, button.top() + 9, 10, 10), 2, 2
-            )
-            painter.drawRoundedRect(
-                QRectF(button.left() + 6, button.bottom() - 12, width - 12, 4), 2, 2
+                QRectF(button.left() + button.width() * 0.3, barTop, button.width() * 0.4, 2.5),
+                1.25,
+                1.25,
             )
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
