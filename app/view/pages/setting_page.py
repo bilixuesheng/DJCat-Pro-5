@@ -70,6 +70,7 @@ from app.view.components.setting_preview import (
     PROJECTION_CONTENT,
     ApplicationIconPreview,
     MainWindowPreview,
+    TrayPreview,
     WindowBackgroundPreview,
 )
 from app.view.components.setting_section import (
@@ -1131,6 +1132,7 @@ class SettingPage(QWidget):
             "托盘图标、提示文字、点击行为和托盘菜单",
             "personalization",
         )
+        tray.addPreview(self._homeCardPreview(TrayPreview()))
         tray.addSubsectionTitle("图标与提示")
         tray.addCardList(
             [self.trayIconSourceCard, self.trayIconCard, self.trayTooltipCard]

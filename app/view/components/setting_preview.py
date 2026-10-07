@@ -36,6 +36,7 @@ from qframelesswindow.titlebar import CloseButton, MaximizeButton, MinimizeButto
 from app.common.application_icon import applicationIcon, trayIcon
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
+from app.platform.shadow_effect import paintSilhouetteShadow
 from app.view.components.banner_widget import BannerWidget
 from app.view.components.setting_card_group import SettingMaterialCard
 from app.view.components.window_background import (
@@ -644,13 +645,34 @@ def _paintWindowsLogo(painter: QPainter, center, size: float) -> None:
             )
 
 
-def paintTaskbar(painter: QPainter, rect: QRectF, dark: bool) -> QRectF:
-    """The Windows taskbar with DJCat running; returns the Tray Icon's rect.
+def taskbarLayout(rect: QRectF) -> dict[str, QRectF]:
+    """Where the Start button, DJCat, the Tray Icon and the clock sit.
 
-    Win11 centres the buttons and draws a short pill under a running app;
-    Win10 keeps them on the left with a line under the whole button.
+    Win11 centres the buttons; Win10 keeps them on the left.
+    """
+    button = rect.height() - 8
+    group = button * 2 + 4
+    left = rect.left() + 4 if _isWindows10() else rect.center().x() - group / 2
+    start = QRectF(left, rect.top() + 4, button, button)
+    clock = QRectF(rect.right() - 84, rect.top(), 76, rect.height())
+    tray = QRectF(clock.left() - 30, rect.center().y() - 8, 16, 16)
+    return {
+        "start": start,
+        "application": start.translated(button + 4, 0),
+        "clock": clock,
+        "tray": tray,
+        "chevron": QRectF(tray.left() - 26, rect.center().y() - 2.5, 9, 5),
+    }
+
+
+def paintTaskbar(painter: QPainter, rect: QRectF, dark: bool) -> None:
+    """The Windows taskbar with DJCat running and its Tray Icon in the corner.
+
+    Win11 draws a short pill under a running app, Win10 a line under the whole
+    button.
     """
     win10 = _isWindows10()
+    layout = taskbarLayout(rect)
     painter.save()
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(QColor(28, 28, 28) if dark else QColor(238, 238, 238))
@@ -658,16 +680,12 @@ def paintTaskbar(painter: QPainter, rect: QRectF, dark: bool) -> QRectF:
     painter.setPen(QPen(QColor(255, 255, 255, 20) if dark else QColor(0, 0, 0, 20), 1))
     painter.drawLine(rect.topLeft(), rect.topRight())
 
-    button = rect.height() - 8
-    group = button * 2 + 4
-    left = rect.left() + 4 if win10 else rect.center().x() - group / 2
-    start = QRectF(left, rect.top() + 4, button, button)
-    application = start.translated(button + 4, 0)
-    _paintWindowsLogo(painter, start.center(), 18 if not win10 else 16)
-
+    _paintWindowsLogo(painter, layout["start"].center(), 16 if win10 else 18)
+    application = layout["application"]
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(QColor(255, 255, 255, 18) if dark else QColor(255, 255, 255, 170))
-    painter.drawRoundedRect(application, 0 if win10 else 4, 0 if win10 else 4)
+    corner = 0 if win10 else 4
+    painter.drawRoundedRect(application, corner, corner)
     applicationIcon().paint(
         painter,
         QRectF(application.center().x() - 12, application.center().y() - 12, 24, 24).toRect(),
@@ -685,29 +703,26 @@ def paintTaskbar(painter: QPainter, rect: QRectF, dark: bool) -> QRectF:
     painter.setFont(font)
     painter.setPen(text)
     now = QDateTime.currentDateTime()
-    clock = QRectF(rect.right() - 84, rect.top(), 76, rect.height())
+    clock = layout["clock"]
     lineHeight = QFontMetricsF(font).height()
-    painter.drawText(
-        QRectF(clock.left(), rect.center().y() - lineHeight, clock.width(), lineHeight),
-        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-        now.toString("H:mm"),
-    )
-    painter.drawText(
-        QRectF(clock.left(), rect.center().y(), clock.width(), lineHeight),
-        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-        now.toString("yyyy/M/d"),
-    )
+    for top, value in (
+        (rect.center().y() - lineHeight, now.toString("H:mm")),
+        (rect.center().y(), now.toString("yyyy/M/d")),
+    ):
+        painter.drawText(
+            QRectF(clock.left(), top, clock.width(), lineHeight),
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            value,
+        )
 
-    tray = QRectF(clock.left() - 30, rect.center().y() - 8, 16, 16)
-    trayIcon().paint(painter, tray.toRect())
-    chevron = QRectF(tray.left() - 26, rect.center().y() - 2.5, 9, 5)
+    trayIcon().paint(painter, layout["tray"].toRect())
+    chevron = layout["chevron"]
     painter.setPen(QPen(text, 1.1))
     painter.setBrush(Qt.BrushStyle.NoBrush)
     painter.drawPolyline(
         [chevron.bottomLeft(), QPointF(chevron.center().x(), chevron.top()), chevron.bottomRight()]
     )
     painter.restore()
-    return tray
 
 
 class TaskbarStrip(QWidget):
@@ -774,3 +789,216 @@ class ApplicationIconPreview(SettingPreviewCard):
 
     def setHomeCards(self, entries) -> None:
         self.windowMiniature.setHomeCards(entries)
+
+
+class TrayPreview(SettingPreviewCard):
+    """The corner of the screen with the Tray Menu open above the taskbar.
+
+    The menu comes from the tray's own ``buildTrayMenu()`` and keeps its real
+    size, so its rows, icons and texts are exactly what a right click shows;
+    it is placed by the same rules ``AcrylicMenu`` and ``RoundMenu`` follow.
+    The tooltip really only shows while hovering, but sits beside the menu here
+    so every tray setting can be read at a glance.
+    """
+
+    TOP_MARGIN = 16
+    TOOLTIP_GAP = 12
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._homeCards = []
+        self.menuParts = None
+        self._layout = None
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        self._rebuild()
+        self._bind()
+
+    def _bind(self) -> None:
+        for item in (
+            cfg.showBroadcastTrayAction,
+            cfg.showHomeCardTaskTrayAction,
+            cfg.showShutdownTrayAction,
+            cfg.broadcastTasksEnabled,
+            cfg.homeCardTasksEnabled,
+            cfg.shutdownTasksEnabled,
+            cfg.trayHomeCardKeys,
+            cfg.trayHomeCardsInSubmenu,
+            cfg.trayIconSource,
+            cfg.trayIconPath,
+            cfg.applicationIconSource,
+            cfg.applicationIconPath,
+            qconfig.themeColor,
+        ):
+            item.valueChanged.connect(self._rebuild)
+        qconfig.themeChanged.connect(self._rebuild)
+        cfg.trayTooltip.valueChanged.connect(self._relayout)
+
+    def setHomeCards(self, entries) -> None:
+        self._homeCards = [dict(entry) for entry in entries or [] if isinstance(entry, dict)]
+        self._rebuild()
+
+    def _rebuild(self, *_args) -> None:
+        from app.common.application_icon import trayHomeIcon
+        from app.view.shell.tray import buildTrayMenu
+
+        if self.menuParts is not None:
+            self.menuParts.menu.deleteLater()
+        self._menuPixmaps = {}
+        self.menuParts = buildTrayMenu(self._homeCards, trayHomeIcon(), self)
+        submenu = self._submenu()
+        height = self.menuParts.menu.view.height()
+        if submenu is not None:
+            # 打开二级菜单时，它的条目在菜单里保持选中的样子。
+            self.menuParts.menu.view.setCurrentItem(self._submenuItem())
+            height = max(height, submenu.view.height())
+        self.setFixedHeight(self.TOP_MARGIN + height + taskbarHeight())
+        self._relayout()
+
+    def _menuPixmap(self, menu) -> QPixmap:
+        # render() 直接画到本控件的 painter 上会被重定向偏移打乱位置，先截成图再贴。
+        pixmap = self._menuPixmaps.get(id(menu))
+        if pixmap is None or pixmap.devicePixelRatio() != self.devicePixelRatioF():
+            pixmap = menu.view.grab()
+            self._menuPixmaps[id(menu)] = pixmap
+        return pixmap
+
+    def _submenu(self):
+        menus = self.menuParts.menu._subMenus
+        return menus[0] if menus else None
+
+    def _submenuItem(self):
+        view = self.menuParts.menu.view
+        submenu = self._submenu()
+        for index in range(view.count()):
+            if view.item(index).data(Qt.ItemDataRole.UserRole) is submenu:
+                return view.item(index)
+        return None
+
+    def _relayout(self, *_args) -> None:
+        self._layout = None
+        self.update()
+
+    def resizeEvent(self, event) -> None:
+        self._relayout()
+        super().resizeEvent(event)
+
+    def taskbarRect(self) -> QRect:
+        height = taskbarHeight()
+        return QRect(0, self.height() - height, self.width(), height)
+
+    def _screenRect(self) -> QRect:
+        """What Qt calls the available geometry: the screen above the taskbar."""
+        return QRect(0, 0, self.width(), self.taskbarRect().top())
+
+    def _computeLayout(self) -> dict:
+        if self._layout is not None:
+            return self._layout
+        screen = self._screenRect()
+        tray = taskbarLayout(QRectF(self.taskbarRect()))["tray"]
+        view = self.menuParts.menu.view
+        # AcrylicMenu.adjustPosition：从光标处展开，右边放不下就贴着可用区域右边，底边贴着任务栏。
+        width = view.width() + 5
+        x = max(screen.left(), min(round(tray.center().x()), screen.right() - width))
+        menu = QRect(x, screen.bottom() - view.height() + 1, view.width(), view.height())
+
+        submenuRect = QRect()
+        submenu = self._submenu()
+        if submenu is not None:
+            # RoundMenu._onShowMenuTimeOut：条目右侧 5 px，放不下就开到左侧。
+            item = self._submenuItem()
+            itemRect = view.visualItemRect(item).translated(menu.topLeft())
+            size = submenu.view.size()
+            left = itemRect.right() + 5
+            if left + size.width() > screen.right():
+                left = max(itemRect.left() - size.width() - 5, screen.left())
+            top = itemRect.y() - 5
+            if top + size.height() > screen.bottom():
+                top = screen.bottom() - size.height()
+            submenuRect = QRect(QPoint(left, max(top, screen.top())), size)
+
+        text = self.tooltipText()
+        font = getFont(12)
+        metrics = QFontMetricsF(font)
+        tooltipWidth = min(
+            math.ceil(metrics.horizontalAdvance(text)) + 16,
+            max(40, menu.left() - self.TOOLTIP_GAP - 8),
+        )
+        tooltipHeight = math.ceil(metrics.height()) + 12
+        left = menu.left() if submenuRect.isNull() else min(menu.left(), submenuRect.left())
+        tooltipRight = left - self.TOOLTIP_GAP
+        tooltip = QRect(
+            tooltipRight - tooltipWidth,
+            screen.bottom() - 8 - tooltipHeight,
+            tooltipWidth,
+            tooltipHeight,
+        )
+        self._layout = {
+            "menu": menu,
+            "submenu": submenuRect,
+            "tooltip": tooltip,
+            "font": font,
+        }
+        return self._layout
+
+    def menuRect(self) -> QRect:
+        return self._computeLayout()["menu"]
+
+    def submenuRect(self) -> QRect:
+        return self._computeLayout()["submenu"]
+
+    def tooltipRect(self) -> QRect:
+        return self._computeLayout()["tooltip"]
+
+    def tooltipText(self) -> str:
+        return cfg.trayTooltip.value.strip() or APP_NAME
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        layout = self._computeLayout()
+        dark = isDarkTheme()
+        painter = QPainter(self)
+        painter.setRenderHints(
+            QPainter.RenderHint.Antialiasing
+            | QPainter.RenderHint.TextAntialiasing
+            | QPainter.RenderHint.SmoothPixmapTransform
+        )
+        card = QPainterPath()
+        radius = self.borderRadius
+        card.addRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), radius, radius)
+        painter.setClipPath(card)
+        paintTaskbar(painter, QRectF(self.taskbarRect()), dark)
+
+        # Win10 的托盘菜单是方角，Win11 保留圆角；底色近似亚克力，透出的桌面画不出来。
+        cornerRadius = 0 if _isWindows10() else 8
+        menus = [(self.menuParts.menu, layout["menu"])]
+        if self._submenu() is not None:
+            menus.append((self._submenu(), layout["submenu"]))
+        for menu, rect in menus:
+            paintSilhouetteShadow(painter, QRectF(rect), cornerRadius, 24, 0.22)
+            path = QPainterPath()
+            path.addRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5), cornerRadius, cornerRadius)
+            painter.fillPath(path, QColor(44, 44, 44) if dark else QColor(249, 249, 249))
+            painter.drawPixmap(rect.topLeft(), self._menuPixmap(menu))
+
+        self._paintTooltip(painter, layout, dark)
+
+    def _paintTooltip(self, painter: QPainter, layout: dict, dark: bool) -> None:
+        rect = QRectF(layout["tooltip"])
+        if rect.width() <= 0:
+            return
+        path = QPainterPath()
+        path.addRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), 4, 4)
+        painter.fillPath(path, QColor(43, 43, 43) if dark else QColor(249, 249, 249))
+        painter.setPen(QPen(_strokeColor(dark), 1))
+        painter.drawPath(path)
+        painter.setFont(layout["font"])
+        painter.setPen(_textColor(dark))
+        text = QFontMetricsF(layout["font"]).elidedText(
+            self.tooltipText(), Qt.TextElideMode.ElideRight, rect.width() - 16
+        )
+        painter.drawText(
+            rect.adjusted(8, 0, -8, 0),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            text,
+        )

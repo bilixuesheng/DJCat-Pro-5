@@ -1,4 +1,5 @@
 import sys
+from typing import NamedTuple
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QIcon, QPainter
@@ -160,6 +161,65 @@ class AcrylicMenu(RoundMenu):
             return
         super()._onItemClicked(item)
 
+def _refreshTaskAction(action, enabled, label, icon):
+    action.setText(("关闭" if enabled else "开启") + label)
+    action.setIcon(FIF.PAUSE if enabled else icon)
+
+
+class TrayMenuParts(NamedTuple):
+    menu: AcrylicMenu
+    showAction: Action
+    taskActions: dict
+    cardActions: list
+    quitAction: Action
+
+
+def buildTrayMenu(homeCards, homeIcon, parent=None) -> TrayMenuParts:
+    """The Tray Menu as the current settings shape it, without any wiring.
+
+    The tray connects the actions; the Setting Preview only draws the menu, so
+    both always show the same rows, icons and texts.
+    """
+    menu = AcrylicMenu(parent=parent)
+    showAction = Action(homeIcon, "主页", menu)
+    menu.addAction(showAction)
+
+    taskActions = {}
+    for name, showItem, enabledItem, label, icon in TRAY_TASK_ACTIONS:
+        if not showItem.value:
+            taskActions[name] = None
+            continue
+        action = Action(icon, "", menu)
+        _refreshTaskAction(action, enabledItem.value, label, icon)
+        menu.addAction(action)
+        taskActions[name] = action
+
+    selected = {
+        key
+        for key in cfg.trayHomeCardKeys.value
+        if isinstance(key, str)
+    } if isinstance(cfg.trayHomeCardKeys.value, list) else set()
+    cards = [entry for entry in homeCards if entry["key"] in selected]
+    cardActions = []
+    if cards:
+        menu.addSeparator()
+        owner = menu
+        if cfg.trayHomeCardsInSubmenu.value:
+            owner = AcrylicMenu("主页卡片", menu)
+            owner.setIcon(FIF.HOME)
+        for entry in cards:
+            action = Action(entry["icon"], entry["title"], owner)
+            owner.addAction(action)
+            cardActions.append((entry["key"], action))
+        if owner is not menu:
+            menu.addMenu(owner)
+
+    menu.addSeparator()
+    quitAction = Action(FIF.CLOSE, "退出程序", menu)
+    menu.addAction(quitAction)
+    return TrayMenuParts(menu, showAction, taskActions, cardActions, quitAction)
+
+
 class SystemTrayIcon(QSystemTrayIcon):
     showRequested = Signal()
     homeCardTriggered = Signal(str)
@@ -213,74 +273,35 @@ class SystemTrayIcon(QSystemTrayIcon):
 
     def _rebuildMenu(self, _value=None) -> None:
         oldMenu = getattr(self, "menu", None)
-        menu = AcrylicMenu(parent=self.parent())
+        parts = buildTrayMenu(self._homeCards, self._homeIcon, self.parent())
 
-        self.showAction = Action(
-            self._homeIcon,
-            "主页",
-            menu,
-        )
+        self.showAction = parts.showAction
         self.showAction.triggered.connect(self.showRequested)
-        menu.addAction(self.showAction)
-
-        for name, showItem, enabledItem, label, icon in TRAY_TASK_ACTIONS:
-            if not showItem.value:
-                setattr(self, name, None)
-                continue
-            action = Action(icon, "", menu)
-            action.triggered.connect(
-                lambda _checked=False, item=enabledItem: self._toggleTasks(item)
-            )
-            menu.addAction(action)
+        for name, _showItem, enabledItem, _label, _icon in TRAY_TASK_ACTIONS:
+            action = parts.taskActions[name]
             setattr(self, name, action)
-            self._refreshTaskAction(action, enabledItem.value, label, icon)
-
-        selected = {
-            key
-            for key in cfg.trayHomeCardKeys.value
-            if isinstance(key, str)
-        } if isinstance(cfg.trayHomeCardKeys.value, list) else set()
-        cards = [entry for entry in self._homeCards if entry["key"] in selected]
-        if cards:
-            menu.addSeparator()
-            if cfg.trayHomeCardsInSubmenu.value:
-                submenu = AcrylicMenu("主页卡片", menu)
-                submenu.setIcon(FIF.HOME)
-                for entry in cards:
-                    submenu.addAction(self._cardAction(entry, submenu))
-                menu.addMenu(submenu)
-            else:
-                for entry in cards:
-                    menu.addAction(self._cardAction(entry, menu))
-
-        menu.addSeparator()
-        self.quitAction = Action(FIF.CLOSE, "退出程序", menu)
+            if action is not None:
+                action.triggered.connect(
+                    lambda _checked=False, item=enabledItem: self._toggleTasks(item)
+                )
+        for key, action in parts.cardActions:
+            action.triggered.connect(
+                lambda _checked=False, cardKey=key: self.homeCardTriggered.emit(cardKey)
+            )
+        self.quitAction = parts.quitAction
         self.quitAction.triggered.connect(self.quitRequested)
-        menu.addAction(self.quitAction)
 
-        self.menu = menu
-        self.setContextMenu(menu)
+        self.menu = parts.menu
+        self.setContextMenu(self.menu)
         if oldMenu is not None:
             oldMenu.close()
             oldMenu.deleteLater()
-
-    def _cardAction(self, entry, parent):
-        action = Action(entry["icon"], entry["title"], parent)
-        action.triggered.connect(
-            lambda _checked=False, key=entry["key"]: self.homeCardTriggered.emit(key)
-        )
-        return action
 
     def _refreshTaskActions(self, _value=None):
         for name, _showItem, enabledItem, label, icon in TRAY_TASK_ACTIONS:
             action = getattr(self, name, None)
             if action is not None:
-                self._refreshTaskAction(action, enabledItem.value, label, icon)
-
-    @staticmethod
-    def _refreshTaskAction(action, enabled, label, icon):
-        action.setText(("关闭" if enabled else "开启") + label)
-        action.setIcon(FIF.PAUSE if enabled else icon)
+                _refreshTaskAction(action, enabledItem.value, label, icon)
 
     @staticmethod
     def _toggleTasks(configItem):

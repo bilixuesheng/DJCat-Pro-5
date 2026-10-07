@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize
 from PySide6.QtWidgets import QApplication, QWidget
+from qfluentwidgets import FluentIcon as FIF, RoundMenu
 
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
@@ -10,8 +11,10 @@ from app.view.components.setting_preview import (
     MAIN_WINDOW_PREVIEW_HEIGHT,
     MainWindowPreview,
     MainWindowReplica,
+    TrayPreview,
 )
 from app.view.pages.setting_page import SettingPage
+from app.view.shell.tray import SystemTrayIcon
 from app.view.windows.main_window import MainWindow
 from tests.support import isolateCfg
 
@@ -171,3 +174,87 @@ class MainWindowPreviewTest(TestCase):
         self.app.processEvents()
 
         self.assertAlmostEqual(self._aspect(), 700 / 400, delta=0.02)
+
+
+class TrayPreviewTest(TestCase):
+    ENTRIES = [
+        {"key": "custom:one", "source": "custom", "title": "自定义入口", "icon": FIF.APPLICATION},
+        {"key": "custom:two", "source": "custom", "title": "第二项", "icon": FIF.LINK},
+    ]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance()
+
+    def setUp(self):
+        isolateCfg(self)
+        cfg.set(cfg.trayHomeCardKeys, ["custom:one", "custom:two"])
+        cfg.set(cfg.trayHomeCardsInSubmenu, False)
+        self.preview = TrayPreview()
+        self.addCleanup(self.preview.deleteLater)
+        self.preview.setHomeCards(self.ENTRIES)
+        self.preview.resize(700, self.preview.height())
+        self.preview.show()
+        self.app.processEvents()
+
+    def _texts(self, menu):
+        return [action.text() for action in menu.actions()]
+
+    def testTheMenuHasTheTraysOwnRows(self):
+        parent = QWidget()
+        self.addCleanup(parent.deleteLater)
+        tray = SystemTrayIcon(parent)
+        tray.setHomeCards(self.ENTRIES)
+
+        self.assertEqual(self._texts(self.preview.menuParts.menu), self._texts(tray.menu))
+
+        cfg.set(cfg.showBroadcastTrayAction, False)
+        cfg.set(cfg.homeCardTasksEnabled, False)
+        self.app.processEvents()
+
+        self.assertEqual(self._texts(self.preview.menuParts.menu), self._texts(tray.menu))
+        self.assertIn("开启自动任务", self._texts(self.preview.menuParts.menu))
+
+    def testTheMenuStandsOnTheTaskbarAgainstTheRightEdge(self):
+        menu = self.preview.menuRect()
+        taskbar = self.preview.taskbarRect()
+
+        self.assertEqual(menu.size(), self.preview.menuParts.menu.view.size())
+        self.assertEqual(menu.bottom() + 1, taskbar.top())
+        # AcrylicMenu.adjustPosition 按 rect.right() - (宽 + 5) 放左边，
+        # QRect.right() 两头各少 1 px，菜单右缘离屏幕边 6 px。
+        self.assertEqual(self.preview.width() - 1 - menu.right(), 6)
+        self.assertEqual(
+            self.preview.height(),
+            TrayPreview.TOP_MARGIN + menu.height() + taskbar.height(),
+        )
+
+    def testTheSubmenuOpensWhereTheRealOneWould(self):
+        cfg.set(cfg.trayHomeCardsInSubmenu, True)
+        self.app.processEvents()
+        menu, submenu = self.preview.menuRect(), self.preview.submenuRect()
+
+        submenus = self.preview.menuParts.menu.findChildren(RoundMenu)
+        self.assertEqual([menu.title() for menu in submenus], ["主页卡片"])
+        self.assertEqual(self._texts(submenus[0]), ["自定义入口", "第二项"])
+        # 菜单贴着屏幕右边，右侧放不下，二级菜单开在左边，与条目相隔 5 px。
+        self.assertEqual(menu.left() - 5 - submenu.width(), submenu.left())
+        self.assertLessEqual(submenu.bottom() + 1, self.preview.taskbarRect().top())
+
+    def testTheTooltipShowsTheConfiguredTextOrTheApplicationName(self):
+        self.assertEqual(self.preview.tooltipText(), APP_NAME)
+
+        cfg.set(cfg.trayTooltip, "  值班托盘 ")
+
+        self.assertEqual(self.preview.tooltipText(), "值班托盘")
+        tooltip = self.preview.tooltipRect()
+        self.assertLess(tooltip.right(), self.preview.menuRect().left())
+        self.assertLess(tooltip.bottom(), self.preview.taskbarRect().top())
+
+    def testMoreShortcutsMakeTheMenuAndThePreviewTaller(self):
+        height = self.preview.height()
+
+        cfg.set(cfg.trayHomeCardKeys, ["custom:one"])
+        self.app.processEvents()
+
+        self.assertEqual(self.preview.height(), height - 28)
