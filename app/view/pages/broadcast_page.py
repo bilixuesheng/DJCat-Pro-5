@@ -1193,12 +1193,17 @@ class AIMarkdownDialog(MessageBoxBase):
 class BroadcastEditPage(QWidget):
     backSignal = Signal()
     editSignal = Signal()
+    quotaReceived = Signal(int, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._inlineAIRequest = None
         self._inlineAISnapshot = None
         self._inlineAIPendingChunks = []
+        # 剩余额度未知（还没查、查不到）时为 None，照常整理，交给服务端判断。
+        self._quotaRemaining = None
+        self._quotaCost = 1
+        self._quotaRequestRunning = False
         self.vBoxLayout = QVBoxLayout(self)
         self.vBoxLayout.setContentsMargins(30, 30, 30, 30)
 
@@ -1272,6 +1277,11 @@ class BroadcastEditPage(QWidget):
         self._inlineAIFlushTimer.setSingleShot(True)
         self._inlineAIFlushTimer.setInterval(50)
         self._inlineAIFlushTimer.timeout.connect(self._flushInlineAIChunks)
+        # 跟上 0 点刷新、双倍时段起止和管理员改额度；只在可见且处于整理模式时运行。
+        self._quotaTimer = QTimer(self)
+        self._quotaTimer.setInterval(30_000)
+        self._quotaTimer.timeout.connect(self._refreshQuota)
+        self.quotaReceived.connect(self._onQuotaReceived)
         self._updateMarkdownUi()
 
         self.broadcastWin = BroadcastWindow()
@@ -1307,8 +1317,66 @@ class BroadcastEditPage(QWidget):
         self.organizeCheckBox.setVisible(markdownEnabled)
         self.aiBtn.setEnabled(markdownEnabled and self._inlineAIRequest is None)
         if self._inlineAIRequest is None:
-            organize = markdownEnabled and self.organizeCheckBox.isChecked()
-            self.broadcastBtn.setText("整理并投送" if organize else "投送")
+            if not self._organizeMode():
+                text = "投送"
+            elif self._quotaInsufficient():
+                text = "投送（额度不足）"
+            else:
+                text = "整理并投送"
+            self.broadcastBtn.setText(text)
+        self._syncQuotaTimer()
+
+    def _organizeMode(self):
+        return self.markdownCheckBox.isChecked() and self.organizeCheckBox.isChecked()
+
+    def _quotaInsufficient(self):
+        return (
+            self._quotaRemaining is not None
+            and self._quotaRemaining < self._quotaCost
+        )
+
+    def _syncQuotaTimer(self):
+        if self.isVisible() and self._organizeMode():
+            if not self._quotaTimer.isActive():
+                self._quotaTimer.start()
+                self._refreshQuota()
+        else:
+            self._quotaTimer.stop()
+
+    def _refreshQuota(self):
+        if (
+            self._quotaRequestRunning
+            or self._inlineAIRequest is not None
+            or not (self.isVisible() and self._organizeMode())
+        ):
+            return
+        self._quotaRequestRunning = True
+        threading.Thread(target=self._fetchQuota, daemon=True).start()
+
+    def _fetchQuota(self):
+        try:
+            quota = fetchQuota()
+            try:
+                self.quotaReceived.emit(*((quota[0], quota[2]) if quota else (-1, 1)))
+            except RuntimeError:
+                # 页面可能在请求途中随退出一起销毁。
+                pass
+        finally:
+            self._quotaRequestRunning = False
+
+    def _onQuotaReceived(self, remaining, cost):
+        # 整理进行中由它的回应带回剩余点数，比途中查到的更新。
+        if self._inlineAIRequest is None:
+            self._setQuota(remaining, cost)
+
+    def _setQuota(self, remaining, cost):
+        self._quotaRemaining = remaining if remaining >= 0 else None
+        self._quotaCost = cost
+        self._updateMarkdownUi()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._syncQuotaTimer()
 
     def _showAIMarkdownDialog(self):
         dialog = AIMarkdownDialog(
@@ -1320,6 +1388,7 @@ class BroadcastEditPage(QWidget):
                 self.contentInput.setPlainText(dialog.resultText())
         finally:
             dialog.deleteLater()
+            self._refreshQuota()
 
     def _showTemplateMenu(self):
         menu = RoundMenu(parent=self)
@@ -1395,8 +1464,8 @@ class BroadcastEditPage(QWidget):
             return
 
         if (
-            self.markdownCheckBox.isChecked()
-            and self.organizeCheckBox.isChecked()
+            self._organizeMode()
+            and not self._quotaInsufficient()
             and self.contentInput.toPlainText().strip()
         ):
             self._startInlineAI()
@@ -1487,6 +1556,7 @@ class BroadcastEditPage(QWidget):
     def _onInlineAIFinished(self, request, remaining, limit, cost):
         if request is not self._inlineAIRequest:
             return
+        self._setQuota(remaining, cost)
         result = request.resultText()
         if not result.strip():
             self._onInlineAIFailed(
@@ -1506,6 +1576,7 @@ class BroadcastEditPage(QWidget):
     def _onInlineAIFailed(self, request, message, remaining, limit, cost):
         if request is not self._inlineAIRequest:
             return
+        self._setQuota(remaining, cost)
         snapshot = self._inlineAISnapshot
         self._finishInlineAI()
         self.contentInput.setPlainText(snapshot["content"])
@@ -1548,6 +1619,7 @@ class BroadcastEditPage(QWidget):
 
     def shutdown(self):
         self._saveTitle()
+        self._quotaTimer.stop()
         request = self._inlineAIRequest
         if request is None:
             return
@@ -1598,3 +1670,4 @@ class BroadcastEditPage(QWidget):
     def hideEvent(self, event):
         self._saveTitle()
         super().hideEvent(event)
+        self._syncQuotaTimer()

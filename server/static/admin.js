@@ -410,8 +410,7 @@
 
     document.querySelectorAll("[data-toast]").forEach(prepareToast);
 
-    const setButtonLoading = (form, loading) => {
-        const button = form.querySelector("button[type=submit]");
+    const setButtonLoading = (form, loading, button = form.querySelector("button[type=submit]")) => {
         if (!button) return;
         if (loading) {
             button.dataset.originalLabel = button.textContent.trim();
@@ -434,14 +433,15 @@
         button.classList.remove("is-loading");
     };
 
+    // 每台机器的上限不同（有专属额度的按专属额度），重置后剩余回到各自的上限。
     const updateQuotaLabels = (form) => {
-        const table = form.closest(".machine-section")?.querySelector("table[data-daily-limit]");
-        if (!table) return;
-        const limit = table.dataset.dailyLimit;
+        const section = form.closest(".machine-section");
+        if (!section) return;
         const labels = form.dataset.resetKind === "all"
-            ? table.querySelectorAll("[data-quota-label]")
+            ? section.querySelectorAll("[data-quota-label]")
             : form.closest("tr")?.querySelectorAll("[data-quota-label]");
         labels?.forEach((label) => {
+            const limit = label.dataset.limit;
             label.textContent = `${limit} / ${limit}`;
             const meter = label.previousElementSibling;
             if (meter?.tagName === "METER") meter.value = limit;
@@ -489,15 +489,20 @@
         throw new Error("新版本没有按时启动，请到宝塔面板查看 Python 项目日志");
     };
 
-    const submitAsync = async (form) => {
-        if (form.dataset.submitting === "true") return;
+    // 有多个提交按钮的表单（如专属额度的「保存」和「恢复默认」）要带上按下的那个。
+    const submitAsync = async (form, submitter = null) => {
+        if (form.dataset.submitting === "true") return false;
         form.dataset.submitting = "true";
-        setButtonLoading(form, true);
+        // 先取表单数据再进入加载态：禁用后的按钮不会被 FormData 收进去。
+        const body = new FormData(form, submitter);
+        const button = submitter || form.querySelector("button[type=submit]");
+        setButtonLoading(form, true, button);
         let navigating = false;
+        let succeeded = false;
         try {
             const response = await fetch(form.action, {
                 method: (form.method || "POST").toUpperCase(),
-                body: new FormData(form),
+                body,
                 credentials: "same-origin",
                 headers: {
                     Accept: "application/json",
@@ -522,6 +527,7 @@
             }
             if (form.dataset.resetKind) updateQuotaLabels(form);
             applyPayload(payload);
+            succeeded = true;
             showToast(payload?.message || "操作已完成", payload?.category || "success");
             if (form.dataset.removeOnSuccess) {
                 const target = form.closest(form.dataset.removeOnSuccess);
@@ -549,9 +555,10 @@
         } finally {
             if (!navigating) {
                 delete form.dataset.submitting;
-                setButtonLoading(form, false);
+                setButtonLoading(form, false, button);
             }
         }
+        return succeeded;
     };
 
     let activeConfirm = null;
@@ -608,6 +615,47 @@
         document.addEventListener("keydown", onKeyDown);
         cancelButton.focus();
     };
+
+    // 专属额度弹窗只有一个，打开时填入被点那一行的机器。保存后服务端换掉那一行，
+    // 原来的按钮随之销毁，所以焦点交还给新行里的同一个按钮。
+    const quotaDialog = document.querySelector("[data-quota-dialog]");
+    if (quotaDialog) {
+        const form = quotaDialog.querySelector("form");
+        const input = form.elements.daily_limit;
+        const restoreButton = form.querySelector("[data-quota-restore]");
+        let machineCode = "";
+        const editButton = () => document.querySelector(
+            `[data-replace="machine-${CSS.escape(machineCode)}"] [data-quota-edit]`,
+        );
+        const close = () => {
+            if (quotaDialog.hidden) return;
+            quotaDialog.hidden = true;
+            editButton()?.focus();
+        };
+        document.addEventListener("click", (event) => {
+            const button = event.target.closest("[data-quota-edit]");
+            if (!button) return;
+            machineCode = button.dataset.machineCode;
+            form.action = button.dataset.quotaAction;
+            quotaDialog.querySelector("[data-quota-machine]").textContent = machineCode;
+            input.value = button.dataset.quotaOverride;
+            restoreButton.hidden = button.dataset.quotaOverride === "";
+            quotaDialog.hidden = false;
+            input.focus();
+            input.select();
+        });
+        quotaDialog.querySelector("[data-quota-cancel]").addEventListener("click", close);
+        quotaDialog.addEventListener("click", (event) => {
+            if (event.target === quotaDialog) close();
+        });
+        document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") close();
+        });
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            if (await submitAsync(form, event.submitter)) close();
+        });
+    }
 
     // 委托到 document：服务端换进来的新行里的表单同样生效。
     document.addEventListener("click", (event) => {

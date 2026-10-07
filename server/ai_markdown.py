@@ -29,7 +29,7 @@ from flask import (
 )
 from werkzeug.security import check_password_hash
 
-DAILY_LIMIT = 15
+DEFAULT_DAILY_QUOTA = 15
 MAX_CONTENT_LENGTH = 24_000
 MAX_CUSTOM_STYLE_LENGTH = 4_000
 MAX_SYSTEM_PROMPT_LENGTH = 20_000
@@ -383,6 +383,10 @@ def _connect():
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS quota_overrides (
+            machine_id TEXT PRIMARY KEY,
+            daily_limit INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS request_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             day TEXT NOT NULL,
@@ -459,11 +463,24 @@ def _setting(key, default=None):
     return row["value"] if row else default
 
 
-def _dailyLimit():
+def _defaultDailyQuota():
     try:
-        return max(1, min(10_000, int(_setting("daily_limit", DAILY_LIMIT))))
+        return max(1, min(10_000, int(_setting("daily_limit", DEFAULT_DAILY_QUOTA))))
     except (TypeError, ValueError):
-        return DAILY_LIMIT
+        return DEFAULT_DAILY_QUOTA
+
+
+def _dailyQuota(machineId):
+    """这台机器的 Daily Quota：有 Quota Override 用它，否则用 Default Daily Quota。
+
+    Quota Override 可以是 0（停用），判断时不能拿真值测试。
+    """
+    with closing(_connect()) as database:
+        row = database.execute(
+            "SELECT daily_limit FROM quota_overrides WHERE machine_id = ?",
+            (machineId,),
+        ).fetchone()
+    return _defaultDailyQuota() if row is None else row[0]
 
 
 def _deepseekModel():
@@ -736,7 +753,8 @@ def _rollupOldRequests():
 
 def _remaining(machineId, day=None, limit=None):
     day = day or _today()
-    limit = limit or _dailyLimit()
+    if limit is None:
+        limit = _dailyQuota(machineId)
     with closing(_connect()) as database:
         row = database.execute(
             "SELECT count FROM usage WHERE day = ? AND machine_id = ?",
@@ -814,10 +832,11 @@ def quota():
             return _error("设备尚未注册", 404)
         _recoverStaleRequests()
         peakEnabled = _setting("peak_enabled", "1") == "1"
+        limit = _dailyQuota(machineId)
         return jsonify(
             {
-                "remaining": _remaining(machineId),
-                "limit": _dailyLimit(),
+                "remaining": _remaining(machineId, limit=limit),
+                "limit": limit,
                 "cost": _quotaCost(peakEnabled=peakEnabled),
                 "peak_enabled": peakEnabled,
                 "machine_code": machineCode,
@@ -866,7 +885,7 @@ def convert():
     day = _today()
     try:
         _registerMachine(machineId)
-        limit = _dailyLimit()
+        limit = _dailyQuota(machineId)
         cost = _quotaCost()
         model = _deepseekModel()
         systemPrompt = _systemPrompt(customStyle)
@@ -879,11 +898,12 @@ def convert():
     if remaining < 0:
         remaining = _remaining(machineId, day, limit)
         _recordFailedRequest(machineId, 0, day)
-        message = (
-            "当前为双倍时段，剩余额度不足，请在非双倍时段再试。"
-            if remaining
-            else "今天的转换额度已用完，请明天再试。"
-        )
+        if not limit:
+            message = "这台电脑的 AI 整理已被管理员停用。"
+        elif remaining:
+            message = "当前为双倍时段，剩余额度不足，请在非双倍时段再试。"
+        else:
+            message = "今天的转换额度已用完，请明天再试。"
         response = _error(message, 429)
         response.headers["X-RateLimit-Limit"] = str(limit)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
@@ -1190,43 +1210,50 @@ def _dashboardStats():
     }
 
 
-def _machineRows(search="", sort="registered"):
+def _machineRows(search="", sort="registered", machineId=None):
     day = _today()
-    limit = _dailyLimit()
+    defaultQuota = _defaultDailyQuota()
     _rollupOldRequests()
     with closing(_connect()) as database:
         rows = database.execute(
-            """
+            f"""
             SELECT
                 m.id,
                 m.machine_id,
                 m.registered_at,
                 m.last_seen_at,
                 COALESCE(u.count, 0) AS used,
+                o.daily_limit AS override,
                 COALESCE(t.requests, 0) + COALESCE(r.requests, 0) AS requests
             FROM machines m
             LEFT JOIN usage u ON u.machine_id = m.machine_id AND u.day = ?
+            LEFT JOIN quota_overrides o ON o.machine_id = m.machine_id
             LEFT JOIN machine_request_totals t ON t.machine_id = m.machine_id
             LEFT JOIN (
                 SELECT machine_id, COUNT(*) AS requests
                 FROM request_log GROUP BY machine_id
             ) r ON r.machine_id = m.machine_id
+            {"WHERE m.machine_id = ?" if machineId else ""}
             """,
-            (day,),
+            (day, machineId) if machineId else (day,),
         ).fetchall()
 
-    machines = [
-        {
-            "code": f"DJ-{row['id']:06d}",
-            "fingerprint": row["machine_id"],
-            "registered_at": row["registered_at"],
-            "last_seen_at": row["last_seen_at"],
-            "used": row["used"],
-            "remaining": max(0, limit - row["used"]),
-            "requests": row["requests"],
-        }
-        for row in rows
-    ]
+    machines = []
+    for row in rows:
+        limit = defaultQuota if row["override"] is None else row["override"]
+        machines.append(
+            {
+                "code": f"DJ-{row['id']:06d}",
+                "fingerprint": row["machine_id"],
+                "registered_at": row["registered_at"],
+                "last_seen_at": row["last_seen_at"],
+                "used": row["used"],
+                "limit": limit,
+                "override": row["override"],
+                "remaining": max(0, limit - row["used"]),
+                "requests": row["requests"],
+            }
+        )
     search = search.strip().lower()
     if search:
         machines = [
@@ -1246,30 +1273,60 @@ def _machineRows(search="", sort="registered"):
     return machines
 
 
-def _resetMachine(alias):
+def _machineIdForCode(database, alias):
     match = re.fullmatch(r"DJ-(\d{6,})", alias)
     if not match:
-        return False
+        return None
+    row = database.execute(
+        "SELECT machine_id FROM machines WHERE id = ?", (int(match.group(1)),)
+    ).fetchone()
+    return row["machine_id"] if row else None
+
+
+def _resetMachine(alias):
     with closing(_connect()) as database:
         database.execute("BEGIN IMMEDIATE")
-        row = database.execute(
-            "SELECT machine_id FROM machines WHERE id = ?", (int(match.group(1)),)
-        ).fetchone()
-        if not row:
+        machineId = _machineIdForCode(database, alias)
+        if machineId is None:
             database.rollback()
             return False
         day = _today()
         database.execute(
             "UPDATE request_log SET status = 'reset' "
             "WHERE day = ? AND machine_id = ? AND status = 'processing'",
-            (day, row["machine_id"]),
+            (day, machineId),
         )
         database.execute(
             "DELETE FROM usage WHERE day = ? AND machine_id = ?",
-            (day, row["machine_id"]),
+            (day, machineId),
         )
         database.commit()
     return True
+
+
+def _setQuotaOverride(alias, override):
+    """Set a machine's Quota Override, or remove it when ``override`` is None.
+
+    Returns the machine's fingerprint, or None when the Machine Code is unknown.
+    """
+    with closing(_connect()) as database:
+        database.execute("BEGIN IMMEDIATE")
+        machineId = _machineIdForCode(database, alias)
+        if machineId is None:
+            database.rollback()
+            return None
+        if override is None:
+            database.execute(
+                "DELETE FROM quota_overrides WHERE machine_id = ?", (machineId,)
+            )
+        else:
+            database.execute(
+                "INSERT INTO quota_overrides(machine_id, daily_limit) VALUES (?, ?) "
+                "ON CONFLICT(machine_id) DO UPDATE SET daily_limit = excluded.daily_limit",
+                (machineId, override),
+            )
+        database.commit()
+    return machineId
 
 
 @app.after_request
@@ -1331,7 +1388,7 @@ def adminDashboard():
         csrf_token=_csrfToken(),
         current_page="home",
         stats=_dashboardStats(),
-        daily_limit=_dailyLimit(),
+        daily_limit=_defaultDailyQuota(),
         peak_enabled=_setting("peak_enabled", "1") == "1",
         model=_deepseekModel(),
         ai_configured=bool(
@@ -1355,7 +1412,7 @@ def adminAIMarkdown():
         csrf_token=_csrfToken(),
         current_page="ai_overview",
         stats=_dashboardStats(),
-        daily_limit=_dailyLimit(),
+        daily_limit=_defaultDailyQuota(),
         peak_enabled=peakEnabled,
         quota_cost=_quotaCost(peakEnabled=peakEnabled),
         model=_deepseekModel(),
@@ -1367,7 +1424,7 @@ def adminAIMarkdown():
 
 def _renderAdminSettings(submitted=None):
     values = submitted or {
-        "daily_limit": _dailyLimit(),
+        "daily_limit": _defaultDailyQuota(),
         "peak_enabled": _setting("peak_enabled", "1") == "1",
         "holiday_exempt": _setting("holiday_exempt", "0") == "1",
         "model": _deepseekModel(),
@@ -1405,7 +1462,7 @@ def adminSettings():
     model = submitted["model"].strip()
     if not 1 <= dailyLimit <= 10_000:
         return _adminResponse(
-            "每日额度必须在 1 到 10000 之间",
+            "默认额度必须在 1 到 10000 之间",
             "error",
             "adminSettings",
             400,
@@ -1970,7 +2027,7 @@ def adminMachines():
         machines=_machineRows(search, sort),
         search=search,
         sort=sort,
-        daily_limit=_dailyLimit(),
+        default_quota=_defaultDailyQuota(),
     )
 
 
@@ -1984,6 +2041,43 @@ def adminResetMachine(alias):
         "success" if reset else "error",
         "adminMachines",
         200 if reset else 404,
+    )
+
+
+@app.post("/admin/ai/markdown/machines/<alias>/quota")
+@_loginRequired
+def adminMachineQuota(alias):
+    _checkCsrf()
+    override = None
+    if request.form.get("restore") != "1":
+        try:
+            override = int(request.form.get("daily_limit", ""))
+        except ValueError:
+            override = -1
+        if not 0 <= override <= 10_000:
+            return _adminResponse(
+                "专属额度必须在 0 到 10000 之间", "error", "adminMachines", 400
+            )
+    machineId = _setQuotaOverride(alias, override)
+    if machineId is None:
+        return _adminResponse("未找到该机器", "error", "adminMachines", 404)
+
+    machine = _machineRows(machineId=machineId)[0]
+    code = machine["code"]
+    if override is None:
+        message = f"{code} 已恢复默认额度"
+    elif override == 0:
+        message = f"已停用 {code} 的 AI 整理"
+    else:
+        message = f"{code} 的专属额度已设为每天 {override} 点"
+    row = render_template(
+        "_ai_machine_row.html", csrf_token=_csrfToken(), machine=machine
+    )
+    return _adminResponse(
+        message,
+        "success",
+        "adminMachines",
+        data={"replace": {f"machine-{code}": row}},
     )
 
 

@@ -853,7 +853,7 @@ class AIMarkdownTest(unittest.TestCase):
         ):
             machineId = ai_markdown._machineId("a" * 64)
             day = ai_markdown._today()
-            limit = ai_markdown._dailyLimit()
+            limit = ai_markdown._defaultDailyQuota()
             claims = [
                 ai_markdown._claimRequest(machineId, 2, day, limit) for _ in range(7)
             ]

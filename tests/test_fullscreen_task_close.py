@@ -1,4 +1,5 @@
 import json
+import time
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
@@ -97,6 +98,96 @@ class FullscreenTaskCloseTest(TestCase):
         startBroadcast.assert_called_once_with(
             "作业", "**数学**\n- 97页", True
         )
+
+    def testInsufficientQuotaBroadcastsTheOriginalWithoutForgettingOrganize(self):
+        cfg.set(cfg.broadcastMarkdownEnabled, True)
+        cfg.set(cfg.organizeMarkdownBeforeBroadcast, True)
+        page = BroadcastEditPage()
+        self.addCleanup(page.close)
+        page.titleInput.setText("作业")
+        page.contentInput.setPlainText("数学97页")
+
+        for remaining, cost, text in (
+            (-1, 1, "整理并投送"),  # 查不到：照常整理，交给服务端判断
+            (1, 1, "整理并投送"),
+            (1, 2, "投送（额度不足）"),  # 双倍时段只剩 1 点
+            (0, 1, "投送（额度不足）"),
+        ):
+            with self.subTest(remaining=remaining, cost=cost):
+                page._setQuota(remaining, cost)
+                self.assertEqual(page.broadcastBtn.text(), text)
+
+        with (
+            patch.object(page, "_startInlineAI") as startInlineAI,
+            patch.object(page, "_startBroadcast") as startBroadcast,
+        ):
+            page._onBroadcast()
+
+        startInlineAI.assert_not_called()
+        startBroadcast.assert_called_once_with("作业", "数学97页", True)
+        self.assertTrue(page.organizeCheckBox.isChecked())
+        self.assertTrue(cfg.organizeMarkdownBeforeBroadcast.value)
+
+        page.organizeCheckBox.setChecked(False)
+        self.assertEqual(page.broadcastBtn.text(), "投送")
+        page.organizeCheckBox.setChecked(True)
+        self.assertEqual(page.broadcastBtn.text(), "投送（额度不足）")
+        page._setQuota(15, 1)
+        self.assertEqual(page.broadcastBtn.text(), "整理并投送")
+
+    def testEditorQueriesQuotaOnlyWhileVisibleInOrganizeMode(self):
+        cfg.set(cfg.broadcastMarkdownEnabled, True)
+        cfg.set(cfg.organizeMarkdownBeforeBroadcast, False)
+        page = BroadcastEditPage()
+        self.addCleanup(page.close)
+
+        with patch(
+            "app.view.pages.broadcast_page.fetchQuota",
+            return_value=(0, 0, 1, True, "DJ-000001"),
+        ) as fetchQuota:
+            page.organizeCheckBox.setChecked(True)
+            self.assertFalse(page._quotaTimer.isActive())
+            fetchQuota.assert_not_called()
+
+            page.show()
+            for _ in range(200):
+                self.app.processEvents()
+                if page.broadcastBtn.text() == "投送（额度不足）":
+                    break
+                time.sleep(0.005)
+            self.assertEqual(page.broadcastBtn.text(), "投送（额度不足）")
+            self.assertTrue(page._quotaTimer.isActive())
+            fetchQuota.assert_called_once_with()
+
+            page.organizeCheckBox.setChecked(False)
+            self.assertFalse(page._quotaTimer.isActive())
+            page.organizeCheckBox.setChecked(True)
+            self.assertTrue(page._quotaTimer.isActive())
+            page.hide()
+            self.assertFalse(page._quotaTimer.isActive())
+
+    def testInlineOrganizationResultUpdatesTheQuota(self):
+        cfg.set(cfg.broadcastMarkdownEnabled, True)
+        cfg.set(cfg.organizeMarkdownBeforeBroadcast, True)
+        page = BroadcastEditPage()
+        self.addCleanup(page.close)
+        page.contentInput.setPlainText("数学97页")
+
+        with patch("app.view.pages.broadcast_page._AIMarkdownRequest.start"):
+            page._onBroadcast()
+        request = page._inlineAIRequest
+        with patch("app.view.pages.broadcast_page.MessageBox.exec"):
+            page._onInlineAIFailed(request, "今天的转换额度已用完，请明天再试。", 0, 15, 1)
+        self.assertEqual(page.broadcastBtn.text(), "投送（额度不足）")
+
+        page._setQuota(-1, 1)
+        with patch("app.view.pages.broadcast_page._AIMarkdownRequest.start"):
+            page._onBroadcast()
+        request = page._inlineAIRequest
+        request._resultChunks.append("**数学**")
+        with patch.object(page, "_startBroadcast"):
+            page._onInlineAIFinished(request, 0, 15, 1)
+        self.assertEqual(page.broadcastBtn.text(), "投送（额度不足）")
 
     def testCancellingInlineOrganizationBroadcastsOriginalSnapshot(self):
         cfg.set(cfg.broadcastMarkdownEnabled, True)
