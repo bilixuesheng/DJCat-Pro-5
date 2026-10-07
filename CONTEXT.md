@@ -33,7 +33,7 @@ DJCat 主窗口和启动页共用的软件图标。默认模式使用原有主 L
 _Avoid_: Tray Icon（只在跟随时才相同）、Home Card 图标、Application Store 中 Application 的图标
 
 **Tray Icon（托盘图标）**:
-系统托盘里代表 DJCat 的图标。默认跟随 Application Icon；也可以单独换成另一张本地图片，这时不影响主窗口和启动页。
+系统托盘里代表 DJCat 的图标，取值只有两种："跟随软件图标"（默认）或"自定义"，自定义时换成另一张本地图片，不影响主窗口和启动页。Tray Menu 的"主页"入口跟着 Tray Icon 变：跟随时和 Application Icon 的规则一样（默认模式显示独立的猫图标，自定义模式显示那张图），Tray Icon 自定义时换成 Tray Icon 那张图。
 _Avoid_: Application Icon、托盘图片
 
 **Tray Menu**:
