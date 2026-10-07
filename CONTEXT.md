@@ -187,8 +187,16 @@ _Avoid_: account、license、raw hardware ID
 _Avoid_: Machine Identity、activation code、license key
 
 **Daily Quota**:
-每个 Machine Identity 每个北京时间自然日可用于 AI Markdown Conversion 的额度点数，于 0 点刷新。失败请求不最终占用额度。默认所有 Machine Identity 相同；管理员可以给单个 Machine Identity 长期指定另一个值（0 表示停用），多给或少给都行，扣点规则不变。指定的值跟着 Machine Identity 走：重装 Windows 后得到的新 Machine Identity 回到默认值。
+每个 Machine Identity 每个北京时间自然日可用于 AI Markdown Conversion 的额度点数，于 0 点刷新。失败请求不最终占用额度。有 Quota Override 时取它，否则取 Default Daily Quota。
 _Avoid_: request count（高峰时一次请求可能消耗两点）、token quota
+
+**Default Daily Quota（默认额度）**:
+管理员设定的、所有没有 Quota Override 的 Machine Identity 共用的 Daily Quota。改它不影响已有 Quota Override 的机器。
+_Avoid_: 单机额度（旧的后台叫法，容易和 Quota Override 混淆）、全局额度
+
+**Quota Override（专属额度）**:
+管理员给单个 Machine Identity 长期指定的 Daily Quota，取值 0–10000，0 表示这台机器停用 AI Markdown Conversion。填多少就是多少，即使和 Default Daily Quota 相等也不跟着它变；只有"恢复默认"才删掉它。修改立即生效，只改上限，不动当天已用的点数；扣点规则（Peak Hours 双倍、节假日豁免）照旧。它跟着 Machine Identity 走：重装 Windows 后得到的新 Machine Identity 没有它。
+_Avoid_: 自定义额度（Custom 指桌面用户自建的东西）、单机额度、额度总量
 
 **Peak Hours**:
 可由管理员启用的双倍额度时段，当前为北京时间 9:00–12:00 和 14:00–18:00。启用时每次转换扣 2 点，其余时段扣 1 点。管理员另开"节假日豁免"时，只有 **Working Day** 的这两个时段才加倍。
