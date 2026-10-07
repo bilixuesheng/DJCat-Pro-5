@@ -232,6 +232,10 @@ _Avoid_: 进度条（那只是卡片底边的一条线）、StateToolTip、Progr
 用户可见的 DJCat 版本号，唯一来源是 `app/common/config.py`。
 _Avoid_: Python Distribution Version、把构建元数据中的 `+` 版本展示给用户
 
+**KB Release**:
+同一 Client Version 正式发布之后的修订发布，在版本号后加 `-kb` 和发布日期（如 `5.2.0-kb261007`）。它排在同号正式版之后、下一个版本号之前，Client Update 照常提示。
+_Avoid_: 补丁版、预发布（kb 不是 pre，排序在正式版之后而不是之前）
+
 **Client Distribution**:
 用户首次获取 DJCat 时下载的发布文件，分为安装程序（`Setup.exe`）和免安装压缩包（`.zip`）两种。它只描述文件形态，与存储模式无关：两种形态全新使用时都默认 Portable Mode。
 _Avoid_: 安装版、便携版（与 Installed Mode、Portable Mode 混淆）；安装包（那是 Application 的 Package）
