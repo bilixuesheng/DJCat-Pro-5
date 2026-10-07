@@ -605,6 +605,7 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
     justify-content: flex-end;
     gap: 10px;
 }
+.confirm-dialog label { margin-bottom: 24px; }
 @keyframes confirm-in {
     from { opacity: 0; transform: scale(0.97) translateY(8px); }
     to   { opacity: 1; transform: scale(1) translateY(0); }
@@ -1398,6 +1399,13 @@ td code {
     border-radius: 99px;
     background: var(--clay);
 }
+.quota-chip {
+    margin-left: 8px;
+    vertical-align: middle;
+}
+/* 窄屏时时间戳在日期和时间之间换行，给机器表的操作列让出宽度。 */
+td.cell-time { white-space: normal; }
+td.cell-time span { white-space: nowrap; }
 
 .table-action {
     min-height: 36px;

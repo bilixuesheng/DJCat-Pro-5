@@ -234,3 +234,55 @@ def testAddingALogAsAnExampleReturnsToTheLogList(admin):
     admin.wait_for_url("**/admin/ai/markdown/logs/")
     _toast(admin, "示例已加入提示词")
     assert ai_markdown._getConversionLog(logId)["status"] == "approved"
+
+
+def testQuotaDialogSetsAndRestoresTheOverrideInPlace(admin):
+    client = ai_markdown.app.test_client()
+    for machine in ("a", "b"):
+        client.post("/ai/markdown/register", json={"machine_id": machine * 64})
+    machineId = ai_markdown._machineId("a" * 64)
+    ai_markdown._claimRequest(machineId, 3, ai_markdown._today(), 15)
+    _open(admin, "/admin/ai/markdown/machines/")
+    admin.evaluate("() => { window.__samePage = true; }")
+    row = admin.locator("[data-replace='machine-DJ-000001']")
+    dialog = admin.locator("[data-quota-dialog]")
+    field = dialog.locator("input[name=daily_limit]")
+
+    row.locator("button", has_text="设置额度").click()
+    assert dialog.is_visible()
+    assert dialog.locator("[data-quota-machine]").inner_text() == "DJ-000001"
+    assert dialog.locator("[data-quota-restore]").is_hidden()
+    dialog.locator("button", has_text="保存").click()
+    assert dialog.is_visible()  # 空着不能保存
+    field.fill("40")
+    dialog.locator("button", has_text="保存").click()
+    _toast(admin, "专属额度已设为每天 40 点")
+
+    assert dialog.is_hidden()
+    assert "37 / 40" in row.inner_text()
+    assert "专属" in row.inner_text()
+    assert ai_markdown._dailyQuota(machineId) == 40
+    # 原按钮随整行换掉，焦点交给新行里的同一个按钮。
+    assert admin.evaluate("() => document.activeElement.dataset.machineCode") == "DJ-000001"
+
+    # 重置今日额度按这一行自己的上限回满，别的行按默认额度。
+    row.locator("button", has_text="重置额度").click()
+    _confirm(admin)
+    _toast(admin, "机器额度已重置")
+    assert "40 / 40" in row.inner_text()
+    admin.locator("button", has_text="重置全部今日额度").click()
+    _confirm(admin)
+    _toast(admin, "所有机器今日额度已重置")
+    assert "15 / 15" in admin.locator("[data-replace='machine-DJ-000002']").inner_text()
+    assert "40 / 40" in row.inner_text()
+
+    row.locator("button", has_text="设置额度").click()
+    assert field.input_value() == "40"
+    field.fill("")
+    dialog.locator("button", has_text="恢复默认").click()
+    _toast(admin, "已恢复默认额度")
+
+    assert "15 / 15" in row.inner_text()
+    assert "专属" not in row.inner_text()
+    assert ai_markdown._dailyQuota(machineId) == 15
+    assert admin.evaluate("() => window.__samePage") is True

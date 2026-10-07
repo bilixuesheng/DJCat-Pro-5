@@ -21,7 +21,8 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 - Broadcast Task、Home Card Task 与 Shutdown Task 持久化在 `cfg`；对应设置页只编辑规则，MainWindow 负责按时间匹配或分发 Application Lifecycle Event。
 - Existing-card 模式的 **Home Card Task** 只保存稳定 Home Card key、用于失效提示的标题快照和打开／关闭动作；关闭只适用于 Default Home Card。Custom 模式直接拥有 Action Sequence，但不会创建 Custom Home Card。
 - AI Markdown Conversion 使用 Machine Identity 领取和结算 Daily Quota；Machine Code 只是定位该身份的可见别名。
-- Projection 编辑器中的"整理并投送"只在 Markdown 模式显示并独立记忆；它复用 AI Markdown Conversion，但启动恢复必须绕过整理流程并原样恢复 Projection Snapshot。
+- Projection 编辑器中的"整理并投送"只在 Markdown 模式显示并独立记忆；它复用 AI Markdown Conversion，但启动恢复必须绕过整理流程并原样恢复 Projection Snapshot。已知剩余额度不够本次扣点时，按钮改为"投送（额度不足）"并按原文投送，勾选和配置都不动；查不到额度时照常整理，由服务端判断。
+- **Daily Quota** 按 Machine Identity 取：有 **Quota Override** 用它，否则用 **Default Daily Quota**。Quota Override 只改上限，不碰当天已用的点数，也不改扣点规则。
 - **Setting Section** 按 Setting Route 组成一棵树；顶层只有导航行，叶子才持有 Setting Card。Setting Suggestion 指向卡片及其 Route，不改变任何页面内容。
 
 ## Ownership rules
@@ -166,6 +167,8 @@ AI Markdown Conversion 失败时由服务端按 DeepSeek 的回应归因：只�
 
 AI Markdown 数据库的 schema 初始化缓存同时使用文件身份和 SQLite schema version；同一路径下的数据库文件被替换后必须重新初始化，普通额度和请求记录写入不能反复触发 schema 初始化。
 
+一台机器的上限一律经 `_dailyQuota(machineId)` 取：先查 `quota_overrides` 表，没有才用 `_defaultDailyQuota()`（设置键仍叫 `daily_limit`）。Quota Override 可以是 0，取上限的地方不能写 `limit or 默认值` 这类真值判断，否则停用的机器会回到默认额度。`/quota`、整理请求的 `X-RateLimit-Limit` 和后台表格都报这台机器自己的上限，所以 Quota Override 只需一次 Server Update，客户端不用跟着升级。
+
 ### 管理后台
 
 `server/templates/admin_base.html` 拥有 Admin Console 的共享导航布局；`server/static/admin.css` 和 `server/static/admin.js` 拥有后台共用的导航、表格拖拽和异步交互，不在各页面模板复制相同逻辑。移动端打开侧边栏时锁定页面滚动，但导航列表本身必须保留独立的纵向触控滚动。
@@ -175,6 +178,8 @@ AI Markdown 数据库的 schema 初始化缓存同时使用文件身份和 SQLit
 后台能不刷新就不刷新。异步表单（`data-async-form`）的结果由服务端 JSON 决定页面怎么变：`redirect` 表示成功后跳到别的页面，提示经 flash 带过去，失败时停在原页不动；`fill` 把值写进 `[data-fill]` 输入框；`replace` 用服务端渲染的 HTML 换掉 `[data-replace]` 的内容，排序表、确认框和异步表单的事件都挂在外层，换进来的新行照常可用。`redirect` 同时带 `awaitVersion` 时，先轮询其中的地址，等它报出指定的版本和提交再跳转，Server Update 靠它等新 worker 起来。后台的 CSP 不允许内联脚本，页面交互只能写进 admin.js。编辑长内容用独立页面，不在排序表里插行内编辑表单。
 
 所有排序接口都接收 admin.js 提交的 `item_id` / `expected_item_id`，页面不得改写 `window.fetch` 去适配别的载荷格式。
+
+admin.js 提交的表单里，控件不能取名 `action` 或 `method`：同名控件会遮住 `form.action`／`form.method`，请求就发到了 `[object RadioNodeList]`。一个表单有多个提交按钮时（如专属额度弹窗的「保存」和「恢复默认」），`submitAsync()` 带上按下的那个；它先取 `FormData` 再让按钮进入加载态，因为禁用的按钮不会被收进表单数据。
 
 Catalog Order 由 `server/app_store.py` 按稳定 ID 写入数据库。拖拽和键盘排序提交完整新顺序及原始顺序快照；服务端在事务内核对原始顺序，过期快照返回 HTTP 409。保存失败或拖拽取消时，浏览器恢复原顺序；拖拽浮影只是临时视觉状态，不参与命中测试或持久化。Application Preset 排序必须限定在所属 Application 内。
 
@@ -232,6 +237,8 @@ Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` �
 改动 Busy Glow 前先读 `docs/adr/0002-busy-glow-custom-paint.md`。要守住的：重绘自限 60 Hz；已长出的部分是以底边中点为中心的单段圆弧，入场窗口乘进渐变 alpha，不另画遮罩；锥形渐变按周长弧长参数化，几何变化时在 `resizeEvent` 重建，动画期间只转相位、改 alpha；光晕在 `HALO_PIXEL` 倍的低分辨率缓冲里画，只有边线按设备像素描，不要退回多遍宽笔叠加；深色主题光晕按 `Plus` 加性合成、边线正常叠加，深浅主题是两套配方。
 
 内联整理必须保存开始时的标题和正文快照；完成后投送完整结果，用户取消时先停止接收迟到信号，再立即投送快照正文。
+
+Projection 编辑器只在自己可见且处于整理模式时查额度：显示时、勾上"整理并投送"时、AI Markdown 对话框关闭后，以及期间每 30 秒一次（跟上 0 点刷新、双倍时段起止和管理员改额度）；整理结束时直接用回应带回的剩余点数，整理进行中不查。启动恢复时编辑器不可见，不会为此发请求。它和 AI Markdown 对话框各查各的，不共享额度状态。
 
 ## Module topology
 

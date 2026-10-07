@@ -215,7 +215,7 @@ class AIAdminTest(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(ai_markdown._dailyLimit(), 20)
+        self.assertEqual(ai_markdown._defaultDailyQuota(), 20)
         self.assertEqual(ai_markdown._deepseekModel(), "deepseek-v4-flash-test")
         self.assertEqual(ai_markdown._deepseekApiKey(), "sk-panel-test")
         prompt = self._promptPage()
@@ -444,7 +444,7 @@ class AIAdminTest(TestCase):
         self.assertRegex(content, r'name="model"[^>]*value="changed-model"')
         self.assertRegex(content, r'name="peak_enabled"[^>]*checked')
         self.assertNotIn("sk-will-not-save", content)
-        self.assertEqual(ai_markdown._dailyLimit(), 15)
+        self.assertEqual(ai_markdown._defaultDailyQuota(), 15)
         self.assertEqual(ai_markdown._deepseekModel(), "deepseek-v4-flash")
 
     def testAdminRejectsOversizedSystemPrompt(self):
@@ -468,7 +468,7 @@ class AIAdminTest(TestCase):
         self.client.post("/ai/markdown/register", json={"machine_id": "a" * 64})
         machineId = ai_markdown._machineId("a" * 64)
         ai_markdown._claimRequest(
-            machineId, 2, ai_markdown._today(), ai_markdown._dailyLimit()
+            machineId, 2, ai_markdown._today(), ai_markdown._defaultDailyQuota()
         )
         dashboard = self._login()
 
@@ -488,7 +488,7 @@ class AIAdminTest(TestCase):
         self.assertEqual(ai_markdown._remaining(machineId), 15)
 
         ai_markdown._claimRequest(
-            machineId, 1, ai_markdown._today(), ai_markdown._dailyLimit()
+            machineId, 1, ai_markdown._today(), ai_markdown._defaultDailyQuota()
         )
         self.client.post(
             "/admin/ai/markdown/reset-all",
@@ -542,6 +542,149 @@ class AIAdminTest(TestCase):
                 "SELECT status FROM request_log WHERE id = ?", (oldRequest,)
             ).fetchone()[0]
         self.assertEqual(status, "reset")
+
+    def _setQuota(self, code, dailyLimit=None, restore=False):
+        machines = self._machinesPage()
+        data = {"csrf_token": self._csrf(machines)}
+        if restore:
+            data["restore"] = "1"
+        if dailyLimit is not None:
+            data["daily_limit"] = dailyLimit
+        return self.client.post(
+            f"/admin/ai/markdown/machines/{code}/quota",
+            base_url="https://dash.djcatpro.top",
+            headers={
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest",
+            },
+            data=data,
+        )
+
+    def testQuotaOverrideReplacesTheDefaultForOneMachine(self):
+        self.client.post("/ai/markdown/register", json={"machine_id": "a" * 64})
+        self.client.post("/ai/markdown/register", json={"machine_id": "b" * 64})
+        overridden = ai_markdown._machineId("a" * 64)
+        default = ai_markdown._machineId("b" * 64)
+        self._login()
+
+        response = self._setQuota("DJ-000001", "40")
+        payload = response.get_json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["category"], "success")
+        self.assertIn("每天 40 点", payload["message"])
+        row = payload["replace"]["machine-DJ-000001"]
+        self.assertIn("40 / 40", row)
+        self.assertIn('data-limit="40"', row)
+        self.assertIn("专属", row)
+        self.assertIn('data-quota-override="40"', row)
+        self.assertEqual(ai_markdown._dailyQuota(overridden), 40)
+        self.assertEqual(ai_markdown._dailyQuota(default), 15)
+
+        quota = self.client.get(
+            "/ai/markdown/quota", query_string={"machine_id": "a" * 64}
+        ).get_json()
+        self.assertEqual((quota["remaining"], quota["limit"]), (40, 40))
+
+        page = self._machinesPage().get_data(as_text=True)
+        self.assertIn('data-replace="machine-DJ-000001"', page)
+        self.assertIn('data-limit="15"', page)
+        self.assertIn("默认额度为 15 点", page)
+
+        # 改默认额度不影响专属额度，哪怕专属额度原本和默认值相同。
+        self._setQuota("DJ-000002", "15")
+        settings = self._settingsPage()
+        self.client.post(
+            "/admin/ai/markdown/settings",
+            base_url="https://dash.djcatpro.top",
+            data={
+                "csrf_token": self._csrf(settings),
+                "daily_limit": "20",
+                "model": "deepseek-v4-flash",
+            },
+        )
+        self.assertEqual(ai_markdown._dailyQuota(overridden), 40)
+        self.assertEqual(ai_markdown._dailyQuota(default), 15)
+
+        restored = self._setQuota("DJ-000001", restore=True).get_json()
+        self.assertIn("已恢复默认额度", restored["message"])
+        self.assertNotIn("专属", restored["replace"]["machine-DJ-000001"])
+        self.assertIn('data-quota-override=""', restored["replace"]["machine-DJ-000001"])
+        self.assertEqual(ai_markdown._dailyQuota(overridden), 20)
+
+    def testQuotaOverrideTakesEffectImmediatelyWithoutTouchingUsage(self):
+        registered = self.client.post(
+            "/ai/markdown/register", json={"machine_id": "a" * 64}
+        ).get_json()
+        code = registered["machine_code"]
+        machineId = ai_markdown._machineId("a" * 64)
+        ai_markdown._claimRequest(machineId, 10, ai_markdown._today(), 15)
+        self._login()
+
+        self._setQuota(code, "5")
+        self.assertEqual(ai_markdown._remaining(machineId), 0)
+        self._setQuota(code, "50")
+        self.assertEqual(ai_markdown._remaining(machineId), 40)
+
+        machines = self._machinesPage()
+        self.client.post(
+            f"/admin/ai/markdown/machines/{code}/reset",
+            base_url="https://dash.djcatpro.top",
+            data={"csrf_token": self._csrf(machines)},
+        )
+        self.assertEqual(ai_markdown._remaining(machineId), 50)
+        self.assertEqual(ai_markdown._dailyQuota(machineId), 50)
+
+    def testZeroQuotaOverrideDisablesConversion(self):
+        registered = self.client.post(
+            "/ai/markdown/register", json={"machine_id": "a" * 64}
+        ).get_json()
+        self._login()
+
+        payload = self._setQuota(registered["machine_code"], "0").get_json()
+        self.assertIn("已停用", payload["message"])
+        self.assertIn("已停用", payload["replace"]["machine-DJ-000001"])
+        self.assertIn("0 / 0", payload["replace"]["machine-DJ-000001"])
+
+        quota = self.client.get(
+            "/ai/markdown/quota", query_string={"machine_id": "a" * 64}
+        ).get_json()
+        self.assertEqual((quota["remaining"], quota["limit"]), (0, 0))
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-only"}):
+            response = self.client.post(
+                "/ai/markdown", json={"content": "作业", "machine_id": "a" * 64}
+            )
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(
+            response.get_json()["message"], "这台电脑的 AI 整理已被管理员停用。"
+        )
+        self.assertEqual(response.headers["X-RateLimit-Limit"], "0")
+
+    def testQuotaOverrideRejectsInvalidValuesAndUnknownMachines(self):
+        self.client.post("/ai/markdown/register", json={"machine_id": "a" * 64})
+        machineId = ai_markdown._machineId("a" * 64)
+        self._login()
+
+        for value in ("", "abc", "-1", "10001", "2.5"):
+            with self.subTest(value=value):
+                response = self._setQuota("DJ-000001", value)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("0 到 10000", response.get_json()["message"])
+        self.assertEqual(ai_markdown._dailyQuota(machineId), 15)
+
+        self.assertEqual(self._setQuota("DJ-000009", "20").status_code, 404)
+        self.assertEqual(self._setQuota("not-a-code", "20").status_code, 404)
+        self.assertEqual(
+            self._setQuota("DJ-0000001", "30").get_json()["replace"].keys(),
+            {"machine-DJ-000001"},
+        )
+
+        response = self.client.post(
+            "/admin/ai/markdown/machines/DJ-000001/quota",
+            base_url="https://dash.djcatpro.top",
+            data={"daily_limit": "50"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(ai_markdown._dailyQuota(machineId), 30)
 
     def testAdminRequiresLoginAndCsrf(self):
         response = self.client.get(
@@ -612,7 +755,7 @@ class AIAdminTest(TestCase):
         )
         content = response.get_data(as_text=True)
         self.assertIn('class="toast-region"', content)
-        self.assertIn("每日额度必须在 1 到 10000 之间", content)
+        self.assertIn("默认额度必须在 1 到 10000 之间", content)
         self.assertNotIn('<main class="page-main">\n                <div class="notice', content)
 
         cssResponse = self.client.get(
