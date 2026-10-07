@@ -206,8 +206,12 @@ _Avoid_: theme、CSS、System Prompt
 一次成功的 AI Markdown Conversion 的完整输入、输出和元数据快照，存储在服务端供管理员审阅。审批后可提升为 Prompt Example。
 _Avoid_: request log（那是额度和计费的元数据记录）、history、转化记录
 
+**Prompt Template（提示词模板）**:
+管理员在后台编辑的 AI Markdown Conversion 全局规则文字，服务端自带一份可随时恢复的默认值。发给模型的系统提示词依次由它、Prompt Example 和 Custom Markdown Style 拼成，它只是其中第一段。
+_Avoid_: 全局系统提示词（容易误解成整份系统提示词）、提示词上半部分
+
 **Prompt Example**:
-纳入系统提示词的 few-shot 输入输出对。来源有两种：管理员从 Conversion Log 中选取并编辑后加入，或在后台直接编写；两者加入后没有区别。运行时按顺序动态拼接到提示词模板之后，模板本身不应再写示例。
+纳入系统提示词的 few-shot 输入输出对。来源有两种：管理员从 Conversion Log 中选取并编辑后加入，或在后台直接编写；两者加入后没有区别。运行时按顺序动态拼接到 Prompt Template 之后，Prompt Template 本身不应再写示例。
 _Avoid_: sample、template、system prompt（Prompt Example 是提示词的一部分，不是提示词本身）
 
 ### 更新
