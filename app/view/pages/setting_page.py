@@ -69,10 +69,8 @@ from app.view.components.setting_preview import (
     COUNTDOWN_CONTENT,
     PROJECTION_CONTENT,
     ApplicationIconPreview,
-    HomeBannerPreview,
-    ThemePreview,
+    MainWindowPreview,
     WindowBackgroundPreview,
-    WindowTextPreview,
 )
 from app.view.components.setting_section import (
     ROOT_SECTION_KEY,
@@ -505,6 +503,7 @@ class SettingPage(QWidget):
         self._sectionParents = {}
         self._cardLists = {}
         self._suggestions = []
+        self._homeCardPreviews = []
         self.breadcrumbWidget = QWidget(self)
         self.breadcrumbBar = BreadcrumbBar(self.breadcrumbWidget)
         self.sectionStack = SettingSectionStack(self)
@@ -976,6 +975,11 @@ class SettingPage(QWidget):
             parentView.addNavigationCard(card)
         return view
 
+    def _homeCardPreview(self, preview):
+        """Previews of the main window draw the Home Cards the home page has."""
+        self._homeCardPreviews.append(preview)
+        return preview
+
     def _initSections(self) -> None:
         self._addSection(ROOT_SECTION_KEY, "设置")
 
@@ -986,7 +990,7 @@ class SettingPage(QWidget):
             "主页横幅的显示与自定义",
             ROOT_SECTION_KEY,
         )
-        banner.addPreview(HomeBannerPreview())
+        banner.addPreview(self._homeCardPreview(MainWindowPreview()))
         banner.addCardList(
             [
                 self.showBannerCard,
@@ -1100,7 +1104,7 @@ class SettingPage(QWidget):
             "应用主题、主题色、窗口背景透明材质和窗口过渡动画",
             "personalization",
         )
-        appearance.addPreview(ThemePreview())
+        appearance.addPreview(self._homeCardPreview(MainWindowPreview()))
         appearance.addCardList(
             [
                 self.themeModeCard,
@@ -1116,7 +1120,7 @@ class SettingPage(QWidget):
             "主窗口和启动页的图标，系统托盘默认跟随",
             "personalization",
         )
-        applicationIcon.addPreview(ApplicationIconPreview())
+        applicationIcon.addPreview(self._homeCardPreview(ApplicationIconPreview()))
         applicationIcon.addCardList(
             [self.applicationIconSourceCard, self.applicationIconCard]
         )
@@ -1138,7 +1142,7 @@ class SettingPage(QWidget):
         tray.addSubsectionTitle("主页卡片")
         tray.addWidget(self.trayHomeCardList)
         personalization.addSubsectionTitle("窗口")
-        personalization.addPreview(WindowTextPreview())
+        personalization.addPreview(self._homeCardPreview(MainWindowPreview()))
         personalization.addCardList([self.windowTitleCard, self.showCreditsCard])
 
         software = self._addSection(
@@ -1257,6 +1261,8 @@ class SettingPage(QWidget):
 
     def setHomeCards(self, entries) -> None:
         self.trayHomeCardList.setHomeCards(entries)
+        for preview in self._homeCardPreviews:
+            preview.setHomeCards(entries)
 
     @property
     def trayHomeCardSwitches(self) -> dict:
