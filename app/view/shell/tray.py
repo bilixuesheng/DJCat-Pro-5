@@ -17,7 +17,7 @@ from qfluentwidgets.common.screen import getCurrentScreenGeometry
 from qfluentwidgets.components.widgets.menu import MenuActionListWidget
 from qframelesswindow import WindowEffect
 
-from app.common.application_icon import trayHomeIcon, trayIcon
+from app.common.application_icon import TRAY_ICON_ITEMS, trayHomeIcon, trayIcon
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
 
@@ -161,6 +161,13 @@ class AcrylicMenu(RoundMenu):
             return
         super()._onItemClicked(item)
 
+def selectedShortcutKeys(value) -> set[str]:
+    """The Home Card keys chosen as Tray Card Shortcuts, tolerating a damaged config."""
+    if not isinstance(value, list):
+        return set()
+    return {key for key in value if isinstance(key, str)}
+
+
 def _refreshTaskAction(action, enabled, label, icon):
     action.setText(("关闭" if enabled else "开启") + label)
     action.setIcon(FIF.PAUSE if enabled else icon)
@@ -172,6 +179,7 @@ class TrayMenuParts(NamedTuple):
     taskActions: dict
     cardActions: list
     quitAction: Action
+    submenu: AcrylicMenu | None
 
 
 def buildTrayMenu(homeCards, homeIcon, parent=None) -> TrayMenuParts:
@@ -194,30 +202,27 @@ def buildTrayMenu(homeCards, homeIcon, parent=None) -> TrayMenuParts:
         menu.addAction(action)
         taskActions[name] = action
 
-    selected = {
-        key
-        for key in cfg.trayHomeCardKeys.value
-        if isinstance(key, str)
-    } if isinstance(cfg.trayHomeCardKeys.value, list) else set()
+    selected = selectedShortcutKeys(cfg.trayHomeCardKeys.value)
     cards = [entry for entry in homeCards if entry["key"] in selected]
     cardActions = []
+    submenu = None
     if cards:
         menu.addSeparator()
-        owner = menu
         if cfg.trayHomeCardsInSubmenu.value:
-            owner = AcrylicMenu("主页卡片", menu)
-            owner.setIcon(FIF.HOME)
+            submenu = AcrylicMenu("主页卡片", menu)
+            submenu.setIcon(FIF.HOME)
+        owner = menu if submenu is None else submenu
         for entry in cards:
             action = Action(entry["icon"], entry["title"], owner)
             owner.addAction(action)
             cardActions.append((entry["key"], action))
-        if owner is not menu:
-            menu.addMenu(owner)
+        if submenu is not None:
+            menu.addMenu(submenu)
 
     menu.addSeparator()
     quitAction = Action(FIF.CLOSE, "退出程序", menu)
     menu.addAction(quitAction)
-    return TrayMenuParts(menu, showAction, taskActions, cardActions, quitAction)
+    return TrayMenuParts(menu, showAction, taskActions, cardActions, quitAction, submenu)
 
 
 class SystemTrayIcon(QSystemTrayIcon):
@@ -231,12 +236,7 @@ class SystemTrayIcon(QSystemTrayIcon):
 
         self._updateTrayTooltip(cfg.trayTooltip.value)
 
-        for item in (
-            cfg.applicationIconSource,
-            cfg.applicationIconPath,
-            cfg.trayIconSource,
-            cfg.trayIconPath,
-        ):
+        for item in TRAY_ICON_ITEMS:
             item.valueChanged.connect(self._updateTrayIcon)
         cfg.trayTooltip.valueChanged.connect(self._updateTrayTooltip)
 

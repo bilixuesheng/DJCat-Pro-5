@@ -44,7 +44,7 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 **`app/view/components/setting_section.py` 独占设置页的层级导航。** Setting Section 的下钻、返回、面包屑对应的 Setting Route，以及层级之间的推移动画都由它提供；页面只负责装配内容。推移沿用 `SlideNavigationTransitionInfo`：进入下一级时旧页左移出场、新页自右入场，返回时反向，两页共用同一条 `cubic-bezier(0,0,0,1)` 曲线和 300 ms 时长并交叉淡入淡出，不得改成"旧页原地淡出"。位移 150 px 是设备无关像素，不得再乘 `devicePixelRatio`。动画期间只改 `pos` 和不透明度，不碰布局。推移的是两页起步时各 `grab()` 一次的快照，真页面在推移期间隐藏；不得再给整页 `ScrollArea` 挂 `QGraphicsOpacityEffect`。理由见 `docs/adr/0003-settings-drill-in-navigation.md`。
 
-**`app/view/components/setting_preview.py` 独占 Setting Preview。** 画主窗口的预览不截取真实页面（会逼 Lazy Page 提前构造，还会截到设置页自己），而是由 `MainWindowReplica` 用真实组件——导航按钮、`BannerWidget`、主页的 `ActionCard`、标题栏按钮——按主窗口当前尺寸摆好，画到目标两倍大小再平滑缩小，结果按尺寸、设备像素比缓存，配置变化时作废。宽高比实时跟随主窗口（监听 `window()` 的尺寸变化），限高 280；复刻在第一次画时才搭。`tests/test_setting_preview.py` 逐项核对复刻和真实主窗口的几何一致，改主窗口或主页的排布时必须同步改复刻。托盘预览的菜单来自 `buildTrayMenu()`，按 `AcrylicMenu`／`RoundMenu` 的定位规则 1:1 摆在任务栏右侧。投送、倒计时和时钟的预览按屏幕比例画全屏，边距和字号照真实窗口的比例，角落按钮整组放大到 0.5 倍以便认出图标。理由见 `docs/adr/0007-setting-preview-replica.md`。
+**`app/view/components/setting_preview.py` 独占 Setting Preview。** 画主窗口的预览不截取真实页面（会逼 Lazy Page 提前构造，还会截到设置页自己），而是由 `MainWindowReplica` 用真实组件——导航按钮、`BannerWidget`、主页的 `ActionCard`、标题栏按钮——按主窗口当前尺寸摆好，画到目标两倍大小再平滑缩小，结果按尺寸、设备像素比缓存，配置变化时作废。宽高比实时跟随主窗口（监听 `window()` 的尺寸变化），限高 280；复刻在第一次画时才搭。`tests/test_setting_preview.py` 逐项核对复刻和真实主窗口的几何一致，改主窗口或主页的排布时必须同步改复刻。托盘预览的菜单来自 `buildTrayMenu()`，按 `AcrylicMenu`／`RoundMenu` 的定位规则 1:1 摆在任务栏右侧。投送、倒计时和时钟的预览按屏幕比例画全屏，标题、正文和按钮离窗口边的距离照真实窗口的比例；角落按钮用真实图标和 80 × 65 的比例，缩放取屏幕比例与 0.4 中较大的一个，否则图标只剩几个像素；时钟定格在预览出现的那一刻。理由见 `docs/adr/0007-setting-preview-replica.md`。
 
 **设置页搜索只产出 Setting Suggestion。** 页面本身不筛选、不折叠、不重排；建议只按 Setting Card 的标题匹配，条件隐藏的卡片不参与，跨 Section 重名的标题才补完整 Route 前缀。`SettingPage` 提供 `searchSuggestions()` 和 `navigateToRoute()`，弹窗由 MainWindow 拥有——搜索框属于标题栏，设置页不得反向持有它。选中建议后清空搜索框、跳到目标 Route、滚动到卡片并描一圈主题色边框，绝不改写用户的前置设置来让隐藏卡片现身。
 
@@ -66,7 +66,7 @@ Tray Menu 的外观和弹出方式固定恢复为 v5.1.2：右键由注册的 co
 
 **HomePage 按稳定 key 复用 Application Home Card。** 不变快照不得重建卡片或重复发布主页变化；标题、图标和动作更新原有卡片，移除时才释放对应 QWidget。
 
-托盘设置都在 Setting Section `个性化 › 系统托盘`（`personalization.tray`），侧边栏没有单独的托盘页。其中的主页卡片开关（`TrayHomeCardList`）按 Home Card 命名、随主页变化，不属于任何 Setting Card 列表，因此不产生 Setting Suggestion；它只渲染 Tray Card Shortcut 开关，不得在刷新控件时清理 `cfg.trayHomeCardKeys`。MainWindow 必须先恢复 Application Home Card，再用完整的 HomePage 快照移除已经失效的引用，避免启动阶段的临时不完整快照覆盖已保存选择。
+托盘设置都在 Setting Section `个性化 › 系统托盘`（`personalization.tray`），侧边栏没有单独的托盘页。其中的主页卡片开关（`TrayCardShortcutList`）按 Home Card 命名、随主页变化，不属于任何 Setting Card 列表，因此不产生 Setting Suggestion；它只渲染 Tray Card Shortcut 开关，不得在刷新控件时清理 `cfg.trayHomeCardKeys`。MainWindow 必须先恢复 Application Home Card，再用完整的 HomePage 快照移除已经失效的引用，避免启动阶段的临时不完整快照覆盖已保存选择。
 
 ### 主窗口与页面
 

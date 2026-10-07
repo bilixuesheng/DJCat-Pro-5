@@ -265,8 +265,8 @@ class LazySettingPage(LazyPage):
             self.page.setHomeCards(self._homeCards)
 
     @property
-    def trayHomeCardSwitches(self):
-        return self.ensureLoaded().trayHomeCardSwitches
+    def trayCardShortcutSwitches(self):
+        return self.ensureLoaded().trayCardShortcutSwitches
 
     def searchSuggestions(self, text):
         return self.ensureLoaded().searchSuggestions(text)

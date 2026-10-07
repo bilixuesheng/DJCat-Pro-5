@@ -173,8 +173,7 @@ class WindowBackgroundTest(TestCase):
         def pixel(kind):
             self.app.processEvents()
             preview = previews[kind]
-            # 左下角空着：时间按真实比例几乎占满一行，按钮默认在右下角。
-            return preview.grab().toImage().pixelColor(20, preview.height() - 12)
+            return preview.grab().toImage().pixelColor(20, preview.height() // 2)
 
         for theme, projection in ((Theme.LIGHT, "#ffffff"), (Theme.DARK, "#202020")):
             with self.subTest(theme=theme):
@@ -509,21 +508,24 @@ class WindowBackgroundPreviewFurnitureTest(TestCase):
     def testButtonsUseTheRealIconsShapeAndOrder(self):
         preview = self._preview(PROJECTION_CONTENT, "broadcast")
         rects = preview.actionButtonRects()
+        screenScale = WINDOW_PREVIEW_HEIGHT / QApplication.primaryScreen().geometry().height()
 
         self.assertEqual(
             preview.actionButtonIcons(), [FIF.EDIT, FIF.MINIMIZE, FIF.COPY, FIF.CLOSE]
         )
         for rect in rects:
             self.assertAlmostEqual(rect.width() / rect.height(), 80 / 65, places=3)
-        # 真实窗口里按钮间距和离边距离都是 12，相对 80 宽的按钮。
+        # 按钮比按屏幕等比缩小时稍大，彼此仍相隔真实的 12 / 80；离窗口边照屏幕比例。
+        self.assertGreaterEqual(rects[0].width(), 80 * screenScale)
         spacing = rects[1].left() - rects[0].right()
         self.assertAlmostEqual(spacing / rects[0].width(), 12 / 80, places=3)
-        self.assertAlmostEqual(preview.width() - rects[-1].right(), spacing, places=3)
-        self.assertAlmostEqual(preview.height() - rects[-1].bottom(), spacing, places=3)
+        margin = 12 * screenScale
+        self.assertAlmostEqual(preview.width() - rects[-1].right(), margin, places=3)
+        self.assertAlmostEqual(preview.height() - rects[-1].bottom(), margin, places=3)
 
         cfg.set(cfg.broadcastActionButtonPosition, "左下角")
         self.assertEqual(preview.actionButtonIcons()[0], FIF.CLOSE)
-        self.assertAlmostEqual(preview.actionButtonRects()[0].left(), spacing, places=3)
+        self.assertAlmostEqual(preview.actionButtonRects()[0].left(), margin, places=3)
 
         self.assertEqual(
             self._preview(COUNTDOWN_CONTENT, "countdown").actionButtonIcons(),
@@ -542,13 +544,21 @@ class WindowBackgroundPreviewFurnitureTest(TestCase):
 
         self.assertEqual(preview.projectionTitle(), "今日作业")
 
-    def testClockShowsTheCurrentTime(self):
+    def testClockShowsTheTimeThePreviewAppeared(self):
         preview = self._preview(CLOCK_CONTENT, "fullscreenClock")
+        shown = QTime(9, 24, 30)
+        with patch(
+            "app.view.components.setting_preview.QTime.currentTime", return_value=shown
+        ):
+            preview.show()
+            self.assertEqual(preview.timerText(), "09 : 24 : 30")
+        # 之后的重绘不让秒数跳；下次出现才换成新的时间。
+        self.assertEqual(preview.timerText(), "09 : 24 : 30")
+        preview.hide()
         before = QTime.currentTime().toString("HH : mm : ss")
+        preview.show()
         text = preview.timerText()
-        after = QTime.currentTime().toString("HH : mm : ss")
-
-        self.assertIn(text, (before, after))
+        self.assertIn(text, (before, QTime.currentTime().toString("HH : mm : ss")))
         self.assertEqual(
             self._preview(COUNTDOWN_CONTENT, "countdown").timerText(), "00 : 45 : 00"
         )

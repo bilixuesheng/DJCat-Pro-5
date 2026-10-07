@@ -193,17 +193,17 @@ class HomeCardTrayInterfaceTest(TestCase):
 
         self.assertEqual(cfg.trayHomeCardKeys.value, ["missing", "全屏投送"])
         self.assertEqual(
-            list(page.trayHomeCardSwitches),
+            list(page.trayCardShortcutSwitches),
             ["考试倒计时", "全屏投送", "定时播报", "定时关机"],
         )
-        self.assertTrue(page.trayHomeCardSwitches["全屏投送"].isChecked())
+        self.assertTrue(page.trayCardShortcutSwitches["全屏投送"].isChecked())
 
     def testTraySectionPersistsClickAndCardChoices(self):
         page = self._settingPage()
         page.setHomeCards(self.page.homeCardEntries())
 
         page.trayLeftClickCard.comboBox.setCurrentIndex(1)
-        page.trayHomeCardSwitches["考试倒计时"].setChecked(True)
+        page.trayCardShortcutSwitches["考试倒计时"].setChecked(True)
 
         self.assertEqual(cfg.trayLeftClickAction.value, "ShowMenu")
         self.assertEqual(cfg.trayHomeCardKeys.value, ["考试倒计时"])
@@ -214,24 +214,24 @@ class HomeCardTrayInterfaceTest(TestCase):
 
         cfg.set(cfg.trayHomeCardKeys, ["定时关机"])
 
-        self.assertTrue(page.trayHomeCardSwitches["定时关机"].isChecked())
-        self.assertFalse(page.trayHomeCardSwitches["全屏投送"].isChecked())
+        self.assertTrue(page.trayCardShortcutSwitches["定时关机"].isChecked())
+        self.assertFalse(page.trayCardShortcutSwitches["全屏投送"].isChecked())
 
     def testTraySectionWithoutHomeCardsSaysSo(self):
         page = self._settingPage()
 
         page.setHomeCards([])
 
-        self.assertEqual(page.trayHomeCardSwitches, {})
+        self.assertEqual(page.trayCardShortcutSwitches, {})
         self.assertEqual(
-            [card.titleLabel.text() for card in page.trayHomeCardList.cards()],
+            [card.titleLabel.text() for card in page.trayCardShortcutList.cards()],
             ["暂无主页卡片"],
         )
 
     def testHomeCardSwitchesAreNotOfferedAsSuggestions(self):
         page = self._settingPage()
         page.setHomeCards(self.page.homeCardEntries())
-        switches = set(page.trayHomeCardSwitches.values())
+        switches = set(page.trayCardShortcutSwitches.values())
 
         cards = [suggestion.card for suggestion in page.searchSuggestions("定时关机")]
 
@@ -287,7 +287,7 @@ class HomeCardTrayInterfaceTest(TestCase):
             page.trayLeftClickCard.comboBox.height(),
             page.trayLeftClickCard.comboBox.sizeHint().height(),
         )
-        for card in [*page.trayMenuCards, *page.trayHomeCardSwitches.values()]:
+        for card in [*page.trayMenuCards, *page.trayCardShortcutSwitches.values()]:
             self.assertEqual(
                 card.switchButton.height(), card.switchButton.sizeHint().height()
             )
@@ -334,7 +334,7 @@ class TrayControlNavigationTest(TestCase):
         self.assertIsNone(self.window.settingPage.page)
 
         self.assertEqual(
-            list(self.window.settingPage.trayHomeCardSwitches),
+            list(self.window.settingPage.trayCardShortcutSwitches),
             ["全屏投送", "考试倒计时", "全屏时钟", "定时播报", "自动任务", "定时关机"],
         )
 
@@ -375,7 +375,7 @@ class TrayControlNavigationTest(TestCase):
                 cfg.trayHomeCardKeys.value,
                 ["全屏投送", "app:7:0"],
             )
-            switches = restoredWindow.settingPage.trayHomeCardSwitches
+            switches = restoredWindow.settingPage.trayCardShortcutSwitches
             self.assertTrue(switches["全屏投送"].isChecked())
             self.assertTrue(switches["app:7:0"].isChecked())
         finally:

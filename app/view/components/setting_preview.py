@@ -1,9 +1,19 @@
 from __future__ import annotations
 
 import math
-import sys
 
-from PySide6.QtCore import QDateTime, QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTime
+from PySide6.QtCore import (
+    QDateTime,
+    QEvent,
+    QPoint,
+    QPointF,
+    QRect,
+    QRectF,
+    QSize,
+    Qt,
+    QTime,
+    QTimer,
+)
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -33,9 +43,15 @@ from qfluentwidgets.components.navigation.navigation_bar import (
 )
 from qframelesswindow.titlebar import CloseButton, MaximizeButton, MinimizeButton
 
-from app.common.application_icon import applicationIcon, trayIcon
+from app.common.application_icon import (
+    TRAY_ICON_ITEMS,
+    applicationIcon,
+    trayHomeIcon,
+    trayIcon,
+)
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
+from app.platform.background_effect import isWin10
 from app.platform.shadow_effect import paintSilhouetteShadow
 from app.view.components.banner_widget import BannerWidget
 from app.view.components.setting_card_group import SettingMaterialCard
@@ -45,6 +61,7 @@ from app.view.components.window_background import (
     projectionThemeBackground,
     projectionTitleColor,
 )
+from app.view.shell.tray import buildTrayMenu
 
 # 投送、倒计时和时钟三种窗口的正文形状不同，预览按各自真实的排布画。
 PROJECTION_CONTENT = "projection"
@@ -59,10 +76,6 @@ class SettingPreviewCard(SettingMaterialCard):
     otherwise they read as unfinished page content rather than a preview."""
 
 
-def _isWindows10() -> bool:
-    return sys.platform == "win32" and sys.getwindowsversion().build < 22000
-
-
 def _strokeColor(dark: bool) -> QColor:
     return QColor(255, 255, 255, 20) if dark else QColor(0, 0, 0, 18)
 
@@ -72,8 +85,8 @@ def _textColor(dark: bool) -> QColor:
 
 
 WINDOW_PREVIEW_HEIGHT = 216
-# 投送、倒计时和时钟的角落按钮整组按这个比例画，图标才认得出。
-ACTION_BUTTON_SCALE = 0.5
+# 角落按钮按屏幕比例缩小，但不小于这个比例：再小图标就只剩几个像素。
+ACTION_BUTTON_MIN_SCALE = 0.4
 
 
 def _screenSize() -> QSize:
@@ -117,6 +130,7 @@ class WindowBackgroundPreview(WindowBackground):
         )
         self._contentKind = contentKind
         self._actionPositionItem = actionPositionItem
+        self._shownTime = None
         # 三种窗口默认全屏：按屏幕比例画，图片背景的裁切位置才和真实窗口一致。
         self.setFixedSize(
             round(WINDOW_PREVIEW_HEIGHT * _screenAspectRatio()), WINDOW_PREVIEW_HEIGHT
@@ -161,15 +175,19 @@ class WindowBackgroundPreview(WindowBackground):
             and self._actionPositionItem.value == "左下角"
         )
 
+    def _actionButtonScale(self) -> float:
+        return max(self._screenScale(), ACTION_BUTTON_MIN_SCALE)
+
     def actionButtonRects(self) -> list[QRectF]:
-        # 真实按钮 80 × 65，间距和离边都是 12。整组按比例放大到 ACTION_BUTTON_SCALE，
-        # 按屏幕比例缩小的话图标只剩几个像素。
-        scale = ACTION_BUTTON_SCALE
+        # 真实按钮 80 × 65、彼此相隔 12，离窗口边也是 12。离边按屏幕比例缩小，
+        # 按钮和间隔按 _actionButtonScale() 缩小，比屏幕比例稍大一些。
+        scale = self._actionButtonScale()
         width, height, spacing = 80 * scale, 65 * scale, 12 * scale
+        margin = 12 * self._screenScale()
         count = len(self.actionButtonIcons())
         total = count * width + (count - 1) * spacing
-        left = spacing if self._buttonsAtLeft() else self.width() - spacing - total
-        top = self.height() - spacing - height
+        left = margin if self._buttonsAtLeft() else self.width() - margin - total
+        top = self.height() - margin - height
         return [
             QRectF(left + index * (width + spacing), top, width, height)
             for index in range(count)
@@ -181,7 +199,14 @@ class WindowBackgroundPreview(WindowBackground):
     def timerText(self) -> str:
         if self._contentKind == COUNTDOWN_CONTENT:
             return "00 : 45 : 00"
-        return QTime.currentTime().toString("HH : mm : ss")
+        # 时钟定格在预览出现的那一刻，滚动或换主题引起的重绘不让秒数跳。
+        if self._shownTime is None:
+            self._shownTime = QTime.currentTime()
+        return self._shownTime.toString("HH : mm : ss")
+
+    def showEvent(self, event) -> None:
+        self._shownTime = None
+        super().showEvent(event)
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
@@ -223,40 +248,35 @@ class WindowBackgroundPreview(WindowBackground):
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
     def _paintTimer(self, painter: QPainter, rect: QRectF) -> None:
-        # 字号和上下留白照真实窗口：标题高的 1/14，时间 9/40，三段弹性空白 1 : 1 : 2。
         title = "考试倒计时" if self._contentKind == COUNTDOWN_CONTENT else "当前时间"
-        text = self.timerText()
-        titleFont = QFont(self.font())
-        titleFont.setPixelSize(max(1, self.height() // 14))
-        titleFont.setBold(True)
-        timeFont = QFont(self.font())
-        timeFont.setPixelSize(max(1, self.height() * 9 // 40))
-        timeFont.setBold(True)
-        # 预览宽度随屏幕比例变化，4:3 屏上时间会超出两侧，和真实窗口一样按比例缩小。
-        width = QFontMetricsF(timeFont).horizontalAdvance(text)
-        if width > rect.width():
-            timeFont.setPixelSize(max(1, int(timeFont.pixelSize() * rect.width() / width)))
-        titleHeight = QFontMetricsF(titleFont).height()
-        timeHeight = QFontMetricsF(timeFont).height()
-        free = max(0.0, rect.height() - titleHeight - timeHeight) / 4
-
-        painter.setFont(titleFont)
-        painter.setPen(QColor(255, 255, 255))
-        titleTop = rect.top() + free
+        font = QFont(self.font())
+        font.setPixelSize(13)
+        painter.setFont(font)
+        painter.setPen(QColor(255, 255, 255, 190))
         painter.drawText(
-            QRectF(rect.left(), titleTop, rect.width(), titleHeight),
-            Qt.AlignmentFlag.AlignCenter,
+            QRectF(rect.left(), rect.top() + 12, rect.width(), 20),
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
             title,
         )
-        painter.setFont(timeFont)
+        text = self.timerText()
+        font.setPixelSize(46)
+        font.setWeight(QFont.Weight.DemiBold)
+        # 预览宽度随屏幕比例变化，4:3 屏上 46 px 的时间会超出两侧。
+        width = QFontMetricsF(font).horizontalAdvance(text)
+        available = rect.width() * 0.88
+        if width > available:
+            font.setPixelSize(max(12, int(46 * available / width)))
+        painter.setFont(font)
+        painter.setPen(QColor(255, 255, 255, 235))
         painter.drawText(
-            QRectF(rect.left(), titleTop + titleHeight + free, rect.width(), timeHeight),
-            Qt.AlignmentFlag.AlignCenter,
+            QRectF(rect.left(), rect.top() + 36, rect.width(), 60),
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
             text,
         )
 
     def _paintActionButtons(self, painter: QPainter) -> None:
         dark = self._darkFurniture()
+        scale = self._actionButtonScale()
         foreground = QColor(255, 255, 255) if dark else QColor(0, 0, 0)
         for icon, button in zip(self.actionButtonIcons(), self.actionButtonRects()):
             primary = icon is FIF.CLOSE
@@ -270,16 +290,16 @@ class WindowBackgroundPreview(WindowBackground):
                 if primary
                 else QColor(255, 255, 255, 26) if dark else QColor(0, 0, 0, 13)
             )
-            radius = 8 * ACTION_BUTTON_SCALE
+            radius = 8 * scale
             painter.drawRoundedRect(button, radius, radius)
             # 图标在上、文字在下；文字缩小后认不出，用一道横条代替。
             color = QColor(255, 255, 255) if primary else foreground
-            iconSize = 20 * ACTION_BUTTON_SCALE
+            iconSize = 20 * scale
             icon.icon(color=color).paint(
                 painter,
                 QRectF(
                     button.center().x() - iconSize / 2,
-                    button.top() + 9 * ACTION_BUTTON_SCALE,
+                    button.top() + 9 * scale,
                     iconSize,
                     iconSize,
                 ).toRect(),
@@ -287,7 +307,7 @@ class WindowBackgroundPreview(WindowBackground):
             painter.setPen(Qt.PenStyle.NoPen)
             color.setAlpha(170)
             painter.setBrush(color)
-            barTop = button.top() + (9 + 20 + 4 + 11) * ACTION_BUTTON_SCALE - 1.25
+            barTop = button.top() + (9 + 20 + 4 + 11) * scale - 1.25
             painter.drawRoundedRect(
                 QRectF(button.left() + button.width() * 0.3, barTop, button.width() * 0.4, 2.5),
                 1.25,
@@ -328,7 +348,6 @@ class MainWindowReplica(QWidget):
     def __init__(self, splash: bool = False, parent=None):
         super().__init__(parent)
         self.splash = splash
-        self._homeCards = []
         self.cards = {}
         self.page = QWidget(self)
         self.banner = BannerWidget(self.page)
@@ -376,7 +395,7 @@ class MainWindowReplica(QWidget):
             self.cards[key] = card
             self.flowLayout.addWidget(card)
 
-    def windowTitle(self) -> str:
+    def titleText(self) -> str:
         return cfg.windowTitle.value.strip() or APP_NAME
 
     def layoutFor(self, size: QSize) -> QSize:
@@ -518,7 +537,7 @@ class MainWindowReplica(QWidget):
         left = 20 + 18 + 2 + 10
         available = width - left - CAPTION_BUTTON_SIZE.width() * 3 - 10
         text = QFontMetricsF(font).elidedText(
-            self.windowTitle(), Qt.TextElideMode.ElideRight, available
+            self.titleText(), Qt.TextElideMode.ElideRight, available
         )
         painter.drawText(
             QRectF(left, 15, available, 18),
@@ -560,6 +579,11 @@ class MainWindowMiniature(QWidget):
         self._pixmap = None
         self._pixmapKey = None
         self._observedWindow = None
+        # 拖动缩放主窗口时每一步都重排复刻是同步布局，先拉伸旧图，停下来再重画。
+        self._resizeTimer = QTimer(self)
+        self._resizeTimer.setSingleShot(True)
+        self._resizeTimer.setInterval(80)
+        self._resizeTimer.timeout.connect(self.update)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         for item in (
             cfg.showBanner,
@@ -608,16 +632,29 @@ class MainWindowMiniature(QWidget):
             area.center().x() - width / 2, area.center().y() - height / 2, width, height
         )
 
-    def renderedPixmap(self) -> QPixmap:
+    def _pixmapKeyNow(self) -> tuple:
         size = self.mainWindowSize()
         rect = self.windowRect()
-        ratio = self.devicePixelRatioF()
-        key = (size.width(), size.height(), rect.width(), rect.height(), ratio)
+        return (size.width(), size.height(), rect.width(), rect.height(), self.devicePixelRatioF())
+
+    def renderedPixmap(self) -> QPixmap:
+        key = self._pixmapKeyNow()
         if self._pixmap is None or self._pixmapKey != key:
-            scale = rect.width() / size.width()
-            self._pixmap = self.replica.renderPixmap(size, scale, ratio)
+            size = self.mainWindowSize()
+            scale = self.windowRect().width() / size.width()
+            self._pixmap = self.replica.renderPixmap(size, scale, key[-1])
             self._pixmapKey = key
         return self._pixmap
+
+    def _pixmapForPaint(self) -> QPixmap:
+        # 主窗口或设置页正在缩放：先拉伸旧图，停下 80 ms 后再重画。
+        if self._pixmap is not None and self._resizeTimer.isActive():
+            return self._pixmap
+        return self.renderedPixmap()
+
+    def resizeEvent(self, event) -> None:
+        self._resizeTimer.start()
+        super().resizeEvent(event)
 
     def showEvent(self, event) -> None:
         window = self.window()
@@ -630,6 +667,7 @@ class MainWindowMiniature(QWidget):
 
     def eventFilter(self, obj, event) -> bool:
         if obj is self._observedWindow and event.type() == QEvent.Type.Resize:
+            self._resizeTimer.start()
             self.update()
         return super().eventFilter(obj, event)
 
@@ -642,12 +680,13 @@ class MainWindowMiniature(QWidget):
             QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform
         )
         # Win11 的窗口有 8 px 圆角，Win10 是直角；缩小后的圆角按同一比例。
-        radius = 0 if _isWindows10() else 8 * rect.width() / self.mainWindowSize().width()
+        radius = 0 if isWin10() else 8 * rect.width() / self.mainWindowSize().width()
         path = QPainterPath()
         path.addRoundedRect(rect, radius, radius)
         painter.save()
         painter.setClipPath(path)
-        painter.drawPixmap(rect.topLeft(), self.renderedPixmap())
+        pixmap = self._pixmapForPaint()
+        painter.drawPixmap(rect, pixmap, QRectF(pixmap.rect()))
         painter.restore()
         painter.setPen(QPen(QColor(255, 255, 255, 40) if isDarkTheme() else QColor(0, 0, 0, 40), 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -681,7 +720,7 @@ class MainWindowPreview(SettingPreviewCard):
 
 
 def taskbarHeight() -> int:
-    return 40 if _isWindows10() else 48
+    return 40 if isWin10() else 48
 
 
 def _paintWindowsLogo(painter: QPainter, center, size: float) -> None:
@@ -704,7 +743,7 @@ def taskbarLayout(rect: QRectF) -> dict[str, QRectF]:
     """
     button = rect.height() - 8
     group = button * 2 + 4
-    left = rect.left() + 4 if _isWindows10() else rect.center().x() - group / 2
+    left = rect.left() + 4 if isWin10() else rect.center().x() - group / 2
     start = QRectF(left, rect.top() + 4, button, button)
     clock = QRectF(rect.right() - 84, rect.top(), 76, rect.height())
     tray = QRectF(clock.left() - 30, rect.center().y() - 8, 16, 16)
@@ -723,7 +762,7 @@ def paintTaskbar(painter: QPainter, rect: QRectF, dark: bool) -> None:
     Win11 draws a short pill under a running app, Win10 a line under the whole
     button.
     """
-    win10 = _isWindows10()
+    win10 = isWin10()
     layout = taskbarLayout(rect)
     painter.save()
     painter.setPen(Qt.PenStyle.NoPen)
@@ -830,12 +869,7 @@ class ApplicationIconPreview(SettingPreviewCard):
         self.vBoxLayout.addWidget(self.taskbar)
 
     def _bind(self) -> None:
-        for item in (
-            cfg.applicationIconSource,
-            cfg.applicationIconPath,
-            cfg.trayIconSource,
-            cfg.trayIconPath,
-        ):
+        for item in TRAY_ICON_ITEMS:
             item.valueChanged.connect(self.taskbar.update)
         qconfig.themeChanged.connect(self.taskbar.update)
 
@@ -860,9 +894,12 @@ class TrayPreview(SettingPreviewCard):
         super().__init__(parent)
         self._homeCards = []
         self.menuParts = None
+        self._menuPixmaps = {}
         self._layout = None
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
+        # 菜单当场建好，不等第一次画：Section 推移前对还没显示的页面 grab()，
+        # 这时才建，预览的高度会在推移结束时跳一下。
         self._rebuild()
         self._bind()
 
@@ -876,14 +913,11 @@ class TrayPreview(SettingPreviewCard):
             cfg.shutdownTasksEnabled,
             cfg.trayHomeCardKeys,
             cfg.trayHomeCardsInSubmenu,
-            cfg.trayIconSource,
-            cfg.trayIconPath,
-            cfg.applicationIconSource,
-            cfg.applicationIconPath,
-            qconfig.themeColor,
+            *TRAY_ICON_ITEMS,
         ):
             item.valueChanged.connect(self._rebuild)
-        qconfig.themeChanged.connect(self._rebuild)
+        # 换主题时菜单自己换样式，这里只丢掉截好的图。
+        qconfig.themeChanged.connect(self._clearMenuPixmaps)
         cfg.trayTooltip.valueChanged.connect(self._relayout)
 
     def setHomeCards(self, entries) -> None:
@@ -891,14 +925,11 @@ class TrayPreview(SettingPreviewCard):
         self._rebuild()
 
     def _rebuild(self, *_args) -> None:
-        from app.common.application_icon import trayHomeIcon
-        from app.view.shell.tray import buildTrayMenu
-
         if self.menuParts is not None:
             self.menuParts.menu.deleteLater()
         self._menuPixmaps = {}
         self.menuParts = buildTrayMenu(self._homeCards, trayHomeIcon(), self)
-        submenu = self._submenu()
+        submenu = self.menuParts.submenu
         height = self.menuParts.menu.view.height()
         if submenu is not None:
             # 打开二级菜单时，它的条目在菜单里保持选中的样子。
@@ -907,21 +938,30 @@ class TrayPreview(SettingPreviewCard):
         self.setFixedHeight(self.TOP_MARGIN + height + taskbarHeight())
         self._relayout()
 
-    def _menuPixmap(self, menu) -> QPixmap:
-        # render() 直接画到本控件的 painter 上会被重定向偏移打乱位置，先截成图再贴。
-        pixmap = self._menuPixmaps.get(id(menu))
-        if pixmap is None or pixmap.devicePixelRatio() != self.devicePixelRatioF():
-            pixmap = menu.view.grab()
-            self._menuPixmaps[id(menu)] = pixmap
-        return pixmap
+    def _clearMenuPixmaps(self, *_args) -> None:
+        self._menuPixmaps = {}
+        self.update()
 
-    def _submenu(self):
-        menus = self.menuParts.menu._subMenus
-        return menus[0] if menus else None
+    def _menuPixmap(self, menu) -> QPixmap:
+        # render() 直接画到本控件的 painter 上会被重定向偏移打乱位置，先画进图再贴。
+        # 不用 grab()：从没显示过的菜单按主屏取设备像素比，和预览所在的屏可能不同。
+        ratio = self.devicePixelRatioF()
+        key = (id(menu), ratio)
+        pixmap = self._menuPixmaps.get(key)
+        if pixmap is None:
+            size = menu.view.size()
+            pixmap = QPixmap(math.ceil(size.width() * ratio), math.ceil(size.height() * ratio))
+            pixmap.setDevicePixelRatio(ratio)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            menu.view.render(painter, QPoint(), renderFlags=QWidget.RenderFlag.DrawChildren)
+            painter.end()
+            self._menuPixmaps[key] = pixmap
+        return pixmap
 
     def _submenuItem(self):
         view = self.menuParts.menu.view
-        submenu = self._submenu()
+        submenu = self.menuParts.submenu
         for index in range(view.count()):
             if view.item(index).data(Qt.ItemDataRole.UserRole) is submenu:
                 return view.item(index)
@@ -955,7 +995,7 @@ class TrayPreview(SettingPreviewCard):
         menu = QRect(x, screen.bottom() - view.height() + 1, view.width(), view.height())
 
         submenuRect = QRect()
-        submenu = self._submenu()
+        submenu = self.menuParts.submenu
         if submenu is not None:
             # RoundMenu._onShowMenuTimeOut：条目右侧 5 px，放不下就开到左侧。
             item = self._submenuItem()
@@ -1022,10 +1062,10 @@ class TrayPreview(SettingPreviewCard):
         paintTaskbar(painter, QRectF(self.taskbarRect()), dark)
 
         # Win10 的托盘菜单是方角，Win11 保留圆角；底色近似亚克力，透出的桌面画不出来。
-        cornerRadius = 0 if _isWindows10() else 8
+        cornerRadius = 0 if isWin10() else 8
         menus = [(self.menuParts.menu, layout["menu"])]
-        if self._submenu() is not None:
-            menus.append((self._submenu(), layout["submenu"]))
+        if self.menuParts.submenu is not None:
+            menus.append((self.menuParts.submenu, layout["submenu"]))
         for menu, rect in menus:
             paintSilhouetteShadow(painter, QRectF(rect), cornerRadius, 24, 0.22)
             path = QPainterPath()

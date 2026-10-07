@@ -10,6 +10,15 @@ from app.config.paths import ASSET_DIR
 _icons: dict[tuple, QIcon] = {}
 
 
+# Tray Icon 跟随软件图标，所以这四项任何一项变了，托盘图标都可能跟着变。
+TRAY_ICON_ITEMS = (
+    cfg.applicationIconSource,
+    cfg.applicationIconPath,
+    cfg.trayIconSource,
+    cfg.trayIconPath,
+)
+
+
 def defaultApplicationIconPath() -> str:
     return str(ASSET_DIR / "logo.png")
 

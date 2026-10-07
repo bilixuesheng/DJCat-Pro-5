@@ -2,6 +2,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 from qfluentwidgets import FluentIcon as FIF, RoundMenu
 
@@ -109,14 +110,14 @@ class MainWindowReplicaTest(TestCase):
 
     def testContentFollowsTheSettings(self):
         replica = self._replica()
-        self.assertEqual(replica.windowTitle(), APP_NAME)
+        self.assertEqual(replica.titleText(), APP_NAME)
         self.assertFalse(replica.navigationButtons["CreditsPage"].isHidden())
 
         cfg.set(cfg.windowTitle, "三年二班")
         cfg.set(cfg.showCreditsPage, False)
         replica.layoutFor(self.window.size())
 
-        self.assertEqual(replica.windowTitle(), "三年二班")
+        self.assertEqual(replica.titleText(), "三年二班")
         self.assertTrue(replica.navigationButtons["CreditsPage"].isHidden())
         self.assertEqual(
             [card.titleLabel.text() for card in replica.cards.values()][:2],
@@ -168,6 +169,22 @@ class MainWindowPreviewTest(TestCase):
             pixmap.size(),
             QSize(round(rect.width() * ratio), round(rect.height() * ratio)),
         )
+
+    def testResizingStretchesTheOldPictureUntilTheWindowSettles(self):
+        miniature = self.preview.miniature
+        old = miniature.renderedPixmap()
+
+        self.host.resize(900, 600)
+        self.app.processEvents()
+
+        # 缩放途中只拉伸旧图，不逐步重排复刻；停下来以后才重画。
+        self.assertIs(miniature._pixmapForPaint(), old)
+        QTest.qWait(150)
+        fresh = miniature._pixmapForPaint()
+        self.assertIsNot(fresh, old)
+        rect = self.preview.windowRect()
+        self.assertAlmostEqual(fresh.width() / fresh.height(), 1.5, delta=0.02)
+        self.assertAlmostEqual(rect.width() / rect.height(), 1.5, delta=0.02)
 
     def testTheMainWindowsMinimumSizeIsRespected(self):
         self.host.resize(300, 300)

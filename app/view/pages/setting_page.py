@@ -81,6 +81,7 @@ from app.view.components.setting_section import (
     SettingSectionStack,
     SettingSectionView,
 )
+from app.view.shell.tray import selectedShortcutKeys
 
 # 配置里存的仍是 WINDOW_BACKGROUND_MODES 的原值，这里只换显示文字：第一项不是强调色，
 # 投送跟随深浅主题铺白底或深灰底，倒计时和时钟不论主题都是黑底。
@@ -145,15 +146,7 @@ class LineEditSettingCard(SettingCard):
             cfg.set(self.configItem, self.lineEdit.text())
 
 
-def _selectedTrayHomeCardKeys(value) -> set[str]:
-    return (
-        {key for key in value if isinstance(key, str)}
-        if isinstance(value, list)
-        else set()
-    )
-
-
-class TrayHomeCardList(QWidget):
+class TrayCardShortcutList(QWidget):
     """One switch per Home Card, choosing the Tray Card Shortcuts.
 
     The switches are named after Home Cards and follow the home page, so they
@@ -200,7 +193,7 @@ class TrayHomeCardList(QWidget):
             )
             return cardList
 
-        selected = _selectedTrayHomeCardKeys(cfg.trayHomeCardKeys.value)
+        selected = selectedShortcutKeys(cfg.trayHomeCardKeys.value)
         for entry in self._homeCards:
             key = entry["key"]
             card = SwitchSettingCard(
@@ -217,7 +210,7 @@ class TrayHomeCardList(QWidget):
         return cardList
 
     def _setHomeCardEnabled(self, key: str, enabled: bool) -> None:
-        selected = _selectedTrayHomeCardKeys(cfg.trayHomeCardKeys.value)
+        selected = selectedShortcutKeys(cfg.trayHomeCardKeys.value)
         if enabled:
             selected.add(key)
         else:
@@ -228,7 +221,7 @@ class TrayHomeCardList(QWidget):
         )
 
     def _syncSwitches(self, keys) -> None:
-        selected = _selectedTrayHomeCardKeys(keys)
+        selected = selectedShortcutKeys(keys)
         for key, card in self.switches.items():
             with QSignalBlocker(card.switchButton):
                 card.setChecked(key in selected)
@@ -619,7 +612,7 @@ class SettingPage(QWidget):
                 cfg.trayHomeCardsInSubmenu,
             ),
         ]
-        self.trayHomeCardList = TrayHomeCardList()
+        self.trayCardShortcutList = TrayCardShortcutList()
         self.showCreditsCard = SwitchSettingCard(
             FluentIcon.HEART,
             "显示特别鸣谢入口",
@@ -976,7 +969,7 @@ class SettingPage(QWidget):
             parentView.addNavigationCard(card)
         return view
 
-    def _homeCardPreview(self, preview):
+    def _registerHomeCardPreview(self, preview):
         """Previews of the main window draw the Home Cards the home page has."""
         self._homeCardPreviews.append(preview)
         return preview
@@ -991,7 +984,7 @@ class SettingPage(QWidget):
             "主页横幅的显示与自定义",
             ROOT_SECTION_KEY,
         )
-        banner.addPreview(self._homeCardPreview(MainWindowPreview()))
+        banner.addPreview(self._registerHomeCardPreview(MainWindowPreview()))
         banner.addCardList(
             [
                 self.showBannerCard,
@@ -1105,7 +1098,7 @@ class SettingPage(QWidget):
             "应用主题、主题色、窗口背景透明材质和窗口过渡动画",
             "personalization",
         )
-        appearance.addPreview(self._homeCardPreview(MainWindowPreview()))
+        appearance.addPreview(self._registerHomeCardPreview(MainWindowPreview()))
         appearance.addCardList(
             [
                 self.themeModeCard,
@@ -1121,7 +1114,7 @@ class SettingPage(QWidget):
             "主窗口和启动页的图标，系统托盘默认跟随",
             "personalization",
         )
-        applicationIcon.addPreview(self._homeCardPreview(ApplicationIconPreview()))
+        applicationIcon.addPreview(self._registerHomeCardPreview(ApplicationIconPreview()))
         applicationIcon.addCardList(
             [self.applicationIconSourceCard, self.applicationIconCard]
         )
@@ -1132,7 +1125,7 @@ class SettingPage(QWidget):
             "托盘图标、提示文字、点击行为和托盘菜单",
             "personalization",
         )
-        tray.addPreview(self._homeCardPreview(TrayPreview()))
+        tray.addPreview(self._registerHomeCardPreview(TrayPreview()))
         tray.addSubsectionTitle("图标与提示")
         tray.addCardList(
             [self.trayIconSourceCard, self.trayIconCard, self.trayTooltipCard]
@@ -1142,9 +1135,9 @@ class SettingPage(QWidget):
         tray.addSubsectionTitle("托盘菜单")
         tray.addCardList(self.trayMenuCards)
         tray.addSubsectionTitle("主页卡片")
-        tray.addWidget(self.trayHomeCardList)
+        tray.addWidget(self.trayCardShortcutList)
         personalization.addSubsectionTitle("窗口")
-        personalization.addPreview(self._homeCardPreview(MainWindowPreview()))
+        personalization.addPreview(self._registerHomeCardPreview(MainWindowPreview()))
         personalization.addCardList([self.windowTitleCard, self.showCreditsCard])
 
         software = self._addSection(
@@ -1238,37 +1231,31 @@ class SettingPage(QWidget):
                 cardList.setSettingCardVisible(card, visible)
 
     def _onChooseApplicationIconClicked(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "选择软件图标",
-            "",
-            "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp *.svg *.ico)",
-        )
-        if not path:
-            return
-        cfg.set(cfg.applicationIconPath, path)
-        cfg.set(cfg.applicationIconSource, "自定义")
+        self._chooseIcon("选择软件图标", cfg.applicationIconPath, cfg.applicationIconSource)
 
     def _onChooseTrayIconClicked(self) -> None:
+        self._chooseIcon("选择托盘图标", cfg.trayIconPath, cfg.trayIconSource)
+
+    def _chooseIcon(self, title: str, pathItem, sourceItem) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "选择托盘图标",
+            title,
             "",
             "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp *.svg *.ico)",
         )
         if not path:
             return
-        cfg.set(cfg.trayIconPath, path)
-        cfg.set(cfg.trayIconSource, "自定义")
+        cfg.set(pathItem, path)
+        cfg.set(sourceItem, "自定义")
 
     def setHomeCards(self, entries) -> None:
-        self.trayHomeCardList.setHomeCards(entries)
+        self.trayCardShortcutList.setHomeCards(entries)
         for preview in self._homeCardPreviews:
             preview.setHomeCards(entries)
 
     @property
-    def trayHomeCardSwitches(self) -> dict:
-        return self.trayHomeCardList.switches
+    def trayCardShortcutSwitches(self) -> dict:
+        return self.trayCardShortcutList.switches
 
     def _onChooseBackgroundImageClicked(self, pathItem, modeItem) -> None:
         path, _ = QFileDialog.getOpenFileName(
