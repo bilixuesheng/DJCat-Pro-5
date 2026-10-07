@@ -46,8 +46,6 @@ from app.view.components.window_background import (
     projectionTitleColor,
 )
 
-PREVIEW_RADIUS = 8
-
 # 投送、倒计时和时钟三种窗口的正文形状不同，预览按各自真实的排布画。
 PROJECTION_CONTENT = "projection"
 COUNTDOWN_CONTENT = "countdown"
