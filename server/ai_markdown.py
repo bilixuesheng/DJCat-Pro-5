@@ -29,6 +29,11 @@ from flask import (
 )
 from werkzeug.security import check_password_hash
 
+try:
+    from .ip_location import ipLocation
+except ImportError:
+    from ip_location import ipLocation
+
 DEFAULT_DAILY_QUOTA = 15
 MAX_CONTENT_LENGTH = 24_000
 MAX_CUSTOM_STYLE_LENGTH = 4_000
@@ -171,6 +176,14 @@ def _databaseIdentity(path, database):
     # Inodes can be reused when a database is replaced at the same path. The
     # schema version distinguishes an empty replacement without tracking writes.
     return (info.st_dev, info.st_ino, schemaVersion)
+
+
+def _migrateMachines(database):
+    # last_location 为 NULL 表示这台机器自 Last Seen 加上属地以来还没上线过，
+    # 空串才表示上线了但属地查不到。
+    columns = {row[1] for row in database.execute("PRAGMA table_info(machines)")}
+    if "last_location" not in columns:
+        database.execute("ALTER TABLE machines ADD COLUMN last_location TEXT")
 
 
 def _migratePromptExamples(database):
@@ -377,7 +390,8 @@ def _connect():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             machine_id TEXT NOT NULL UNIQUE,
             registered_at TEXT NOT NULL,
-            last_seen_at TEXT NOT NULL
+            last_seen_at TEXT NOT NULL,
+            last_location TEXT
         );
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -440,6 +454,7 @@ def _connect():
         GROUP BY machine_id;
                     """
                 )
+                _migrateMachines(database)
                 _migratePromptExamples(database)
                 _initializedDatabases[databaseKey] = _databaseIdentity(
                     databaseKey, database
@@ -551,7 +566,13 @@ def _resetSystemPrompt():
         database.commit()
 
 
-def _registerMachine(machineId):
+def _requestLocation():
+    # Nginx 用自己看到的来源地址覆盖 X-Real-IP，后端只监听 127.0.0.1，客户端伪造不了它。
+    return ipLocation(request.headers.get("X-Real-IP") or request.remote_addr)
+
+
+def _registerMachine(machineId, location):
+    """Register the machine if needed and record its Last Seen and IP Location."""
     now = _nowIso()
     with closing(_connect()) as database:
         database.execute("BEGIN IMMEDIATE")
@@ -561,16 +582,16 @@ def _registerMachine(machineId):
         if row:
             machineNumber = row["id"]
             database.execute(
-                "UPDATE machines SET last_seen_at = ? WHERE id = ?",
-                (now, machineNumber),
+                "UPDATE machines SET last_seen_at = ?, last_location = ? WHERE id = ?",
+                (now, location, machineNumber),
             )
         else:
             cursor = database.execute(
                 """
-                INSERT INTO machines(machine_id, registered_at, last_seen_at)
-                VALUES (?, ?, ?)
+                INSERT INTO machines(machine_id, registered_at, last_seen_at, last_location)
+                VALUES (?, ?, ?, ?)
                 """,
-                (machineId, now, now),
+                (machineId, now, now, location),
             )
             machineNumber = cursor.lastrowid
         database.commit()
@@ -816,7 +837,9 @@ def _requestTooLarge(error):
 def registerMachine():
     try:
         machineId = _machineId((request.get_json(silent=True) or {}).get("machine_id"))
-        return jsonify({"machine_code": _registerMachine(machineId)})
+        return jsonify(
+            {"machine_code": _registerMachine(machineId, _requestLocation())}
+        )
     except ValueError as error:
         return _error(str(error), 400)
     except (RuntimeError, sqlite3.Error) as error:
@@ -830,6 +853,7 @@ def quota():
         machineCode = _registeredMachineCode(machineId)
         if not machineCode:
             return _error("设备尚未注册", 404)
+        _registerMachine(machineId, _requestLocation())
         _recoverStaleRequests()
         peakEnabled = _setting("peak_enabled", "1") == "1"
         limit = _dailyQuota(machineId)
@@ -884,7 +908,7 @@ def convert():
 
     day = _today()
     try:
-        _registerMachine(machineId)
+        _registerMachine(machineId, _requestLocation())
         limit = _dailyQuota(machineId)
         cost = _quotaCost()
         model = _deepseekModel()
@@ -1222,6 +1246,7 @@ def _machineRows(search="", sort="registered", machineId=None):
                 m.machine_id,
                 m.registered_at,
                 m.last_seen_at,
+                m.last_location,
                 COALESCE(u.count, 0) AS used,
                 o.daily_limit AS override,
                 COALESCE(t.requests, 0) + COALESCE(r.requests, 0) AS requests
@@ -1247,6 +1272,7 @@ def _machineRows(search="", sort="registered", machineId=None):
                 "fingerprint": row["machine_id"],
                 "registered_at": row["registered_at"],
                 "last_seen_at": row["last_seen_at"],
+                "location": row["last_location"],
                 "used": row["used"],
                 "limit": limit,
                 "override": row["override"],

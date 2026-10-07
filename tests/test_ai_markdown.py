@@ -5,6 +5,7 @@ import unittest
 from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from PySide6.QtTest import QTest
@@ -21,7 +22,7 @@ from app.view.pages.broadcast_page import (
     _iterSseContent,
 )
 from app.view.pages.setting_page import CUSTOM_STYLE_PLACEHOLDER, SettingPage
-from app.view.windows.main_window import MachineRegistrationWorker
+from app.view.windows.main_window import MachineRegistrationWorker, MainWindow
 from server import ai_markdown
 from tests.support import isolateCfg
 
@@ -264,6 +265,14 @@ class AIMarkdownTest(unittest.TestCase):
         self.assertNotIn("高峰", page.aiQuotaCard.contentLabel.text())
         page._onAIQuotaReceived(-1, -1, 1, None, "")
         self.assertNotIn("高峰", page.aiQuotaCard.contentLabel.text())
+
+    def testMainWindowReportsToTheServerOnEveryStartup(self):
+        cfg.set(cfg.aiMarkdownMachineCode, "DJ-000123")
+        window = SimpleNamespace(_onMachineRegistered=lambda code: None)
+        with patch("app.view.windows.main_window.threading.Thread") as thread:
+            MainWindow._startMachineRegistration(window)
+        thread.return_value.start.assert_called_once_with()
+        self.assertIsInstance(window.machineRegistrationWorker, MachineRegistrationWorker)
 
     def testClientRegistersMachineOnFirstStartup(self):
         response = MagicMock()
