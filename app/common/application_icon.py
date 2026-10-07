@@ -33,15 +33,33 @@ def _cachedIcon(path: str, fallback: str) -> QIcon:
 
 
 def applicationIcon() -> QIcon:
-    """Resolve the icon shared by the window, splash screen and system tray."""
+    """Resolve the icon shared by the main window and splash screen."""
     default = defaultApplicationIconPath()
     if cfg.applicationIconSource.value != "自定义":
         return _cachedIcon(default, default)
     return _cachedIcon(cfg.applicationIconPath.value, default)
 
 
+def _customTrayIcon() -> QIcon | None:
+    if cfg.trayIconSource.value != "自定义":
+        return None
+    icon = _cachedIcon(cfg.trayIconPath.value, cfg.trayIconPath.value)
+    # 自定义的托盘图片丢了就退回跟随，而不是让托盘变成空白。
+    return None if icon.isNull() else icon
+
+
+def trayIcon() -> QIcon:
+    """The Tray Icon follows the Application Icon unless it has its own image."""
+    custom = _customTrayIcon()
+    return custom if custom is not None else applicationIcon()
+
+
 def trayHomeIcon() -> QIcon:
-    """The Tray Menu "主页" entry keeps its own cat icon in default mode."""
+    """The Tray Menu "主页" entry follows the Tray Icon, but while both follow
+    the default it keeps its own cat icon."""
+    custom = _customTrayIcon()
+    if custom is not None:
+        return custom
     cat = str(ASSET_DIR / "logo_cat.png")
     if cfg.applicationIconSource.value != "自定义":
         return _cachedIcon(cat, cat)

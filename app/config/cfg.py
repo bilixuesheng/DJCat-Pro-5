@@ -106,6 +106,13 @@ class Config(QConfig):
         "Personalization", "ShowCreditsPage", True, BoolValidator()
     )
 
+    trayIconSource = OptionsConfigItem(
+        "Tray",
+        "IconSource",
+        "跟随软件图标",
+        OptionsValidator(["跟随软件图标", "自定义"]),
+    )
+    trayIconPath = ConfigItem("Tray", "IconPath", "")
     trayLeftClickAction = OptionsConfigItem(
         "Tray",
         "LeftClickAction",

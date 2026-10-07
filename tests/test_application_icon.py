@@ -5,7 +5,7 @@ from unittest import TestCase
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication
 
-from app.common.application_icon import applicationIcon, trayHomeIcon
+from app.common.application_icon import applicationIcon, trayHomeIcon, trayIcon
 from app.config.cfg import cfg
 from tests.support import isolateCfg
 
@@ -64,3 +64,42 @@ class ApplicationIconTest(TestCase):
         cfg.set(cfg.applicationIconSource, "自定义")
 
         self.assertEqual(_color(applicationIcon()), default)
+
+
+class TrayIconTest(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance()
+
+    def setUp(self):
+        self.tempDir = isolateCfg(self)
+
+    def testTheTrayFollowsTheApplicationIconByDefault(self):
+        self.assertEqual(cfg.trayIconSource.defaultValue, "跟随软件图标")
+        self.assertEqual(cfg.trayIconPath.defaultValue, "")
+        path = self.tempDir / "application.png"
+        _saveIcon(path, "#ce352c")
+        cfg.set(cfg.applicationIconPath, str(path))
+        cfg.set(cfg.applicationIconSource, "自定义")
+
+        self.assertIs(trayIcon(), applicationIcon())
+        self.assertEqual(_color(trayHomeIcon()), "#ce352c")
+
+    def testACustomTrayIconLeavesTheWindowIconAlone(self):
+        path = self.tempDir / "tray.png"
+        _saveIcon(path, "#2c7ace")
+        windowIcon = _color(applicationIcon())
+
+        cfg.set(cfg.trayIconPath, str(path))
+        cfg.set(cfg.trayIconSource, "自定义")
+
+        self.assertEqual(_color(trayIcon()), "#2c7ace")
+        # 托盘菜单的“主页”入口属于托盘，跟着托盘图标换。
+        self.assertEqual(_color(trayHomeIcon()), "#2c7ace")
+        self.assertEqual(_color(applicationIcon()), windowIcon)
+
+    def testAMissingCustomTrayFileFallsBackToFollowing(self):
+        cfg.set(cfg.trayIconPath, str(self.tempDir / "gone.png"))
+        cfg.set(cfg.trayIconSource, "自定义")
+
+        self.assertEqual(_color(trayIcon()), _color(applicationIcon()))

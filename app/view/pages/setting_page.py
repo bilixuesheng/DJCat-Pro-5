@@ -4,7 +4,7 @@ from collections import Counter
 from typing import NamedTuple
 
 from loguru import logger
-from PySide6.QtCore import QUrl, Qt, QTimer, Signal
+from PySide6.QtCore import QSignalBlocker, QUrl, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
@@ -60,7 +60,10 @@ from app.platform.background_effect import BACKGROUND_EFFECTS
 from app.signal_bus import signalBus
 from app.view.components.color_dialog import ColorDialog
 from app.view.components.scroll_area import registerTouchDragTarget
-from app.view.components.setting_card_group import CollapsibleSettingCard
+from app.view.components.setting_card_group import (
+    CollapsibleSettingCard,
+    SettingCardList,
+)
 from app.view.components.setting_preview import (
     CLOCK_CONTENT,
     COUNTDOWN_CONTENT,
@@ -141,6 +144,95 @@ class LineEditSettingCard(SettingCard):
         self.saveTimer.stop()
         if self.configItem.value != self.lineEdit.text():
             cfg.set(self.configItem, self.lineEdit.text())
+
+
+def _selectedTrayHomeCardKeys(value) -> set[str]:
+    return (
+        {key for key in value if isinstance(key, str)}
+        if isinstance(value, list)
+        else set()
+    )
+
+
+class TrayHomeCardList(QWidget):
+    """One switch per Home Card, choosing the Tray Card Shortcuts.
+
+    The switches are named after Home Cards and follow the home page, so they
+    stay out of the section's card lists and never become Setting Suggestions.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._homeCards = []
+        self.switches = {}
+        self.vBoxLayout = QVBoxLayout(self)
+        self.cardList = self._createCardList()
+
+        self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
+        self.vBoxLayout.addWidget(self.cardList)
+        cfg.trayHomeCardKeys.valueChanged.connect(self._syncSwitches)
+
+    def cards(self) -> tuple[QWidget, ...]:
+        return self.cardList.settingCards()
+
+    def setHomeCards(self, entries) -> None:
+        self._homeCards = []
+        keys = set()
+        for entry in entries or []:
+            key = entry.get("key") if isinstance(entry, dict) else None
+            if not isinstance(key, str) or not key or key in keys:
+                continue
+            keys.add(key)
+            self._homeCards.append(entry)
+
+        oldList = self.cardList
+        self.cardList = self._createCardList()
+        self.vBoxLayout.replaceWidget(oldList, self.cardList)
+        oldList.deleteLater()
+
+    def _createCardList(self) -> SettingCardList:
+        cardList = SettingCardList(self)
+        self.switches = {}
+        if not self._homeCards:
+            cardList.addSettingCard(
+                SettingCard(
+                    FluentIcon.INFO, "暂无主页卡片", "请先在主页添加或恢复卡片"
+                )
+            )
+            return cardList
+
+        selected = _selectedTrayHomeCardKeys(cfg.trayHomeCardKeys.value)
+        for entry in self._homeCards:
+            key = entry["key"]
+            card = SwitchSettingCard(
+                entry["icon"], entry["title"], entry.get("description", "")
+            )
+            card.setChecked(key in selected)
+            card.checkedChanged.connect(
+                lambda checked, cardKey=key: self._setHomeCardEnabled(
+                    cardKey, checked
+                )
+            )
+            self.switches[key] = card
+            cardList.addSettingCard(card)
+        return cardList
+
+    def _setHomeCardEnabled(self, key: str, enabled: bool) -> None:
+        selected = _selectedTrayHomeCardKeys(cfg.trayHomeCardKeys.value)
+        if enabled:
+            selected.add(key)
+        else:
+            selected.discard(key)
+        cfg.set(
+            cfg.trayHomeCardKeys,
+            [entry["key"] for entry in self._homeCards if entry["key"] in selected],
+        )
+
+    def _syncSwitches(self, keys) -> None:
+        selected = _selectedTrayHomeCardKeys(keys)
+        for key, card in self.switches.items():
+            with QSignalBlocker(card.switchButton):
+                card.setChecked(key in selected)
 
 
 class CacheSettingCard(SettingCard):
@@ -465,7 +557,7 @@ class SettingPage(QWidget):
             "选择图片",
             FluentIcon.FOLDER,
             "自定义软件图标",
-            "选择窗口、启动页和系统托盘使用的本地图标",
+            "选择主窗口和启动页使用的本地图标",
         )
         self.windowTitleCard = LineEditSettingCard(
             FluentIcon.APPLICATION,
@@ -474,13 +566,60 @@ class SettingPage(QWidget):
             configItem=cfg.windowTitle,
             placeholder=APP_NAME,
         )
+        self.trayIconSourceCard = ComboBoxSettingCard(
+            cfg.trayIconSource,
+            FluentIcon.APPLICATION,
+            "托盘图标",
+            "跟随软件图标，或单独为系统托盘选一张图片",
+            texts=["跟随软件图标", "自定义"],
+        )
+        self.trayIconCard = PushSettingCard(
+            "选择图片",
+            FluentIcon.FOLDER,
+            "自定义托盘图标",
+            "选择系统托盘和托盘菜单“主页”使用的本地图标",
+        )
         self.trayTooltipCard = LineEditSettingCard(
             FluentIcon.INFO,
-            "自定义托盘文本",
+            "托盘提示文字",
             "设置鼠标悬停在系统托盘图标上时显示的文字，留空时使用默认文本",
             configItem=cfg.trayTooltip,
             placeholder=APP_NAME,
         )
+        self.trayLeftClickCard = ComboBoxSettingCard(
+            cfg.trayLeftClickAction,
+            FluentIcon.MENU,
+            "左键单击",
+            "选择打开主窗口或显示托盘菜单",
+            texts=["打开主窗口", "显示托盘菜单"],
+        )
+        self.trayMenuCards = [
+            SwitchSettingCard(
+                FluentIcon.PLAY,
+                "显示定时播报总开关",
+                "在托盘菜单中开启或关闭定时播报总开关",
+                cfg.showBroadcastTrayAction,
+            ),
+            SwitchSettingCard(
+                FluentIcon.HISTORY,
+                "显示自动任务总开关",
+                "在托盘菜单中开启或关闭自动任务总开关",
+                cfg.showHomeCardTaskTrayAction,
+            ),
+            SwitchSettingCard(
+                FluentIcon.POWER_BUTTON,
+                "显示定时关机总开关",
+                "在托盘菜单中开启或关闭定时关机总开关",
+                cfg.showShutdownTrayAction,
+            ),
+            SwitchSettingCard(
+                FluentIcon.FOLDER,
+                "放入二级菜单",
+                "将已选主页卡片统一收进“主页卡片”菜单",
+                cfg.trayHomeCardsInSubmenu,
+            ),
+        ]
+        self.trayHomeCardList = TrayHomeCardList()
         self.showCreditsCard = SwitchSettingCard(
             FluentIcon.HEART,
             "显示特别鸣谢入口",
@@ -951,7 +1090,7 @@ class SettingPage(QWidget):
             "personalization",
             "个性化",
             FluentIcon.BRUSH,
-            "应用主题、颜色和托盘显示",
+            "外观、软件图标、系统托盘和窗口标题",
             ROOT_SECTION_KEY,
         )
         appearance = self._addSection(
@@ -974,18 +1113,33 @@ class SettingPage(QWidget):
             "personalization.icon",
             "软件图标",
             FluentIcon.APPLICATION,
-            "窗口、启动页和系统托盘共享的图标",
+            "主窗口和启动页的图标，系统托盘默认跟随",
             "personalization",
         )
         applicationIcon.addPreview(ApplicationIconPreview())
         applicationIcon.addCardList(
             [self.applicationIconSourceCard, self.applicationIconCard]
         )
-        personalization.addSubsectionTitle("窗口与托盘")
-        personalization.addPreview(WindowTextPreview())
-        personalization.addCardList(
-            [self.windowTitleCard, self.trayTooltipCard, self.showCreditsCard]
+        tray = self._addSection(
+            "personalization.tray",
+            "系统托盘",
+            FluentIcon.MENU,
+            "托盘图标、提示文字、点击行为和托盘菜单",
+            "personalization",
         )
+        tray.addSubsectionTitle("图标与提示")
+        tray.addCardList(
+            [self.trayIconSourceCard, self.trayIconCard, self.trayTooltipCard]
+        )
+        tray.addSubsectionTitle("点击行为")
+        tray.addCardList([self.trayLeftClickCard])
+        tray.addSubsectionTitle("托盘菜单")
+        tray.addCardList(self.trayMenuCards)
+        tray.addSubsectionTitle("主页卡片")
+        tray.addWidget(self.trayHomeCardList)
+        personalization.addSubsectionTitle("窗口")
+        personalization.addPreview(WindowTextPreview())
+        personalization.addCardList([self.windowTitleCard, self.showCreditsCard])
 
         software = self._addSection(
             "software",
@@ -1024,6 +1178,7 @@ class SettingPage(QWidget):
     def _bind(self) -> None:
         self.breadcrumbBar.currentItemChanged.connect(self.navigateToRoute)
         self.applicationIconCard.clicked.connect(self._onChooseApplicationIconClicked)
+        self.trayIconCard.clicked.connect(self._onChooseTrayIconClicked)
         self.chooseImageCard.clicked.connect(self._onChooseImageClicked)
         for prefix, cards in self._backgroundCardSets.items():
             modeItem, _colorItem, imagePathItem, _scaleItem = _backgroundItems(prefix)
@@ -1040,6 +1195,7 @@ class SettingPage(QWidget):
         self.errorLogCard.clicked.connect(self._onOpenErrorLogClicked)
         self.aiQuotaReceived.connect(self._onAIQuotaReceived)
         cfg.applicationIconSource.valueChanged.connect(self._refreshConditionalCards)
+        cfg.trayIconSource.valueChanged.connect(self._refreshConditionalCards)
         cfg.bannerImageSource.valueChanged.connect(self._onBannerImageSourceChanged)
         cfg.bannerImageSource.valueChanged.connect(self._refreshConditionalCards)
         cfg.aiMarkdownMachineCode.valueChanged.connect(self._onMachineCodeChanged)
@@ -1057,6 +1213,7 @@ class SettingPage(QWidget):
     def _conditionalCardVisibility(self) -> dict[QWidget, bool]:
         visibility = {
             self.applicationIconCard: cfg.applicationIconSource.value == "自定义",
+            self.trayIconCard: cfg.trayIconSource.value == "自定义",
             self.chooseImageCard: cfg.bannerImageSource.value == "自定义",
         }
         for prefix, (_modeCard, colorCard, imageCard, scaleCard) in (
@@ -1085,6 +1242,25 @@ class SettingPage(QWidget):
             return
         cfg.set(cfg.applicationIconPath, path)
         cfg.set(cfg.applicationIconSource, "自定义")
+
+    def _onChooseTrayIconClicked(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择托盘图标",
+            "",
+            "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp *.svg *.ico)",
+        )
+        if not path:
+            return
+        cfg.set(cfg.trayIconPath, path)
+        cfg.set(cfg.trayIconSource, "自定义")
+
+    def setHomeCards(self, entries) -> None:
+        self.trayHomeCardList.setHomeCards(entries)
+
+    @property
+    def trayHomeCardSwitches(self) -> dict:
+        return self.trayHomeCardList.switches
 
     def _onChooseBackgroundImageClicked(self, pathItem, modeItem) -> None:
         path, _ = QFileDialog.getOpenFileName(

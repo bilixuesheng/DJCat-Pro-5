@@ -16,7 +16,7 @@ from qfluentwidgets.common.screen import getCurrentScreenGeometry
 from qfluentwidgets.components.widgets.menu import MenuActionListWidget
 from qframelesswindow import WindowEffect
 
-from app.common.application_icon import applicationIcon, trayHomeIcon
+from app.common.application_icon import trayHomeIcon, trayIcon
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
 
@@ -167,12 +167,17 @@ class SystemTrayIcon(QSystemTrayIcon):
 
     def __init__(self, parent=None, homeCards=None):
         super().__init__(parent=parent)
-        self._updateApplicationIcon()
+        self._updateTrayIcon()
 
         self._updateTrayTooltip(cfg.trayTooltip.value)
 
-        cfg.applicationIconSource.valueChanged.connect(self._updateApplicationIcon)
-        cfg.applicationIconPath.valueChanged.connect(self._updateApplicationIcon)
+        for item in (
+            cfg.applicationIconSource,
+            cfg.applicationIconPath,
+            cfg.trayIconSource,
+            cfg.trayIconPath,
+        ):
+            item.valueChanged.connect(self._updateTrayIcon)
         cfg.trayTooltip.valueChanged.connect(self._updateTrayTooltip)
 
         self._homeCards = []
@@ -188,8 +193,8 @@ class SystemTrayIcon(QSystemTrayIcon):
     def _updateTrayTooltip(self, text):
         self.setToolTip(text.strip() or APP_NAME)
 
-    def _updateApplicationIcon(self, _value=None):
-        self.setIcon(applicationIcon())
+    def _updateTrayIcon(self, _value=None):
+        self.setIcon(trayIcon())
         self._homeIcon = trayHomeIcon()
         if hasattr(self, "showAction"):
             self.showAction.setIcon(self._homeIcon)

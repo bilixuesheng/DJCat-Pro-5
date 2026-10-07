@@ -244,15 +244,18 @@ class LazyCreditsPage(LazyPage):
         return CreditsPage(self)
 
 
-class LazyTrayControlPage(LazyPage):
+class LazySettingPage(LazyPage):
+    appStoreCacheCleared = Signal()
+
     def __init__(self, parent=None):
-        super().__init__("TrayControlPage", parent)
+        super().__init__("SettingPage", parent)
         self._homeCards = []
 
     def _createPage(self):
-        from app.view.pages.tray_control_page import TrayControlPage
+        from app.view.pages.setting_page import SettingPage
 
-        page = TrayControlPage(self)
+        page = SettingPage(self)
+        page.appStoreCacheCleared.connect(self.appStoreCacheCleared.emit)
         page.setHomeCards(self._homeCards)
         return page
 
@@ -262,22 +265,8 @@ class LazyTrayControlPage(LazyPage):
             self.page.setHomeCards(self._homeCards)
 
     @property
-    def homeCardSwitches(self):
-        return self.ensureLoaded().homeCardSwitches
-
-
-class LazySettingPage(LazyPage):
-    appStoreCacheCleared = Signal()
-
-    def __init__(self, parent=None):
-        super().__init__("SettingPage", parent)
-
-    def _createPage(self):
-        from app.view.pages.setting_page import SettingPage
-
-        page = SettingPage(self)
-        page.appStoreCacheCleared.connect(self.appStoreCacheCleared.emit)
-        return page
+    def trayHomeCardSwitches(self):
+        return self.ensureLoaded().trayHomeCardSwitches
 
     def searchSuggestions(self, text):
         return self.ensureLoaded().searchSuggestions(text)
@@ -1100,7 +1089,6 @@ class MainWindow(MSFluentWindow):
         self.homePage = HomePage(self)
         self.appStorePage = LazyAppStorePage(self)
         self.creditsPage = LazyCreditsPage(self)
-        self.trayControlPage = LazyTrayControlPage(self)
         self.settingPage = LazySettingPage(self)
         self.broadcastEditPage = None
         self.countdownPage = None
@@ -1132,12 +1120,6 @@ class MainWindow(MSFluentWindow):
             position=NavigationItemPosition.BOTTOM,
         )
         self._setCreditsPageVisible(cfg.showCreditsPage.value)
-        self.addSubInterface(
-            self.trayControlPage,
-            FIF.MENU,
-            "托盘控件",
-            position=NavigationItemPosition.BOTTOM,
-        )
         self.addSubInterface(
             self.settingPage,
             FIF.SETTING,
@@ -1193,7 +1175,7 @@ class MainWindow(MSFluentWindow):
         ]
         if normalized != cfg.trayHomeCardKeys.value:
             cfg.set(cfg.trayHomeCardKeys, normalized)
-        self.trayControlPage.setHomeCards(entries)
+        self.settingPage.setHomeCards(entries)
         if self.homeCardTaskPage is not None:
             self.homeCardTaskPage.setHomeCards(entries)
         tray = getattr(self, "tray", None)
