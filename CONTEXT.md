@@ -187,7 +187,7 @@ _Avoid_: account、license、raw hardware ID
 _Avoid_: Machine Identity、activation code、license key
 
 **Daily Quota**:
-每个 Machine Identity 每个北京时间自然日可用于 AI Markdown Conversion 的额度点数，于 0 点刷新。失败请求不最终占用额度。
+每个 Machine Identity 每个北京时间自然日可用于 AI Markdown Conversion 的额度点数，于 0 点刷新。失败请求不最终占用额度。默认所有 Machine Identity 相同；管理员可以给单个 Machine Identity 长期指定另一个值（0 表示停用），多给或少给都行，扣点规则不变。指定的值跟着 Machine Identity 走：重装 Windows 后得到的新 Machine Identity 回到默认值。
 _Avoid_: request count（高峰时一次请求可能消耗两点）、token quota
 
 **Peak Hours**:
