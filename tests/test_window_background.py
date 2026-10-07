@@ -4,13 +4,14 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, Qt, QTime
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QWidget
-from qfluentwidgets import Theme, qconfig
+from qfluentwidgets import FluentIcon as FIF, Theme, qconfig
 
 from app.config.cfg import WINDOW_BACKGROUND_MODES, WINDOW_BACKGROUND_SCALE_MODES, cfg
 from app.view.components.setting_preview import (
+    CLOCK_CONTENT,
     COUNTDOWN_CONTENT,
     PROJECTION_CONTENT,
     WINDOW_PREVIEW_HEIGHT,
@@ -482,3 +483,97 @@ class WindowBackgroundTest(TestCase):
         self.assertEqual(colorDialog.call_args.args[1], "选择背景颜色")
         self.assertNotIn("Choose", colorDialog.call_args.args[1])
         colorDialog.return_value.deleteLater.assert_called_once_with()
+
+
+class WindowBackgroundPreviewFurnitureTest(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance()
+
+    def setUp(self):
+        isolateCfg(self)
+
+    def _preview(self, kind, prefix):
+        preview = WindowBackgroundPreview(
+            getattr(cfg, f"{prefix}BackgroundMode"),
+            getattr(cfg, f"{prefix}BackgroundColor"),
+            getattr(cfg, f"{prefix}BackgroundImagePath"),
+            getattr(cfg, f"{prefix}BackgroundScaleMode"),
+            kind,
+            getattr(cfg, f"{prefix}ActionButtonPosition"),
+        )
+        self.addCleanup(preview.deleteLater)
+        return preview
+
+    def testButtonsUseTheRealIconsShapeAndOrder(self):
+        preview = self._preview(PROJECTION_CONTENT, "broadcast")
+        rects = preview.actionButtonRects()
+        screenScale = WINDOW_PREVIEW_HEIGHT / QApplication.primaryScreen().geometry().height()
+
+        self.assertEqual(
+            preview.actionButtonIcons(), [FIF.EDIT, FIF.MINIMIZE, FIF.COPY, FIF.CLOSE]
+        )
+        for rect in rects:
+            self.assertAlmostEqual(rect.width() / rect.height(), 80 / 65, places=3)
+        # 按钮比按屏幕等比缩小时稍大，彼此仍相隔真实的 12 / 80；离窗口边照屏幕比例。
+        self.assertGreaterEqual(rects[0].width(), 80 * screenScale)
+        spacing = rects[1].left() - rects[0].right()
+        self.assertAlmostEqual(spacing / rects[0].width(), 12 / 80, places=3)
+        margin = 12 * screenScale
+        self.assertAlmostEqual(preview.width() - rects[-1].right(), margin, places=3)
+        self.assertAlmostEqual(preview.height() - rects[-1].bottom(), margin, places=3)
+
+        cfg.set(cfg.broadcastActionButtonPosition, "左下角")
+        self.assertEqual(preview.actionButtonIcons()[0], FIF.CLOSE)
+        self.assertAlmostEqual(preview.actionButtonRects()[0].left(), margin, places=3)
+
+        self.assertEqual(
+            self._preview(COUNTDOWN_CONTENT, "countdown").actionButtonIcons(),
+            [FIF.SYNC, FIF.COPY, FIF.CLOSE],
+        )
+        self.assertEqual(
+            self._preview(CLOCK_CONTENT, "fullscreenClock").actionButtonIcons(),
+            [FIF.COPY, FIF.CLOSE],
+        )
+
+    def testProjectionShowsTheSavedTitle(self):
+        preview = self._preview(PROJECTION_CONTENT, "broadcast")
+        self.assertEqual(preview.projectionTitle(), "投送标题")
+
+        cfg.set(cfg.broadcastTitle, "  今日作业 ")
+
+        self.assertEqual(preview.projectionTitle(), "今日作业")
+
+    def testClockShowsTheTimeThePreviewAppeared(self):
+        preview = self._preview(CLOCK_CONTENT, "fullscreenClock")
+        shown = QTime(9, 24, 30)
+        with patch(
+            "app.view.components.setting_preview.QTime.currentTime", return_value=shown
+        ):
+            preview.show()
+            self.assertEqual(preview.timerText(), "09 : 24 : 30")
+        # 之后的重绘不让秒数跳；下次出现才换成新的时间。
+        self.assertEqual(preview.timerText(), "09 : 24 : 30")
+        preview.hide()
+        before = QTime.currentTime().toString("HH : mm : ss")
+        preview.show()
+        text = preview.timerText()
+        self.assertIn(text, (before, QTime.currentTime().toString("HH : mm : ss")))
+        self.assertEqual(
+            self._preview(COUNTDOWN_CONTENT, "countdown").timerText(), "00 : 45 : 00"
+        )
+
+    def testMarginsFollowTheRealWindow(self):
+        scale = WINDOW_PREVIEW_HEIGHT / QApplication.primaryScreen().geometry().height()
+        for kind, prefix, margins in (
+            (PROJECTION_CONTENT, "broadcast", (40, 20, 40, 0)),
+            (COUNTDOWN_CONTENT, "countdown", (40, 20, 40, 20)),
+        ):
+            with self.subTest(kind=kind):
+                preview = self._preview(kind, prefix)
+                content = preview.contentRect()
+                left, top, right, bottom = (value * scale for value in margins)
+                self.assertAlmostEqual(content.left(), left, delta=0.6)
+                self.assertAlmostEqual(content.top(), top, delta=0.6)
+                self.assertAlmostEqual(preview.width() - content.right(), right, delta=0.6)
+                self.assertAlmostEqual(preview.height() - content.bottom(), bottom, delta=0.6)

@@ -285,6 +285,12 @@ class SettingSectionView(ScrollArea):
             self.vBoxLayout.addWidget(widget)
         return widget
 
+    def addWidget(self, widget: QWidget) -> QWidget:
+        """Content that is neither a preview nor a searchable card list."""
+        widget.setParent(self.container)
+        self.vBoxLayout.addWidget(widget)
+        return widget
+
     def addNavigationCard(self, card: SettingNavigationCard) -> SettingNavigationCard:
         card.setParent(self.container)
         self.vBoxLayout.addWidget(card)

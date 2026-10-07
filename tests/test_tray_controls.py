@@ -6,11 +6,13 @@ from PySide6.QtGui import QColor, QIcon, QImage, QInputDevice
 from PySide6.QtWidgets import QApplication, QScroller, QWidget
 from PySide6.QtTest import QTest
 from shiboken6 import isValid
-from qfluentwidgets import FluentIcon as FIF, RoundMenu
+from qfluentwidgets import FluentIcon as FIF, RoundMenu, StrongBodyLabel
 
+from app.common.application_icon import applicationIcon
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
 from app.config.paths import ASSET_DIR
+from app.view.components.setting_section import ROOT_SECTION_KEY
 from app.view.pages.home_page import HomePage
 from app.view.pages.setting_page import SettingPage
 from app.view.windows.main_window import MainWindow
@@ -142,86 +144,160 @@ class HomeCardTrayInterfaceTest(TestCase):
         self.assertFalse(self.page.activateHomeCard("missing"))
         self.assertEqual(clicks, ["全屏投送"])
 
-    def testTrayControlPagePreservesSelectionsOutsideCurrentSnapshot(self):
-        from app.view.pages.tray_control_page import TrayControlPage
+    def _settingPage(self):
+        patcher = patch("app.view.pages.setting_page.threading.Thread")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        page = SettingPage()
+        self.addCleanup(page.deleteLater)
+        return page
 
+    def testTraySectionSitsUnderPersonalization(self):
+        page = self._settingPage()
+
+        self.assertEqual(
+            page.routeFor("personalization.tray"),
+            [ROOT_SECTION_KEY, "personalization", "personalization.tray"],
+        )
+        self.assertEqual(page.routeLabel("personalization.tray"), "个性化 › 系统托盘")
+        view = page.sectionStack.view("personalization.tray")
+        self.assertEqual(
+            [card.titleLabel.text() for card in view.settingCards()],
+            [
+                "托盘图标",
+                "自定义托盘图标",
+                "托盘提示文字",
+                "左键单击",
+                "显示定时播报总开关",
+                "显示自动任务总开关",
+                "显示定时关机总开关",
+                "放入二级菜单",
+            ],
+        )
+        self.assertEqual(
+            [
+                label.text()
+                for label in view.container.findChildren(StrongBodyLabel)
+                if label.parent() is view.container
+            ],
+            ["图标与提示", "点击行为", "托盘菜单", "主页卡片"],
+        )
+        personalization = page.sectionStack.view("personalization")
+        self.assertNotIn(page.trayTooltipCard, personalization.settingCards())
+
+    def testTraySectionPreservesSelectionsOutsideCurrentSnapshot(self):
         cfg.set(cfg.trayHomeCardKeys, ["missing", "全屏投送"])
-        trayPage = TrayControlPage()
-        try:
-            trayPage.setHomeCards(self.page.homeCardEntries())
+        page = self._settingPage()
 
-            self.assertEqual(
-                cfg.trayHomeCardKeys.value,
-                ["missing", "全屏投送"],
-            )
-            self.assertEqual(
-                list(trayPage.homeCardSwitches),
-                ["考试倒计时", "全屏投送", "定时播报", "定时关机"],
-            )
-            self.assertTrue(
-                trayPage.homeCardSwitches["全屏投送"].isChecked()
-            )
-        finally:
-            trayPage.deleteLater()
+        page.setHomeCards(self.page.homeCardEntries())
 
-    def testTrayControlPagePersistsClickAndCardChoices(self):
-        from app.view.pages.tray_control_page import TrayControlPage
+        self.assertEqual(cfg.trayHomeCardKeys.value, ["missing", "全屏投送"])
+        self.assertEqual(
+            list(page.trayCardShortcutSwitches),
+            ["考试倒计时", "全屏投送", "定时播报", "定时关机"],
+        )
+        self.assertTrue(page.trayCardShortcutSwitches["全屏投送"].isChecked())
 
-        trayPage = TrayControlPage()
-        try:
-            trayPage.setHomeCards(self.page.homeCardEntries())
-            trayPage.leftClickCard.comboBox.setCurrentIndex(1)
-            trayPage.homeCardSwitches["考试倒计时"].setChecked(True)
+    def testTraySectionPersistsClickAndCardChoices(self):
+        page = self._settingPage()
+        page.setHomeCards(self.page.homeCardEntries())
 
-            self.assertEqual(cfg.trayLeftClickAction.value, "ShowMenu")
-            self.assertEqual(cfg.trayHomeCardKeys.value, ["考试倒计时"])
-        finally:
-            trayPage.deleteLater()
+        page.trayLeftClickCard.comboBox.setCurrentIndex(1)
+        page.trayCardShortcutSwitches["考试倒计时"].setChecked(True)
 
-    def testTrayControlPageUsesFullTaskNames(self):
-        from app.view.pages.tray_control_page import TrayControlPage
+        self.assertEqual(cfg.trayLeftClickAction.value, "ShowMenu")
+        self.assertEqual(cfg.trayHomeCardKeys.value, ["考试倒计时"])
 
-        trayPage = TrayControlPage()
-        try:
-            self.assertEqual(
-                [card.titleLabel.text() for card in trayPage.menuCards[:3]],
-                [
-                    "显示定时播报总开关",
-                    "显示自动任务总开关",
-                    "显示定时关机总开关",
-                ],
-            )
-        finally:
-            trayPage.deleteLater()
+    def testTraySwitchesFollowSelectionsMadeElsewhere(self):
+        page = self._settingPage()
+        page.setHomeCards(self.page.homeCardEntries())
 
-    def testTrayControlPageKeepsTouchScrollingAndNativeControlSizes(self):
-        from app.view.pages.tray_control_page import TrayControlPage
+        cfg.set(cfg.trayHomeCardKeys, ["定时关机"])
 
-        trayPage = TrayControlPage()
-        trayPage.setHomeCards(self.page.homeCardEntries())
-        trayPage.show()
+        self.assertTrue(page.trayCardShortcutSwitches["定时关机"].isChecked())
+        self.assertFalse(page.trayCardShortcutSwitches["全屏投送"].isChecked())
+
+    def testTraySectionWithoutHomeCardsSaysSo(self):
+        page = self._settingPage()
+
+        page.setHomeCards([])
+
+        self.assertEqual(page.trayCardShortcutSwitches, {})
+        self.assertEqual(
+            [card.titleLabel.text() for card in page.trayCardShortcutList.cards()],
+            ["暂无主页卡片"],
+        )
+
+    def testHomeCardSwitchesAreNotOfferedAsSuggestions(self):
+        page = self._settingPage()
+        page.setHomeCards(self.page.homeCardEntries())
+        switches = set(page.trayCardShortcutSwitches.values())
+
+        cards = [suggestion.card for suggestion in page.searchSuggestions("定时关机")]
+
+        self.assertEqual(cards, [page.trayMenuCards[2]])
+        self.assertFalse(switches & set(cards))
+        self.assertIn(
+            page.trayLeftClickCard,
+            [suggestion.card for suggestion in page.searchSuggestions("左键")],
+        )
+
+    def testCustomTrayIconCardOnlyAppearsForCustomSource(self):
+        page = self._settingPage()
+        cards = lambda: [s.card for s in page.searchSuggestions("托盘图标")]
+
+        self.assertTrue(page.trayIconCard.isHidden())
+        self.assertNotIn(page.trayIconCard, cards())
+
+        cfg.set(cfg.trayIconSource, "自定义")
+
+        self.assertFalse(page.trayIconCard.isHidden())
+        self.assertIn(page.trayIconCard, cards())
+
+    def testTrayIconPickerStoresSelectedPath(self):
+        page = self._settingPage()
+        with patch(
+            "app.view.pages.setting_page.QFileDialog.getOpenFileName",
+            return_value=("C:/icons/tray.ico", ""),
+        ):
+            page.trayIconCard.clicked.emit()
+
+        self.assertEqual(cfg.trayIconPath.value, "C:/icons/tray.ico")
+        self.assertEqual(cfg.trayIconSource.value, "自定义")
+
+    def testTraySectionUsesFullTaskNames(self):
+        page = self._settingPage()
+
+        self.assertEqual(
+            [card.titleLabel.text() for card in page.trayMenuCards[:3]],
+            ["显示定时播报总开关", "显示自动任务总开关", "显示定时关机总开关"],
+        )
+
+    def testTraySectionKeepsTouchScrollingAndNativeControlSizes(self):
+        page = self._settingPage()
+        page.setHomeCards(self.page.homeCardEntries())
+        page.resize(900, 640)
+        page.show()
+        page.navigateToRoute("personalization.tray", animated=False)
         self.app.processEvents()
-        try:
-            self.assertTrue(QScroller.hasScroller(trayPage.viewport()))
+        view = page.sectionStack.view("personalization.tray")
+
+        self.assertTrue(QScroller.hasScroller(view.viewport()))
+        self.assertEqual(
+            page.trayLeftClickCard.comboBox.height(),
+            page.trayLeftClickCard.comboBox.sizeHint().height(),
+        )
+        for card in [*page.trayMenuCards, *page.trayCardShortcutSwitches.values()]:
             self.assertEqual(
-                trayPage.leftClickCard.comboBox.height(),
-                trayPage.leftClickCard.comboBox.sizeHint().height(),
+                card.switchButton.height(), card.switchButton.sizeHint().height()
             )
-            cards = [*trayPage.menuCards, *trayPage.homeCardSwitches.values()]
-            for card in cards:
-                self.assertEqual(
-                    card.switchButton.height(),
-                    card.switchButton.sizeHint().height(),
-                )
-                self.assertLessEqual(
-                    abs(
-                        card.switchButton.geometry().center().y()
-                        - card.rect().center().y()
-                    ),
-                    1,
-                )
-        finally:
-            trayPage.deleteLater()
+            self.assertLessEqual(
+                abs(
+                    card.switchButton.geometry().center().y()
+                    - card.rect().center().y()
+                ),
+                1,
+            )
 
 
 class TrayControlNavigationTest(TestCase):
@@ -248,28 +324,18 @@ class TrayControlNavigationTest(TestCase):
         self.app.processEvents()
         self.quotaPatcher.stop()
 
-    def testTrayControlsSitBetweenCreditsAndSettings(self):
+    def testSidebarNoLongerHasItsOwnTrayPage(self):
         routeKeys = list(self.window.navigationInterface.items)
 
-        self.assertLess(
-            routeKeys.index(self.window.creditsPage.objectName()),
-            routeKeys.index(self.window.trayControlPage.objectName()),
-        )
-        self.assertLess(
-            routeKeys.index(self.window.trayControlPage.objectName()),
-            routeKeys.index(self.window.settingPage.objectName()),
-        )
+        self.assertNotIn("TrayControlPage", routeKeys)
+        self.assertFalse(hasattr(self.window, "trayControlPage"))
+
+    def testHomeCardsReachTheTraySectionWithoutLoadingSettings(self):
+        self.assertIsNone(self.window.settingPage.page)
 
         self.assertEqual(
-            list(self.window.trayControlPage.homeCardSwitches),
-            [
-                "全屏投送",
-                "考试倒计时",
-                "全屏时钟",
-                "定时播报",
-                "自动任务",
-                "定时关机",
-            ],
+            list(self.window.settingPage.trayCardShortcutSwitches),
+            ["全屏投送", "考试倒计时", "全屏时钟", "定时播报", "自动任务", "定时关机"],
         )
 
     def testAuthoritativeHomeCardRefreshDropsMissingSelections(self):
@@ -309,7 +375,7 @@ class TrayControlNavigationTest(TestCase):
                 cfg.trayHomeCardKeys.value,
                 ["全屏投送", "app:7:0"],
             )
-            switches = restoredWindow.trayControlPage.homeCardSwitches
+            switches = restoredWindow.settingPage.trayCardShortcutSwitches
             self.assertTrue(switches["全屏投送"].isChecked())
             self.assertTrue(switches["app:7:0"].isChecked())
         finally:
@@ -553,6 +619,37 @@ class TrayMenuTest(TestCase):
             self.assertEqual(
                 tray.showAction.icon().pixmap(24, 24).toImage(),
                 defaultHomeIcon.pixmap(24, 24).toImage(),
+            )
+        finally:
+            tray.deleteLater()
+
+    def testCustomTrayIconReplacesTrayAndHomeActionOnly(self):
+        tray = self._createTray()
+        path = self.tempDir / "tray-icon.png"
+        image = QImage(24, 24, QImage.Format.Format_ARGB32)
+        image.fill(QColor("#2c7ace"))
+        self.assertTrue(image.save(str(path)))
+        try:
+            homeAction = tray.showAction
+
+            cfg.set(cfg.trayIconPath, str(path))
+            cfg.set(cfg.trayIconSource, "自定义")
+
+            self.assertIs(tray.showAction, homeAction)
+            for icon in (tray.icon(), tray.showAction.icon()):
+                self.assertEqual(
+                    icon.pixmap(24, 24).toImage().pixelColor(12, 12).name(),
+                    "#2c7ace",
+                )
+            self.assertNotEqual(
+                applicationIcon().pixmap(24, 24).toImage().pixelColor(12, 12).name(),
+                "#2c7ace",
+            )
+
+            cfg.set(cfg.trayIconSource, "跟随软件图标")
+            self.assertEqual(
+                tray.icon().pixmap(24, 24).toImage(),
+                applicationIcon().pixmap(24, 24).toImage(),
             )
         finally:
             tray.deleteLater()

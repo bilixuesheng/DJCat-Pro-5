@@ -14,7 +14,7 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 - Projection 编辑器的标题保存在 `cfg.broadcastTitle`，离开编辑器后仍保留；正文不作为编辑草稿持久化。
 - **Projection Snapshot** 保存在 `cfg.lastBroadcast`；开始 Projection 时立即写入，关闭或返回编辑只清除活动状态，不删除可再次导入的内容。
 - **Installed Mode** 与 **Portable Mode** 共享相同的目录结构，Storage Migration 移动的是整个 App Data Directory，不是单独的设置文件。
-- **Application Icon** 由个性化设置统一控制；主窗口、启动页、系统托盘和 Tray Menu 的"主页"入口共享自定义图片，但默认模式保留各位置原有资源。
+- **Application Icon** 由个性化设置统一控制，管主窗口和启动页；**Tray Icon** 默认跟随它，也可在「系统托盘」里单独换图。Tray Menu 的"主页"入口跟随 Tray Icon：两者都跟随默认时保留原有的猫图标。
 - **Tray Card Shortcut**、主页固定项和 Application Store 共享 `cfg.pinnedHomeCards` 中的稳定引用；图片缓存路径只是可更新的派生元数据。
 - **Custom Home Card** 包含一个 Action Sequence；`ActionSequenceWorker` 每次执行前读取最新动作列表，同一动作 ID 在一次运行中至多执行一次。
 - Custom Home Card 与 Custom 模式的 **Home Card Task** 共享 `ActionSequenceEditor` 和 Home Action 校验规则；两者只共享编辑与执行能力，不共享标题、图标或持久化对象。
@@ -28,7 +28,7 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 
 **`cfg` 是客户端持久化设置的唯一来源。** 设置页、主页和托盘通过 `cfg.set(...)` 修改值；运行时对象不另建一份需要双向同步的配置副本。
 
-Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cfg.applicationIconPath` 持久化，解析结果统一经 `app/common/application_icon.py` 缓存。主页横幅与设置页的横幅预览共用一份解码后的原图；横幅按物理像素渲染缓存图再标上设备像素比，缓存键包含设备像素比。MainWindow 同步更新 QApplication 和主窗口图标，启动页直接复用主窗口图标；SystemTrayIcon 同步更新系统托盘及已存在的"主页"菜单项，不重建菜单，也不要求重新启动。
+Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cfg.applicationIconPath` 持久化，Tray Icon 由 `cfg.trayIconSource` 与 `cfg.trayIconPath` 持久化，解析结果统一经 `app/common/application_icon.py` 缓存（`applicationIcon()`、`trayIcon()`、`trayHomeIcon()`）；自定义的托盘图片读不到时退回跟随。主页横幅与设置页的横幅预览共用一份解码后的原图；横幅按物理像素渲染缓存图再标上设备像素比，缓存键包含设备像素比。MainWindow 同步更新 QApplication 和主窗口图标，启动页直接复用主窗口图标；SystemTrayIcon 同时监听两组配置，同步更新系统托盘及已存在的"主页"菜单项，不重建菜单，也不要求重新启动。
 
 **`app/platform/animation_timer.py` 独占 Qt 全局 Animation Tick 间隔。** View 和业务模块不直接调用 Qt 私有动画 API；私有符号不可用时保留 Qt 默认行为。
 
@@ -44,6 +44,8 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 **`app/view/components/setting_section.py` 独占设置页的层级导航。** Setting Section 的下钻、返回、面包屑对应的 Setting Route，以及层级之间的推移动画都由它提供；页面只负责装配内容。推移沿用 `SlideNavigationTransitionInfo`：进入下一级时旧页左移出场、新页自右入场，返回时反向，两页共用同一条 `cubic-bezier(0,0,0,1)` 曲线和 300 ms 时长并交叉淡入淡出，不得改成"旧页原地淡出"。位移 150 px 是设备无关像素，不得再乘 `devicePixelRatio`。动画期间只改 `pos` 和不透明度，不碰布局。推移的是两页起步时各 `grab()` 一次的快照，真页面在推移期间隐藏；不得再给整页 `ScrollArea` 挂 `QGraphicsOpacityEffect`。理由见 `docs/adr/0003-settings-drill-in-navigation.md`。
 
+**`app/view/components/setting_preview.py` 独占 Setting Preview。** 画主窗口的预览不截取真实页面（会逼 Lazy Page 提前构造，还会截到设置页自己），而是由 `MainWindowReplica` 用真实组件——导航按钮、`BannerWidget`、主页的 `ActionCard`、标题栏按钮——按主窗口当前尺寸摆好，画到目标两倍大小再平滑缩小，结果按尺寸、设备像素比缓存，配置变化时作废。宽高比实时跟随主窗口（监听 `window()` 的尺寸变化），限高 280；复刻在第一次画时才搭。`tests/test_setting_preview.py` 逐项核对复刻和真实主窗口的几何一致，改主窗口或主页的排布时必须同步改复刻。托盘预览的菜单来自 `buildTrayMenu()`，按 `AcrylicMenu`／`RoundMenu` 的定位规则 1:1 摆在任务栏右侧。投送、倒计时和时钟的预览按屏幕比例画全屏，标题、正文和按钮离窗口边的距离照真实窗口的比例；角落按钮用真实图标和 80 × 65 的比例，缩放取屏幕比例与 0.4 中较大的一个，否则图标只剩几个像素；时钟定格在预览出现的那一刻。理由见 `docs/adr/0007-setting-preview-replica.md`。
+
 **设置页搜索只产出 Setting Suggestion。** 页面本身不筛选、不折叠、不重排；建议只按 Setting Card 的标题匹配，条件隐藏的卡片不参与，跨 Section 重名的标题才补完整 Route 前缀。`SettingPage` 提供 `searchSuggestions()` 和 `navigateToRoute()`，弹窗由 MainWindow 拥有——搜索框属于标题栏，设置页不得反向持有它。选中建议后清空搜索框、跳到目标 Route、滚动到卡片并描一圈主题色边框，绝不改写用户的前置设置来让隐藏卡片现身。
 
 **每个 Setting Section 各自是一个 `ScrollArea`，各自记住滚动位置。** 返回上一级时停在离开时的位置，触控仲裁沿用 `ScrollArea` 既有实现，页面不另写一套。
@@ -58,13 +60,13 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 需要让出触控的模式调用 `ScrollArea.setTouchScrollSuppressed()`，它把拖动阈值抬到手指够不到的距离，不释放手势；页面不得自己 `QScroller.ungrabGesture()`，也不得对已抓过的 viewport 再调 `QScroller.grabGesture()`（它会先自行 ungrab 再重抓）。不是 `ScrollArea` 的 viewport（Projection 正文的 `QTextEdit`、`MarkdownView`）用 `scroll_area.setTouchScrollSuppressed(viewport, ...)` 做同一件事。Application Store 页面本身不滚动，两个选项卡和详情两栏各自是 `ScrollArea`，进出详情不抑制也不释放任何手势。
 
-**Tray Menu 不拥有 Home Card。** 它只根据 HomePage 提供的入口快照重建菜单，并把稳定 key 交回 MainWindow/HomePage 执行。
+**Tray Menu 不拥有 Home Card。** 它只根据 HomePage 提供的入口快照重建菜单，并把稳定 key 交回 MainWindow/HomePage 执行。菜单内容由 `app/view/shell/tray.py` 的 `buildTrayMenu()` 一处决定，SystemTrayIcon 只在它建好的动作上接信号；「系统托盘」的 Setting Preview 用同一个函数建菜单，不得另写一份菜单项清单。
 
 Tray Menu 的外观和弹出方式固定恢复为 v5.1.2：右键由注册的 context menu 打开，左键按配置调用菜单；位置调整保留在 `showEvent()`，不再叠加新的展开或定位方案。自定义 AcrylicMenu 在 Windows 10 上统一使用方角窗口和方角边框，一级菜单和主页卡片二级菜单保持一致；Windows 11 继续使用原有系统圆角、亚克力和阴影。该平台差异只属于 Tray Menu，不修改下拉框、输入框右键等 QFluentWidgets 菜单。
 
 **HomePage 按稳定 key 复用 Application Home Card。** 不变快照不得重建卡片或重复发布主页变化；标题、图标和动作更新原有卡片，移除时才释放对应 QWidget。
 
-TrayControlPage 只渲染 Tray Card Shortcut 开关，不得在刷新控件时清理 `cfg.trayHomeCardKeys`。MainWindow 必须先恢复 Application Home Card，再用完整的 HomePage 快照移除已经失效的引用，避免启动阶段的临时不完整快照覆盖已保存选择。
+托盘设置都在 Setting Section `个性化 › 系统托盘`（`personalization.tray`），侧边栏没有单独的托盘页。其中的主页卡片开关（`TrayCardShortcutList`）按 Home Card 命名、随主页变化，不属于任何 Setting Card 列表，因此不产生 Setting Suggestion；它只渲染 Tray Card Shortcut 开关，不得在刷新控件时清理 `cfg.trayHomeCardKeys`。MainWindow 必须先恢复 Application Home Card，再用完整的 HomePage 快照移除已经失效的引用，避免启动阶段的临时不完整快照覆盖已保存选择。
 
 ### 主窗口与页面
 
@@ -77,7 +79,7 @@ TrayControlPage 只渲染 Tray Card Shortcut 开关，不得在刷新控件时�
 
 MainWindow 的 Resize Band 宽度使用统一 DPI 比例计算，以 300% 缩放下 35 个物理像素为基准，即 `round(35 × devicePixelRatio / 3)`；窗口切换屏幕时重新计算，因此所有缩放比例都按同一规则变化。Resize Band 在最小化、最大化与关闭三个标题栏按钮上让位：组件库给出缩放命中码后，`MainWindow.nativeEvent` 若发现消息坐标落在按钮矩形内就改判 `HTCLIENT`。判断用消息坐标而不是光标位置，触控按下时两者可能不同；Win11 最大化按钮的 `HTMAXBUTTON`（贴靠布局）不是缩放命中码，不受影响。右上角因此没有斜向缩放，这是有意的；调整基准或标题栏布局时不得为了找回它把命中带重新铺到按钮上。
 
-**HomePage** 是唯一随 MainWindow 立即创建的导航页面。Application Store、Credits、Tray Control 和 Setting 使用 Lazy Page；Projection 编辑、Exam Countdown、Broadcast Task、Home Card Task 和 Shutdown Task 页面通过 `_getTaskPage()` 系列方法首次打开时创建。
+**HomePage** 是唯一随 MainWindow 立即创建的导航页面。Application Store、Credits 和 Setting 使用 Lazy Page；Projection 编辑、Exam Countdown、Broadcast Task、Home Card Task 和 Shutdown Task 页面通过 `_getTaskPage()` 系列方法首次打开时创建。
 
 只有启用了启动恢复且最近一次 Projection 仍处于活动状态，或启动时触发的 Home Card Task 明确打开 Projection 时，MainWindow 才在启动阶段创建 Projection 编辑页面；仅关闭尚未打开的 Projection 不会破坏懒加载。
 
@@ -88,8 +90,7 @@ Lazy Page 必须保留外部调用需要的最小接口：
 | Lazy Page | 加载前可暂存或转发的状态 |
 |---|---|
 | `LazyAppStorePage` | 搜索文字、固定卡片信号与应用卡片失败信号；清缓存和关闭在未加载时为空操作 |
-| `LazySettingPage` | 缓存清理信号；搜索建议和 Setting Route 导航一律转发给真实页面（导航到设置页必然已 `ensureLoaded()`，搜索框只在该页可见） |
-| `LazyTrayControlPage` | 最新 Home Card 列表 |
+| `LazySettingPage` | 缓存清理信号与最新 Home Card 列表（主页卡片开关和画主窗口、托盘的 Setting Preview 都要用）；搜索建议和 Setting Route 导航一律转发给真实页面（导航到设置页必然已 `ensureLoaded()`，搜索框只在该页可见） |
 | `LazyCreditsPage` | 无业务状态 |
 
 调用方不得直接依赖 `lazyPage.page` 的存在；需要真实页面时调用 `ensureLoaded()`，只做关闭或缓存失效时应保持未加载状态。
@@ -262,10 +263,10 @@ Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` �
 | `app/view/components/update_toast.py` | Update Toast 的三种状态、按钮和底边进度线；不知道下载、版本和安装的规则 |
 | `app/view/components/window_transition.py` | Window Transition：Display Window 在全屏、窗口化和 Floating Button 之间切换的快照形变、动画层和交接顺序 |
 | `app/view/components/setting_section.py` | Setting Section 的下钻容器、导航行、推移动画和命中高亮 |
-| `app/view/components/setting_preview.py` | Setting Preview：按真实排布复刻整个主窗口（标题栏／导航栏／横幅／卡片）、投送与倒计时窗口（标题／正文或大时间／角落按钮，按钮位置跟随对应配置）、软件图标四处用法、主题小窗和标题栏＋Windows 通知区域 |
+| `app/view/components/setting_preview.py` | Setting Preview：`MainWindowReplica` 用真实组件按主窗口当前尺寸复刻整个主窗口（横幅、外观、个性化、软件图标四处共用）、托盘菜单与任务栏、投送／倒计时／时钟窗口（标题、正文或大时间、角落按钮） |
 | `app/view/components/color_dialog.py` | QFluentWidgets 颜色选择弹窗换上项目 `ScrollArea`，色板和亮度滑块登记为触控拖动目标 |
 | `app/view/components/setting_suggestion_menu.py` | Setting Suggestion 弹窗；选中后交回 Route，不把文本写回搜索框 |
-| `app/common/application_icon.py` | Application Icon 的解析：主窗口、启动页、托盘与 Tray Menu“主页”共用一处 |
+| `app/common/application_icon.py` | Application Icon 与 Tray Icon 的解析：主窗口、启动页、托盘与 Tray Menu“主页”共用一处 |
 | `app/common/logs.py` | Log 的位置、14 天保留、Cache 中可清理的日志，以及旧 `APP_DIR\Log` 的迁入 |
 | `pyqt_github_markdown/` | 项目内置 Markdown 渲染器；不承载 DJCat 业务规则 |
 
@@ -302,7 +303,7 @@ set working directory
       → HomePage eagerly
       → register Lazy Pages without constructing their real pages
       → restore Application Home Card from cfg.pinnedHomeCards
-      → publish the complete Home Card snapshot to Tray Control and Tray Menu
+      → publish the complete Home Card snapshot to the Setting page and Tray Menu
       → create tray and long-lived timers/workers
       → restore valid active Projection Snapshot only when recovery is enabled
       → dispatch startup event and, when applicable, silent-startup event

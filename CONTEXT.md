@@ -28,9 +28,13 @@ _Avoid_: workflow、macro
 
 ### 系统托盘
 
-**Application Icon**:
-DJCat 主窗口、启动页和系统托盘共享的软件图标。默认模式保留原有主 Logo，Tray Menu 的"主页"入口继续使用独立的猫图标；自定义模式使用同一张本地图片替换这些位置。
-_Avoid_: Home Card 图标、Application Store 中 Application 的图标
+**Application Icon（软件图标）**:
+DJCat 主窗口和启动页共用的软件图标。默认模式使用原有主 Logo，自定义模式使用一张本地图片替换。Tray Icon 默认跟随它。
+_Avoid_: Tray Icon（只在跟随时才相同）、Home Card 图标、Application Store 中 Application 的图标
+
+**Tray Icon（托盘图标）**:
+系统托盘里代表 DJCat 的图标，取值只有两种："跟随软件图标"（默认）或"自定义"，自定义时换成另一张本地图片，不影响主窗口和启动页。Tray Menu 的"主页"入口跟着 Tray Icon 变：跟随时和 Application Icon 的规则一样（默认模式显示独立的猫图标，自定义模式显示那张图），Tray Icon 自定义时换成 Tray Icon 那张图。
+_Avoid_: Application Icon、托盘图片
 
 **Tray Menu**:
 DJCat 系统托盘图标提供的快捷操作集合。右键始终打开它；左键可配置为打开 Tray Menu 或显示主窗口。Tray Menu 不拥有 Home Card，只根据主页快照重建菜单。
@@ -295,7 +299,7 @@ Setting Section 中的一行设置项，通常绑定一个 `cfg` 配置项或一
 _Avoid_: 设置项（泛指值本身）、Home Card
 
 **Setting Preview**:
-Setting Section 中按当前配置实时渲染的示意图，随所在 Section 的配置项变化立即重绘。它复刻目标界面的真实排布，而不是孤立地摆一张图片或一段文字。只显示状态，不接受输入。
+Setting Section 中目标界面按当前配置等比缩小后的样子，随所在 Section 的配置项变化立即重绘。它照真实的排布、尺寸和用户自己的数据（例如主页上实际存在的 Home Card）来画，而不是孤立地摆一张图片或一段文字。目标是主窗口时，宽高比跟着主窗口当前的宽高比实时变化。只显示状态，不接受输入。
 _Avoid_: 缩略图、示意图（静态图片）、截图
 
 **Setting Suggestion**:

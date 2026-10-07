@@ -73,8 +73,7 @@ class StartupTest(TestCase):
                 sys.executable,
                 "-c",
                 "import sys; import app.view.windows.main_window; "
-                "pages = ('app_store_page', 'credits_page', "
-                "'tray_control_page', 'setting_page'); "
+                "pages = ('app_store_page', 'credits_page', 'setting_page'); "
                 "print([f'app.view.pages.{page}' in sys.modules "
                 "for page in pages] + "
                 "['app.common.application_store' in sys.modules])",
@@ -86,7 +85,7 @@ class StartupTest(TestCase):
         )
         self.assertEqual(
             result.stdout.strip().splitlines()[-1],
-            "[False, False, False, False, False]",
+            "[False, False, False, False]",
         )
 
     def testMainWindowImportDefersOptionalEditorsAndRenderingDependencies(self):
