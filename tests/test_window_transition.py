@@ -244,7 +244,7 @@ class WindowTransitionTest(TestCase):
         window.minimizeToMini()
 
         self.assertFalse(window.transition.isRunning())
-        self.assertIsNone(window.transition._overlay)
+        self.assertFalse(window.transition._overlay.isVisible())
         self.assertFalse(window.isVisible())
         self.assertTrue(window.miniWindow.isVisible())
         self.assertAlmostEqual(

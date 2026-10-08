@@ -248,6 +248,8 @@ class WindowTransition(QObject):
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._timer.timeout.connect(self._onTick)
+        # 第一次显示时才建原生窗口要多花几十毫秒，全落在第一次点击之后；提前建好。
+        self._ensureOverlay().winId()
 
     def isRunning(self) -> bool:
         return self._phase != _IDLE
@@ -346,7 +348,10 @@ class WindowTransition(QObject):
         self._phase = _ANIMATING
         self._clock.restart()
         self._timer.setInterval(self._frameInterval())
-        self._overlay.setFrame(self._source, target, 0.0)
+        # 动画层已画着起点画面，进度 0 这一帧与它一模一样；不再整片重画一遍，第一帧动起来的
+        # 画面才不被推迟。
+        self._overlay.target = target
+        self._overlay.progress = 0.0
 
     def _reveal(self) -> None:
         overlay = self._overlay

@@ -157,7 +157,10 @@ class TimerWindow(FramelessWindow):
         self.setContentsMargins(margin, margin, margin, margin)
         self.background.setRoundedWindow(self.isWindowed)
         self.background.setGeometry(self.contentsRect())
-        self.setStyleSheet(f"{self.objectName()} {{ background-color: transparent; }}")
+        styleSheet = f"{self.objectName()} {{ background-color: transparent; }}"
+        # 设样式表会重新套用所有子控件的样式；它在 Window Transition 的切换里，没变就不设。
+        if self.styleSheet() != styleSheet:
+            self.setStyleSheet(styleSheet)
         self.titleLabel.setVisible(not self.isWindowed)
         self._setControlsShown(not self.isWindowed)
 
