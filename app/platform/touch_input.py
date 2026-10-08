@@ -9,12 +9,19 @@ screens a tap on a popup's button (the time picker's check mark) lights it up an
 does not click, which offscreen never reproduces, so popup buttons get a safety net.
 """
 
+import math
+
 from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QContextMenuEvent, QGuiApplication
 from PySide6.QtWidgets import QAbstractButton, QApplication
 from shiboken6 import isValid
 
 _SYNTHESIZED_BY_QT = Qt.MouseEventSource.MouseEventSynthesizedByQt
+
+# 微软的触控规范：手指移动 2.7 mm（目标分辨率下约 10 px）以内仍算轻点或按住。
+# Windows 上的 startDragDistance 来自鼠标的 SM_CXDRAG，只有 4 px，按住不动的手指
+# 抖一下就会越过它。
+TOUCH_HOLD_TOLERANCE = 10
 
 
 def _isTouchMouse(event) -> bool:
@@ -63,8 +70,9 @@ class _TouchLongPress(QObject):
         if event.type() != QEvent.Type.TouchUpdate or not event.points():
             self.timer.stop()
             return
-        position = event.points()[0].globalPosition().toPoint()
-        if (position - self.pressPosition).manhattanLength() >= QApplication.startDragDistance():
+        offset = event.points()[0].globalPosition().toPoint() - self.pressPosition
+        tolerance = max(QApplication.startDragDistance(), TOUCH_HOLD_TOLERANCE)
+        if math.hypot(offset.x(), offset.y()) > tolerance:
             self.timer.stop()
 
     def _openContextMenu(self):

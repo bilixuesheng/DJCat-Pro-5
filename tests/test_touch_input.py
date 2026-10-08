@@ -77,6 +77,28 @@ class TouchLongPressTest(TestCase):
         QTest.touchEvent(edit, self.device).release(0, point, edit).commit()
         self.app.processEvents()
 
+    def testFingerJitterOnWindowsStillOpensTheMenu(self):
+        # Windows 的 startDragDistance 取自鼠标的 SM_CXDRAG（4 px）；按住不动的手指
+        # 也会抖上几个像素，长按不能被这点抖动取消。
+        restore = QApplication.startDragDistance()
+        QApplication.setStartDragDistance(4)
+        self.addCleanup(QApplication.setStartDragDistance, restore)
+        edit = LineEdit()
+        self._window(edit)
+        self.addCleanup(self._closePopups)
+        point = edit.rect().center()
+        jitter = [QPoint(3, 0), QPoint(0, 3), QPoint(-3, 2), QPoint(2, -3), QPoint(3, 3)]
+
+        QTest.touchEvent(edit, self.device).press(0, point, edit).commit()
+        for offset in jitter:
+            QTest.qWait(_holdInterval() // len(jitter))
+            QTest.touchEvent(edit, self.device).move(0, point + offset, edit).commit()
+        QTest.qWait(250)
+
+        self.assertIsInstance(QApplication.activePopupWidget(), RoundMenu)
+        QTest.touchEvent(edit, self.device).release(0, point, edit).commit()
+        self.app.processEvents()
+
     def testHoldingAButtonWithoutMenuStillClicksOnRelease(self):
         button = QPushButton("确定")
         clicks = []
