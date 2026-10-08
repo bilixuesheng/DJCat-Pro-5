@@ -3,7 +3,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from PySide6.QtCore import QPoint, QRect
-from PySide6.QtGui import QColor, QImage
+from PySide6.QtGui import QColor, QGuiApplication, QImage
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import qconfig
 
@@ -72,6 +72,28 @@ class WindowTransitionTest(TestCase):
         window.startBroadcast()
         self.pumpUntil(lambda: window.geometry() == window.windowHandle().geometry(), "never fullscreen")
         return window
+
+    def testANewTransitionNeverFlashesTheLastOnesFrame(self):
+        window = self.startBroadcast()
+        transition = window.transition
+        window.toggleWindowMode()
+        self.pumpUntil(lambda: not transition.isRunning(), "Window Transition never ended")
+        window.move(window.pos() + QPoint(-150, -80))
+
+        window.toggleWindowMode()
+
+        # 透明层刚显示、还没重画时，屏幕上是它留着的那张位图（Windows 的透明窗口
+        # 同样如此）：它不能还是上一次过渡的末帧，否则窗口在旧位置闪一下。
+        overlay = transition._overlay
+        onScreen = QGuiApplication.primaryScreen().grabWindow(overlay.winId()).toImage()
+        leftovers = [
+            (x, y)
+            for y in range(0, onScreen.height(), 8)
+            for x in range(0, onScreen.width(), 8)
+            if onScreen.pixelColor(x, y).alpha()
+        ]
+        self.assertEqual(leftovers[:3], [])
+        transition.finish()
 
     def testSwitchHappensUnderTheCoverAndWaitsForIt(self):
         window = self.startCountdown()
@@ -200,7 +222,7 @@ class WindowTransitionTest(TestCase):
         window.restoreFromMini()
         transition = window.transition
         self.assertEqual(
-            transition._overlay.source.rect.toRect(),
+            transition._source.rect.toRect(),
             QRect(button.pos(), button.size()),
         )
         self.pumpUntilAnimating(transition)

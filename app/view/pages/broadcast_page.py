@@ -344,6 +344,7 @@ class FloatingMiniWindow(QWidget):
             self.rect(),
             self.width() / 2,
             opacity=self._opacity,
+            snapshot=self.grab,
             fill=QColor(qconfig.themeColor.value),
             icon=self.btn.icon().pixmap(self.btn.iconSize(), self.devicePixelRatioF()),
         )
