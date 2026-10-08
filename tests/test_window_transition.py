@@ -3,7 +3,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from PySide6.QtCore import QPoint, QRect
-from PySide6.QtGui import QColor, QGuiApplication, QImage
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import qconfig
 
@@ -94,6 +94,50 @@ class WindowTransitionTest(TestCase):
         ]
         self.assertEqual(leftovers[:3], [])
         transition.finish()
+
+    def composeScreen(self, *windows):
+        """各窗口最后刷出的位图按窗口不透明度叠起来：Windows 合成器看到的就是这些。"""
+        screen = QGuiApplication.primaryScreen()
+        image = QImage(screen.geometry().size(), QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(QColor("#336699"))
+        painter = QPainter(image)
+        for window in windows:
+            if window.isVisible():
+                painter.setOpacity(window.windowOpacity())
+                painter.drawPixmap(window.geometry().topLeft(), screen.grabWindow(window.winId()))
+        painter.end()
+        return image
+
+    def testScreenStaysPutUntilTheMorphStarts(self):
+        window = self.startBroadcast()
+        transition = window.transition
+        layers = (window, window.miniWindow, transition._overlay)
+        window.toggleWindowMode()
+        self.pumpUntil(lambda: not transition.isRunning(), "Window Transition never ended")
+        window.move(window.pos() + QPoint(-150, -80))
+
+        for name, action in (
+            ("windowed→fullscreen", window.toggleWindowMode),
+            ("collapse", window.minimizeToMini),
+            ("restore", window.restoreFromMini),
+        ):
+            with self.subTest(name):
+                self.pumpUntil(lambda: not transition.isRunning(), "Window Transition never ended")
+                before = self.composeScreen(*layers)
+                action()
+                frames = [self.composeScreen(*layers)]
+                while transition._phase not in (window_transition._ANIMATING, window_transition._IDLE):
+                    self.app.processEvents()
+                    frames.append(self.composeScreen(*layers))
+                worst = 0
+                for frame in frames:
+                    for y in range(0, before.height(), 4):
+                        for x in range(0, before.width(), 4):
+                            a, b = before.pixelColor(x, y), frame.pixelColor(x, y)
+                            worst = max(worst, abs(a.red() - b.red()), abs(a.green() - b.green()),
+                                        abs(a.blue() - b.blue()))
+                self.assertLessEqual(worst, 2)
+                transition.finish()
 
     def testSwitchHappensUnderTheCoverAndWaitsForIt(self):
         window = self.startCountdown()
