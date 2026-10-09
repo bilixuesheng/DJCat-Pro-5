@@ -75,7 +75,7 @@ from app.common.update_download import (
     takeUpdateFailure,
     validateClientUpdateZip,
 )
-from app.config.cfg import cfg
+from app.config.cfg import cfg, currentThemeColor
 from app.config.constants import (
     APP_NAME,
     DOWNLOAD_URL,
@@ -401,7 +401,7 @@ class MainWindow(MSFluentWindow):
         oldView.hide()
         oldView.deleteLater()
 
-        setThemeColor(cfg.customThemeColor.value)
+        setThemeColor(currentThemeColor())
         self._toggleTheme(cfg.customThemeMode.value)
         cfg.customThemeMode.valueChanged.connect(self._toggleTheme)
         self._applyBackgroundEffect()

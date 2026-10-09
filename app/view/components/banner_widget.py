@@ -4,7 +4,7 @@ from pathlib import Path
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
-from qfluentwidgets import qconfig
+from qfluentwidgets import themeColor
 
 from app.config.cfg import (
     BANNER_IMAGE_PRESETS,
@@ -148,7 +148,7 @@ class BannerWidget(QWidget):
         if self._cachedPixmap:
             painter.drawPixmap(0, 0, self._cachedPixmap)
         else:
-            painter.fillPath(path, qconfig.themeColor.value)
+            painter.fillPath(path, themeColor())
 
     def resizeEvent(self, event):
         self._invalidateCache()

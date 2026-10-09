@@ -57,7 +57,7 @@ from qfluentwidgets import (
     ToolButton,
     TransitionStackedWidget,
     isDarkTheme,
-    qconfig,
+    themeColor,
 )
 from qfluentwidgets import FluentIcon as FIF
 
@@ -538,7 +538,7 @@ class ActionProgressButton(PrimaryPushButton):
         top = self.height() - PROGRESS_LINE_HEIGHT
         segment = max(24.0, width * 0.28)
         x = -segment + (width + segment) * self._lineOffset
-        color = QColor(qconfig.themeColor.value)
+        color = QColor(themeColor())
         trackColor = QColor(color)
         trackColor.setAlpha(75)
         button = QPainterPath()

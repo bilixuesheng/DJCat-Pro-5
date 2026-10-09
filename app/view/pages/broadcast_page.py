@@ -172,10 +172,12 @@ class _VerticalButtonMixin:
             hover = "rgba(0, 0, 0, 26)"
             pressed = "rgba(0, 0, 0, 20)"
             foreground = "black"
+        # 与 Setting Preview 同一道细边：主题色的关闭按钮落在同色背景上（如罗小黑配黑底）也能分辨。
+        edge = "rgba(255, 255, 255, 110)" if dark else "rgba(0, 0, 0, 40)"
 
         self.setStyleSheet(
             f"QPushButton {{ color: {foreground}; background-color: {normal};"
-            " border: none; border-radius: 8px; padding: 0; }"
+            f" border: 1px solid {edge}; border-radius: 8px; padding: 0; }}"
             f" QPushButton:hover {{ background-color: {hover}; }}"
             f" QPushButton:pressed {{ background-color: {pressed}; }}"
         )

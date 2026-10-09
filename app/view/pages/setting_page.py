@@ -26,6 +26,7 @@ from qfluentwidgets import (
     LineEdit,
     MessageBox,
     PrimaryPushSettingCard,
+    PushButton,
     PushSettingCard,
     RadioButton,
     RangeSettingCard,
@@ -50,9 +51,11 @@ from app.common.logs import clearableLogSize, clearLogs
 from app.config.cfg import (
     BANNER_IMAGE_PRESETS,
     BANNER_PRESET_SCALE_MODES,
+    CUSTOM_THEME_COLOR,
     THEME_COLOR_PRESETS,
     WINDOW_BACKGROUND_SCALE_MODES,
     cfg,
+    currentThemeColor,
 )
 from app.config.constants import APP_NAME, AUTHOR, AUTHOR_URL, VERSION, YEAR
 from app.config.paths import LOG_DIR
@@ -330,66 +333,85 @@ class ThemeColorSettingCard(CollapsibleSettingCard):
             name: _ColorSwatch(QColor(*rgb), self.radioWidget)
             for name, rgb in THEME_COLOR_PRESETS
         }
-        self.customButton = RadioButton("自定义颜色", self.radioWidget)
+        self.customButton = RadioButton(CUSTOM_THEME_COLOR, self.radioWidget)
+        self.customSwatch = _ColorSwatch(cfg.customThemeColor.value, self.radioWidget)
+        self.chooseColorButton = PushButton("选择颜色", self.radioWidget)
 
     def _initLayout(self) -> None:
         self.addWidget(self.choiceSwatch)
         self.addWidget(self.choiceLabel)
         self.radioLayout.setSpacing(19)
         self.radioLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.radioLayout.setContentsMargins(48, 18, 0, 18)
-        for name, button in [*self.presetButtons.items(), (None, self.customButton)]:
+        self.radioLayout.setContentsMargins(48, 18, 48, 18)
+        rows = [
+            (button, self.presetSwatches[name], None)
+            for name, button in self.presetButtons.items()
+        ]
+        rows.append((self.customButton, self.customSwatch, self.chooseColorButton))
+        for button, swatch, action in rows:
             self.buttonGroup.addButton(button)
             row = QHBoxLayout()
             row.setSpacing(8)
             row.addWidget(button)
-            if name is not None:
-                row.addWidget(self.presetSwatches[name])
+            row.addWidget(swatch)
             row.addStretch(1)
+            if action is not None:
+                row.addWidget(action)
             self.radioLayout.addLayout(row)
         self.addGroupWidget(self.radioWidget)
 
     def _bind(self) -> None:
         self.buttonGroup.buttonClicked.connect(self._onButtonClicked)
+        self.chooseColorButton.clicked.connect(self._chooseCustomColor)
         qconfig.themeColorChanged.connect(self.choiceSwatch.setColor)
 
     def _loadSelection(self) -> None:
         preset = cfg.themeColorPreset.value
-        button = self.customButton if preset == "自定义" else self.presetButtons[preset]
-        button.setChecked(True)
+        button = self.presetButtons.get(preset, self.customButton)
+        with QSignalBlocker(self.buttonGroup):
+            button.setChecked(True)
         self.choiceLabel.setText(button.text())
+        self.customSwatch.setColor(cfg.customThemeColor.value)
+        self.customSwatch.setVisible(cfg.hasCustomThemeColor.value is True)
 
     def _onButtonClicked(self, button) -> None:
-        self.choiceLabel.setText(button.text())
-        preset = next(
-            (
-                name
-                for name, presetButton in self.presetButtons.items()
-                if button is presetButton
-            ),
-            None,
-        )
-        if preset is None:
-            cfg.set(cfg.themeColorPreset, "自定义")
-            dialog = ColorDialog(
-                cfg.customThemeColor.value,
-                "选择主题色",
-                self.window(),
-            )
-            dialog.colorChanged.connect(self._setThemeColor)
-            try:
-                dialog.exec()
-            finally:
-                dialog.deleteLater()
+        if button is self.customButton:
+            if cfg.hasCustomThemeColor.value is True:
+                self._apply(CUSTOM_THEME_COLOR)
+            else:
+                self._chooseCustomColor()
             return
-        cfg.set(cfg.themeColorPreset, preset)
-        rgb = next(rgb for name, rgb in THEME_COLOR_PRESETS if name == preset)
-        self._setThemeColor(QColor(*rgb))
+        preset = next(
+            name
+            for name, presetButton in self.presetButtons.items()
+            if button is presetButton
+        )
+        self._apply(preset)
 
-    @staticmethod
-    def _setThemeColor(color: QColor) -> None:
-        cfg.set(cfg.customThemeColor, color)
-        setThemeColor(color)
+    def _chooseCustomColor(self) -> None:
+        initial = (
+            cfg.customThemeColor.value
+            if cfg.hasCustomThemeColor.value is True
+            else currentThemeColor()
+        )
+        dialog = ColorDialog(initial, "选择主题色", self.window())
+        dialog.colorChanged.connect(self._setCustomColor)
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
+            # 取消时单选项可能已被点到「自定义」上，按配置复位。
+            self._loadSelection()
+
+    def _setCustomColor(self, color: QColor) -> None:
+        cfg.set(cfg.customThemeColor, QColor(color))
+        cfg.set(cfg.hasCustomThemeColor, True)
+        self._apply(CUSTOM_THEME_COLOR)
+
+    def _apply(self, preset: str) -> None:
+        cfg.set(cfg.themeColorPreset, preset)
+        setThemeColor(currentThemeColor())
+        self._loadSelection()
 
 
 class AIMarkdownStyleSettingCard(CollapsibleSettingCard):

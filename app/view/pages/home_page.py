@@ -42,6 +42,7 @@ from qfluentwidgets import (
     ToolButton,
     qconfig,
     setCustomStyleSheet,
+    themeColor,
 )
 from qfluentwidgets import FluentIcon as FIF
 
@@ -316,7 +317,7 @@ class ActionCard(CardWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         color = (
-            qconfig.themeColor.value
+            themeColor()
             if self._editing or self.isHover
             else QColor(128, 128, 128, 55)
         )
