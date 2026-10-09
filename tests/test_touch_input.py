@@ -1,279 +1,168 @@
 from unittest import TestCase
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QTime
-from PySide6.QtGui import QGuiApplication, QInputDevice
+from PySide6.QtCore import QPoint, Qt, QTime
+from PySide6.QtGui import QInputDevice
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
-from qfluentwidgets import LineEdit, MSFluentWindow, RoundMenu
+from qfluentwidgets import CardWidget, LineEdit
 
+from app.platform.touch_input import enableTouchPressFeedback
 from app.view.components.task_picker import TouchTimePicker
 
-from app.platform.touch_input import enableTouchInput, enableTouchTitleBarDrag
+
+def _windowsTouchScreen():
+    """A touch screen as Windows reports it: Qt synthesizes no mouse events, because
+    Windows sends its own once it has told a tap from a drag or a press-and-hold."""
+    return QTest.createTouchDevice(
+        QInputDevice.DeviceType.TouchScreen,
+        QInputDevice.Capability.Position | QInputDevice.Capability.MouseEmulation,
+    )
 
 
-def _holdInterval():
-    return QGuiApplication.styleHints().mousePressAndHoldInterval()
-
-
-class TouchLongPressTest(TestCase):
-    """Offscreen Qt synthesizes left-button mouse events from touch, as Windows does
-    under ``nomousefromtouch``; nothing there turns a held finger into a right click."""
-
+class TouchPressFeedbackTest(TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance()
-        enableTouchInput(cls.app)
+        enableTouchPressFeedback(cls.app)
 
     def setUp(self):
-        self.device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
-        # offscreen 的空剪贴板 mimeData() 是 None，LineEdit 的右键菜单读它会出错。
-        QApplication.clipboard().setText("粘贴")
+        self.device = _windowsTouchScreen()
 
-    def _window(self, *widgets):
+    def _show(self, *widgets):
         window = QWidget()
         layout = QVBoxLayout(window)
         for widget in widgets:
             layout.addWidget(widget)
-        window.resize(320, 200)
+        window.resize(320, 240)
         window.show()
         self.addCleanup(window.deleteLater)
         self.app.processEvents()
         return window
 
-    def _closePopups(self):
-        while (popup := QApplication.activePopupWidget()) is not None:
-            popup.close()
-            self.app.processEvents()
+    def _press(self, widget, point=None):
+        point = widget.rect().center() if point is None else point
+        QTest.touchEvent(widget, self.device).press(0, point, widget).commit()
+        self.app.processEvents()
+        return point
 
-    def testHoldingStillOnTextBoxOpensItsMenu(self):
-        edit = LineEdit()
-        self._window(edit)
-        self.addCleanup(self._closePopups)
-        point = edit.rect().center()
-
-        QTest.touchEvent(edit, self.device).press(0, point, edit).commit()
-        QTest.qWait(_holdInterval() + 150)
-
-        menu = QApplication.activePopupWidget()
-        self.assertIsInstance(menu, RoundMenu)
-        QTest.touchEvent(edit, self.device).release(0, point, edit).commit()
-        QTest.qWait(50)
-        self.assertIs(QApplication.activePopupWidget(), menu)
-
-    def testMovingBeforeTheHoldEndsOpensNothing(self):
-        edit = LineEdit()
-        self._window(edit)
-        self.addCleanup(self._closePopups)
-        point = edit.rect().center()
-
-        QTest.touchEvent(edit, self.device).press(0, point, edit).commit()
-        QTest.qWait(50)
-        QTest.touchEvent(edit, self.device).move(
-            0, point + QPoint(QApplication.startDragDistance() + 5, 0), edit
-        ).commit()
-        QTest.qWait(_holdInterval() + 150)
-
-        self.assertIsNone(QApplication.activePopupWidget())
-        QTest.touchEvent(edit, self.device).release(0, point, edit).commit()
+    def _release(self, widget, point):
+        QTest.touchEvent(widget, self.device).release(0, point, widget).commit()
         self.app.processEvents()
 
-    def testFingerJitterOnWindowsStillOpensTheMenu(self):
-        # Windows 的 startDragDistance 取自鼠标的 SM_CXDRAG（4 px）；按住不动的手指
-        # 也会抖上几个像素，长按不能被这点抖动取消。
-        restore = QApplication.startDragDistance()
-        QApplication.setStartDragDistance(4)
-        self.addCleanup(QApplication.setStartDragDistance, restore)
-        edit = LineEdit()
-        self._window(edit)
-        self.addCleanup(self._closePopups)
-        point = edit.rect().center()
-        jitter = [QPoint(3, 0), QPoint(0, 3), QPoint(-3, 2), QPoint(2, -3), QPoint(3, 3)]
-
-        QTest.touchEvent(edit, self.device).press(0, point, edit).commit()
-        for offset in jitter:
-            QTest.qWait(_holdInterval() // len(jitter))
-            QTest.touchEvent(edit, self.device).move(0, point + offset, edit).commit()
-        QTest.qWait(250)
-
-        self.assertIsInstance(QApplication.activePopupWidget(), RoundMenu)
-        QTest.touchEvent(edit, self.device).release(0, point, edit).commit()
-        self.app.processEvents()
-
-    def testHoldingAButtonWithoutMenuStillClicksOnRelease(self):
-        button = QPushButton("确定")
+    def _clicks(self, button):
         clicks = []
         button.clicked.connect(lambda: clicks.append(True))
-        self._window(button)
-        point = button.rect().center()
+        return clicks
 
-        QTest.touchEvent(button, self.device).press(0, point, button).commit()
-        QTest.qWait(_holdInterval() + 150)
-        QTest.touchEvent(button, self.device).release(0, point, button).commit()
-        self.app.processEvents()
+    def testButtonLooksPressedWhileTheFingerIsDown(self):
+        button = QPushButton("确定")
+        clicks = self._clicks(button)
+        self._show(button)
 
-        self.assertIsNone(QApplication.activePopupWidget())
+        point = self._press(button)
+        self.assertTrue(button.isDown())
+        self._release(button, point)
+
+        self.assertFalse(button.isDown())
+        self.assertEqual(clicks, [])
+
+    def testWindowsTapAfterTheLiftClicksOnce(self):
+        button = QPushButton("确定")
+        clicks = self._clicks(button)
+        self._show(button)
+
+        point = self._press(button)
+        self._release(button, point)
+        QTest.mouseClick(button, Qt.MouseButton.LeftButton, pos=point)
+
+        self.assertEqual(clicks, [True])
+        self.assertFalse(button.isDown())
+
+    def testWindowsPressBeforeTheLiftKeepsTheButtonPressed(self):
+        # 手指挪过轻点容差后 Windows 当场补发按下；抬手时不能再把按钮复位，否则
+        # 随后到来的松开就点不中了。
+        button = QPushButton("确定")
+        clicks = self._clicks(button)
+        self._show(button)
+
+        point = self._press(button)
+        QTest.mousePress(button, Qt.MouseButton.LeftButton, pos=point)
+        self._release(button, point)
+        QTest.mouseRelease(button, Qt.MouseButton.LeftButton, pos=point)
+
         self.assertEqual(clicks, [True])
 
+    def testCardLooksPressedWhileTheFingerIsDown(self):
+        card = CardWidget()
+        card.setFixedHeight(80)
+        self._show(card)
 
-class TouchTitleBarDragTest(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.app = QApplication.instance()
+        point = self._press(card)
+        self.assertTrue(card.isPressed)
+        self._release(card, point)
 
-    def setUp(self):
-        self.device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
+        self.assertFalse(card.isPressed)
 
-    def _window(self):
-        window = MSFluentWindow()
-        self.titleBarDrag = enableTouchTitleBarDrag(window.titleBar)
-        window.resize(500, 400)
-        window.move(100, 100)
-        window.show()
-        self.addCleanup(window.deleteLater)
-        self.app.processEvents()
-        return window
-
-    def _touch(self, titleBar, action, globalPoint):
-        """Keep the finger fixed on the screen while the window moves under it."""
-        local = titleBar.mapFromGlobal(globalPoint)
-        getattr(QTest.touchEvent(titleBar, self.device), action)(
-            0, local, titleBar
-        ).commit()
-        self.app.processEvents()
-
-    def _drag(self, window, delta):
-        titleBar = window.titleBar
-        start = titleBar.mapToGlobal(QPoint(titleBar.width() // 2, titleBar.height() // 2))
-        self._touch(titleBar, "press", start)
-        for step in range(1, 6):
-            QTest.qWait(16)
-            self._touch(titleBar, "move", start + delta * step / 5)
-        self._touch(titleBar, "release", start + delta)
-        return start + delta
-
-    def testFingerDragOnTitleBarMovesTheWindow(self):
-        window = self._window()
-        before = window.pos()
-
-        self._drag(window, QPoint(120, 80))
-
-        self.assertEqual(window.pos(), before + QPoint(120, 80))
-
-    def testTapOnTitleBarLeavesTheWindowInPlace(self):
-        window = self._window()
-        before = window.pos()
-
-        self._drag(window, QPoint(1, 1))
-
-        self.assertEqual(window.pos(), before)
-
-    def testFingerDragReportsItsStartAndEndOnceButATapReportsNothing(self):
-        window = self._window()
-        events = []
-        self.titleBarDrag.moveStarted.connect(lambda: events.append("started"))
-        self.titleBarDrag.moveFinished.connect(lambda: events.append("finished"))
-
-        self._drag(window, QPoint(120, 80))
-        self.assertEqual(events, ["started", "finished"])
-
-        # 先拖后点：两次按下落在同一处会被当成双击标题栏。
-        self._drag(window, QPoint(1, 1))
-        self.assertEqual(events, ["started", "finished"])
-
-    def testFingerDragRestoresMaximizedWindowUnderTheFinger(self):
-        window = self._window()
-        window.showMaximized()
-        self.app.processEvents()
-        self.assertTrue(window.isMaximized())
-
-        finger = self._drag(window, QPoint(60, 120))
-
-        self.assertFalse(window.isMaximized())
-        self.assertEqual(window.width(), 500)
-        # 按下时手指在最大化窗口正中，还原后仍应落在窗口宽度的正中。
-        local = window.mapFromGlobal(finger)
-        self.assertAlmostEqual(local.x(), window.width() / 2, delta=2)
-        self.assertTrue(window.titleBar.geometry().contains(local))
-
-
-class _SwallowRelease(QObject):
-    """Stands in for the Windows path that loses the lift before the button sees it."""
-
-    def __init__(self, button):
-        super().__init__()
-        self.button = button
-
-    def eventFilter(self, obj, event):
-        return obj is self.button and event.type() == QEvent.Type.MouseButtonRelease
-
-
-class TouchPopupTapTest(TestCase):
-    """On the touch screens a finger tap on the time picker's check mark lights it up
-    and then does nothing; offscreen never reproduced why, so these simulate the ways
-    the lift can go missing and require the tap to click exactly once regardless."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.app = QApplication.instance()
-        enableTouchInput(cls.app)
-
-    def setUp(self):
-        self.device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
-
-    def _openPanel(self):
+    def testPopupButtonLooksPressedWhileTheFingerIsDown(self):
         picker = TouchTimePicker(showSeconds=True)
         picker.setTime(QTime(6, 30, 30))
-        picker.show()
-        self.addCleanup(picker.deleteLater)
-        self.app.processEvents()
+        self._show(picker)
         picker._showPanel()
         panel = QApplication.activePopupWidget()
         panel.ani.setCurrentTime(panel.ani.duration())
         self.app.processEvents()
         self.addCleanup(lambda: panel.isVisible() and panel.close())
-        return panel
 
-    def _tap(self, button, liftAt=None, afterPress=None):
-        clicks = []
-        button.clicked.connect(lambda: clicks.append(True))
-        press = button.rect().center()
-        QTest.touchEvent(button, self.device).press(0, press, button).commit()
+        point = self._press(panel.yesButton)
+        self.assertTrue(panel.yesButton.isDown())
+        self._release(panel.yesButton, point)
+
+        self.assertFalse(panel.yesButton.isDown())
+
+    def testMovingTheFingerAwayDropsThePressedLook(self):
+        button = QPushButton("确定")
+        self._show(button)
+
+        point = self._press(button)
+        QTest.touchEvent(button, self.device).move(0, point + QPoint(0, 15), button).commit()
         self.app.processEvents()
-        if afterPress is not None:
-            afterPress()
-        lift = press if liftAt is None else liftAt
-        if lift != press:
-            QTest.touchEvent(button, self.device).move(0, lift, button).commit()
-            self.app.processEvents()
-        QTest.touchEvent(button, self.device).release(0, lift, button).commit()
-        QTest.qWait(50)
-        return clicks
 
-    def testNormalTapClicksOnce(self):
-        panel = self._openPanel()
+        self.assertFalse(button.isDown())
+        self._release(button, point + QPoint(0, 15))
 
-        self.assertEqual(self._tap(panel.yesButton), [True])
+    def testAutoRepeatButtonIsLeftAlone(self):
+        button = QPushButton("+")
+        button.setAutoRepeat(True)
+        clicks = self._clicks(button)
+        self._show(button)
 
-    def testTapClicksWhenTheLiftNeverReachesTheButton(self):
-        panel = self._openPanel()
-        swallow = _SwallowRelease(panel.yesButton)
-        self.app.installEventFilter(swallow)
-        self.addCleanup(self.app.removeEventFilter, swallow)
+        point = self._press(button)
+        QTest.qWait(button.autoRepeatDelay() + 2 * button.autoRepeatInterval())
 
-        self.assertEqual(self._tap(panel.yesButton), [True])
+        self.assertFalse(button.isDown())
+        self.assertEqual(clicks, [])
+        self._release(button, point)
 
-    def testTapClicksWhenTheButtonLostItsPressBeforeTheLift(self):
-        panel = self._openPanel()
+    def testWidgetThatHandlesTouchKeepsItsButtonsToItself(self):
+        host = QWidget()
+        host.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents)
+        button = QPushButton("确定", host)
+        button.resize(120, 40)
+        self._show(host)
 
-        clicks = self._tap(
-            panel.cancelButton,
-            afterPress=lambda: panel.cancelButton.setDown(False),
-        )
+        point = self._press(button)
 
-        self.assertEqual(clicks, [True])
+        self.assertFalse(button.isDown())
+        self._release(button, point)
 
-    def testSlidingOffTheButtonBeforeLiftingDoesNotClick(self):
-        panel = self._openPanel()
-        outside = QPoint(panel.yesButton.width() + 40, panel.yesButton.height() // 2)
+    def testHoldingInsideATextBoxKeepsTheSelection(self):
+        edit = LineEdit()
+        edit.setText("全屏投送标题")
+        self._show(edit)
+        edit.setSelection(2, 2)
 
-        self.assertEqual(self._tap(panel.yesButton, liftAt=outside), [])
+        point = self._press(edit)
+        QTest.qWait(300)
+        self._release(edit, point)
+
+        self.assertEqual(edit.selectedText(), "投送")

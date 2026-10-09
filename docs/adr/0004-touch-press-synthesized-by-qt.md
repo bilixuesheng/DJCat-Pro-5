@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0008
+---
+
 # 触控按下改由 Qt 合成鼠标事件
 
 Windows 上 Qt 6 默认把触控的 `WM_POINTER` 消息交回 `DefWindowProc`，由系统生成对应的鼠标消息。系统要先分辨轻点、拖动和长按（右键），所以轻点在抬手时才一起发按下和松开，拖动在手指开始移动时才发按下。结果是所有控件用手指按住时都没有按下态，要等松开或挪动一点才出现。现在启动时给 QApplication 传入 `-platform windows:nomousefromtouch`：Qt 丢弃系统从触控生成的鼠标消息，在 `TouchBegin` 没有被控件接受时，于落指瞬间自己合成左键按下。

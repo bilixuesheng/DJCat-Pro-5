@@ -59,17 +59,13 @@ def main():
     else:
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-    from app.platform.application import (
-        SingletonApplication,
-        raiseWindow,
-        withQtTouchPress,
-    )
+    from app.platform.application import SingletonApplication, raiseWindow
     from app.platform.animation_timer import unlockQtAnimations
-    from app.platform.touch_input import enableTouchInput
+    from app.platform.touch_input import enableTouchPressFeedback
 
-    app = SingletonApplication(withQtTouchPress(sys.argv))
+    app = SingletonApplication(sys.argv)
     unlockQtAnimations()
-    enableTouchInput(app)
+    enableTouchPressFeedback(app)
     isSilent = "--silence" in sys.argv
     activationPending = False
 

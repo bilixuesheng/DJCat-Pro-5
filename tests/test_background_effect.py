@@ -3,9 +3,8 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import MagicMock, call, patch
 
-from PySide6.QtCore import QEvent, QPoint
-from PySide6.QtGui import QColor, QInputDevice
-from PySide6.QtTest import QTest
+from PySide6.QtCore import QEvent
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import MSFluentWindow, qconfig
 
@@ -251,27 +250,3 @@ class MainWindowBackgroundEffectTest(TestCase):
 
         suspend.assert_not_called()
         apply.assert_not_called()
-
-    def testWin10AcrylicDropsTheBlurWhileAFingerDragsTheTitleBar(self):
-        cfg.set(cfg.backgroundEffect, "Acrylic")
-        apply = self._onWindows()
-        suspend = self._onWin10()
-        titleBar = self.window.titleBar
-        device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
-        start = titleBar.mapToGlobal(QPoint(titleBar.width() // 2, titleBar.height() // 2))
-
-        def touch(action, globalPoint):
-            local = titleBar.mapFromGlobal(globalPoint)
-            getattr(QTest.touchEvent(titleBar, device), action)(0, local, titleBar).commit()
-            self.app.processEvents()
-
-        touch("press", start)
-        for step in range(1, 4):
-            touch("move", start + QPoint(40, 30) * step)
-        suspend.assert_called_once_with(self.window)
-        apply.assert_not_called()
-
-        touch("release", start + QPoint(120, 90))
-        apply.assert_called_once()
-        self.assertEqual(apply.call_args.args[:2], (self.window, "Acrylic"))
-        self.assertEqual(apply.call_args.kwargs, {"removeFirst": False})

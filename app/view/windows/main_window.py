@@ -91,7 +91,6 @@ from app.platform.background_effect import (
     suspendAcrylic,
     suspendsAcrylicDuringMove,
 )
-from app.platform.touch_input import enableTouchTitleBarDrag
 from app.signal_bus import signalBus
 from app.view.components.setting_suggestion_menu import SettingSuggestionMenu
 from app.view.components.update_toast import UpdateToast
@@ -1096,9 +1095,6 @@ class MainWindow(MSFluentWindow):
         self.schedulePage = None
         self.homeCardTaskPage = None
         self.shutdownPage = None
-        touchDrag = enableTouchTitleBarDrag(self.titleBar)
-        touchDrag.moveStarted.connect(self._onWindowMoveStarted)
-        touchDrag.moveFinished.connect(self._onWindowMoveFinished)
         self.searchEdit = SearchLineEdit(self.titleBar)
         self.searchEdit.setClearButtonEnabled(True)
         self.searchEdit.setPlaceholderText("搜索设置")
