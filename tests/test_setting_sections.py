@@ -78,6 +78,22 @@ class SettingSectionTest(TestCase):
                 self.assertEqual(card.iconWidget.size().width(), 24)
                 self.assertTrue(card.contentLabel.text())
 
+    def testPreviewsOnlyLiveOnLeavesAndNeverRepeatAlongARoute(self):
+        page = self.buildPage()
+        root = page.sectionStack.view(ROOT_SECTION_KEY)
+        layout = root.vBoxLayout
+        rootWidgets = [layout.itemAt(i).widget() for i in range(layout.count())]
+
+        self.assertTrue(
+            all(isinstance(widget, SettingNavigationCard) for widget in rootWidgets)
+        )
+        for view in page.sectionStack.views():
+            with self.subTest(section=view.key):
+                if view.navigationCards():
+                    self.assertEqual(view.previews(), ())
+                else:
+                    self.assertLessEqual(len(view.previews()), 1)
+
     def testOnlyTheCurrentSectionStaysVisible(self):
         page = self.buildPage()
 
