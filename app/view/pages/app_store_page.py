@@ -17,6 +17,7 @@ from PySide6.QtCore import (
     Qt,
     QTimer,
     QUrl,
+    QVariantAnimation,
     Signal,
 )
 from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPainterPath, QPixmap
@@ -193,7 +194,9 @@ class GridSlideTransition(QObject):
 
     The grid changes at once and stays hidden, keeping its layout space, under
     two snapshots; paging and category switches then move like the catalog
-    tabs without a second set of cards or any relayout per animation tick.
+    tabs without a second set of cards. The space it keeps eases from the old
+    height to the new one on the same curve, both snapshots cut to it, so what
+    sits below the grid glides along instead of jumping or leaving a gap.
     """
 
     def __init__(self, target: QWidget):
@@ -210,6 +213,7 @@ class GridSlideTransition(QObject):
         curve = QEasingCurve(QEasingCurve.Type.OutCubic)
         for _ in range(2):
             label = QLabel(target.parentWidget())
+            label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
             label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             effect = QGraphicsOpacityEffect(label)
@@ -224,13 +228,23 @@ class GridSlideTransition(QObject):
             self._labels.append(label)
             self._slides.append(slide)
             self._fades.append(fade)
+        self._height = QVariantAnimation(self)
+        self._height.setDuration(SLIDE_DURATION_MS)
+        self._height.setEasingCurve(curve)
+        self._height.valueChanged.connect(self._applyHeight)
+        self._group.addAnimation(self._height)
+        self._heightLimits = None
 
     def isRunning(self):
         return self._group.state() == QAbstractAnimation.State.Running
 
     def run(self, change, forward=True):
-        self.stop()
         target = self._target
+        # 途中反向时从眼下的高度接着走，不先跳回某一页的高度。
+        startHeight = (
+            self._height.currentValue() if self.isRunning() else target.height()
+        )
+        self.stop()
         if not target.isVisible() or target.width() <= 0:
             change()
             return
@@ -260,6 +274,12 @@ class GridSlideTransition(QObject):
         nextFade.setEndValue(1.0)
         current.move(origin)
         upcoming.move(origin + QPoint(offset, 0))
+        # 设起止值时动画会当场发出 valueChanged、把高度定死，原来的上下限得先记下。
+        self._heightLimits = (target.minimumHeight(), target.maximumHeight())
+        endHeight = target.height()
+        self._height.setStartValue(startHeight)
+        self._height.setEndValue(endHeight)
+        self._applyHeight(startHeight)
         target.hide()
         self._group.start()
 
@@ -268,10 +288,21 @@ class GridSlideTransition(QObject):
             self._group.stop()
             self._settle()
 
+    def _applyHeight(self, height):
+        # 只打脏标记，Qt 自己合并重排，不用限流。
+        self._target.setFixedHeight(height)
+        for label in self._labels:
+            label.resize(label.width(), height)
+
     def _settle(self):
         for label in self._labels:
             label.hide()
             label.clear()
+        if self._heightLimits is not None:
+            minimum, maximum = self._heightLimits
+            self._heightLimits = None
+            self._target.setMinimumHeight(minimum)
+            self._target.setMaximumHeight(maximum)
         self._target.show()
 
 
@@ -638,6 +669,7 @@ class ApplicationCard(CardWidget):
         self.removeButton.clicked.connect(self.uninstallClicked)
 
     def setApplication(self, app: dict, imagePath: str = "") -> None:
+        sameApplication = self.appId == int(app["id"])
         self.appId = int(app["id"])
         self.appData = app
         self.titleLabel.setText(str(app.get("name", "")))
@@ -647,7 +679,9 @@ class ApplicationCard(CardWidget):
         except (TypeError, ValueError):
             count = 0
         self.downloadCountLabel.setText(f"已下载 {count:,} 次")
-        self.setImage(imagePath)
+        # 服务端换了图标而新图还没缓存时，同一个应用保留眼下的图标，不退回占位。
+        if imagePath or not (sameApplication and app.get("icon_url")):
+            self.setImage(imagePath)
 
     def setDownloadCountVisible(self, visible: bool) -> None:
         self.downloadCountLabel.setVisible(bool(visible))
@@ -842,12 +876,20 @@ class AdvertisementOverlay(QWidget):
             return False
         if not event.points():
             return self.event(event) if self._pressPosition is not None else False
-        position = self.mapFromGlobal(
-            event.points()[0].globalPosition().toPoint()
-        )
-        if self._pressPosition is None and not self.rect().contains(position):
+        globalPosition = event.points()[0].globalPosition().toPoint()
+        if self._pressPosition is None and not (
+            self.rect().contains(self.mapFromGlobal(globalPosition))
+            and self._isUnderFinger(globalPosition)
+        ):
             return False
         return self.event(event)
+
+    def _isUnderFinger(self, globalPosition):
+        # 只比坐标时，滚到选项卡栏后面或被弹窗盖住的那部分横幅也算数：手指点"已安装"
+        # 会点中藏在下面的"查看软件"。以手指下实际的控件为准。
+        banner = self.parentWidget()
+        widget = QApplication.widgetAt(globalPosition)
+        return widget is not None and (widget is banner or banner.isAncestorOf(widget))
 
     def event(self, event):
         if event.type() == QEvent.Type.TouchBegin and event.points():
@@ -1684,9 +1726,8 @@ class AppStorePage(QWidget):
                 "description": source.get("description", ""),
                 "install_dir": app.get("install_dir", ""),
                 "icon_url": app.get("icon_url", ""),
-                "icon_path": self.imagePaths.get(
-                    app.get("icon_url", ""), card.get("icon_path", "")
-                ),
+                "icon_path": self._imagePath(app.get("icon_url", ""))
+                or card.get("icon_path", ""),
             }
             if card["preset_id"] != DIRECT_APPLICATION_PRESET_ID:
                 currentAction = self._currentCatalogPresetAction(
@@ -1814,7 +1855,7 @@ class AppStorePage(QWidget):
                     )
                 card.setApplication(
                     app,
-                    self.imagePaths.get(app.get("icon_url", ""), ""),
+                    self._imagePath(app.get("icon_url", "")),
                 )
                 card.installedPage = installedPage
                 card.setDownloadCountVisible(not installedPage)
@@ -1852,25 +1893,6 @@ class AppStorePage(QWidget):
             return
         self._reflowGrid(self.installedGrid)
         self._reflowGrid(self.allGrid)
-        self._reserveAllGridHeight()
-
-    def _reserveAllGridHeight(self):
-        # 最后一页卡片少时网格变矮，分页按钮会往上跳，翻页的横移会把这一跳放大。
-        # 只有一页时不预留，免得凭空多出一片空白。
-        height = 0
-        if (
-            self.categoryPivot.currentRouteKey() == "all"
-            and self.pager.count() > 1
-        ):
-            rows = -(-ALL_APPS_PAGE_SIZE // self._columnCount())
-            margins = self.allGrid.contentsMargins()
-            height = (
-                rows * APPLICATION_CARD_HEIGHT
-                + (rows - 1) * self.allGrid.verticalSpacing()
-                + margins.top()
-                + margins.bottom()
-            )
-        self.allGridWidget.setMinimumHeight(height)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1961,7 +1983,6 @@ class AppStorePage(QWidget):
             self.pagerBar.setVisible(paginated and bool(apps))
             self._updatePagerButtons()
             self._renderAllPage(apps)
-            self._reserveAllGridHeight()
             self._updateAllEmptyState(apps)
         finally:
             self.pager.blockSignals(False)
@@ -2034,7 +2055,7 @@ class AppStorePage(QWidget):
             self._pauseAds()
             return
         for ad in self.ads:
-            path = self.imagePaths.get(ad.get("image_url", ""), "")
+            path = self._imagePath(ad.get("image_url", ""))
             if path and Path(path).exists():
                 self.adFlipView.addImage(QPixmap(path))
             else:
@@ -2173,24 +2194,29 @@ class AppStorePage(QWidget):
         self.stack.setCurrentWidget(self.detail)
 
     def _populateDetail(self, app):
+        sameApplication = (
+            self.currentApp is not None and self.currentApp.get("id") == app.get("id")
+        )
         self.currentApp = app
         self._pauseAds()
         self.detailName.setText(str(app.get("name", "")))
         self.detailDeveloper.setText(f"开发者：{app.get('developer') or '未填写'}")
         self.detailVersion.setText(f"版本：{app.get('version') or '未填写'}")
         self.detailDescription.setText(str(app.get("description", "")))
-        iconPath = self.imagePaths.get(app.get("icon_url", ""), "")
+        iconPath = self._imagePath(app.get("icon_url", ""))
         icon = QPixmap(iconPath) if iconPath and Path(iconPath).exists() else QPixmap()
-        self.detailIcon.setPixmap(
-            icon.scaled(
-                112,
-                112,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
+        # 新图标还没缓存时，正在看的这个应用保留眼下的图标，不退回占位。
+        if not icon.isNull() or not (sameApplication and app.get("icon_url")):
+            self.detailIcon.setPixmap(
+                icon.scaled(
+                    112,
+                    112,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                if not icon.isNull()
+                else FIF.APPLICATION.icon().pixmap(QSize(72, 72))
             )
-            if not icon.isNull()
-            else FIF.APPLICATION.icon().pixmap(QSize(72, 72))
-        )
         self._updateDetailAction()
         self._renderPresets(app)
 
@@ -2791,7 +2817,7 @@ class AppStorePage(QWidget):
                     "action": action,
                     "install_dir": app.get("install_dir", ""),
                     "icon_url": app.get("icon_url", ""),
-                    "icon_path": self.imagePaths.get(app.get("icon_url", ""), ""),
+                    "icon_path": self._imagePath(app.get("icon_url", "")),
                 }
             )
         cfg.set(cfg.pinnedHomeCards, cards)
@@ -2923,6 +2949,16 @@ class AppStorePage(QWidget):
 
     def clearCachedImages(self):
         self.imagePaths.clear()
+
+    def _imagePath(self, url):
+        # 缓存里已有的图直接用，不等目录到达或后台逐张核对；核对出坏图时后台会
+        # 删掉重下，再经 _onCatalogImageLoaded 换上。
+        path = self.imagePaths.get(url, "")
+        if not path and url:
+            path = self.store.cachedImagePath(url)
+            if path:
+                self.imagePaths[url] = path
+        return path
 
     @staticmethod
     def _installedOpenAction(app):

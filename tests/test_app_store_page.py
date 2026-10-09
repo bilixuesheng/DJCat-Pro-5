@@ -11,6 +11,7 @@ from PySide6.QtCore import (
     QEvent,
     QObject,
     QPoint,
+    QSize,
     Qt,
     QTimer,
     Signal,
@@ -45,6 +46,7 @@ from app.view.pages.app_store_page import (
     CatalogWorker,
     DetailTransitionStackedWidget,
     HorizontalTransitionStackedWidget,
+    SLIDE_DURATION_MS,
 )
 
 
@@ -53,6 +55,9 @@ class _Store:
 
     def mergeInstalled(self, apps):
         return list(apps)
+
+    def cachedImagePath(self, _url):
+        return ""
 
     def shutdown(self):
         pass
@@ -1384,7 +1389,12 @@ class AppStorePageTest(TestCase):
         self.assertEqual(leftBar.value(), 60)
         self.assertEqual(presetBar.value(), 80)
 
-    def testShortLastPageKeepsPagerInPlace(self):
+    def testShortLastPagePagerGlidesUpUnderItsCards(self):
+        """Reserving a full page kept the pager far below a short last page.
+
+        Single column, two cards on the last page left four empty rows. The space
+        the grid keeps now eases to the new height during the slide instead.
+        """
         self.page.catalog = _apps(8)
         self.page.resize(1000, 700)
         self.page.show()
@@ -1393,21 +1403,46 @@ class AppStorePageTest(TestCase):
         self.page.categoryPivot.setCurrentItem("all")
         self.page._switchCategory(1)
         self._settleTransitions()
-        pagerTop = self.page.pagerBar.y()
+        allLayout = self.page.allPage.layout()
+        grid = self.page.allGridWidget
+        fullHeight = grid.height()
+        fullPagerTop = self.page.pagerBar.y()
+
+        self.page._changePage(1)
+        slide = self.page.allGridSlide
+        slide._group.pause()
+        allLayout.activate()
+        # 横移开始时分页条不先跳。
+        self.assertEqual(self.page.pagerBar.y(), fullPagerTop)
+
+        slide._group.setCurrentTime(SLIDE_DURATION_MS // 2)
+        allLayout.activate()
+        midHeight = grid.height()
+        midPagerTop = self.page.pagerBar.y()
+        self.assertLess(midPagerTop, fullPagerTop)
+        for label in slide._labels:
+            self.assertEqual(label.height(), midHeight)
+
+        # 途中反向：从当前高度接着走。
+        self.page._changePage(-1)
+        slide._group.pause()
+        allLayout.activate()
+        self.assertEqual(grid.height(), midHeight)
+        self.assertEqual(self.page.pagerBar.y(), midPagerTop)
+        slide._group.resume()
+        self._settleTransitions()
+        self.assertEqual(grid.height(), fullHeight)
 
         self.page._changePage(1)
         self._settleTransitions()
-
+        allLayout.activate()
         self.assertEqual(self.page.allGrid.count(), 2)
-        self.assertEqual(self.page.pagerBar.y(), pagerTop)
-
-    def testSinglePageReservesNoBlankGridSpace(self):
-        self.page.catalog = _apps(2)
-        self.page.resize(1000, 700)
-        self.page.categoryPivot.setCurrentItem("all")
-        self.page._switchCategory(1)
-
-        self.assertEqual(self.page.allGridWidget.minimumHeight(), 0)
+        self.assertLess(grid.height(), fullHeight)
+        self.assertEqual(grid.minimumHeight(), 0)
+        self.assertEqual(
+            self.page.pagerBar.y(),
+            grid.geometry().bottom() + 1 + allLayout.spacing(),
+        )
 
     def testDownloadRetryNamesTheApplication(self):
         with patch.object(InfoBar, "warning") as warning:
@@ -2200,6 +2235,50 @@ class AppStorePageTest(TestCase):
 
         self.assertEqual(self.page.adFlipView.currentIndex(), 1)
 
+    def testAdvertisementScrolledUnderTabsDoesNotTakeTheirTouches(self):
+        """Scrolled behind the tab bar, the banner's hidden button took the tab's tap.
+
+        A finger on "已安装" opened the application behind "查看软件" instead of
+        switching tabs.
+        """
+        apps = _apps(12)
+        for app in apps:
+            app["recommended"] = True
+        self.page.catalog = apps
+        self.page.ads = [
+            {"id": 1, "title": "First", "app_id": 1, "image_url": ""},
+            {"id": 2, "title": "Second", "app_id": 2, "image_url": ""},
+        ]
+        self.page.resize(1000, 600)
+        self.page.show()
+        self.page.pivot.setCurrentItem("all")
+        self.page._switchCatalogTab(1)
+        self.page._prepareAds()
+        self._waitForAdLayout(visible=True)
+        tab = self.page.pivot.items["installed"]
+        tabCenter = tab.mapTo(self.page, tab.rect().center())
+        adButton = self.page.adButton
+        scrollBar = self.page.allScroll.verticalScrollBar()
+        scrollBar.setValue(
+            adButton.mapTo(self.page, adButton.rect().center()).y() - tabCenter.y()
+        )
+        self.qtApp.processEvents()
+        self.assertTrue(
+            adButton.rect().contains(adButton.mapFrom(self.page, tabCenter))
+        )
+        device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
+
+        with patch.object(self.page, "_showDetail") as showDetail:
+            QTest.touchEvent(self.page, device).press(0, tabCenter, self.page).commit()
+            self.qtApp.processEvents()
+            QTest.touchEvent(self.page, device).release(
+                0, tabCenter, self.page
+            ).commit()
+            self.qtApp.processEvents()
+
+        showDetail.assert_not_called()
+        self.assertEqual(self.page.pivot.currentRouteKey(), "installed")
+
     def testAdvertisementTouchJitterDoesNotLockTheSwipeAxis(self):
         self.page.ads = [
             {"id": 1, "title": "First", "image_url": ""},
@@ -2762,6 +2841,82 @@ class AppStorePageTest(TestCase):
         QTest.qWait(20)
         self.assertTrue(completed.is_set())
         self.assertEqual(images, [("https://example.test/icon.png", "cached.png")])
+
+    def _cacheImages(self, *urls):
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        paths = {}
+        for index, url in enumerate(urls):
+            path = Path(directory.name) / f"{index}.png"
+            image = QImage(64, 64, QImage.Format.Format_ARGB32)
+            image.fill(QColor("#0f7b6c"))
+            self.assertTrue(image.save(str(path)))
+            paths[url] = str(path)
+        self.page.store.cachedImagePath = lambda url: paths.get(url, "")
+        return paths
+
+    def testInstalledCardsShowCachedIconsBeforeTheCatalogArrives(self):
+        icon = "https://example.test/installed.png"
+        self._cacheImages(icon)
+        app = dict(_apps(1)[0], installed=True, icon_url=icon)
+        self.page.catalog = [app]
+
+        self.page._renderInstalled()
+
+        card = self.page.installedGrid.itemAt(0).widget()
+        self.assertEqual(card.iconLabel.pixmap().size(), QSize(54, 54))
+
+    def testCatalogArrivalShowsCachedIconsAndBannersAtOnce(self):
+        icon = "https://example.test/icon.png"
+        banner = "https://example.test/banner.png"
+        self._cacheImages(icon, banner)
+        app = dict(_apps(1)[0], icon_url=icon, recommended=True)
+        self.page.resize(1000, 700)
+        self.page.show()
+        self.page.pivot.setCurrentItem("all")
+        self.page._switchCatalogTab(1)
+
+        with patch.object(self.page, "_startCatalogImages"):
+            self.page._onCatalogLoaded(
+                {
+                    "apps": [app],
+                    "ads": [{"id": 1, "title": "Ad", "image_url": banner}],
+                },
+                {},
+                "",
+            )
+        self.page._showDetail(self.page._mergedApps()[0])
+
+        card = self.page.allGrid.itemAt(0).widget()
+        self.assertEqual(card.iconLabel.pixmap().size(), QSize(54, 54))
+        self.assertFalse(self.page.adFlipView.image(0).isNull())
+        self.assertEqual(self.page.detailIcon.pixmap().size(), QSize(112, 112))
+
+    def testChangedIconKeepsTheCurrentOneUntilTheNewImageIsCached(self):
+        old = "https://example.test/old.png"
+        new = "https://example.test/new.png"
+        self._cacheImages(old)
+        app = dict(_apps(1)[0], installed=True, icon_url=old)
+        self.page.catalog = [app]
+        self.page._renderInstalled()
+        self.page._showDetail(app)
+        card = self.page.installedGrid.itemAt(0).widget()
+
+        changed = dict(app, icon_url=new)
+        self.page.catalog = [changed]
+        self.page._renderInstalled()
+        self.page._populateDetail(changed)
+
+        self.assertIs(self.page.installedGrid.itemAt(0).widget(), card)
+        self.assertEqual(card.iconLabel.pixmap().size(), QSize(54, 54))
+        self.assertEqual(self.page.detailIcon.pixmap().size(), QSize(112, 112))
+
+        other = dict(_apps(2)[1], installed=True, icon_url=new)
+        self.page.catalog = [other]
+        self.page._renderInstalled()
+
+        self.assertIs(self.page.installedGrid.itemAt(0).widget(), card)
+        self.assertEqual(card.iconLabel.pixmap().size(), QSize(32, 32))
 
     def testCanceledImageWorkerDoesNotWaitForBlockedRequest(self):
         store = _SlowImageStore()
