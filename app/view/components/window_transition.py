@@ -8,7 +8,18 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import NamedTuple
 
-from PySide6.QtCore import QElapsedTimer, QEasingCurve, QObject, QPointF, QRect, QRectF, Qt, QTimer
+from PySide6.QtCore import (
+    QCoreApplication,
+    QElapsedTimer,
+    QEasingCurve,
+    QEvent,
+    QObject,
+    QPointF,
+    QRect,
+    QRectF,
+    Qt,
+    QTimer,
+)
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QWidget
 
@@ -22,21 +33,23 @@ from app.view.components.window_background import (
 )
 
 TRANSITION_DURATION_MS = 250
-# 动画层第一次画到屏幕上之前不能让真窗口变透明，否则会闪出桌面；等不到就照常继续。
+# 动画层显示后要等系统真正把它摆上屏幕，之后的重画才是同步刷到屏幕的；等不到就照常继续。
 _COVER_TIMEOUT_MS = 100
 # 真全屏由系统异步改尺寸，等窗口尺寸落定再截终点快照；等不到就按当时的样子截。
 _SETTLE_TIMEOUT_MS = 200
 _FALLBACK_REFRESH_RATE = 60.0
 
-_IDLE, _COVERING, _SETTLING, _ANIMATING, _REVEALING = range(5)
+_IDLE, _COVERING, _SETTLING, _ANIMATING = range(4)
 
 
 class TransitionSurface(NamedTuple):
     """What one end of a Window Transition looks like on screen.
 
-    ``rect`` is the visible shape inside ``window``, filled either by ``snapshot()``
-    or by ``fill`` with ``icon`` centred at its own size. ``opacity`` is the
-    window opacity the window rests at once the transition hands the screen back.
+    ``rect`` is the visible shape inside ``window``; ``snapshot()`` grabs it as it
+    is on screen. A shape with ``fill`` is painted as ``fill`` with ``icon``
+    centred at its own size while it morphs, and as its snapshot at the ends.
+    ``opacity`` is the window opacity the window rests at once the transition
+    hands the screen back.
     """
 
     window: QWidget
@@ -139,6 +152,7 @@ class _TransitionOverlay(QWidget):
 
     def paintEvent(self, event) -> None:
         if self.source is None:
+            self.painted = True
             return
         rect, radius, shadow, opacity = self.frame()
         painter = QPainter(self)
@@ -188,24 +202,28 @@ class _TransitionOverlay(QWidget):
         if opacity <= 0:
             return
         painter.save()
-        if exact and look.fill is None:
-            painter.setClipRect(rect)
-        else:
-            painter.setClipPath(shape)
         painter.setOpacity(opacity)
-        if look.fill is not None:
+        if exact and look.image is not None:
+            # 两端的快照与真窗口一一对应，自带圆角的抗锯齿：只按矩形裁。
+            painter.setClipRect(rect)
+            painter.drawPixmap(rect, look.image, QRectF(look.image.rect()))
+        elif look.fill is not None:
+            # 有底色的形状（Floating Button）途中按底色和图标画：它的快照是圆的，
+            # 铺满途中的大矩形会变成一个巨大的圆。
+            painter.setClipPath(shape)
             painter.fillRect(rect, look.fill)
-        if look.image is not None:
+            if look.icon is not None:
+                target = QRectF(QPointF(), look.icon.deviceIndependentSize())
+                target.moveCenter(rect.center())
+                painter.drawPixmap(target, look.icon, QRectF(look.icon.rect()))
+        elif look.image is not None:
             # 按比例铺满再居中裁切：倒计时从 16:9 变到 600 × 190，拉伸会把字压扁。
+            painter.setClipPath(shape)
             size = look.image.deviceIndependentSize()
             scale = max(rect.width() / size.width(), rect.height() / size.height())
             target = QRectF(0, 0, size.width() * scale, size.height() * scale)
             target.moveCenter(rect.center())
             painter.drawPixmap(target, look.image, QRectF(look.image.rect()))
-        if look.icon is not None:
-            target = QRectF(QPointF(), look.icon.deviceIndependentSize())
-            target.moveCenter(rect.center())
-            painter.drawPixmap(target, look.icon, QRectF(look.icon.rect()))
         painter.restore()
 
 
@@ -224,13 +242,14 @@ class WindowTransition(QObject):
         self._change: Callable[[], None] | None = None
         self._target: Callable[[], TransitionSurface] | None = None
         self._source: _Look | None = None
-        self._settledOnce = False
         self._overlay: _TransitionOverlay | None = None
         self._easing = QEasingCurve(QEasingCurve.Type.OutCubic)
         self._clock = QElapsedTimer()
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._timer.timeout.connect(self._onTick)
+        # 第一次显示时才建原生窗口要多花几十毫秒，全落在第一次点击之后；提前建好。
+        self._ensureOverlay().winId()
 
     def isRunning(self) -> bool:
         return self._phase != _IDLE
@@ -253,8 +272,9 @@ class WindowTransition(QObject):
         self._target = target
         overlay = self._ensureOverlay()
         overlay.setGeometry(self._area(start.window, target().window))
+        # 先以全透明的样子摆上屏幕：此时真窗口还在，动画层若已画着起点画面，两者的阴影和
+        # 抗锯齿边缘会叠深一层。
         overlay.painted = False
-        overlay.setFrame(self._source, self._source, 0.0)
         overlay.show()
         overlay.raise_()
         self._phase = _COVERING
@@ -283,36 +303,38 @@ class WindowTransition(QObject):
             if self._overlay.painted or self._clock.elapsed() >= _COVER_TIMEOUT_MS:
                 self._swap()
         elif self._phase == _SETTLING:
-            # 尺寸落定后再等一轮事件，让它引起的排版先跑完，终点快照才与真窗口一致。
-            if self._settledOnce or self._clock.elapsed() >= _SETTLE_TIMEOUT_MS:
+            if self._settled() or self._clock.elapsed() >= _SETTLE_TIMEOUT_MS:
                 self._begin()
-            else:
-                self._settledOnce = self._settled()
         elif self._phase == _ANIMATING:
             elapsed = min(1.0, self._clock.elapsed() / TRANSITION_DURATION_MS)
             if elapsed >= 1.0:
                 self._reveal()
+                self._end()
             else:
                 self._overlay.setFrame(
                     self._overlay.source,
                     self._overlay.target,
                     self._easing.valueForProgress(elapsed),
                 )
-        elif self._phase == _REVEALING:
-            self._end()
 
     def _swap(self) -> None:
+        # 动画层已经在屏幕上，重画是同步刷上去的：先画出起点画面，紧接着才让真窗口变透明。
+        # 两步之间隔不了几微秒，系统合成刚好落在中间也只是叠深一层，不会露出桌面。
+        overlay = self._overlay
+        overlay.setFrame(self._source, self._source, 0.0)
+        overlay.repaint()
         self._target().window.setWindowOpacity(0.0)
         change, self._change = self._change, None
         self._phase = _SETTLING
-        self._settledOnce = False
         self._clock.restart()
         try:
             change()
         except Exception:
             self._stop()
             raise
-        self._overlay.raise_()
+        overlay.raise_()
+        if self._settled():
+            self._begin()
 
     def _settled(self) -> bool:
         window = self._target().window
@@ -320,19 +342,24 @@ class WindowTransition(QObject):
         return window.isVisible() and (handle is None or handle.geometry() == window.geometry())
 
     def _begin(self) -> None:
+        # 切换引起的排版请求还排在事件队列里，先处理掉，终点快照才与真窗口一致。
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
         target = _capture(self._target())
         self._phase = _ANIMATING
         self._clock.restart()
         self._timer.setInterval(self._frameInterval())
-        self._overlay.setFrame(self._source, target, 0.0)
+        # 动画层已画着起点画面，进度 0 这一帧与它一模一样；不再整片重画一遍，第一帧动起来的
+        # 画面才不被推迟。
+        self._overlay.target = target
+        self._overlay.progress = 0.0
 
     def _reveal(self) -> None:
         overlay = self._overlay
         overlay.setFrame(overlay.source, overlay.target, 1.0)
-        # 末帧先画到屏幕上，真窗口再现身：两者一样，谁先谁后都不会闪。
+        # 末帧先画到屏幕上，真窗口再现身，紧接着 _end() 清空动画层：与开头同理，
+        # 合成落在中间只会叠深一层，不会露出桌面。
         overlay.repaint()
         self._rest(self._target)
-        self._phase = _REVEALING
 
     def _end(self) -> None:
         self._timer.stop()
@@ -340,9 +367,14 @@ class WindowTransition(QObject):
         self._change = None
         self._target = None
         self._source = None
-        if self._overlay is not None:
-            self._overlay.hide()
-            self._overlay.source = self._overlay.target = None
+        overlay = self._overlay
+        if overlay is not None:
+            overlay.source = overlay.target = None
+            # 透明窗口藏起来后仍留着最后一帧，下次一显示、还没重画就先亮出来，窗口就在
+            # 上一次的位置闪一下。藏之前先刷成全透明。
+            if overlay.isVisible():
+                overlay.repaint()
+            overlay.hide()
 
     @staticmethod
     def _rest(target: Callable[[], TransitionSurface] | None) -> None:

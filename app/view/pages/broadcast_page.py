@@ -344,6 +344,7 @@ class FloatingMiniWindow(QWidget):
             self.rect(),
             self.width() / 2,
             opacity=self._opacity,
+            snapshot=self.grab,
             fill=QColor(qconfig.themeColor.value),
             icon=self.btn.icon().pixmap(self.btn.iconSize(), self.devicePixelRatioF()),
         )
@@ -436,7 +437,11 @@ class BroadcastWindow(FramelessWindow):
         self.setContentsMargins(margin, margin, margin, margin)
         self.background.setRoundedWindow(self.isWindowed)
         self.background.setGeometry(self.contentsRect())
-        self.setStyleSheet(f"BroadcastWindow {{ background-color: transparent; }} QTextEdit {{ color: {textColor}; background: transparent; }}")
+        styleSheet = f"BroadcastWindow {{ background-color: transparent; }} QTextEdit {{ color: {textColor}; background: transparent; }}"
+        # 设样式表会重新套用整个窗口所有子控件的样式，即使内容没变；它在 Window Transition
+        # 的切换里，每多花一毫秒，动画就晚一毫秒开始。
+        if self.styleSheet() != styleSheet:
+            self.setStyleSheet(styleSheet)
 
     def setContent(self, title, text, isMarkdown=False):
         self._applyStyle()
