@@ -262,6 +262,7 @@ class SettingSectionView(ScrollArea):
         self.vBoxLayout = QVBoxLayout(self.container)
         self._cardLists = []
         self._navigationCards = []
+        self._previews = []
 
         self._initWidget()
 
@@ -283,6 +284,7 @@ class SettingSectionView(ScrollArea):
             self.vBoxLayout.addWidget(widget, 0, Qt.AlignmentFlag.AlignHCenter)
         else:
             self.vBoxLayout.addWidget(widget)
+        self._previews.append(widget)
         return widget
 
     def addWidget(self, widget: QWidget) -> QWidget:
@@ -315,6 +317,9 @@ class SettingSectionView(ScrollArea):
 
     def navigationCards(self) -> tuple[SettingNavigationCard, ...]:
         return tuple(self._navigationCards)
+
+    def previews(self) -> tuple[QWidget, ...]:
+        return tuple(self._previews)
 
     def settingCards(self) -> tuple[QWidget, ...]:
         return tuple(

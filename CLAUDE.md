@@ -24,7 +24,7 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 - Projection 编辑器中的"整理并投送"只在 Markdown 模式显示并独立记忆；它复用 AI Markdown Conversion，但启动恢复必须绕过整理流程并原样恢复 Projection Snapshot。已知剩余额度不够本次扣点时，按钮改为"投送（额度不足）"并按原文投送，勾选和配置都不动；查不到额度时照常整理，由服务端判断。
 - **Error Report** 由服务端按 **Error Signature** 归并成组，每组按 Machine Identity 和日期各记一行次数；Machine Code 只是显示用的别名。
 - **Daily Quota** 按 Machine Identity 取：有 **Quota Override** 用它，否则用 **Default Daily Quota**。Quota Override 只改上限，不碰当天已用的点数，也不改扣点规则。
-- **Setting Section** 按 Setting Route 组成一棵树；顶层只有导航行，叶子才持有 Setting Card。Setting Suggestion 指向卡片及其 Route，不改变任何页面内容。
+- **Setting Section** 按 Setting Route 组成一棵树；根只有导航行，其他有子 Section 的节点可以在导航行之外放 Setting Card，但 Setting Preview 只在叶子上、每个至多一份，同一条 Route 上不重复（`tests/test_setting_sections.py` 检查）。Setting Suggestion 指向卡片及其 Route，不改变任何页面内容。
 
 ## Ownership rules
 
@@ -277,7 +277,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/view/components/update_toast.py` | Update Toast 的三种状态、按钮和底边进度线；不知道下载、版本和安装的规则 |
 | `app/view/components/window_transition.py` | Window Transition：Display Window 在全屏、窗口化和 Floating Button 之间切换的快照形变、动画层和交接顺序 |
 | `app/view/components/setting_section.py` | Setting Section 的下钻容器、导航行、推移动画和命中高亮 |
-| `app/view/components/setting_preview.py` | Setting Preview：`MainWindowReplica` 用真实组件按主窗口当前尺寸复刻整个主窗口（横幅、外观、个性化、软件图标四处共用）、托盘菜单与任务栏、投送／倒计时／时钟窗口（标题、正文或大时间、角落按钮） |
+| `app/view/components/setting_preview.py` | Setting Preview：`MainWindowReplica` 用真实组件按主窗口当前尺寸复刻整个主窗口（横幅、外观、软件图标三处共用）、托盘菜单与任务栏、投送／倒计时／时钟窗口（标题、正文或大时间、角落按钮） |
 | `app/view/components/color_dialog.py` | QFluentWidgets 颜色选择弹窗换上项目 `ScrollArea`，色板和亮度滑块登记为触控拖动目标 |
 | `app/view/components/setting_suggestion_menu.py` | Setting Suggestion 弹窗；选中后交回 Route，不把文本写回搜索框 |
 | `app/common/application_icon.py` | Application Icon 与 Tray Icon 的解析：主窗口、启动页、托盘与 Tray Menu“主页”共用一处 |
@@ -419,6 +419,7 @@ def __init__(self, parent=None):
 - 新的私有 Qt/Windows API 必须封装、可失败、可回退，并有锁定版本的真实二进制验证。
 - 要加按钮的 InfoBar 先构造 `InfoBar(...)`、`addWidget()` 完再 `show()`，不用 `InfoBar.error()` 这类便捷方法后再加：它们当场显示，InfoBarManager 按加控件前的宽度算定滑入终点，多出的部分落在窗口外。
 - 依赖 QFluentWidgets `exec(pos, ani, aniType)` 签名的菜单 Python 子类，在自己的类体里重新声明 `exec`（如 `exec = CompleterMenu.exec`）：PySide6 在实例上查找 `exec` 时跳过继承来的 Python 重写，落到 `QMenu.exec`（6.9–6.11 均如此）。托盘 `AcrylicMenu` 走原生 `QMenu.exec` 属于 v5.1.2 固定行为，保持原样。
+- 监听主题色变化用 `qconfig.themeColor.valueChanged`，不用 `qconfig.themeColorChanged`：启动时 `qconfig.load(CONFIG_PATH, cfg)` 之后，组件库把 `themeColorChanged` 发在 `cfg` 上，`qconfig` 自己的这个信号再也不发，监听它不报错也不生效。`themeChanged` 有组件库转发，不受影响。
 - 取窗口所在屏幕用 `app/platform/screens.py` 的 `screenFor()`，不得调用 `QWidget.screen()` 或 `QWindow.screen()`（原因见 `screens.py` 文件头）。只需要设备像素比时直接用 `devicePixelRatioF()`。`tests/test_screens.py` 会扫描 `app/` 拦下新的调用。
 
 ### Comments
