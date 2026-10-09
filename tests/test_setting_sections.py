@@ -253,6 +253,14 @@ class SettingSectionTest(TestCase):
         card.comboBox.setCurrentIndex(0)
         self.assertEqual(cfg.backgroundEffect.value, "Acrylic")
 
+    def testAppearanceSectionOwnsWindowTitleAndCreditsEntry(self):
+        page = self.buildPage()
+
+        self.assertEqual(
+            page.sectionStack.view("personalization.appearance").settingCards()[-2:],
+            (page.windowTitleCard, page.showCreditsCard),
+        )
+
     def testAppearanceSectionSwitchesWindowTransitionsForAllDisplayWindows(self):
         isolateCfg(self)
         page = self.buildPage()
