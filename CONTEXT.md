@@ -304,6 +304,20 @@ _Avoid_: 边框（窗口化时那条 1 px 灰线才是边框）、缩放像素�
 由 Windows 在主窗口背后合成的透明材质，可选 Acrylic、Mica、MicaAlt、Aero 或 None，切换后立即生效；未设置时 Win11 为 Mica、Win10 为 None。只作用于主窗口和画在主窗口上的蒙层弹窗；投送、考试倒计时和全屏时钟各自的背景设置以及 Tray Menu 的亚克力都不受它影响。
 _Avoid_: 背景（投送、倒计时和时钟的背景设置）、卡片材质、透明度
 
+### 外观
+
+**Theme Color（主题色）**:
+全软件的强调色，取自某个 Theme Color Preset 或 Custom Theme Color。深色主题下，软件自己背景上的控件显示它提亮后的样子（纯黑因此显示为白色）；Floating Button 和展示窗口的按钮始终用原色。
+_Avoid_: 投送、倒计时和时钟背景里的"主题色"选项（历史名称，指默认底色，不是强调色）、强调色
+
+**Theme Color Preset（预设主题色）**:
+内置的命名 Theme Color：树人绿（默认）、系统蓝、罗小黑（纯黑）。主题色的罗小黑与横幅预设的罗小黑只是同名，互不联动。
+_Avoid_: 默认颜色
+
+**Custom Theme Color（自定义主题色）**:
+用户最近一次在选色框里确定的颜色，只记一个。切到 Theme Color Preset 后仍然保留，可以一键切回；从未自定义过时不存在。
+_Avoid_: 当前主题色（切到预设时两者不同）、上次颜色、颜色历史
+
 ### 设置
 
 **Setting Section**:
