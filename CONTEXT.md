@@ -307,7 +307,7 @@ _Avoid_: 背景（投送、倒计时和时钟的背景设置）、卡片材质�
 ### 设置
 
 **Setting Section**:
-设置页层级中的一个节点，由稳定 key、标题、图标和可选说明构成，含若干 Setting Card、纯文字小节和可选 Setting Preview。顶层的"设置"是根 Section。
+设置页层级中的一个节点，由稳定 key、标题、图标和可选说明构成。有子 Section 的节点只放通往子 Section 的导航行；Setting Card、纯文字小节和 Setting Preview 只在叶子上。顶层的"设置"是根 Section。
 _Avoid_: group（可折叠分组已退役）、页面（它不是导航页面，MainWindow 不感知它）
 
 **Setting Route**:
@@ -319,7 +319,7 @@ Setting Section 中的一行设置项，通常绑定一个 `cfg` 配置项或一
 _Avoid_: 设置项（泛指值本身）、Home Card
 
 **Setting Preview**:
-Setting Section 中目标界面按当前配置等比缩小后的样子，随所在 Section 的配置项变化立即重绘。它照真实的排布、尺寸和用户自己的数据（例如主页上实际存在的 Home Card）来画，而不是孤立地摆一张图片或一段文字。目标是主窗口时，宽高比跟着主窗口当前的宽高比实时变化。只显示状态，不接受输入。
+Setting Section 中目标界面按当前配置等比缩小后的样子，随所在 Section 的配置项变化立即重绘。它照真实的排布、尺寸和用户自己的数据（例如主页上实际存在的 Home Card）来画，而不是孤立地摆一张图片或一段文字。目标是主窗口时，宽高比跟着主窗口当前的宽高比实时变化。只显示状态，不接受输入。每个叶子 Section 至多一个；不同叶子可以画同一个目标界面（横幅设置和外观都画主窗口），但同一条 Setting Route 上不重复。
 _Avoid_: 缩略图、示意图（静态图片）、截图
 
 **Setting Suggestion**:
