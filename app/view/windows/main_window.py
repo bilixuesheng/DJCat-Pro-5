@@ -1448,7 +1448,7 @@ class MainWindow(MSFluentWindow):
         infoBar = InfoBar(
             icon=InfoBarIcon.ERROR,
             title="软件可能遇到异常",
-            content="请将本地报错日志发送给开发者。",
+            content="报错会在联网时自动发给开发者。",
             orient=Qt.Orientation.Horizontal,
             isClosable=True,
             duration=8000,

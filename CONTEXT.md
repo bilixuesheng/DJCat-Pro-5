@@ -165,7 +165,7 @@ _Avoid_: Recommendation、Application
 ### 管理后台
 
 **Admin Console**:
-服务端的浏览器管理界面，负责 AI Markdown 配置、Machine Identity 查询和 Application Catalog 维护。
+服务端的浏览器管理界面，负责 AI Markdown 配置、Machine Identity 查询、Application Catalog 维护和 Error Report 查看。
 _Avoid_: Application Store、桌面设置页
 
 **Catalog Order**:
@@ -179,7 +179,7 @@ _Avoid_: Home Card order、全局应用排序
 _Avoid_: chat、generation、Projection
 
 **Machine Identity**:
-用于把 AI Markdown 使用量稳定归到同一台设备的匿名身份。它只服务于额度统计，不是账号或许可证。
+用于把 AI Markdown 使用量和 Error Report 稳定归到同一台设备的匿名身份。它只服务于额度统计和报错归属，不是账号或许可证。
 _Avoid_: account、license、raw hardware ID
 
 **Machine Code**:
@@ -293,6 +293,16 @@ _Avoid_: 应用市场缓存（它不再只装 Application Store 的东西）；�
 **Log（日志）**:
 DJCat 运行时按天写下的诊断记录，以及更新器在程序目录留下的那份更新记录，都只保留最近 14 天。按天的日志属于 App Data Directory，Client Update 和 Storage Migration 之后仍在。用户可以随 Cache 一起清理，正在写入的那一份除外。
 _Avoid_: 错误日志（设置里的入口叫法，它记录的不只是错误）
+
+### 报错
+
+**Error Report（报错上报）**:
+DJCat 发行版遇到用户可见的异常（弹出"软件可能遇到异常"的那种）时，自动发给服务端的一份记录：异常类型、消息、调用栈、Client Version、系统版本和 Machine Identity。路径换成相对程序目录的写法，用户目录换成 `~`，不带日志。同一次运行里同一处代码的同一种异常只发一次。源码运行和测试不上报。
+_Avoid_: 崩溃报告（多数异常不会让 DJCat 退出）、日志上传（不发日志）
+
+**Error Signature（报错指纹）**:
+服务端判断两份 Error Report 是不是同一个错误的依据：异常类型、去掉时间、内存地址、路径和数字之后的消息，以及每一帧的文件和函数名。不含行号和日志，所以同一个 bug 换了电脑、时间或版本仍归到同一组。Admin Console 按它分组，每组再按电脑和日期各记一行次数。
+_Avoid_: 报错 ID、hash（它是归并规则，不只是一个散列值）
 
 ### 窗口
 

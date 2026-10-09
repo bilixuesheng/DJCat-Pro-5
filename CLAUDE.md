@@ -22,6 +22,7 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 - Existing-card 模式的 **Home Card Task** 只保存稳定 Home Card key、用于失效提示的标题快照和打开／关闭动作；关闭只适用于 Default Home Card。Custom 模式直接拥有 Action Sequence，但不会创建 Custom Home Card。
 - AI Markdown Conversion 使用 Machine Identity 领取和结算 Daily Quota；Machine Code 只是定位该身份的可见别名。
 - Projection 编辑器中的"整理并投送"只在 Markdown 模式显示并独立记忆；它复用 AI Markdown Conversion，但启动恢复必须绕过整理流程并原样恢复 Projection Snapshot。已知剩余额度不够本次扣点时，按钮改为"投送（额度不足）"并按原文投送，勾选和配置都不动；查不到额度时照常整理，由服务端判断。
+- **Error Report** 由服务端按 **Error Signature** 归并成组，每组按 Machine Identity 和日期各记一行次数；Machine Code 只是显示用的别名。
 - **Daily Quota** 按 Machine Identity 取：有 **Quota Override** 用它，否则用 **Default Daily Quota**。Quota Override 只改上限，不碰当天已用的点数，也不改扣点规则。
 - **Setting Section** 按 Setting Route 组成一棵树；顶层只有导航行，叶子才持有 Setting Card。Setting Suggestion 指向卡片及其 Route，不改变任何页面内容。
 
@@ -169,6 +170,12 @@ AI Markdown 数据库的 schema 初始化缓存同时使用文件身份和 SQLit
 
 一台机器的上限一律经 `_dailyQuota(machineId)` 取：先查 `quota_overrides` 表，没有才用 `_defaultDailyQuota()`（设置键仍叫 `daily_limit`）。Quota Override 可以是 0，取上限的地方不能写 `limit or 默认值` 这类真值判断，否则停用的机器会回到默认额度。`/quota`、整理请求的 `X-RateLimit-Limit` 和后台表格都报这台机器自己的上限，所以 Quota Override 只需一次 Server Update，客户端不用跟着升级。
 
+### Error Report
+
+**`app/common/error_report.py` 独占客户端的 Error Report。** `djcat.py` 的 `exceptionHook` 在记日志之后、发 `signalBus.catchException` 之前调用 `reportError()`；另外发 `catchException` 的地方（目前只有设置页的开机启动）也要先调它，因为"软件可能遇到异常"的 InfoBar 告诉用户报错会自动发出。`reportError()` 只在发行版里上报（`isPackaged()`），源码运行和测试不得往线上服务端发；在后台线程里 POST，不跟随跳转，失败只记日志。同一次运行里按异常类型和每一帧的文件、函数、行号去重，最多发 20 份。路径换成相对 `APP_DIR` 的写法、用户目录换成 `~`；不发日志，日志每行都带时间。
+
+**`server/error_reports.py` 独占服务端的 Error Report。** `POST /error-reports` 只在 API 域名上接收，机器标识照 AI Markdown 加盐成 Machine Identity 再存。Error Signature 在服务端算：异常类型 + 去掉路径、`0x` 地址、长十六进制串和所有数字后的消息 + 每一帧的"文件:函数名"；文件去掉安装位置（`site-packages/` 之前的部分、绝对路径只留文件名），不取行号、回溯全文或日志。改归并规则会把已有的组拆开，改之前想清楚。每组按（组, Machine Identity, 日期）各一行累计次数，组里只留最近一次的消息和回溯。一台机器一天最多 100 次、全站一天最多新出现 200 组，超出返回 429；过期（90 天）清理挂在写入路径上，没有出现记录的组随之删除。
+
 ### 管理后台
 
 `server/templates/admin_base.html` 拥有 Admin Console 的共享导航布局；`server/static/admin.css` 和 `server/static/admin.js` 拥有后台共用的导航、表格拖拽和异步交互，不在各页面模板复制相同逻辑。移动端打开侧边栏时锁定页面滚动，但导航列表本身必须保留独立的纵向触控滚动。
@@ -275,6 +282,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/view/components/setting_suggestion_menu.py` | Setting Suggestion 弹窗；选中后交回 Route，不把文本写回搜索框 |
 | `app/common/application_icon.py` | Application Icon 与 Tray Icon 的解析：主窗口、启动页、托盘与 Tray Menu“主页”共用一处 |
 | `app/common/logs.py` | Log 的位置、14 天保留、Cache 中可清理的日志，以及旧 `APP_DIR\Log` 的迁入 |
+| `app/common/error_report.py` | Error Report 的客户端一侧：整理调用栈、去掉安装位置和用户名、同一次运行去重、后台上报 |
 | `pyqt_github_markdown/` | 项目内置 Markdown 渲染器；不承载 DJCat 业务规则 |
 
 `app/common/application_version.py` 只包含架构和版本比较等纯函数，允许 MainWindow 在启动阶段导入。重量较大的 `app/common/application_store.py`、Custom Home Card 编辑器和 Markdown 渲染器分别在对应页面、编辑操作或更新日志首次需要时导入；`edge_tts` 依赖只在实际查询音色或合成语音时导入。
@@ -285,6 +293,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 |---|---|
 | `server/ai_markdown.py` | Machine Identity、Daily Quota、AI Markdown Conversion 和管理接口 |
 | `server/app_store.py` | Application Catalog、下载重定向/计数和应用市场管理页面 |
+| `server/error_reports.py` | Error Report：公开的上报接口、Error Signature 归并、过期清理和「客户端报错」页面 |
 | `server/server_update.py` | Server Update：检查 main 上的 Server Version、下载替换、回滚，以及「服务端更新」页面 |
 | `server/version.py` | Server Version 的唯一来源 |
 | `server/templates/admin_base.html` | Admin Console 的共享页面结构、侧边栏和导航入口 |

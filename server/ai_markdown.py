@@ -2108,14 +2108,26 @@ def adminLogout():
 
 try:
     from .app_store import marketplaceStats, registerAppStore
+    from .error_reports import registerErrorReports
     from .server_update import registerServerUpdate
 except ImportError:
     from app_store import marketplaceStats, registerAppStore
+    from error_reports import registerErrorReports
     from server_update import registerServerUpdate
 
 registerAppStore(
     app,
     connect=_connect,
+    loginRequired=_loginRequired,
+    csrfToken=_csrfToken,
+    checkCsrf=_checkCsrf,
+    adminResponse=_adminResponse,
+)
+registerErrorReports(
+    app,
+    connect=_connect,
+    machineId=_machineId,
+    registerMachine=_registerMachine,
     loginRequired=_loginRequired,
     csrfToken=_csrfToken,
     checkCsrf=_checkCsrf,

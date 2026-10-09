@@ -1,0 +1,62 @@
+{% extends "admin_base.html" %}
+
+{% block title %}客户端报错{% endblock %}
+{% block page_name %}客户端报错{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <div class="eyebrow">系统</div>
+        <h1>客户端报错</h1>
+        <p>DJCat 遇到未处理的异常时自动上报。同一个错误不论出现在哪台电脑、什么时间，都归到同一组；每组按电脑和日期记下次数，保留最近 {{ retention_days }} 天。</p>
+    </div>
+    <div class="machine-count"><strong data-item-count>{{ total }}</strong><span>组报错</span></div>
+</header>
+
+<section class="section-block" aria-labelledby="errors-title">
+    <div class="section-heading">
+        <div><span class="section-index">01</span><h2 id="errors-title">报错</h2></div>
+        <span>今天 {{ today.occurrences }} 次 · {{ today.groups }} 组</span>
+    </div>
+    <div class="table-wrap">
+        <table data-empty-message="还没有收到报错。">
+            <thead><tr><th scope="col">最近出现</th><th scope="col">错误</th><th scope="col">位置</th><th scope="col">次数</th><th scope="col">电脑</th><th scope="col">操作</th></tr></thead>
+            <tbody>
+            {% for group in groups %}
+                <tr>
+                    <td>{{ group.last_seen_at[:16]|replace('T', ' ') }}<br><small>{{ group.last_version }}</small></td>
+                    <td class="cell-truncate"><strong>{{ group.exception_type }}</strong><br><small>{{ group.message }}</small></td>
+                    {% set location = group.location.partition(' · ') %}
+                    <td><code>{{ location[0] }}</code><br><small>{{ location[2] }}</small></td>
+                    <td>{{ group.occurrences }}</td>
+                    <td>{{ group.machines }}</td>
+                    <td>
+                        <div class="table-actions">
+                            <a class="table-action" href="{{ url_for('error_reports.detail', groupId=group.id) }}">查看</a>
+                            <form method="post" action="{{ url_for('error_reports.delete', groupId=group.id) }}" data-async-form data-remove-on-success="tr" data-confirm="确认删除这组报错吗？再次出现时会重新记录。">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button class="table-action" type="submit">删除</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td class="empty" colspan="6">还没有收到报错。</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if total_pages > 1 %}
+    <nav class="pagination" aria-label="分页导航">
+        {% if page > 1 %}
+            <a class="button button-secondary" href="{{ url_for('error_reports.page', page=page-1) }}">上一页</a>
+        {% endif %}
+        <span class="pagination-indicator">{{ page }} / {{ total_pages }}</span>
+        {% if page < total_pages %}
+            <a class="button button-secondary" href="{{ url_for('error_reports.page', page=page+1) }}">下一页</a>
+        {% endif %}
+    </nav>
+    {% endif %}
+</section>
+{% endblock %}

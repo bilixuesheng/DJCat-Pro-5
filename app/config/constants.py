@@ -10,6 +10,7 @@ AUTHOR_URL = "https://space.bilibili.com/1956850051"
 DOWNLOAD_URL = "https://updata.cn-nb1.rains3.com/DJCat-Pro.zip"
 UPDATE_API = "https://api.djcatpro.top"
 AI_MARKDOWN_API = "https://api.djcatpro.top/ai/markdown"
+ERROR_REPORT_API = "https://api.djcatpro.top/error-reports"
 _RELEASE_VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?")
 
 
@@ -26,6 +27,7 @@ __all__ = [
     "AUTHOR",
     "AUTHOR_URL",
     "DOWNLOAD_URL",
+    "ERROR_REPORT_API",
     "UPDATE_API",
     "VERSION",
     "YEAR",

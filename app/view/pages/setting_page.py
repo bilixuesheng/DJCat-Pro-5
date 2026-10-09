@@ -1318,7 +1318,10 @@ class SettingPage(QWidget):
         try:
             setRunAtLogin(enabled)
         except OSError as error:
+            from app.common.error_report import reportError
+
             logger.exception("修改开机启动设置失败")
+            reportError(type(error), error, error.__traceback__)
             signalBus.catchException.emit(str(error))
 
     def _onStorageModeClicked(self) -> None:

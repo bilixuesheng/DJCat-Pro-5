@@ -15,6 +15,13 @@ def exceptionHook(excType, excValue, excTraceback):
     logger.opt(exception=excInfo).error("未处理的程序异常")
 
     try:
+        from app.common.error_report import reportError
+
+        reportError(*excInfo)
+    except Exception:
+        logger.exception("报错上报失败")
+
+    try:
         signalBus.catchException.emit(message)
     except RuntimeError:
         pass
