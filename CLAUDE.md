@@ -22,8 +22,9 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 - Existing-card 模式的 **Home Card Task** 只保存稳定 Home Card key、用于失效提示的标题快照和打开／关闭动作；关闭只适用于 Default Home Card。Custom 模式直接拥有 Action Sequence，但不会创建 Custom Home Card。
 - AI Markdown Conversion 使用 Machine Identity 领取和结算 Daily Quota；Machine Code 只是定位该身份的可见别名。
 - Projection 编辑器中的"整理并投送"只在 Markdown 模式显示并独立记忆；它复用 AI Markdown Conversion，但启动恢复必须绕过整理流程并原样恢复 Projection Snapshot。已知剩余额度不够本次扣点时，按钮改为"投送（额度不足）"并按原文投送，勾选和配置都不动；查不到额度时照常整理，由服务端判断。
+- **Error Report** 由服务端按 **Error Signature** 归并成组，每组按 Machine Identity 和日期各记一行次数；Machine Code 只是显示用的别名。
 - **Daily Quota** 按 Machine Identity 取：有 **Quota Override** 用它，否则用 **Default Daily Quota**。Quota Override 只改上限，不碰当天已用的点数，也不改扣点规则。
-- **Setting Section** 按 Setting Route 组成一棵树；顶层只有导航行，叶子才持有 Setting Card。Setting Suggestion 指向卡片及其 Route，不改变任何页面内容。
+- **Setting Section** 按 Setting Route 组成一棵树；根只有导航行，其他有子 Section 的节点可以在导航行之外放 Setting Card，但 Setting Preview 只在叶子上、每个至多一份，同一条 Route 上不重复（`tests/test_setting_sections.py` 检查）。Setting Suggestion 指向卡片及其 Route，不改变任何页面内容。
 
 ## Ownership rules
 
@@ -41,7 +42,7 @@ Theme Color 由 `cfg.themeColorPreset` 决定：预设取 `THEME_COLOR_PRESETS` 
 
 **`app/platform/icon_cache.py` 独占 QFluentWidgets SVG 图标的解析缓存。** 它替换 `drawSvgIcon` 和 `writeSvg`，只缓存内容不会变的来源——`:/` 资源路径和 SVG 源码字节，磁盘路径照旧每次读取；两份缓存各有上限。页面不得自己另建图标缓存。
 
-**`app/platform/background_effect.py` 独占 Background Effect。** 选项、默认值和每种材质的挂法都照 Ghost Downloader 的"窗口背景透明材质"，只作用于主窗口。MainWindow 关掉组件库自带的云母，在构造、每次显示和每次换主题时按 `cfg.backgroundEffect` 重挂；选了材质时窗口底色透明。三处有意照搬 Ghost 的行为保持原样：Win10 上也列出 Mica 和 MicaAlt，选中后材质不生效、窗口透明；Win10 的主窗口按 `AcrylicWindow.updateFrameless` 去框；不跟随系统的"透明效果"开关。Win10 的 Acrylic 跟不上移动中的窗口，所以移动期间换成透明渐变、结束后挂回：鼠标和系统移动走 `MainWindow.nativeEvent` 的 `WM_ENTERSIZEMOVE`／`WM_EXITSIZEMOVE`；手指拖标题栏不经过系统移动循环，由 `touch_input.py` 拖动对象的 `moveStarted`／`moveFinished` 报告。
+**`app/platform/background_effect.py` 独占 Background Effect。** 选项、默认值和每种材质的挂法都照 Ghost Downloader 的"窗口背景透明材质"，只作用于主窗口。MainWindow 关掉组件库自带的云母，在构造、每次显示和每次换主题时按 `cfg.backgroundEffect` 重挂；选了材质时窗口底色透明。三处有意照搬 Ghost 的行为保持原样：Win10 上也列出 Mica 和 MicaAlt，选中后材质不生效、窗口透明；Win10 的主窗口按 `AcrylicWindow.updateFrameless` 去框；不跟随系统的"透明效果"开关。Win10 的 Acrylic 跟不上移动中的窗口，所以移动期间换成透明渐变、结束后挂回：鼠标、手指拖标题栏和其他系统移动都走 `MainWindow.nativeEvent` 的 `WM_ENTERSIZEMOVE`／`WM_EXITSIZEMOVE`。
 
 **`app/platform/dialog_animation.py` 独占 QFluentWidgets 蒙层弹窗的公共适配。** 它为卡片装上 Silhouette Shadow 并接管 `showEvent` 和 `done`，时序见"Animation scheduling"。弹窗中的下拉框仍属于 Menu Reveal；页面不得重复修补组件库或改变原有动画曲线。
 
@@ -59,7 +60,7 @@ Theme Color 由 `cfg.themeColorPreset` 决定：预设取 `THEME_COLOR_PRESETS` 
 
 拖动本身就是操作的控件（色板、滑块）用 `scroll_area.registerTouchDragTarget()` 登记：从它们上起滑的整个触控序列归控件，所在 `ScrollArea` 在这一序列内抬高拖动阈值、不取消按压、不吞松开，抬手后复原。颜色选择弹窗的色板和亮度滑块、设置里的横幅亮度、Broadcast Task 的音量滑块都已登记；新增放在 `ScrollArea` 里的滑块同样登记。组件库弹窗里的滚动区（如 `ColorDialog` 的 `SingleDirectionScrollArea`）不抓触控手势，要换成项目 `ScrollArea`（见 `app/view/components/color_dialog.py`），不另写一套触控；这类弹窗在 `done()` 里停止 scroller 并释放一次手势，与 `_ResponsiveMessageBox` 相同，视口随弹窗销毁，不会再抓。
 
-**触控按下由 Qt 在落指瞬间合成，不用 Windows 从触控生成的鼠标消息。** Windows 要先分辨轻点、拖动和长按，按下要等抬手或移动才发出，控件按住时就没有按下态。`djcat.py` 用 `withQtTouchPress()` 给 QApplication 加 `-platform windows:nomousefromtouch`；已显式指定平台（`-platform`、`QT_QPA_PLATFORM`，如 offscreen 测试和 CI）时不加，也不得改用环境变量设置，否则 DJCat 启动的 Application 会继承它。因为按下立即到达，从控件上起滑必然先出现按下态，起滑取消要把它们全部复位：按钮的 `isDown`、`CardWidget` 的 `isPressed`，以及登记过的自绘目标；起滑后的松开被仲裁吞掉，控件自己不会复位。Qt 会丢掉由鼠标触发的 `WM_CONTEXTMENU`，系统的移动循环也跟不上 Qt 合成的按下，所以 `app/platform/touch_input.py` 补上两件事：手指按住不动满 `mousePressAndHoldInterval` 就向指下控件发 `QContextMenuEvent`（"不动"按微软的触控容差 2.7 mm、约 10 px 算，不能用 Windows 上来自鼠标的 4 px `startDragDistance`，否则手指的抖动就会取消长按），与鼠标右键同一条路径；手指拖标题栏时由 Qt 直接 `move()` 窗口，鼠标拖动仍交给系统。两者都只认 `MouseEventSynthesizedByQt`，页面不得另写长按菜单或标题栏拖动。另有一处原因未查明的兜底：触屏上手指点弹出窗口里的按钮（时间选择器的勾和叉）只亮不点，offscreen 复现不出来，所以手指在弹出窗口的按钮上按下又在它上面抬起、而点击没有发生时，由 `touch_input.py` 补一次点击；只作用于弹出窗口，滚动区里的起滑取消不受影响。理由见 `docs/adr/0004-touch-press-synthesized-by-qt.md`。
+**触控输入交给 Windows，DJCat 只补按下的外观。** Windows 要先分辨轻点、拖动和长按才发出鼠标消息，手指按住控件时本来没有按下态。`app/platform/touch_input.py` 的应用级过滤器在落指时把指下的按钮（`setDown`）或带布尔 `isPressed` 的 QFluentWidgets 控件（如 `CardWidget`）画成按下，直到 Windows 自己的按下到来（此后交还控件，抬手时不再复位），或手指抬起、挪出轻点容差（微软触控规范的 2.7 mm，约 10 px）。它只改外观，不产生点击；自动连发的按钮、输入框／滑块／数值框／列表上的落指、自己接触控的控件（`WA_AcceptTouchEvents`，滚动区视口除外）一律不碰。长按到方框后松手弹右键菜单、选区、拖标题栏、弹出面板都是 Windows 原本的行为，不得再用 `nomousefromtouch` 之类让 Qt 自己合成按下，也不得在页面里仿造长按菜单或标题栏拖动。从控件上起滑时，`ScrollArea` 的起滑取消把按钮的 `isDown`、`CardWidget` 的 `isPressed` 和登记过的自绘目标一并复位；起滑后的松开被仲裁吞掉，控件自己不会复位。理由见 `docs/adr/0008-touch-press-look-only.md`（它取代了 0004）。
 
 需要让出触控的模式调用 `ScrollArea.setTouchScrollSuppressed()`，它把拖动阈值抬到手指够不到的距离，不释放手势；页面不得自己 `QScroller.ungrabGesture()`，也不得对已抓过的 viewport 再调 `QScroller.grabGesture()`（它会先自行 ungrab 再重抓）。不是 `ScrollArea` 的 viewport（Projection 正文的 `QTextEdit`、`MarkdownView`）用 `scroll_area.setTouchScrollSuppressed(viewport, ...)` 做同一件事。Application Store 页面本身不滚动，两个选项卡和详情两栏各自是 `ScrollArea`，进出详情不抑制也不释放任何手势。
 
@@ -133,11 +134,11 @@ Application Store 首次显示前同步计算"已安装"和"全部应用"两个�
 
 AppStorePage 本身不滚动：选项卡栏固定在顶部，"已安装"和"全部应用"各自是一个 `ScrollArea`，各自记住滚动位置。两个选项卡曾经共用整页一个滚动区，结果是：QStackedWidget 取两页中较高的一页作为高度，"已安装"下面会多出一整片空白可以滚；切换时高度变化会把横移当场掐断；截快照只能截到列表顶部，从列表中段进详情时画面会跳；进出详情还得放开再抓回外层的触控手势。不要改回整页滚动。
 
-应用市场有两种切换动画，按层级区分：选项卡（"已安装 / 全部应用"）、分类（"推荐 / 全部"）和分页是同级之间的横移，按序号决定方向，180 ms `OutCubic`；进入应用详情是往下一级走，用 QFluentWidgets 的 DrillIn，与主窗口切页一致。DrillIn 曾被换掉过：当时进详情要把整页滚动区缩到一屏高，截快照和动画用的是缩之前的尺寸，DrillIn 把快照拉伸到容器大小，详情页先扁一下、动画结束时"啪"地拉长。现在容器尺寸在进出详情时不变，测试逐像素比对 DrillIn 的进场快照与动画结束后的真实页面，改动详情页结构时必须保持它通过。分类和分页的横移只在网格上叠两张快照，网格本身立即换好并保留占位隐藏，不做第二套卡片，也不逐帧重排。分页超过一页时，"全部"的网格预留一整页的高度，最后一页卡片少时分页按钮不上跳；只有一页时不预留。换分类或翻页后，若分类栏已滚出视口，就平滑滚回分类栏，让新内容从头显示；分类栏仍在视口内时不滚动，也不滚到广告横幅所在的最顶部。两种堆叠切换都必须能在过渡途中反向：过渡期间 `currentIndex()` 仍是旧页，需要"当前选项卡"的地方以选项卡栏的当前项为准。
+应用市场有两种切换动画，按层级区分：选项卡（"已安装 / 全部应用"）、分类（"推荐 / 全部"）和分页是同级之间的横移，按序号决定方向，180 ms `OutCubic`；进入应用详情是往下一级走，用 QFluentWidgets 的 DrillIn，与主窗口切页一致。DrillIn 曾被换掉过：当时进详情要把整页滚动区缩到一屏高，截快照和动画用的是缩之前的尺寸，DrillIn 把快照拉伸到容器大小，详情页先扁一下、动画结束时"啪"地拉长。现在容器尺寸在进出详情时不变，测试逐像素比对 DrillIn 的进场快照与动画结束后的真实页面，改动详情页结构时必须保持它通过。分类和分页的横移只在网格上叠两张快照，网格本身立即换好并保留占位隐藏，不做第二套卡片。网格不预留高度：它占的位置在横移的同一条 180 ms `OutCubic` 里从旧页高度过渡到新页高度，两张快照按当前高度裁切，分页条跟着滑，既不跳也不留空白；途中反向时从当前高度接着走。这是横移期间唯一的逐帧重排，只挪动网格下面的分页条，用 `setFixedHeight` 打脏标记由 Qt 合并。不要改回"预留一整页高度"：最后一页卡片少时分页条会离内容很远，单列时隔着四行空白。换分类或翻页后，若分类栏已滚出视口，就平滑滚回分类栏，让新内容从头显示；分类栏仍在视口内时不滚动，也不滚到广告横幅所在的最顶部。两种堆叠切换都必须能在过渡途中反向：过渡期间 `currentIndex()` 仍是旧页，需要"当前选项卡"的地方以选项卡栏的当前项为准。
 
 "全部应用"与"已安装"一样有空状态卡片：搜索无结果时提供"清除搜索"，目录加载失败且没有已知目录时提供"重试"，加载中只显示说明，"推荐"为空而目录里有应用时提供"查看全部"。
 
-广告触控的 QApplication 全局事件过滤器只在 Application Store 可见时安装；页面隐藏或关闭时移除，避免其他页面的全部输入事件继续经过广告层。
+广告触控的 QApplication 全局事件过滤器只在 Application Store 可见时安装；页面隐藏或关闭时移除，避免其他页面的全部输入事件继续经过广告层。它只接手指落在横幅可见部分上的触控，以手指下实际的控件（`QApplication.widgetAt()`）为准，不能只比坐标：横幅滚到选项卡栏后面时，手指点"已安装"或"刷新"曾点中藏在下面的"查看软件"或换广告箭头；横幅被弹窗或菜单盖住时同理。
 
 `ApplicationStore.installZip()` 是安装与更新的共同提交点：先校验并解压到 `.staging-*`，已有版本先改名为 `.backup-*`，再原子替换目标；失败时恢复备份。启动扫描会恢复未完成替换留下的备份并清理残留操作目录。
 
@@ -170,6 +171,12 @@ AI Markdown Conversion 失败时由服务端按 DeepSeek 的回应归因：只�
 AI Markdown 数据库的 schema 初始化缓存同时使用文件身份和 SQLite schema version；同一路径下的数据库文件被替换后必须重新初始化，普通额度和请求记录写入不能反复触发 schema 初始化。
 
 一台机器的上限一律经 `_dailyQuota(machineId)` 取：先查 `quota_overrides` 表，没有才用 `_defaultDailyQuota()`（设置键仍叫 `daily_limit`）。Quota Override 可以是 0，取上限的地方不能写 `limit or 默认值` 这类真值判断，否则停用的机器会回到默认额度。`/quota`、整理请求的 `X-RateLimit-Limit` 和后台表格都报这台机器自己的上限，所以 Quota Override 只需一次 Server Update，客户端不用跟着升级。
+
+### Error Report
+
+**`app/common/error_report.py` 独占客户端的 Error Report。** `djcat.py` 的 `exceptionHook` 在记日志之后、发 `signalBus.catchException` 之前调用 `reportError()`；另外发 `catchException` 的地方（目前只有设置页的开机启动）也要先调它，因为"软件可能遇到异常"的 InfoBar 告诉用户报错会自动发出。`reportError()` 只在发行版里上报（`isPackaged()`），源码运行和测试不得往线上服务端发；在后台线程里 POST，不跟随跳转，失败只记日志。同一次运行里按异常类型和每一帧的文件、函数、行号去重，最多发 20 份。路径换成相对 `APP_DIR` 的写法、用户目录换成 `~`；不发日志，日志每行都带时间。
+
+**`server/error_reports.py` 独占服务端的 Error Report。** `POST /error-reports` 只在 API 域名上接收，机器标识照 AI Markdown 加盐成 Machine Identity 再存。Error Signature 在服务端算：异常类型 + 去掉路径、`0x` 地址、长十六进制串和所有数字后的消息 + 每一帧的"文件:函数名"；文件去掉安装位置（`site-packages/` 之前的部分、绝对路径只留文件名），不取行号、回溯全文或日志。改归并规则会把已有的组拆开，改之前想清楚。每组按（组, Machine Identity, 日期）各一行累计次数，组里只留最近一次的消息和回溯。一台机器一天最多 100 次、全站一天最多新出现 200 组，超出返回 429；过期（90 天）清理挂在写入路径上，没有出现记录的组随之删除。
 
 ### 管理后台
 
@@ -212,7 +219,7 @@ Storage Migration 的安全约束：
 
 Custom Home Card 的图标选择器用 `app/view/components/icon_grid.py` 的 `IconGrid` 一个控件绘制整个图标库，不为每个图标建 `ToggleToolButton`。`IconGrid` 按 `ToggleToolButton` 的样式表配色和 FlowLayout 的排布绘制，背景状态和图标都按设备像素缓存成位图；提示沿用 QFluentWidgets `ToolTip`。自绘的可按区域控件通过 `scroll_area.registerTouchPressTarget()` 登记，触控起滑时与按钮一样被取消按压。
 
-Application 图标允许使用 PNG、JPEG、WebP、GIF、BMP、SVG 和 ICO。`ImageCache` 保留普通图片已识别的 URL 文件后缀；ICO 在临时文件中由 Pillow 读取最大尺寸帧并规范化为 PNG，再原子替换到 `.png` 缓存路径。Application Store、主页和 Tray Menu 只复用规范化后的路径，不应各自承担 ICO 解码兼容。
+Application 图标允许使用 PNG、JPEG、WebP、GIF、BMP、SVG 和 ICO。`ImageCache` 保留普通图片已识别的 URL 文件后缀；ICO 在临时文件中由 Pillow 读取最大尺寸帧并规范化为 PNG，再原子替换到 `.png` 缓存路径。Application Store、主页和 Tray Menu 只复用规范化后的路径，不应各自承担 ICO 解码兼容。Application Store 渲染卡片、详情和广告横幅时，缓存里已有的图直接用（`ApplicationStore.cachedImagePath()` 由网址算出缓存路径，文件在就用，不下载也不解码），不等目录到达或后台逐张核对；后台核对仍照旧，坏图删掉重下后经 `imageLoaded` 换上。服务端换了图片网址而新图还没缓存时，同一个 Application 保留当前显示的图标，不退回占位。
 
 ### Projection 渲染
 
@@ -255,7 +262,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/platform/shadow_effect.py` | Silhouette Shadow：按尺寸缓存模糊的圆角矩形投影 |
 | `app/platform/menu_animation.py` | QFluentWidgets 全局 Menu Reveal 管理器适配，不改变原版展开视觉 |
 | `app/platform/icon_cache.py` | QFluentWidgets SVG 图标解析缓存，只缓存资源路径和源码 |
-| `app/platform/touch_input.py` | Qt 合成触控鼠标后系统不再提供的两件事：长按弹出右键菜单、手指拖标题栏移动窗口；外加弹出窗口按钮的轻点兜底 |
+| `app/platform/touch_input.py` | 手指按住时给指下的按钮和卡片画上按下态；触控输入本身仍由 Windows 判定 |
 | `app/platform/background_effect.py` | Background Effect：照 Ghost Downloader 给主窗口挂 Windows 透明材质，Win10 的 Acrylic 在窗口移动时暂停模糊 |
 | `app/platform/screens.py` | 取窗口所在屏幕，绕开 PySide 把 QScreen 挂成控件子对象的返回值启发式 |
 | `app/config/` | 配置 schema、常量和 App Data Directory |
@@ -272,11 +279,12 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/view/components/update_toast.py` | Update Toast 的三种状态、按钮和底边进度线；不知道下载、版本和安装的规则 |
 | `app/view/components/window_transition.py` | Window Transition：Display Window 在全屏、窗口化和 Floating Button 之间切换的快照形变、动画层和交接顺序 |
 | `app/view/components/setting_section.py` | Setting Section 的下钻容器、导航行、推移动画和命中高亮 |
-| `app/view/components/setting_preview.py` | Setting Preview：`MainWindowReplica` 用真实组件按主窗口当前尺寸复刻整个主窗口（横幅、外观、个性化、软件图标四处共用）、托盘菜单与任务栏、投送／倒计时／时钟窗口（标题、正文或大时间、角落按钮） |
+| `app/view/components/setting_preview.py` | Setting Preview：`MainWindowReplica` 用真实组件按主窗口当前尺寸复刻整个主窗口（横幅、外观、软件图标三处共用）、托盘菜单与任务栏、投送／倒计时／时钟窗口（标题、正文或大时间、角落按钮） |
 | `app/view/components/color_dialog.py` | QFluentWidgets 颜色选择弹窗换上项目 `ScrollArea`，色板和亮度滑块登记为触控拖动目标 |
 | `app/view/components/setting_suggestion_menu.py` | Setting Suggestion 弹窗；选中后交回 Route，不把文本写回搜索框 |
 | `app/common/application_icon.py` | Application Icon 与 Tray Icon 的解析：主窗口、启动页、托盘与 Tray Menu“主页”共用一处 |
 | `app/common/logs.py` | Log 的位置、14 天保留、Cache 中可清理的日志，以及旧 `APP_DIR\Log` 的迁入 |
+| `app/common/error_report.py` | Error Report 的客户端一侧：整理调用栈、去掉安装位置和用户名、同一次运行去重、后台上报 |
 | `pyqt_github_markdown/` | 项目内置 Markdown 渲染器；不承载 DJCat 业务规则 |
 
 `app/common/application_version.py` 只包含架构和版本比较等纯函数，允许 MainWindow 在启动阶段导入。重量较大的 `app/common/application_store.py`、Custom Home Card 编辑器和 Markdown 渲染器分别在对应页面、编辑操作或更新日志首次需要时导入；`edge_tts` 依赖只在实际查询音色或合成语音时导入。
@@ -287,6 +295,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 |---|---|
 | `server/ai_markdown.py` | Machine Identity、Daily Quota、AI Markdown Conversion 和管理接口 |
 | `server/app_store.py` | Application Catalog、下载重定向/计数和应用市场管理页面 |
+| `server/error_reports.py` | Error Report：公开的上报接口、Error Signature 归并、过期清理和「客户端报错」页面 |
 | `server/server_update.py` | Server Update：检查 main 上的 Server Version、下载替换、回滚，以及「服务端更新」页面 |
 | `server/version.py` | Server Version 的唯一来源 |
 | `server/templates/admin_base.html` | Admin Console 的共享页面结构、侧边栏和导航入口 |
@@ -300,9 +309,9 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 
 ```text
 set working directory
-  → SingletonApplication (Windows single instance + IPC; Qt synthesizes touch presses on Windows)
+  → SingletonApplication (Windows single instance + IPC)
   → unlockQtAnimations (before any QWidget animation is created)
-  → enableTouchInput (long press opens context menus; finger taps on popup buttons always click)
+  → enableTouchPressFeedback (controls under a finger look pressed; Windows still decides the input)
   → optimizeFluentDialogs + optimizeFluentMenus (before MainWindow or its popups are created)
   → cacheFluentSvgIcons (before any QFluentWidgets icon is painted)
   → installTranslators (Qt qtbase + QFluentWidgets Chinese strings)
@@ -412,6 +421,7 @@ def __init__(self, parent=None):
 - 新的私有 Qt/Windows API 必须封装、可失败、可回退，并有锁定版本的真实二进制验证。
 - 要加按钮的 InfoBar 先构造 `InfoBar(...)`、`addWidget()` 完再 `show()`，不用 `InfoBar.error()` 这类便捷方法后再加：它们当场显示，InfoBarManager 按加控件前的宽度算定滑入终点，多出的部分落在窗口外。
 - 依赖 QFluentWidgets `exec(pos, ani, aniType)` 签名的菜单 Python 子类，在自己的类体里重新声明 `exec`（如 `exec = CompleterMenu.exec`）：PySide6 在实例上查找 `exec` 时跳过继承来的 Python 重写，落到 `QMenu.exec`（6.9–6.11 均如此）。托盘 `AcrylicMenu` 走原生 `QMenu.exec` 属于 v5.1.2 固定行为，保持原样。
+- 监听主题色变化用 `qconfig.themeColor.valueChanged`，不用 `qconfig.themeColorChanged`：启动时 `qconfig.load(CONFIG_PATH, cfg)` 之后，组件库把 `themeColorChanged` 发在 `cfg` 上，`qconfig` 自己的这个信号再也不发，监听它不报错也不生效。`themeChanged` 有组件库转发，不受影响。
 - 取窗口所在屏幕用 `app/platform/screens.py` 的 `screenFor()`，不得调用 `QWidget.screen()` 或 `QWindow.screen()`（原因见 `screens.py` 文件头）。只需要设备像素比时直接用 `devicePixelRatioF()`。`tests/test_screens.py` 会扫描 `app/` 拦下新的调用。
 
 ### Comments

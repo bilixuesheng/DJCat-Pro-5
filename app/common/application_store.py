@@ -465,6 +465,14 @@ class ImageCache:
             suffix = ".png"
         return self.directory / f"{hashlib.sha256(url.encode()).hexdigest()}{suffix}"
 
+    def cachedPath(self, url: str) -> str:
+        """The image already on disk for ``url``, or "" — no download, no decoding."""
+        try:
+            path = self.pathFor(_httpsUrl(url))
+        except ApplicationStoreError:
+            return ""
+        return str(path) if path.is_file() else ""
+
     def get(self, url: str, session=requests) -> Path:
         url = _httpsUrl(url)
         path = self.pathFor(url)
@@ -780,6 +788,9 @@ class ApplicationStore:
 
     def imagePath(self, url: str, session=requests) -> Path:
         return self.cache.get(url, session)
+
+    def cachedImagePath(self, url: str) -> str:
+        return self.cache.cachedPath(url)
 
     def downloadPath(self, app: dict) -> Path:
         appId = int(app["id"])

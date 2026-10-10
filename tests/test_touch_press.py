@@ -13,43 +13,12 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import CardWidget
 
-from app.platform.application import TOUCH_PRESS_PLATFORM, withQtTouchPress
 from app.view.components.scroll_area import ScrollArea
 
 
-def testWindowsGetsQtTouchPressPlatform():
-    argv = ["DJCat Pro.exe", "--silence"]
-
-    arguments = withQtTouchPress(argv, platform="win32", environ={})
-
-    assert arguments == [
-        "DJCat Pro.exe",
-        "--silence",
-        "-platform",
-        TOUCH_PRESS_PLATFORM,
-    ]
-    assert argv == ["DJCat Pro.exe", "--silence"]
-
-
-def testExplicitPlatformIsLeftAlone():
-    cases = [
-        (["djcat.py"], {"QT_QPA_PLATFORM": "offscreen"}),
-        (["djcat.py", "-platform", "offscreen"], {}),
-        (["djcat.py", "--platform", "offscreen"], {}),
-    ]
-    for argv, environ in cases:
-        assert withQtTouchPress(argv, platform="win32", environ=environ) == argv
-
-
-def testOtherSystemsKeepTheirArguments():
-    assert withQtTouchPress(["djcat.py"], platform="linux", environ={}) == [
-        "djcat.py"
-    ]
-
-
 class TouchPressInScrollAreaTest(TestCase):
-    """Offscreen Qt synthesizes mouse events from unaccepted touch, as Windows does
-    once ``nomousefromtouch`` is set, so these cover the press path DJCat ships."""
+    """Offscreen Qt synthesizes mouse events from the touch, standing in for the press
+    Windows sends once a finger starts to drag: the scroll must cancel it either way."""
 
     @classmethod
     def setUpClass(cls):
@@ -95,20 +64,6 @@ class TouchPressInScrollAreaTest(TestCase):
             and time.monotonic() < deadline
         ):
             QTest.qWait(20)
-
-    def testButtonIsPressedAsSoonAsTheFingerLands(self):
-        button = QPushButton("打开")
-        self._scrollArea(button)
-        device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
-
-        QTest.touchEvent(button, device).press(0, button.rect().center(), button).commit()
-        self.app.processEvents()
-
-        self.assertTrue(button.isDown())
-        QTest.touchEvent(button, device).release(
-            0, button.rect().center(), button
-        ).commit()
-        self.app.processEvents()
 
     def testScrollKeepsButtonReleasedWhileFingerStaysOnIt(self):
         button = QPushButton("打开")

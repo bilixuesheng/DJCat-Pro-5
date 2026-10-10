@@ -1,0 +1,67 @@
+{% extends "admin_base.html" %}
+
+{% block title %}{{ group.exception_type }} · 客户端报错{% endblock %}
+{% block page_name %}客户端报错{% endblock %}
+{% block page_actions %}<a class="button button-secondary" href="{{ url_for('error_reports.page') }}">返回报错列表</a>{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <div>
+        <div class="eyebrow">客户端报错</div>
+        <h1>{{ group.exception_type }}</h1>
+        <p>{{ group.message or '（异常没有附带消息）' }}</p>
+    </div>
+    <div class="page-header-actions">
+        <form method="post" action="{{ url_for('error_reports.delete', groupId=group.id) }}" data-async-form data-confirm="确认删除这组报错吗？再次出现时会重新记录。">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="from" value="detail">
+            <button class="button button-danger" type="submit">删除</button>
+        </form>
+    </div>
+</header>
+
+<section class="section-block" aria-labelledby="error-facts-title">
+    <div class="section-heading">
+        <div><span class="section-index">01</span><h2 id="error-facts-title">概况</h2></div>
+    </div>
+    <dl class="error-facts">
+        <div><dt>位置</dt><dd><code>{{ group.location or '未知' }}</code></dd></div>
+        <div><dt>次数</dt><dd>{{ group.occurrences }} 次 · {{ group.machines }} 台电脑</dd></div>
+        <div><dt>首次出现</dt><dd>{{ group.first_seen_at[:16]|replace('T', ' ') }}</dd></div>
+        <div><dt>最近出现</dt><dd>{{ group.last_seen_at[:16]|replace('T', ' ') }} · {{ group.last_version or '版本未知' }}</dd></div>
+    </dl>
+</section>
+
+<section class="section-block" aria-labelledby="error-traceback-title">
+    <div class="section-heading">
+        <div><span class="section-index">02</span><h2 id="error-traceback-title">调用栈</h2></div>
+        <span>最近一次</span>
+    </div>
+    <pre class="error-traceback">{{ group.traceback }}</pre>
+</section>
+
+<section class="section-block" aria-labelledby="error-occurrences-title">
+    <div class="section-heading">
+        <div><span class="section-index">03</span><h2 id="error-occurrences-title">出现记录</h2></div>
+        <span>每台电脑每天一行</span>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th scope="col">日期</th><th scope="col">电脑</th><th scope="col">次数</th><th scope="col">首次</th><th scope="col">最近</th><th scope="col">版本</th><th scope="col">系统</th></tr></thead>
+            <tbody>
+            {% for occurrence in occurrences %}
+                <tr>
+                    <td>{{ occurrence.day }}</td>
+                    <td><code>{{ occurrence.machine_code }}</code></td>
+                    <td>{{ occurrence.count }}</td>
+                    <td>{{ occurrence.first_at[11:19] }}</td>
+                    <td>{{ occurrence.last_at[11:19] }}</td>
+                    <td>{{ occurrence.client_version }}</td>
+                    <td class="cell-truncate">{{ occurrence.os }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

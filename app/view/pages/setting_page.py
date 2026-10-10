@@ -363,7 +363,7 @@ class ThemeColorSettingCard(CollapsibleSettingCard):
     def _bind(self) -> None:
         self.buttonGroup.buttonClicked.connect(self._onButtonClicked)
         self.chooseColorButton.clicked.connect(self._chooseCustomColor)
-        qconfig.themeColorChanged.connect(self.choiceSwatch.setColor)
+        qconfig.themeColor.valueChanged.connect(self.choiceSwatch.setColor)
 
     def _loadSelection(self) -> None:
         preset = cfg.themeColorPreset.value
@@ -1106,18 +1106,18 @@ class SettingPage(QWidget):
             ]
         )
 
-        personalization = self._addSection(
+        self._addSection(
             "personalization",
             "个性化",
             FluentIcon.BRUSH,
-            "外观、软件图标、系统托盘和窗口标题",
+            "外观、软件图标和系统托盘",
             ROOT_SECTION_KEY,
         )
         appearance = self._addSection(
             "personalization.appearance",
             "外观",
             FluentIcon.PALETTE,
-            "应用主题、主题色、窗口背景透明材质和窗口过渡动画",
+            "应用主题、主题色、窗口背景透明材质、窗口过渡动画、窗口标题和侧边栏入口",
             "personalization",
         )
         appearance.addPreview(self._registerHomeCardPreview(MainWindowPreview()))
@@ -1127,6 +1127,8 @@ class SettingPage(QWidget):
                 self.themeColorCard,
                 self.backgroundEffectCard,
                 self.windowTransitionCard,
+                self.windowTitleCard,
+                self.showCreditsCard,
             ]
         )
         applicationIcon = self._addSection(
@@ -1158,9 +1160,6 @@ class SettingPage(QWidget):
         tray.addCardList(self.trayMenuCards)
         tray.addSubsectionTitle("主页卡片")
         tray.addWidget(self.trayCardShortcutList)
-        personalization.addSubsectionTitle("窗口")
-        personalization.addPreview(self._registerHomeCardPreview(MainWindowPreview()))
-        personalization.addCardList([self.windowTitleCard, self.showCreditsCard])
 
         software = self._addSection(
             "software",
@@ -1340,7 +1339,10 @@ class SettingPage(QWidget):
         try:
             setRunAtLogin(enabled)
         except OSError as error:
+            from app.common.error_report import reportError
+
             logger.exception("修改开机启动设置失败")
+            reportError(type(error), error, error.__traceback__)
             signalBus.catchException.emit(str(error))
 
     def _onStorageModeClicked(self) -> None:
