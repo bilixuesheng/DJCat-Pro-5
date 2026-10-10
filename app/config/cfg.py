@@ -19,7 +19,9 @@ from app.platform.background_effect import BACKGROUND_EFFECTS, defaultBackground
 THEME_COLOR_PRESETS = (
     ("树人绿", (49, 101, 49)),
     ("系统蓝", (76, 194, 255)),
+    ("罗小黑", (0, 0, 0)),
 )
+CUSTOM_THEME_COLOR = "自定义"
 BANNER_IMAGE_PRESETS = {
     "预设: 树人门": "home.png",
     "预设: 罗小黑": "luoxiaoheimiao.jpg",
@@ -83,13 +85,18 @@ class Config(QConfig):
         "Personalization",
         "ThemeColorPreset",
         "树人绿",
-        OptionsValidator([name for name, _ in THEME_COLOR_PRESETS] + ["自定义"]),
+        OptionsValidator(
+            [name for name, _ in THEME_COLOR_PRESETS] + [CUSTOM_THEME_COLOR]
+        ),
     )
+    # 只存 Custom Theme Color，选预设时不动它；正在用的颜色见 currentThemeColor()。
     customThemeColor = ColorConfigItem(
         "Personalization",
         "CustomThemeColor",
         QColor(*THEME_COLOR_PRESETS[0][1]),
     )
+    # None 表示旧版配置尚未迁移，见 migrateConfig()。
+    hasCustomThemeColor = ConfigItem("Personalization", "HasCustomThemeColor", None)
     windowTransitionEnabled = ConfigItem(
         "Personalization", "WindowTransition", True, BoolValidator()
     )
@@ -332,7 +339,25 @@ cfg = Config()
 cfg.file = CONFIG_PATH
 
 
+def currentThemeColor() -> QColor:
+    preset = cfg.themeColorPreset.value
+    for name, rgb in THEME_COLOR_PRESETS:
+        if name == preset:
+            return QColor(*rgb)
+    return QColor(cfg.customThemeColor.value)
+
+
+def _migrateThemeColor() -> None:
+    # 旧版选预设时会把预设色写进 CustomThemeColor，那时选着预设的用户没有可找回的自定义颜色。
+    if not isinstance(cfg.hasCustomThemeColor.value, bool):
+        cfg.set(
+            cfg.hasCustomThemeColor,
+            cfg.themeColorPreset.value == CUSTOM_THEME_COLOR,
+        )
+
+
 def migrateConfig() -> None:
+    _migrateThemeColor()
     try:
         version = int(cfg.homeCardSchemaVersion.value)
     except (TypeError, ValueError):

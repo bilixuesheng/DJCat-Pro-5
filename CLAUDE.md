@@ -32,6 +32,8 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 
 Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cfg.applicationIconPath` 持久化，Tray Icon 由 `cfg.trayIconSource` 与 `cfg.trayIconPath` 持久化，解析结果统一经 `app/common/application_icon.py` 缓存（`applicationIcon()`、`trayIcon()`、`trayHomeIcon()`）；自定义的托盘图片读不到时退回跟随。主页横幅与设置页的横幅预览共用一份解码后的原图；横幅按物理像素渲染缓存图再标上设备像素比，缓存键包含设备像素比。MainWindow 同步更新 QApplication 和主窗口图标，启动页直接复用主窗口图标；SystemTrayIcon 同时监听两组配置，同步更新系统托盘及已存在的"主页"菜单项，不重建菜单，也不要求重新启动。
 
+Theme Color 由 `cfg.themeColorPreset` 决定：预设取 `THEME_COLOR_PRESETS` 里的颜色，"自定义"取 `cfg.customThemeColor`，统一经 `currentThemeColor()` 解析。`cfg.customThemeColor` 只存 Custom Theme Color，选预设时不得改写它；`cfg.hasCustomThemeColor` 表示它是否存在，旧配置在 `migrateConfig()` 里按当时是否选着"自定义"补上。选色框取消时什么都不变。自绘时，画在软件自己背景上的（进度线、卡片描边、横幅底色）用 QFluentWidgets 推导后的 `themeColor()`，深色主题下与标准控件一样提亮，罗小黑因此显示为白色；Floating Button 和展示窗口角落按钮画在桌面或用户背景上，用原色 `qconfig.themeColor.value`，角落按钮都带与 Setting Preview 相同的细边。
+
 **`app/platform/animation_timer.py` 独占 Qt 全局 Animation Tick 间隔。** View 和业务模块不直接调用 Qt 私有动画 API；私有符号不可用时保留 Qt 默认行为。
 
 **`app/platform/menu_animation.py` 独占 QFluentWidgets 的 Menu Reveal 适配。** 它只替换 `DROP_DOWN` 和 `PULL_UP` 两种动画管理器，并把 `RoundMenu.setShadowEffect` 换成 Silhouette Shadow；其他动画类型及页面组件不再分别接管菜单动画。菜单展开期间不暂停弹窗卡片的阴影：卡片阴影已缓存，暂停和恢复反而各引起一次整卡重绘并让阴影闪一下。Tray Menu 的 `AcrylicMenu` 不走 `RoundMenu.__init__`，不受影响。
