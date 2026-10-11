@@ -884,11 +884,11 @@ class SettingPage(QWidget):
             "了解作者",
             f"发现更多 {AUTHOR} 的作品",
         )
-        self.errorLogCard = PushSettingCard(
-            "查看错误日志",
+        self.logCard = PushSettingCard(
+            "打开文件夹",
             FluentIcon.FOLDER,
-            "错误日志",
-            "打开应用保存错误日志的文件夹。",
+            "日志",
+            "打开保存运行日志的文件夹",
         )
         self.aboutCard = PrimaryPushSettingCard(
             "检查更新",
@@ -977,32 +977,24 @@ class SettingPage(QWidget):
     def _initSections(self) -> None:
         self._addSection(ROOT_SECTION_KEY, "设置")
 
-        banner = self._addSection(
-            "banner",
-            "横幅设置",
-            FluentIcon.PHOTO,
-            "主页横幅的显示与自定义",
-            ROOT_SECTION_KEY,
-        )
-        banner.addPreview(self._registerHomeCardPreview(MainWindowPreview()))
-        banner.addCardList(
-            [
-                self.showBannerCard,
-                self.bannerSourceCard,
-                self.chooseImageCard,
-                self.bannerBrightnessCard,
-                self.bannerScaleCard,
-            ]
-        )
-
         broadcast = self._addSection(
             "broadcast",
-            "全屏投送设置",
+            "全屏投送",
             FluentIcon.FULL_SCREEN,
-            "投送窗口、操作按钮和关闭行为",
+            "投送窗口、AI 整理、操作按钮和关闭行为",
             ROOT_SECTION_KEY,
         )
         self._addBackgroundSection("broadcast", "投送窗口的背景、颜色和缩放", PROJECTION_CONTENT)
+        aiMarkdown = self._addSection(
+            "broadcast.aiMarkdown",
+            "AI 整理",
+            FluentIcon.EDIT,
+            "整理风格、每日额度和机器码",
+            "broadcast",
+        )
+        aiMarkdown.addCardList(
+            [self.aiStyleCard, self.aiQuotaCard, self.aiMachineCodeCard]
+        )
         broadcast.addSubsectionTitle("窗口与显示")
         broadcast.addCardList(
             [
@@ -1021,20 +1013,9 @@ class SettingPage(QWidget):
             ]
         )
 
-        aiMarkdown = self._addSection(
-            "aiMarkdown",
-            "AI 整理 Markdown 设置",
-            FluentIcon.EDIT,
-            "AI 整理功能和 Markdown 风格",
-            ROOT_SECTION_KEY,
-        )
-        aiMarkdown.addCardList(
-            [self.aiStyleCard, self.aiQuotaCard, self.aiMachineCodeCard]
-        )
-
         countdown = self._addSection(
             "countdown",
-            "考试倒计时设置",
+            "考试倒计时",
             FluentIcon.CALENDAR,
             "倒计时窗口、提醒和重置行为",
             ROOT_SECTION_KEY,
@@ -1060,7 +1041,7 @@ class SettingPage(QWidget):
 
         fullscreenClock = self._addSection(
             "fullscreenClock",
-            "全屏时钟设置",
+            "全屏时钟",
             FluentIcon.STOP_WATCH,
             "时钟窗口、操作按钮和关闭行为",
             ROOT_SECTION_KEY,
@@ -1088,7 +1069,7 @@ class SettingPage(QWidget):
             "personalization",
             "个性化",
             FluentIcon.BRUSH,
-            "外观、软件图标和系统托盘",
+            "外观、主页横幅、软件图标和系统托盘",
             ROOT_SECTION_KEY,
         )
         appearance = self._addSection(
@@ -1107,6 +1088,23 @@ class SettingPage(QWidget):
                 self.windowTransitionCard,
                 self.windowTitleCard,
                 self.showCreditsCard,
+            ]
+        )
+        banner = self._addSection(
+            "personalization.banner",
+            "主页横幅",
+            FluentIcon.PHOTO,
+            "主页横幅的显示、图片、亮度和缩放",
+            "personalization",
+        )
+        banner.addPreview(self._registerHomeCardPreview(MainWindowPreview()))
+        banner.addCardList(
+            [
+                self.showBannerCard,
+                self.bannerSourceCard,
+                self.chooseImageCard,
+                self.bannerBrightnessCard,
+                self.bannerScaleCard,
             ]
         )
         applicationIcon = self._addSection(
@@ -1143,7 +1141,7 @@ class SettingPage(QWidget):
             "software",
             "应用",
             FluentIcon.SETTING,
-            "启动、更新和应用行为",
+            "启动、更新、存储、缓存和日志",
             ROOT_SECTION_KEY,
         )
         software.addCardList(
@@ -1152,6 +1150,7 @@ class SettingPage(QWidget):
                 self.autoRunCard,
                 self.storageModeCard,
                 self.cacheCard,
+                self.logCard,
             ]
         )
 
@@ -1162,7 +1161,7 @@ class SettingPage(QWidget):
             "版本、支持和项目相关信息",
             ROOT_SECTION_KEY,
         )
-        about.addCardList([self.authorCard, self.errorLogCard, self.aboutCard])
+        about.addCardList([self.authorCard, self.aboutCard])
 
     def _initLayout(self) -> None:
         self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
@@ -1190,7 +1189,7 @@ class SettingPage(QWidget):
         self.aboutCard.clicked.connect(self._onAboutCardClicked)
         self.cacheCard.clicked.connect(self._onClearCache)
         self.storageModeCard.clicked.connect(self._onStorageModeClicked)
-        self.errorLogCard.clicked.connect(self._onOpenErrorLogClicked)
+        self.logCard.clicked.connect(self._onOpenLogClicked)
         self.aiQuotaReceived.connect(self._onAIQuotaReceived)
         cfg.applicationIconSource.valueChanged.connect(self._refreshConditionalCards)
         cfg.trayIconSource.valueChanged.connect(self._refreshConditionalCards)
@@ -1283,7 +1282,7 @@ class SettingPage(QWidget):
     def _onAboutCardClicked(self) -> None:
         self.window().checkForUpdates(manual=True)
 
-    def _onOpenErrorLogClicked(self) -> None:
+    def _onOpenLogClicked(self) -> None:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(LOG_DIR)))
 
