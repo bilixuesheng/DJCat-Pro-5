@@ -2,7 +2,7 @@ from unittest import TestCase
 
 from PySide6.QtCore import QEvent
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 from qfluentwidgets import (
     PushButton,
     Theme,
@@ -11,7 +11,13 @@ from qfluentwidgets import (
     setTheme,
     setThemeColor,
 )
-from qfluentwidgets.common.style_sheet import StyleSheetCompose, styleSheetManager
+from qfluentwidgets.common import style_sheet as fluentStyleSheet
+from qfluentwidgets.common.style_sheet import (
+    FluentStyleSheet,
+    StyleSheetCompose,
+    getStyleSheet,
+    styleSheetManager,
+)
 
 from app.platform.style_sheet import optimizeFluentStyleSheets
 from tests.support import isolateCfg
@@ -75,3 +81,46 @@ class StyleSheetNestingTest(TestCase):
         setTheme(Theme.LIGHT)
         self.assertIn("padding: 1px", self.button.styleSheet())
         self.assertNotIn("padding: 2px", self.button.styleSheet())
+
+
+class _CountingWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.styleSheetsSet = 0
+
+    def setStyleSheet(self, styleSheet):
+        self.styleSheetsSet += 1
+        super().setStyleSheet(styleSheet)
+
+
+class UnchangedStyleSheetTest(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance()
+        optimizeFluentStyleSheets()
+
+    def setUp(self):
+        isolateCfg(self)
+        self.addCleanup(setThemeColor, qconfig.themeColor.value)
+        self.addCleanup(setTheme, qconfig.themeMode.value)
+        setTheme(Theme.LIGHT)
+        # 主窗口的样式表不含主题色，主窗口页面栈带的就是它。
+        self.widget = _CountingWidget()
+        self.addCleanup(self.widget.deleteLater)
+        fluentStyleSheet.setStyleSheet(self.widget, FluentStyleSheet.FLUENT_WINDOW)
+
+    def testThemeColorChangeDoesNotReapplyAStyleSheetThatStaysTheSame(self):
+        applied = self.widget.styleSheetsSet
+        setThemeColor(QColor("#993366"))
+
+        self.assertEqual(self.widget.styleSheetsSet, applied)
+
+    def testThemeChangeStillAppliesTheNewStyleSheet(self):
+        light = self.widget.styleSheet()
+        setTheme(Theme.DARK)
+
+        self.assertNotEqual(self.widget.styleSheet(), light)
+        self.assertEqual(
+            self.widget.styleSheet().rstrip(),
+            getStyleSheet(FluentStyleSheet.FLUENT_WINDOW, Theme.DARK).rstrip(),
+        )

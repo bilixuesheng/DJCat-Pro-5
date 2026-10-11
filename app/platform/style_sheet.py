@@ -42,7 +42,8 @@ def _setStyleSheet(widget, source, theme=Theme.AUTO, register=True):
     if register:
         styleSheetManager.register(source, widget)
     styleSheet = getStyleSheet(source, theme)
-    if styleSheet != widget.styleSheet():
+    # 首次套用的是单个样式源，换主题时套用的组合末尾多一个换行，内容相同。
+    if styleSheet.rstrip() != widget.styleSheet().rstrip():
         widget.setStyleSheet(styleSheet)
 
 
