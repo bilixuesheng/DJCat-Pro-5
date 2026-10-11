@@ -11,6 +11,8 @@ from PySide6.QtCore import (
     QEvent,
     QObject,
     QPoint,
+    QRect,
+    QRectF,
     QSize,
     Qt,
     QTimer,
@@ -32,8 +34,10 @@ from qfluentwidgets import (
     MessageBox,
     PrimaryPushButton,
     PushButton,
+    Theme,
     ToggleToolButton,
     qconfig,
+    setTheme,
 )
 
 from app.config.cfg import cfg
@@ -379,6 +383,35 @@ class AppStorePageTest(TestCase):
         self.assertEqual(button.toolTip(), "安装中")
         self.assertNotEqual(image.pixelColor(*center), white)
 
+    def testStopSquareSharesTheRingCenterOnOddSizes(self):
+        # 停止方块曾按按钮正中画，环却被布局取整到整数像素，奇数宽或高时差半个像素。
+        for width, height in ((120, 32), (121, 31), (121, 33), (201, 48)):
+            for progress in (0, 37):
+                with self.subTest(size=(width, height), progress=progress):
+                    button = ActionProgressButton("下载")
+                    self.addCleanup(button.deleteLater)
+                    button.resize(width, height)
+                    button.show()
+                    button.setDownloadProgress(progress, "取消下载")
+                    button.spinner.stop()
+                    self.qtApp.processEvents()
+                    ring = button.ring if progress else button.spinner
+                    center = QRectF(ring.geometry()).center()
+                    image = QImage(button.size(), QImage.Format.Format_ARGB32)
+                    image.fill(Qt.GlobalColor.transparent)
+                    button.render(image)
+
+                    # 环的内圈里只有方块：按白色程度求重心，应与环心重合。
+                    total = sumX = sumY = 0.0
+                    for y in range(int(center.y()) - 5, int(center.y()) + 5):
+                        for x in range(int(center.x()) - 5, int(center.x()) + 5):
+                            weight = image.pixelColor(x, y).red() / 255
+                            total += weight
+                            sumX += weight * (x + 0.5)
+                            sumY += weight * (y + 0.5)
+                    self.assertAlmostEqual(sumX / total, center.x(), delta=0.05)
+                    self.assertAlmostEqual(sumY / total, center.y(), delta=0.05)
+
     def testDownloadRingAnimatesFromTheCurrentDisplayedValue(self):
         button = ActionProgressButton("下载")
         self.addCleanup(button.deleteLater)
@@ -415,6 +448,43 @@ class AppStorePageTest(TestCase):
         button.setDownloadProgress(5, "取消下载")
         ring.ani.setCurrentTime(1)
         self.assertLess(ring.val, 5)
+
+    def testUninstallIconIsRedAndTurnsWhiteOnTheHoverFill(self):
+        card = ApplicationCard()
+        self.addCleanup(card.deleteLater)
+        card.resize(331, card.height())
+        card.setState("打开", removable=True, pinnable=True)
+        card.show()
+        self.qtApp.processEvents()
+        button = card.removeButton
+
+        def iconColors():
+            image = QImage(button.size(), QImage.Format.Format_ARGB32)
+            image.fill(Qt.GlobalColor.transparent)
+            button.render(image)
+            iconRect = QRect(QPoint(0, 0), button.iconSize())
+            iconRect.moveCenter(button.rect().center())
+            return {
+                image.pixelColor(x, y).name()
+                for x in range(iconRect.left(), iconRect.right() + 1)
+                for y in range(iconRect.top(), iconRect.bottom() + 1)
+            }
+
+        self.assertIn("#d13438", iconColors())
+        button.isHover = True
+        self.assertIn("#ffffff", iconColors())
+
+    def testUninstallStyleSurvivesThemeChange(self):
+        # 直接 setStyleSheet 的红边框曾在切换深浅主题时被组件库的样式表整份换掉。
+        card = ApplicationCard()
+        self.addCleanup(card.deleteLater)
+        self.addCleanup(setTheme, Theme.LIGHT, save=False)
+
+        setTheme(Theme.DARK, save=False)
+        self.qtApp.processEvents()
+
+        self.assertIn("border: 1px solid #d13438", card.removeButton.styleSheet())
+        self.assertIn("border-radius: 5px", card.removeButton.styleSheet())
 
     def testLineProgressFollowsButtonCornersWithFlatSegmentEnds(self):
         button = ActionProgressButton("打开中")
@@ -1537,9 +1607,15 @@ class AppStorePageTest(TestCase):
 
     def testCardButtonsKeepTouchFriendlyTargets(self):
         card = ApplicationCard()
+        card.resize(331, card.height())
+        card.setState("打开", removable=True, pinnable=True)
+        card.show()
+        self.qtApp.processEvents()
 
         self.assertLess(card.actionButton.height(), 40)
-        self.assertGreaterEqual(card.removeButton.height(), 40)
+        # 卸载按钮与「打开」同高，「已安装」与「全部应用」的主按钮因此也在同一高度；宽度留够触控。
+        self.assertEqual(card.removeButton.geometry().top(), card.actionButton.geometry().top())
+        self.assertEqual(card.removeButton.height(), card.actionButton.height())
         self.assertGreaterEqual(card.removeButton.width(), 40)
         self.assertLess(card.pinButton.sizeHint().width(), 40)
         self.assertLess(card.pinButton.sizeHint().height(), 40)
