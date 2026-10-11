@@ -3,6 +3,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QLabel, QWidget
 from qfluentwidgets import SmoothScrollDelegate, isDarkTheme
 
+from app.view.components.scroll_area import trackTouchScroller
 from pyqt_github_markdown import DARK, LIGHT, MarkdownWidget, Theme
 
 _LARGE_TEXT_QSS = """
@@ -44,6 +45,7 @@ class MarkdownView(MarkdownWidget):
             self._contentLayout.setContentsMargins(4, 4, 4, 4)
             self._contentLayout.setSpacing(0)
         self._scrollDelegate = SmoothScrollDelegate(self._scroll, True)
+        trackTouchScroller(self.viewport())
         if transparentBackground:
             for widget in (self._scroll, self._scroll.viewport(), self._content):
                 widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)

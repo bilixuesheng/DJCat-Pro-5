@@ -140,6 +140,24 @@ class StartupTest(TestCase):
             cacheLargeGlyphs()
             self.assertEqual(os.environ["QT_MAX_CACHED_GLYPH_SIZE"], "64")
 
+    def testExperimentalTouchFollowsItsSwitchesFromStartup(self):
+        from app.config.cfg import cfg
+
+        app = object()
+        with (
+            patch("app.platform.touch_input.setTouchPressFeedbackEnabled") as press,
+            patch("app.view.components.scroll_area.setTunedTouchScrollEnabled") as scroll,
+            patch.object(cfg.touchPressFeedback, "valueChanged") as pressChanged,
+            patch.object(cfg.tunedTouchScroll, "valueChanged") as scrollChanged,
+        ):
+            djcat.bindExperimentalTouch(app)
+            press.assert_called_once_with(app, cfg.touchPressFeedback.value)
+            scroll.assert_called_once_with(cfg.tunedTouchScroll.value)
+
+            pressChanged.connect.call_args.args[0](True)
+            press.assert_called_with(app, True)
+            scrollChanged.connect.assert_called_once_with(scroll)
+
     def runWithTranslators(self, body, bundledOnly=False):
         """在独立进程里装翻译器：翻译器是 QApplication 全局的，会影响同进程的其他测试。"""
         repo = Path(__file__).resolve().parents[1]

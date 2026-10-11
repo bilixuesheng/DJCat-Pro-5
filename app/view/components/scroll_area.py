@@ -1,7 +1,7 @@
 import sys
 import weakref
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt
+from PySide6.QtCore import QEasingCurve, QEvent, QObject, QPoint, QRect, Qt
 from PySide6.QtGui import QImage, QPainter, QRegion
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -85,6 +85,75 @@ class _BackdropPainter(QObject):
         return False
 
 
+# 「新滚动触控」（实验性功能）的手感，照 Edge 调：甩得越快滑得越远，减速带长尾，
+# 到头轻轻回弹。关掉时一律用 Qt 的默认值，与以前完全相同。
+# 速度单位 m/s，减速度 m/s²，滑行距离 = 2v²/(9a)：86 寸大屏上 1.5 m/s 一甩约滑一屏。
+_TUNED_TOUCH_SCROLL_METRICS = (
+    (QScrollerProperties.ScrollMetric.DragVelocitySmoothingFactor, 1.0),
+    (QScrollerProperties.ScrollMetric.MaximumVelocity, 3.0),
+    (QScrollerProperties.ScrollMetric.DecelerationFactor, 0.42),
+    (QScrollerProperties.ScrollMetric.ScrollingCurve, QEasingCurve(QEasingCurve.Type.OutCubic)),
+    (QScrollerProperties.ScrollMetric.OvershootDragDistanceFactor, 0.25),
+    (QScrollerProperties.ScrollMetric.OvershootScrollDistanceFactor, 0.1),
+    (QScrollerProperties.ScrollMetric.OvershootScrollTime, 0.3),
+)
+# 起滑距离沿用 Qt 的 5 mm：红外框本身有约 ±2 mm 抖动，再小就容易把轻点当成拖动。
+# 大屏报给系统的物理尺寸不一定对，换成逻辑像素后限制在合理范围内。
+TUNED_DRAG_START_MM = 5.0
+TUNED_DRAG_START_PIXELS = (3.0, 12.0)
+
+_touchScrollViewports = weakref.WeakSet()
+_tunedTouchScroll = False
+
+
+def isTunedTouchScrollEnabled() -> bool:
+    return _tunedTouchScroll
+
+
+def setTunedTouchScrollEnabled(enabled: bool) -> None:
+    """Switch every touch-scrollable viewport between Qt's feel and the tuned one."""
+    global _tunedTouchScroll
+    _tunedTouchScroll = bool(enabled)
+    for viewport in tuple(_touchScrollViewports):
+        try:
+            _applyTouchScrollProfile(viewport)
+        except RuntimeError:
+            _touchScrollViewports.discard(viewport)
+
+
+def trackTouchScroller(viewport) -> None:
+    """Give a viewport already grabbed for touch the current scroll feel, and keep it in step."""
+    _touchScrollViewports.add(viewport)
+    _applyTouchScrollProfile(viewport)
+
+
+def _profileProperties(scroller) -> QScrollerProperties:
+    properties = QScrollerProperties()
+    if not _tunedTouchScroll:
+        return properties
+    for metric, value in _TUNED_TOUCH_SCROLL_METRICS:
+        properties.setScrollMetric(metric, value)
+    pixelsPerMeter = scroller.pixelPerMeter().y()
+    if pixelsPerMeter > 0:
+        low, high = TUNED_DRAG_START_PIXELS
+        pixels = min(max(TUNED_DRAG_START_MM / 1000 * pixelsPerMeter, low), high)
+        properties.setScrollMetric(
+            QScrollerProperties.ScrollMetric.DragStartDistance,
+            pixels / pixelsPerMeter,
+        )
+    return properties
+
+
+def _applyTouchScrollProfile(viewport) -> None:
+    scroller = QScroller.scroller(viewport)
+    metric = QScrollerProperties.ScrollMetric.DragStartDistance
+    suppressed = scroller.scrollerProperties().scrollMetric(metric) >= SUPPRESSED_DRAG_START_DISTANCE
+    properties = _profileProperties(scroller)
+    if suppressed:
+        properties.setScrollMetric(metric, SUPPRESSED_DRAG_START_DISTANCE)
+    scroller.setScrollerProperties(properties)
+
+
 def setTouchScrollSuppressed(viewport, suppressed: bool, restoreDistance=None):
     """Make a grabbed viewport's scroller inert, or bring it back.
 
@@ -92,6 +161,8 @@ def setTouchScrollSuppressed(viewport, suppressed: bool, restoreDistance=None):
     the suppression. Views outside ``ScrollArea`` (Projection body, nested
     scroll areas) use this instead of ``QScroller.ungrabGesture``: releasing and
     re-grabbing is the cycle that leaves stale targets in Qt's gesture manager.
+    A tracked viewport goes back to its scroll feel's threshold, which may have
+    been switched while it was suppressed.
     """
     scroller = QScroller.scroller(viewport)
     scroller.stop()
@@ -103,6 +174,8 @@ def setTouchScrollSuppressed(viewport, suppressed: bool, restoreDistance=None):
         if current < SUPPRESSED_DRAG_START_DISTANCE:
             restoreDistance = current
         properties.setScrollMetric(metric, SUPPRESSED_DRAG_START_DISTANCE)
+    elif viewport in _touchScrollViewports:
+        properties.setScrollMetric(metric, _profileProperties(scroller).scrollMetric(metric))
     elif restoreDistance is not None:
         properties.setScrollMetric(metric, restoreDistance)
     scroller.setScrollerProperties(properties)
@@ -186,6 +259,13 @@ class _TouchScrollGuard(QObject):
             except RuntimeError:
                 _touchPressTargets.discard(target)
 
+    def scrollStarted(self, scrollArea):
+        # 「新滚动触控」：页面一动就不再算点按，没动就照常点击。不再自己量距离，
+        # 以免和 QScroller 的起滑距离对不上，出现按钮已经弹起、页面却还没动的空档。
+        if _tunedTouchScroll and scrollArea is self.activeScrollArea:
+            self.suppressScrollArea = scrollArea
+            self._cancelPresses(scrollArea)
+
     def _yieldToDragTarget(self):
         # 触控先经手势管理器再到这里，scroller 已记下按下；抬高阈值时顺带把它停掉。
         scrollArea = self.activeScrollArea
@@ -223,7 +303,8 @@ class _TouchScrollGuard(QObject):
 
         if eventType == QEvent.Type.TouchUpdate:
             if (
-                self.activeScrollArea is not None
+                not _tunedTouchScroll
+                and self.activeScrollArea is not None
                 and self.touchStart is not None
                 and event.points()
             ):
@@ -391,6 +472,14 @@ class ScrollArea(FluentScrollArea):
             QScroller.ScrollerGestureType.TouchGesture,
         )
         self.isTouchGestureGrabbed = True
+        trackTouchScroller(self.viewport())
+        QScroller.scroller(self.viewport()).stateChanged.connect(
+            self._onScrollerStateChanged
+        )
+
+    def _onScrollerStateChanged(self, state) -> None:
+        if state == QScroller.State.Dragging:
+            self._touchScrollGuard.scrollStarted(self)
 
     def _tuneScrollAnimations(self):
         """Keep qfluentwidgets' smooth-bar animations inside the bar lifetime."""
