@@ -431,6 +431,9 @@ class MainWindow(MSFluentWindow):
         self.tray.show()
 
         signalBus.catchException.connect(self._onExceptionCaught)
+        if cfg.eagerPageLoading.value:
+            self._loadAllPages()
+        cfg.eagerPageLoading.valueChanged.connect(self._onEagerPageLoadingChanged)
         if self.splashScreen:
             splashScreen = self.splashScreen
             self.splashScreen = None
@@ -1159,6 +1162,21 @@ class MainWindow(MSFluentWindow):
         self.homePage.homeCardsChanged.connect(self._onHomeCardsChanged)
         self._onHomeCardsChanged(self.homePage.homeCardEntries())
         self._updateSearchEdit()
+
+    def _loadAllPages(self):
+        """「停用页面懒加载」（实验性功能）：把懒加载的页面和任务编辑页一次建好。"""
+        for page in (self.appStorePage, self.creditsPage, self.settingPage):
+            page.ensureLoaded()
+        self._getBroadcastEditPage()
+        self._getCountdownPage()
+        self._getSchedulePage()
+        self._getShutdownPage()
+        self._getHomeCardTaskPage()
+
+    def _onEagerPageLoadingChanged(self, enabled):
+        # 打开时当场全部建好；建好的页面没法再变回懒加载，关掉要下次启动才生效。
+        if enabled and not self._resourcesShutdown:
+            self._loadAllPages()
 
     def _setCreditsPageVisible(self, visible):
         self._creditsNavigationItem.setVisible(bool(visible))
