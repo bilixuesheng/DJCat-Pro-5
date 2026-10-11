@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import gc
 import time
 from unittest.mock import patch
 
 import pytest
 
-from PySide6.QtCore import QEasingCurve, QPoint, Qt
+from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication
@@ -36,6 +37,9 @@ def application():
 @pytest.fixture
 def optimizedMenus(monkeypatch):
     monkeypatch.setattr(RoundMenu, "setShadowEffect", RoundMenu.setShadowEffect)
+    monkeypatch.setattr(
+        MenuAnimationManager, "make", vars(MenuAnimationManager)["make"]
+    )
     for animationType in (
         MenuAnimationType.DROP_DOWN,
         MenuAnimationType.PULL_UP,
@@ -62,6 +66,43 @@ def test_menu_optimization_preserves_other_animation_types(optimizedMenus):
 
     assert managers[MenuAnimationType.DROP_DOWN] is _SmoothDropDownMenuAnimation
     assert managers[MenuAnimationType.PULL_UP] is _SmoothPullUpMenuAnimation
+
+
+@pytest.mark.parametrize(
+    "aniType",
+    [
+        MenuAnimationType.DROP_DOWN,
+        MenuAnimationType.PULL_UP,
+        MenuAnimationType.FADE_IN_DROP_DOWN,
+        MenuAnimationType.FADE_IN_PULL_UP,
+    ],
+)
+def test_reopening_a_menu_does_not_keep_old_animations(
+    application, optimizedMenus, aniType
+):
+    # 设置搜索建议这样反复弹出的菜单，每弹一次都会换一个动画管理器。
+    menu = RoundMenu()
+    menu.addAction(QAction("A", menu))
+
+    def animations():
+        gc.collect()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        return len(menu.findChildren(QPropertyAnimation))
+
+    menu.exec(QPoint(100, 100), aniType=aniType)
+    menu.close()
+    opened = animations()
+    for _ in range(10):
+        # 换建议时列表每加一项就重新量一次尺寸，每次也借一个管理器。
+        menu.view.adjustSize()
+        menu.exec(QPoint(100, 100), aniType=aniType)
+        menu.close()
+
+    assert animations() == opened
+    manager = menu.aniManager
+    getattr(manager, "aniGroup", manager.ani).stop()
+    menu.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 @pytest.mark.parametrize("menuKind", ["combo", "context"])

@@ -1,0 +1,77 @@
+from unittest import TestCase
+
+from PySide6.QtCore import QEvent
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QApplication
+from qfluentwidgets import (
+    PushButton,
+    Theme,
+    qconfig,
+    setCustomStyleSheet,
+    setTheme,
+    setThemeColor,
+)
+from qfluentwidgets.common.style_sheet import StyleSheetCompose, styleSheetManager
+
+from app.platform.style_sheet import stopStyleSheetNesting
+from tests.support import isolateCfg
+
+
+class StyleSheetNestingTest(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance()
+        stopStyleSheetNesting()
+
+    def setUp(self):
+        isolateCfg(self)
+        self.addCleanup(setThemeColor, qconfig.themeColor.value)
+        self.addCleanup(setTheme, qconfig.themeMode.value)
+        self.button = PushButton("按钮")
+        setCustomStyleSheet(
+            self.button,
+            "PushButton { padding: 1px; }",
+            "PushButton { padding: 2px; }",
+        )
+        self.addCleanup(self._deleteButton)
+
+    def _deleteButton(self):
+        self.button.deleteLater()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+    def _nestedLevels(self):
+        source = styleSheetManager.source(self.button)
+        levels = 0
+        while isinstance(source.sources[0], StyleSheetCompose):
+            source = source.sources[0]
+            levels += 1
+        return levels
+
+    def testThemeChangesLeaveEachWidgetsStyleSheetAsItWas(self):
+        for lazy in (False, True):
+            with self.subTest(lazy=lazy):
+                setTheme(Theme.LIGHT, lazy=lazy)
+                lightStyleSheet = self.button.styleSheet()
+                for theme in (Theme.DARK, Theme.LIGHT) * 3:
+                    setTheme(theme, lazy=lazy)
+
+                self.assertEqual(self._nestedLevels(), 0)
+                if not lazy:
+                    self.assertEqual(self.button.styleSheet(), lightStyleSheet)
+
+    def testThemeColorChangesLeaveEachWidgetsStyleSheetAsItWas(self):
+        setThemeColor(QColor("#336699"))
+        styleSheet = self.button.styleSheet()
+        for color in ("#993366", "#336699") * 3:
+            setThemeColor(QColor(color))
+
+        self.assertEqual(self._nestedLevels(), 0)
+        self.assertEqual(self.button.styleSheet(), styleSheet)
+
+    def testCustomStyleSheetStillFollowsTheTheme(self):
+        setTheme(Theme.DARK)
+        self.assertIn("padding: 2px", self.button.styleSheet())
+        self.assertNotIn("padding: 1px", self.button.styleSheet())
+        setTheme(Theme.LIGHT)
+        self.assertIn("padding: 1px", self.button.styleSheet())
+        self.assertNotIn("padding: 2px", self.button.styleSheet())

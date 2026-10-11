@@ -41,6 +41,7 @@ from qfluentwidgets import (
     Theme,
     isDarkTheme,
     qconfig,
+    qrouter,
     setTheme,
     setThemeColor,
 )
@@ -100,6 +101,8 @@ from app.view.shell.tray import SystemTrayIcon
 
 SCHEDULE_CATCH_UP_LIMIT = timedelta(seconds=60)
 SHUTDOWN_CATCH_UP_LIMIT = timedelta(seconds=5)
+# 主窗口没有返回按钮，qrouter 记下的切页历史从来不会被弹出。
+NAVIGATION_HISTORY_LIMIT = 16
 # Update Toast 下载中的宽度按这个大小的进度文字预留：更新包上限 1 GiB，以 MB 计时数字最长。
 WIDEST_DOWNLOAD_SIZE = 1023.9 * 1024**2
 
@@ -1300,6 +1303,7 @@ class MainWindow(MSFluentWindow):
         )
 
     def _onNavigationCompleted(self, *args):
+        self._trimNavigationHistory()
         if self.stackedWidget.currentWidget() is not self._navigationTarget:
             return
 
@@ -1308,6 +1312,13 @@ class MainWindow(MSFluentWindow):
         self._pendingNavigation = None
         if pending is not None:
             QTimer.singleShot(0, self, lambda: self._navigateTo(*pending))
+
+    def _trimNavigationHistory(self):
+        del qrouter.history[:-NAVIGATION_HISTORY_LIMIT]
+        stacked = qrouter.stackHistories.get(self.stackedWidget)
+        if stacked is not None:
+            # 第一项是默认页面，不能删。
+            del stacked.history[1:-NAVIGATION_HISTORY_LIMIT]
 
     def _onSearchTextChanged(self, text: str) -> None:
         pendingTarget = (
