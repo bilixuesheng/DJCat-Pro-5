@@ -175,6 +175,19 @@ class ErrorReportServerTest(TestCase):
         self.assertEqual(stored, ai_markdown._machineId("a" * 64))
         self.assertNotEqual(stored, "a" * 64)
 
+    def testAReportCountsAsLastSeenWithItsIPLocation(self):
+        self.client.post(
+            "/error-reports",
+            base_url=API,
+            json=_report(),
+            headers={"X-Real-IP": "114.114.114.114"},
+        )
+        machine = ai_markdown._machineId("a" * 64)
+        self.assertEqual(
+            self._rows("SELECT last_location FROM machines WHERE machine_id = ?", machine),
+            [("江苏 南京",)],
+        )
+
     def testInvalidReportsAreRejected(self):
         self.assertEqual(self._submit(machine_id="not-hex").status_code, 400)
         self.assertEqual(self._submit(exception_type="").status_code, 400)

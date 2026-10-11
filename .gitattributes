@@ -1,1 +1,2 @@
 server/version.py export-subst
+server/*.xdb binary
