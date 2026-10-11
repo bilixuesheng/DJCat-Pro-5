@@ -344,7 +344,6 @@ class HomePage(ScrollArea):
         self._editingCards = False
         self._cardOrder = []
         self._dragOffset = QPoint()
-        self._dragTarget = None
         self._dragCard = None
         self._dragPosition = QPoint()
         self._applicationCardKeys = set()
@@ -853,7 +852,7 @@ class HomePage(ScrollArea):
             self._saveCardOrder()
 
     def _startCardDrag(self, card, globalPosition):
-        self._dragTarget = None
+        self._layoutCardsNow()
         self._dragCard = card
         self._dragPosition = QPoint(globalPosition)
         self._dragOffset = globalPosition - card.mapToGlobal(QPoint())
@@ -879,37 +878,25 @@ class HomePage(ScrollArea):
         self._reorderCardAt(card, globalPosition)
 
     def _reorderCardAt(self, card, globalPosition):
-        position = self.cardsWidget.mapFromGlobal(globalPosition)
-        hitMargin = 32
-        target = min(
+        # 浮起那张卡的中心落进哪个格子就占哪个格子。格子是排好后的位置，不看动画途中的卡片；
+        # 格子间的缝隙就是防抖缓冲，所以不必记住上一次和谁换过。
+        center = self.cardsWidget.mapFromGlobal(
+            globalPosition - self._dragOffset
+        ) + card.rect().center()
+        toIndex = next(
             (
-                other
-                for other in (self.allCards[name] for name in self._cardOrder)
-                if other is not card
-                and other.geometry()
-                .adjusted(-hitMargin, -hitMargin, hitMargin, hitMargin)
-                .contains(position)
+                index
+                for index, slot in enumerate(self._cardSlots())
+                if slot.contains(center)
             ),
-            key=lambda other: (
-                other.geometry().center() - position
-            ).manhattanLength(),
-            default=None,
+            None,
         )
-        if target is None:
-            self._dragTarget = None
-            return
-        if target is self._dragTarget:
-            return
-        self._dragTarget = target
-
         cardName = next(
             name for name, value in self.allCards.items() if value is card
         )
-        targetName = next(
-            name for name, value in self.allCards.items() if value is target
-        )
         fromIndex = self._cardOrder.index(cardName)
-        toIndex = self._cardOrder.index(targetName)
+        if toIndex is None or toIndex == fromIndex:
+            return
         self._cardOrder.pop(fromIndex)
         self._cardOrder.insert(toIndex, cardName)
         # FlowLayout 的公开插入接口会二次移除同布局控件，需同步移动现有动画项。
@@ -917,7 +904,17 @@ class HomePage(ScrollArea):
         animation = self.flowLayout._anis.pop(fromIndex)
         self.flowLayout._items.insert(toIndex, item)
         self.flowLayout._anis.insert(toIndex, animation)
-        self.flowLayout.setGeometry(self.flowLayout.geometry())
+        self._layoutCardsNow()
+
+    def _layoutCardsNow(self):
+        # FlowLayout 开着动画时 setGeometry 要防抖 80 ms 才排，排序时邻卡得当场让开。
+        self.flowLayout._deBounceTimer.stop()
+        self.flowLayout._doLayout(self.flowLayout.geometry(), True)
+
+    def _cardSlots(self):
+        if self.flowLayout.needAni:
+            return [animation.endValue() for animation in self.flowLayout._anis]
+        return [item.geometry() for item in self.flowLayout._items]
 
     def _autoScrollCardDrag(self):
         if self._dragCard is None:
