@@ -37,11 +37,15 @@ Theme Color 由 `cfg.themeColorPreset` 决定：预设取 `THEME_COLOR_PRESETS` 
 
 **`app/platform/animation_timer.py` 独占 Qt 全局 Animation Tick 间隔。** View 和业务模块不直接调用 Qt 私有动画 API；私有符号不可用时保留 Qt 默认行为。
 
-**`app/platform/menu_animation.py` 独占 QFluentWidgets 的 Menu Reveal 适配。** 它只替换 `DROP_DOWN` 和 `PULL_UP` 两种动画管理器，并把 `RoundMenu.setShadowEffect` 换成 Silhouette Shadow；其他动画类型及页面组件不再分别接管菜单动画。菜单展开期间不暂停弹窗卡片的阴影：卡片阴影已缓存，暂停和恢复反而各引起一次整卡重绘并让阴影闪一下。Tray Menu 的 `AcrylicMenu` 不走 `RoundMenu.__init__`，不受影响。
+**`app/platform/menu_animation.py` 独占 QFluentWidgets 的 Menu Reveal 适配。** 它只替换 `DROP_DOWN` 和 `PULL_UP` 两种动画管理器，并把 `RoundMenu.setShadowEffect` 换成 Silhouette Shadow；其他动画类型及页面组件不再分别接管菜单动画。菜单展开期间不暂停弹窗卡片的阴影：卡片阴影已缓存，暂停和恢复反而各引起一次整卡重绘并让阴影闪一下。Tray Menu 的 `AcrylicMenu` 不走 `RoundMenu.__init__`，不受影响。它还包住 `MenuAnimationManager.make()`：管理器都是用完即弃的（每次 `exec()` 换一个，`MenuActionListWidget.adjustSize()` 量尺寸也借一个），它的位移动画却挂在菜单或列表下，管理器销毁时要一并删掉，否则反复弹出的菜单（设置搜索建议）越攒越多。
+
+**`app/platform/style_sheet.py` 独占 QFluentWidgets 样式表登记的修补。** `updateStyleSheet()` 把控件已登记的 `StyleSheetCompose` 交回 `register()`，原版会再包一层，每换一次主题或主题色就嵌套一层、自定义 QSS 多重复一遍，永不释放；这里让已登记的组合原样留着。原版还会把内容没变的样式表重新套一遍，Qt 不会跳过，整棵子控件都要重新 polish：主窗口页面栈带的窗口样式表不含主题色，换主题色时却每次把所有已加载页面的一千多个控件重排一遍。比较时忽略末尾换行（首次套用的是单个样式源，换主题时套用的组合末尾多一个换行）。换主题仍然一次全部换完：QFluentWidgets 的 `lazy=True` 靠绘制事件补换，项目里自绘标签的过滤器会吞掉绘制事件，实测有页面颜色换不全，而多个窗口必须同时换好。
+
+**`app/platform/text_rendering.py` 独占 Qt 的大字形缓存上限。** Qt 光栅引擎只把 64 个设备像素以内的字形缓存成位图，更大的每次按轮廓重填；300% 缩放下投送正文的 26 号字约 104 个设备像素，滚动一帧要四分之一秒。`djcat.py` 在创建 QApplication 之前设 `QT_MAX_CACHED_GLYPH_SIZE=256`（已设置的环境变量不覆盖）。上限不再往上抬：时钟和倒计时的大数字每秒只重画一次，而 Windows 上每个缓存像素要占 4 字节。
 
 **`app/platform/shadow_effect.py` 独占 Silhouette Shadow。** 弹窗卡片（圆角 10）、菜单面板（圆角 9）和 Projection／Exam Countdown／Fullscreen Clock 的窗口化背景（圆角 8）都用它；新的不透明圆角容器要阴影时同样用它，不要再直接挂 `QGraphicsDropShadowEffect`。它是 `QGraphicsDropShadowEffect` 的子类，`color`、`blurRadius`、`offset` 属性和属性动画照常可用；模糊仍交给 Qt 生成，与原版逐像素相差不超过 2 个色阶。尺寸逐帧变化的形状（Window Transition 的动画层）用 `paintSilhouetteShadow()` 直接画：同一圆角只模糊一次最小尺寸，按九宫格拉伸，中间那块垫在形状底下不画。
 
-**`app/platform/icon_cache.py` 独占 QFluentWidgets SVG 图标的解析缓存。** 它替换 `drawSvgIcon` 和 `writeSvg`，只缓存内容不会变的来源——`:/` 资源路径和 SVG 源码字节，磁盘路径照旧每次读取；两份缓存各有上限。页面不得自己另建图标缓存。
+**`app/platform/icon_cache.py` 独占 QFluentWidgets SVG 图标的解析与位图缓存。** 它替换 `drawSvgIcon` 和 `writeSvg`，只缓存内容不会变的来源——`:/` 资源路径和 SVG 源码字节，磁盘路径照旧每次读取；两份解析缓存各有上限。图标落在整设备像素上、画笔没有缩放且是默认合成模式时，按（来源、设备像素尺寸）画一次位图后直接贴，位图缓存限 16 MB；其他情况照旧直接画 SVG。页面不得自己另建图标缓存。
 
 **`app/platform/background_effect.py` 独占 Background Effect。** 选项、默认值和每种材质的挂法都照 Ghost Downloader 的"窗口背景透明材质"，只作用于主窗口。MainWindow 关掉组件库自带的云母，在构造、每次显示和每次换主题时按 `cfg.backgroundEffect` 重挂；选了材质时窗口底色透明。三处有意照搬 Ghost 的行为保持原样：Win10 上也列出 Mica 和 MicaAlt，选中后材质不生效、窗口透明；Win10 的主窗口按 `AcrylicWindow.updateFrameless` 去框；不跟随系统的"透明效果"开关。Win10 的 Acrylic 跟不上移动中的窗口，所以移动期间换成透明渐变、结束后挂回：鼠标、手指拖标题栏和其他系统移动都走 `MainWindow.nativeEvent` 的 `WM_ENTERSIZEMOVE`／`WM_EXITSIZEMOVE`。
 
@@ -57,11 +61,15 @@ Theme Color 由 `cfg.themeColorPreset` 决定：预设取 `THEME_COLOR_PRESETS` 
 
 `ScrollArea` 的触控手势抓取只做一次，不能反复抓了又放：抓放循环留下的残留会在之后创建任意窗口时崩溃。Setting Section 用 `ScrollArea(parent, grabTouch=False)` 构造，首次显示时才 `grabTouchGesture()`；是否已抓由实例自己记账，不能拿 `QScroller.grabbedGesture()` 判断。
 
-**`ScrollArea` 统一仲裁单指触控滚动与子控件点击。** 从按钮、下拉框或卡片上起滑时，移动达到系统拖动阈值后必须取消该触控序列的按压和释放，不能在滚动结束时触发原控件；未达到阈值的短按仍按正常点击处理。页面不得各自复制这套判定。HomePage 进入卡片编辑态时由排序手势独占触控，并依靠卡片拖动的边缘自动滚动跨越视口；退出编辑态后恢复页面触控滚动。
+**`ScrollArea` 统一仲裁单指触控滚动与子控件点击。** 从按钮、下拉框或卡片上起滑时，移动达到系统拖动阈值后必须取消该触控序列的按压和释放，不能在滚动结束时触发原控件；未达到阈值的短按仍按正常点击处理。打开实验性的「新滚动触控」时不再自己量距离，改为页面（`QScroller`）一开始拖动就取消：页面动了就不算点按，没动就算点击，按钮弹起和页面开始滚动在同一刻。页面不得各自复制这套判定。HomePage 进入卡片编辑态时由排序手势独占触控，并依靠卡片拖动的边缘自动滚动跨越视口；退出编辑态后恢复页面触控滚动。
 
 拖动本身就是操作的控件（色板、滑块）用 `scroll_area.registerTouchDragTarget()` 登记：从它们上起滑的整个触控序列归控件，所在 `ScrollArea` 在这一序列内抬高拖动阈值、不取消按压、不吞松开，抬手后复原。颜色选择弹窗的色板和亮度滑块、设置里的横幅亮度、Broadcast Task 的音量滑块都已登记；新增放在 `ScrollArea` 里的滑块同样登记。组件库弹窗里的滚动区（如 `ColorDialog` 的 `SingleDirectionScrollArea`）不抓触控手势，要换成项目 `ScrollArea`（见 `app/view/components/color_dialog.py`），不另写一套触控；这类弹窗在 `done()` 里停止 scroller 并释放一次手势，与 `_ResponsiveMessageBox` 相同，视口随弹窗销毁，不会再抓。
 
-**触控输入交给 Windows，DJCat 只补按下的外观。** Windows 要先分辨轻点、拖动和长按才发出鼠标消息，手指按住控件时本来没有按下态。`app/platform/touch_input.py` 的应用级过滤器在落指时把指下的按钮（`setDown`）或带布尔 `isPressed` 的 QFluentWidgets 控件（如 `CardWidget`）画成按下，直到 Windows 自己的按下到来（此后交还控件，抬手时不再复位），或手指抬起、挪出轻点容差（微软触控规范的 2.7 mm，约 10 px）。它只改外观，不产生点击；自动连发的按钮、输入框／滑块／数值框／列表上的落指、自己接触控的控件（`WA_AcceptTouchEvents`，滚动区视口除外）一律不碰。长按到方框后松手弹右键菜单、选区、拖标题栏、弹出面板都是 Windows 原本的行为，不得再用 `nomousefromtouch` 之类让 Qt 自己合成按下，也不得在页面里仿造长按菜单或标题栏拖动。从控件上起滑时，`ScrollArea` 的起滑取消把按钮的 `isDown`、`CardWidget` 的 `isPressed` 和登记过的自绘目标一并复位；起滑后的松开被仲裁吞掉，控件自己不会复位。理由见 `docs/adr/0008-touch-press-look-only.md`（它取代了 0004）。
+**触控输入交给 Windows，DJCat 只补按下的外观。** Windows 要先分辨轻点、拖动和长按才发出鼠标消息，手指按住控件时本来没有按下态。补按下态是实验性的「新触控」，默认关，开关由 `djcat.py` 的 `bindExperimentalTouch()` 跟着 `cfg.touchPressFeedback` 当场装上或卸下（`setTouchPressFeedbackEnabled()`）；关着时与 Qt 原样相同。打开时 `app/platform/touch_input.py` 的应用级过滤器在落指时把指下的按钮（`setDown`）或带布尔 `isPressed` 的 QFluentWidgets 控件（如 `CardWidget`）画成按下，直到 Windows 自己的按下到来（此后交还控件，抬手时不再复位），或手指抬起、挪出轻点容差（微软触控规范的 2.7 mm，约 10 px）。它只改外观，不产生点击；自动连发的按钮、输入框／滑块／数值框／列表上的落指、自己接触控的控件（`WA_AcceptTouchEvents`，滚动区视口除外）一律不碰。长按到方框后松手弹右键菜单、选区、拖标题栏、弹出面板都是 Windows 原本的行为，不得再用 `nomousefromtouch` 之类让 Qt 自己合成按下，也不得在页面里仿造长按菜单或标题栏拖动。从控件上起滑时，`ScrollArea` 的起滑取消把按钮的 `isDown`、`CardWidget` 的 `isPressed` 和登记过的自绘目标一并复位；起滑后的松开被仲裁吞掉，控件自己不会复位。理由见 `docs/adr/0008-touch-press-look-only.md`（它取代了 0004）。
+
+**`app/view/components/scroll_area.py` 独占触控滚动的手感。** 所有抓了触控手势的 viewport 都经 `trackTouchScroller()`（`ScrollArea.grabTouchGesture()` 自动调用）由它配置 `QScrollerProperties`，别处不得自己设。默认是 Qt 的原值，与以前完全相同；实验性的「新滚动触控」打开后照 Edge 调：松手速度上限 3 m/s、`OutCubic` 减速（滑行距离 = 2v²/(9a)，甩得越快滑得越远）、拖到头最多拉出视口的 1/4、甩到头最多冲出 1/10 并在 0.3 秒内弹回、保留连续甩动加速；起滑距离仍是 5 mm（红外框有约 ±2 mm 抖动），换成逻辑像素后限制在 3～12 px，防止大屏报给系统的物理尺寸不对。`setTunedTouchScrollEnabled()` 当场作用于所有已有 viewport；被抑制的 viewport 保持抑制，解除时恢复当前手感的阈值。
+
+**滚动区的内容不透明，Qt 才平移像素。** `ScrollArea.enableOpaqueScrolling()` 让内容先铺一层身后的颜色（各层 `render()` 在视口四角和中心叠出来的颜色，五处一致且完全不透明才铺），视口在右边让出悬浮滚动条的 13 px，并从内容布局的右边距里还回去；Qt 于是只平移已画好的像素、补画新露出的一条。身后不是一种实色（挂了 Background Effect、渐变、图片）或滚动区藏着时，内容保持透明、照旧整块重画。MainWindow 换主题和 Background Effect 后调 `refreshOpaqueScrolling()`。目前只有 Setting Section 和应用市场两个选项卡开了；主页横幅和特别鸣谢的条目铺到了滚动条下面，不开。开了的滚动区视口上方不要再盖兄弟控件，盖着期间 Qt 退回整块重画。理由见 `docs/adr/0009-opaque-scrolling.md`。
 
 需要让出触控的模式调用 `ScrollArea.setTouchScrollSuppressed()`，它把拖动阈值抬到手指够不到的距离，不释放手势；页面不得自己 `QScroller.ungrabGesture()`，也不得对已抓过的 viewport 再调 `QScroller.grabGesture()`（它会先自行 ungrab 再重抓）。不是 `ScrollArea` 的 viewport（Projection 正文的 `QTextEdit`、`MarkdownView`）用 `scroll_area.setTouchScrollSuppressed(viewport, ...)` 做同一件事。Application Store 页面本身不滚动，两个选项卡和详情两栏各自是 `ScrollArea`，进出详情不抑制也不释放任何手势。
 
@@ -101,6 +109,12 @@ Lazy Page 必须保留外部调用需要的最小接口：
 | `LazyCreditsPage` | 无业务状态 |
 
 调用方不得直接依赖 `lazyPage.page` 的存在；需要真实页面时调用 `ensureLoaded()`，只做关闭或缓存失效时应保持未加载状态。
+
+实验性的「停用页面懒加载」（`cfg.eagerPageLoading`）打开时，MainWindow 当场用 `_loadAllPages()` 建好三个 Lazy Page 和五个任务编辑页，以后每次启动也都建好；关掉只能下次启动生效，已建好的页面不拆。
+
+**Experimental Feature 集中在 Setting Section `应用 › 实验性功能`（`software.experimental`）。** 入口说明写明只供开发人员调试；三张卡（新触控、新滚动触控、停用页面懒加载）默认全关，不参与 Setting Suggestion。新增实验性功能放在这里，同样不参与搜索。
+
+主窗口没有返回按钮，`qrouter` 的切页历史从不弹出；`MainWindow._trimNavigationHistory()` 每次切页后只留最近 16 条。
 
 ### Scheduled Task 调度
 
@@ -242,7 +256,7 @@ Projection 的两种正文渲染器必须保持这些共同约束：
 
 Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` 会覆盖整个窗口背景。窗口化时的 `1 px #808080` 边界线必须由该组件在主题色、纯色或图片绘制完成后最后绘制；全屏时不绘制。不得恢复为父窗口 QSS 边框，否则背景子控件会再次把它盖住。配置值 `主题色` 是历史名称，不是强调色：Projection 取跟随深浅主题的窗口底色（`projectionThemeBackground()`），Exam Countdown 和 Fullscreen Clock 不论主题都铺黑底；设置页把它分别显示为"跟随主题"和"默认黑色"，存储值不变，预览与真实窗口共用同一个底色函数。
 
-背景图片按物理像素缩放后标上设备像素比，缓存键包含设备像素比，与主页横幅同理。Projection、Exam Countdown 与 Fullscreen Clock 的窗口化背景、图片裁剪和边框共用 8 px 圆角；首次显示前启用透明窗口表面，不依赖 Win11 系统圆角。Qt 阴影只附着在背景组件上，四周各留 12 px 透明空间，Exam Countdown 与 Fullscreen Clock 的可见内容仍为 600 × 190，Projection 初始可见尺寸仍为可用屏幕的一半；字体、布局与角落按钮按 `contentsRect()` 定位，不能把阴影空间算进正文尺寸。切回全屏（含保留任务栏模式）时清除透明边距、圆角、边框和阴影，背景重新铺满窗口。Projection 保留窗口化缩放：Windows 命中测试使用消息中的坐标，按 DPI 转为背景局部坐标，在可见圆角边界内侧 12 px、外侧 2 px 的圆角区域判断四边及四角，不将透明阴影外沿作为边框。圆角外的空白和角落按钮不触发缩放；全屏禁用缩放。
+背景图片按物理像素缩放后标上设备像素比，缓存键包含设备像素比，与主页横幅同理。解码后的原图先经 `screens.fitToScreens()` 缩到最大屏幕的物理尺寸（仍盖满屏幕），Display Window 和设置里的预览共用模块级的一份，只记最近三张；主页横幅同样只留屏幕大小的一份。Projection、Exam Countdown 与 Fullscreen Clock 的窗口化背景、图片裁剪和边框共用 8 px 圆角；首次显示前启用透明窗口表面，不依赖 Win11 系统圆角。Qt 阴影只附着在背景组件上，四周各留 12 px 透明空间，Exam Countdown 与 Fullscreen Clock 的可见内容仍为 600 × 190，Projection 初始可见尺寸仍为可用屏幕的一半；字体、布局与角落按钮按 `contentsRect()` 定位，不能把阴影空间算进正文尺寸。切回全屏（含保留任务栏模式）时清除透明边距、圆角、边框和阴影，背景重新铺满窗口。Projection 保留窗口化缩放：Windows 命中测试使用消息中的坐标，按 DPI 转为背景局部坐标，在可见圆角边界内侧 12 px、外侧 2 px 的圆角区域判断四边及四角，不将透明阴影外沿作为边框。圆角外的空白和角落按钮不触发缩放；全屏禁用缩放。
 
 **`app/view/components/window_transition.py` 独占 Window Transition。** 三个 Display Window 的全屏／窗口化切换，以及 Projection 的 Collapse 和从 Floating Button 恢复，都经 `WindowTransition.run(source, change, target)`；`source`、`target` 返回两端的 `TransitionSurface`，Display Window 一端由 `backgroundSurface()` 给出，Floating Button 一端由它自己的 `transitionSurface()` 给出。顺序不能换：置顶透明层先以全透明的样子显示，确认它已摆上屏幕（之后的 `repaint()` 才是同步刷到屏幕的），切换那一步里才同步画出起点快照、紧接着把真窗口调成全透明并执行 `change`；终点窗口尺寸已落定就当场截终点快照，否则（真全屏由系统异步改尺寸）等落定再截；250 ms `OutCubic` 形变完先画出末帧、再还原真窗口的不透明度、同一步里把透明层刷成全透明再藏。反过来做，任意一步都会闪出桌面或让卡片跳一下；透明层与真窗口同时画着同一张卡时，阴影和圆角边缘会叠深一层，所以两者只在相邻两次调用之间短暂重叠。透明层藏起来前必须先刷成全透明：透明窗口藏起来后仍留着最后一帧，下次显示、还没重画就先亮出来，窗口会在上一次的位置闪一下。透明层的原生窗口在构造时就建好，不让第一次点击多等。`change` 里的每一毫秒都推迟动画开始，切换路径上不要做重复工作（如重设同样的样式表）。快照经 `WindowBackground.grabCard()` 截取，不带阴影：阴影也垫在透明圆角底下，带着截会和动画层自己画的阴影叠成两层。形变两端快照只按矩形裁、阴影也不裁，与真窗口逐像素一致；途中才按插值后的圆角裁。重绘按屏幕刷新率自限，只重画形状经过的区域。过渡期间 Display Window 和 Floating Button 的按钮看 `isRunning()` 直接忽略；开始和关闭 Display Window 不播放过渡，`start*()` 与 `closeEvent()` 调 `cancel()` 丢掉尚未执行的切换。`cfg.windowTransitionEnabled` 关掉时 `run()` 直接执行切换。理由见 `docs/adr/0005-window-transition-snapshot.md`。
 
@@ -266,10 +280,12 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/platform/dialog_animation.py` | QFluentWidgets 蒙层弹窗的阴影复用和淡入淡出阴影暂停 |
 | `app/platform/shadow_effect.py` | Silhouette Shadow：按尺寸缓存模糊的圆角矩形投影 |
 | `app/platform/menu_animation.py` | QFluentWidgets 全局 Menu Reveal 管理器适配，不改变原版展开视觉 |
-| `app/platform/icon_cache.py` | QFluentWidgets SVG 图标解析缓存，只缓存资源路径和源码 |
-| `app/platform/touch_input.py` | 手指按住时给指下的按钮和卡片画上按下态；触控输入本身仍由 Windows 判定 |
+| `app/platform/icon_cache.py` | QFluentWidgets SVG 图标的解析和位图缓存，只缓存资源路径和源码 |
+| `app/platform/style_sheet.py` | QFluentWidgets 样式表登记：换主题不再层层嵌套，样式没变的控件不重新套用 |
+| `app/platform/text_rendering.py` | Qt 大字形缓存上限，让投送的大字按位图缓存 |
+| `app/platform/touch_input.py` | 实验性的「新触控」：手指按住时给指下的按钮和卡片画上按下态；触控输入本身仍由 Windows 判定 |
 | `app/platform/background_effect.py` | Background Effect：照 Ghost Downloader 给主窗口挂 Windows 透明材质，Win10 的 Acrylic 在窗口移动时暂停模糊 |
-| `app/platform/screens.py` | 取窗口所在屏幕，绕开 PySide 把 QScreen 挂成控件子对象的返回值启发式 |
+| `app/platform/screens.py` | 取窗口所在屏幕，绕开 PySide 把 QScreen 挂成控件子对象的返回值启发式；把解码的大图缩到最大屏幕的物理尺寸 |
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
 | `app/common/home_card_tasks.py` | Home Card Task schema 归一化、稳定 ID、触发事件和动作常量；不负责计时或 QWidget |
@@ -315,17 +331,20 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 
 ```text
 set working directory
+  → cacheLargeGlyphs (QT_MAX_CACHED_GLYPH_SIZE, before QApplication draws any text)
   → SingletonApplication (Windows single instance + IPC)
   → unlockQtAnimations (before any QWidget animation is created)
-  → enableTouchPressFeedback (controls under a finger look pressed; Windows still decides the input)
   → optimizeFluentDialogs + optimizeFluentMenus (before MainWindow or its popups are created)
   → cacheFluentSvgIcons (before any QFluentWidgets icon is painted)
+  → optimizeFluentStyleSheets (no ever-deeper style registry, no re-polish of unchanged QSS)
   → installTranslators (Qt qtbase + QFluentWidgets Chinese strings)
   → configure logging (adopt legacy APP_DIR\Log, drop logs older than 14 days) and clear stale Client Update files
   → qconfig.load(CONFIG_PATH, cfg)
+  → bindExperimentalTouch (touch press look and touch scroll feel follow their switches)
   → MainWindow(isSilent)
       → HomePage eagerly
       → register Lazy Pages without constructing their real pages
+        (all of them, and the task pages, when 停用页面懒加载 is on)
       → restore Application Home Card from cfg.pinnedHomeCards
       → publish the complete Home Card snapshot to the Setting page and Tray Menu
       → report Last Seen to the AI Markdown server in a background thread
