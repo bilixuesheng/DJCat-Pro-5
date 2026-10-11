@@ -71,6 +71,8 @@ Tray Menu 的外观和弹出方式固定恢复为 v5.1.2：右键由注册的 co
 
 **HomePage 按稳定 key 复用 Application Home Card。** 不变快照不得重建卡片或重复发布主页变化；标题、图标和动作更新原有卡片，移除时才释放对应 QWidget。
 
+**Home Card 排序按格子判定。** 编辑态拖动时，浮起那张卡的中心落进哪个格子，它就占哪个格子；格子取 `FlowLayout` 排好后的位置，不取动画途中卡片的位置。格子间的缝隙就是防抖缓冲，所以判定只看当前位置、不记上一次和谁换过：那份记忆曾让刚换过的卡在拖回去时不让开，而按手指位置判定会让换位时机随按住的地方在 0% 到 80% 之间浮动。中心落在空白处时什么都不做。换位后当场重排、绕过 `FlowLayout` 的 80 ms 防抖，邻卡在同一帧开始 180 ms 的动画。
+
 托盘设置都在 Setting Section `个性化 › 系统托盘`（`personalization.tray`），侧边栏没有单独的托盘页。其中的主页卡片开关（`TrayCardShortcutList`）按 Home Card 命名、随主页变化，不属于任何 Setting Card 列表，因此不产生 Setting Suggestion；它只渲染 Tray Card Shortcut 开关，不得在刷新控件时清理 `cfg.trayHomeCardKeys`。MainWindow 必须先恢复 Application Home Card，再用完整的 HomePage 快照移除已经失效的引用，避免启动阶段的临时不完整快照覆盖已保存选择。
 
 ### 主窗口与页面
