@@ -2134,14 +2134,27 @@ def adminLogout():
 
 try:
     from .app_store import marketplaceStats, registerAppStore
+    from .error_reports import registerErrorReports
     from .server_update import registerServerUpdate
 except ImportError:
     from app_store import marketplaceStats, registerAppStore
+    from error_reports import registerErrorReports
     from server_update import registerServerUpdate
 
 registerAppStore(
     app,
     connect=_connect,
+    loginRequired=_loginRequired,
+    csrfToken=_csrfToken,
+    checkCsrf=_checkCsrf,
+    adminResponse=_adminResponse,
+)
+registerErrorReports(
+    app,
+    connect=_connect,
+    machineId=_machineId,
+    # 上报报错也是这台机器的一次请求，照样记下 Last Seen 和 IP Location。
+    registerMachine=lambda machineId: _registerMachine(machineId, _requestLocation()),
     loginRequired=_loginRequired,
     csrfToken=_csrfToken,
     checkCsrf=_checkCsrf,

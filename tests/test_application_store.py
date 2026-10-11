@@ -446,6 +446,16 @@ class ApplicationStoreTest(TestCase):
         self.store.cache.sweepIfDue()
         self.assertFalse(old.exists())
 
+    def testCachedImagePathAnswersFromDiskWithoutDownloading(self):
+        url = "https://example.test/icon.png"
+        self.assertEqual(self.store.cachedImagePath(url), "")
+
+        path = self.store.imagePath(url, _Session())
+
+        self.assertEqual(self.store.cachedImagePath(url), str(path))
+        self.assertEqual(self.store.cachedImagePath(""), "")
+        self.assertEqual(self.store.cachedImagePath("http://example.test/icon.png"), "")
+
     def testCacheNormalizesBmpBasedIcoToPng(self):
         url = "https://example.test/icon.ICO?revision=2"
         icon = Image.new("RGBA", (48, 48), (30, 100, 220, 180))

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sys
 import time
 from signal import SIGINT, signal
@@ -11,24 +10,6 @@ from loguru import logger
 
 
 SINGLE_INSTANCE_KEY = "DJCatPro5"
-
-# Windows 从触控生成鼠标消息前要先分辨轻点、拖动和长按，按下要等抬手或移动才发出；
-# 这个选项让 Qt 丢掉那套消息，在落指瞬间自己合成按下。见 docs/adr/0004。
-TOUCH_PRESS_PLATFORM = "windows:nomousefromtouch"
-
-
-def withQtTouchPress(argv, platform=sys.platform, environ=os.environ) -> list[str]:
-    """Return QApplication arguments that make Qt synthesize touch presses on Windows.
-
-    An explicitly chosen platform (offscreen tests and CI) wins. It is passed as an
-    argument rather than ``QT_QPA_PLATFORM`` so launched Applications don't inherit it.
-    """
-    arguments = list(argv)
-    if platform != "win32" or environ.get("QT_QPA_PLATFORM"):
-        return arguments
-    if any(argument in ("-platform", "--platform") for argument in arguments[1:]):
-        return arguments
-    return [*arguments, "-platform", TOUCH_PRESS_PLATFORM]
 
 
 class SingletonApplication(QApplication):

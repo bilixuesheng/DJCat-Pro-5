@@ -116,7 +116,18 @@ location ^~ /ai/ {
     proxy_buffering off;
     proxy_read_timeout 150s;
 }
+
+location = /error-reports {
+    proxy_pass http://127.0.0.1:18080;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
 ```
+
+后台「注册机器」的 IP 属地取自 `X-Real-IP`，上面每段都要带上它；少了它，属地会一律显示「未知」。
 
 `dash.djcatpro.top` 保留已有的 `location /` 代理和登录限速配置。两个站点都应传递 `$host`，不要把 Host 固定为 `127.0.0.1`，否则应用层无法隔离域名。
 

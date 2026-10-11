@@ -1107,6 +1107,51 @@ input[type="checkbox"] {
     line-height: 1.5;
 }
 
+.error-facts {
+    margin: 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+}
+.error-facts > div {
+    min-height: 52px;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    border-bottom: 1px solid var(--line-faint);
+}
+.error-facts > div:last-child { border-bottom: 0; }
+.error-facts dt { flex-shrink: 0; color: var(--muted); font-size: 12px; }
+.error-facts dd {
+    min-width: 0;
+    margin: 0;
+    color: var(--ink);
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    overflow-wrap: anywhere;
+}
+.error-facts code,
+.error-traceback {
+    font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+}
+.error-facts code { color: var(--muted-strong); font-size: 12px; }
+.error-traceback {
+    margin: 0;
+    padding: 16px;
+    max-height: 520px;
+    overflow: auto;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--oat-light);
+    color: var(--ink-secondary);
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre;
+    tab-size: 4;
+}
+
 .option-list {
     border: 1px solid var(--line);
     border-radius: 8px;

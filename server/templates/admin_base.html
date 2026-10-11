@@ -58,6 +58,9 @@
                 </div>
                 <div class="side-group" role="group" aria-label="系统">
                     <div class="side-group-title"><span>系统</span><i aria-hidden="true"></i></div>
+                    <a class="side-link side-child {% if current_page == 'error_reports' %}active{% endif %}" href="{{ url_for('error_reports.page') }}" {% if current_page == 'error_reports' %}aria-current="page"{% endif %}>
+                        客户端报错
+                    </a>
                     <a class="side-link side-child {% if current_page == 'server_update' %}active{% endif %}" href="{{ url_for('server_update.page') }}" {% if current_page == 'server_update' %}aria-current="page"{% endif %}>
                         服务端更新
                     </a>
