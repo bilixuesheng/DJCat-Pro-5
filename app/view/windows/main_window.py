@@ -93,6 +93,7 @@ from app.platform.background_effect import (
     suspendsAcrylicDuringMove,
 )
 from app.signal_bus import signalBus
+from app.view.components.scroll_area import refreshOpaqueScrolling
 from app.view.components.setting_suggestion_menu import SettingSuggestionMenu
 from app.view.components.update_toast import UpdateToast
 from app.view.pages.home_page import HomePage
@@ -498,10 +499,13 @@ class MainWindow(MSFluentWindow):
         return super()._normalBackgroundColor()
 
     def _applyBackgroundEffect(self, *_args, removeFirst=True):
-        if sys.platform != "win32":
-            return
-        applyBackgroundEffect(self, cfg.backgroundEffect.value, isDarkTheme(), removeFirst)
-        self.setBackgroundColor(self._normalBackgroundColor())
+        if sys.platform == "win32":
+            applyBackgroundEffect(
+                self, cfg.backgroundEffect.value, isDarkTheme(), removeFirst
+            )
+            self.setBackgroundColor(self._normalBackgroundColor())
+        # 页面底色跟着主题和窗口材质变，不透明滚动的内容要照着重新铺底。
+        refreshOpaqueScrolling()
 
     def _onWindowMoveStarted(self):
         if suspendsAcrylicDuringMove(cfg.backgroundEffect.value):

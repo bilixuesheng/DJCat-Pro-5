@@ -1,7 +1,8 @@
 import sys
 import weakref
 
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt
+from PySide6.QtGui import QImage, QPainter, QRegion
 from PySide6.QtWidgets import (
     QAbstractButton,
     QAbstractScrollArea,
@@ -24,6 +25,64 @@ WHEEL_SCROLL_DURATION_MS = 250
 
 # DragStartDistance 的单位是米,手指够不到 1000 m,滚动因此永远不会起手。
 SUPPRESSED_DRAG_START_DISTANCE = 1000.0
+
+# QFluentWidgets 的竖直悬浮滚动条贴着右边，占最右 13 px（ScrollBar._adjustPos）。
+OVERLAY_SCROLL_BAR_WIDTH = 13
+
+_opaqueScrollAreas = weakref.WeakSet()
+
+
+def refreshOpaqueScrolling() -> None:
+    """Look again at what lies behind every opaque-scrolling area.
+
+    MainWindow calls this after the theme or the Background Effect changes.
+    """
+    for area in tuple(_opaqueScrollAreas):
+        try:
+            area._updateBackdrop()
+        except RuntimeError:
+            _opaqueScrollAreas.discard(area)
+
+
+def _backdropColor(viewport: QWidget, point: QPoint):
+    """What the viewport's ancestors paint at ``point``, children left out."""
+    chain = []
+    widget = viewport
+    while widget is not None:
+        chain.append(widget)
+        if widget.isWindow():
+            break
+        widget = widget.parentWidget()
+    image = QImage(1, 1, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    for widget in reversed(chain):
+        origin = viewport.mapTo(widget, point)
+        # 只取各层自己画的，不取系统给窗口铺的底：主窗口自己画整窗底色，挂了 Background
+        # Effect 时画成全透明，系统底那时也不会显示出来。漏算只会让内容保持透明，不会画错。
+        widget.render(
+            painter,
+            QPoint(),
+            QRegion(QRect(origin.x(), origin.y(), 1, 1)),
+            QWidget.RenderFlag(0),
+        )
+    painter.end()
+    return image.pixelColor(0, 0)
+
+
+class _BackdropPainter(QObject):
+    """Paints the colour behind the viewport under the scrolled content."""
+
+    def __init__(self, area):
+        super().__init__(area)
+        self.color = None
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Paint and self.color is not None:
+            painter = QPainter(obj)
+            painter.fillRect(event.rect(), self.color)
+            painter.end()
+        return False
 
 
 def setTouchScrollSuppressed(viewport, suppressed: bool, restoreDistance=None):
@@ -224,9 +283,77 @@ class ScrollArea(FluentScrollArea):
         # 不在这里碰 QScroller.scroller()：它会顺手建出一个 scroller，
         # 连从不打开、因而从不抓手势的 Section 也会多一个。
         self._dragStartDistance = None
+        self._backdropPainter = None
         if grabTouch:
             self.grabTouchGesture()
         self._touchScrollGuard = _TouchScrollGuard.instance()
+
+    def enableOpaqueScrolling(self) -> None:
+        """Let Qt move already painted pixels when this area scrolls.
+
+        Qt shifts the content's pixels and paints only the newly exposed strip
+        when the scrolled content is opaque and nothing overlaps it; otherwise
+        every scroll step repaints the whole viewport and everything behind it.
+        The content paints the colour that lies behind it, so it looks the same,
+        and the viewport stops short of the overlay scroll bar, giving back as
+        much of the content's right margin as it takes. When what lies behind is
+        not one solid colour (a Background Effect, a hidden page) the content
+        stays transparent and scrolling repaints as before. Call after
+        ``setWidget()``.
+        """
+        if self._backdropPainter is not None:
+            return
+        margins = self.viewportMargins()
+        self.setViewportMargins(
+            margins.left(),
+            margins.top(),
+            margins.right() + OVERLAY_SCROLL_BAR_WIDTH,
+            margins.bottom(),
+        )
+        layout = self.widget().layout()
+        if layout is not None:
+            margins = layout.contentsMargins()
+            layout.setContentsMargins(
+                margins.left(),
+                margins.top(),
+                max(0, margins.right() - OVERLAY_SCROLL_BAR_WIDTH),
+                margins.bottom(),
+            )
+        self._backdropPainter = _BackdropPainter(self)
+        self.widget().installEventFilter(self._backdropPainter)
+        _opaqueScrollAreas.add(self)
+
+    def _updateBackdrop(self) -> None:
+        if self._backdropPainter is None:
+            return
+        color = self._uniformBackdrop() if self.isVisible() else None
+        # 藏着的页面切过来前会被截快照，那时还按透明画，不会带上换主题前的底色。
+        self._backdropPainter.color = color
+        content = self.widget()
+        content.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, color is not None)
+        content.update()
+
+    def _uniformBackdrop(self):
+        viewport = self.viewport()
+        right, bottom = viewport.width() - 2, viewport.height() - 2
+        if right < 1 or bottom < 1:
+            return None
+        points = (
+            QPoint(1, 1),
+            QPoint(right, 1),
+            QPoint(1, bottom),
+            QPoint(right, bottom),
+            QPoint(right // 2, bottom // 2),
+        )
+        colors = {_backdropColor(viewport, point).rgba() for point in points}
+        if len(colors) != 1:
+            return None
+        color = _backdropColor(viewport, points[0])
+        return color if color.alpha() == 255 else None
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._updateBackdrop()
 
     def setTouchScrollSuppressed(self, suppressed: bool) -> None:
         """Stop the page scrolling under touch without releasing the gesture.
