@@ -68,8 +68,10 @@ def main():
 
     from app.platform.application import SingletonApplication, raiseWindow
     from app.platform.animation_timer import unlockQtAnimations
+    from app.platform.text_rendering import cacheLargeGlyphs
     from app.platform.touch_input import enableTouchPressFeedback
 
+    cacheLargeGlyphs()
     app = SingletonApplication(sys.argv)
     unlockQtAnimations()
     enableTouchPressFeedback(app)

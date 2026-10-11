@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -5,6 +6,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 import djcat
+from app.platform.text_rendering import MAX_CACHED_GLYPH_SIZE, cacheLargeGlyphs
 
 
 class WindowStub:
@@ -110,6 +112,33 @@ class StartupTest(TestCase):
             result.stdout.strip().splitlines()[-1],
             "[False, False, False, False]",
         )
+
+    def testLargeGlyphsAreCachedFromTheFirstWindow(self):
+        # Qt 在画第一段文字时读一次上限，之后再改不起作用。
+        seen = {}
+
+        class Stop(Exception):
+            pass
+
+        def application(_argv):
+            seen["limit"] = os.environ.get("QT_MAX_CACHED_GLYPH_SIZE")
+            raise Stop
+
+        with (
+            patch.dict(os.environ),
+            patch("os.chdir"),
+            patch("app.platform.application.SingletonApplication", application),
+        ):
+            os.environ.pop("QT_MAX_CACHED_GLYPH_SIZE", None)
+            with self.assertRaises(Stop):
+                djcat.main()
+
+        self.assertEqual(seen["limit"], str(MAX_CACHED_GLYPH_SIZE))
+
+    def testGlyphLimitSetByTheEnvironmentIsKept(self):
+        with patch.dict(os.environ, {"QT_MAX_CACHED_GLYPH_SIZE": "64"}):
+            cacheLargeGlyphs()
+            self.assertEqual(os.environ["QT_MAX_CACHED_GLYPH_SIZE"], "64")
 
     def runWithTranslators(self, body, bundledOnly=False):
         """在独立进程里装翻译器：翻译器是 QApplication 全局的，会影响同进程的其他测试。"""
