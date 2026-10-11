@@ -1,13 +1,20 @@
+from math import sqrt
 from unittest import TestCase
 from unittest.mock import patch
 
-from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QInputDevice
+from PySide6.QtCore import QPoint, QSize, Qt
+from PySide6.QtGui import QImage, QInputDevice, QRegion
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QScroller, QScrollerProperties
+from PySide6.QtWidgets import (
+    QApplication,
+    QScroller,
+    QScrollerProperties,
+    QWidget,
+)
+from qfluentwidgets import FluentIcon as FIF
 
 from app.config.cfg import cfg
-from app.view.pages.home_page import HomePage
+from app.view.pages.home_page import ActionCard, HomePage
 from tests.support import isolateCfg
 
 
@@ -346,3 +353,63 @@ class HomeCardEditTest(TestCase):
         self.page._autoScrollCardDrag()
 
         self.assertGreater(scrollBar.value(), 0)
+
+
+class ActionCardOutlineTest(TestCase):
+    SCALE = 4
+
+    def setUp(self):
+        isolateCfg(self)
+
+    def _render(self, card):
+        image = QImage(
+            card.size() * self.SCALE,
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        image.setDevicePixelRatio(self.SCALE)
+        image.fill(0)
+        card.render(image, QPoint(), QRegion(), QWidget.RenderFlag.DrawChildren)
+        return image.convertToFormat(QImage.Format.Format_ARGB32)
+
+    def testBackgroundAndOutlineShareOneRoundedCorner(self):
+        # CardWidget 画底色，ActionCard 再叠一圈描边；两层圆角不同时，底色会从描边外面的角上露出来。
+        states = {
+            "normal": lambda card: None,
+            "hover": lambda card: setattr(card, "isHover", True),
+            "editing": lambda card: card.setEditing(True),
+        }
+        radius = 10
+        # 外轮廓距边 1 px、圆角 10，沿 45° 对角线从角上走到它的距离（设备像素）。
+        expected = self.SCALE * (1 + radius - radius / sqrt(2))
+        for state, apply in states.items():
+            card = ActionCard(FIF.EDIT, "全屏投送", "将信息以大字全屏展示")
+            self.addCleanup(card.deleteLater)
+            apply(card)
+            image = self._render(card)
+            right, bottom = image.width() - 1, image.height() - 1
+            corners = {
+                "top-left": (0, 0, 1, 1),
+                "top-right": (right, 0, -1, 1),
+                "bottom-left": (0, bottom, 1, -1),
+                "bottom-right": (right, bottom, -1, -1),
+            }
+            for corner, (x, y, dx, dy) in corners.items():
+                with self.subTest(state=state, corner=corner):
+                    diagonal = [
+                        image.pixelColor(x + dx * step, y + dy * step)
+                        for step in range(int(expected) * 3)
+                    ]
+                    first = next(
+                        step
+                        for step, color in enumerate(diagonal)
+                        if color.alpha() >= 100
+                    )
+                    self.assertAlmostEqual(first, expected, delta=1)
+                    edge = diagonal[first]
+                    interior = diagonal[-1]
+                    difference = sum(
+                        abs(a - b)
+                        for a, b in zip(edge.getRgb(), interior.getRgb())
+                    )
+                    # 轮廓最外一圈是描边，不是底色。
+                    self.assertGreater(difference, 40)

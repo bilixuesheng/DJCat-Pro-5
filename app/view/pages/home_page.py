@@ -84,6 +84,7 @@ class ActionCard(CardWidget):
         self._touchButton = None
         super().__init__(parent)
         self.setFixedSize(210, 120)
+        self.setBorderRadius(10)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setClickEnabled(True)
@@ -323,11 +324,13 @@ class ActionCard(CardWidget):
         )
         width = 2 if self._editing or self.isHover else 1
         painter.setPen(QPen(color, width))
+        # 描边外沿与 CardWidget 的底色重合：笔沿路径居中，路径缩进半个线宽，圆角也减半个线宽。
         inset = width / 2 + 1
+        radius = self.borderRadius - width / 2
         painter.drawRoundedRect(
             QRectF(inset, inset, self.width() - inset * 2, self.height() - inset * 2),
-            10,
-            10,
+            radius,
+            radius,
         )
 
 
