@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
 
@@ -6,6 +7,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 from qfluentwidgets import isDarkTheme, qconfig
 
+from app.platform.screens import fitToScreens
 from app.platform.shadow_effect import SilhouetteShadowEffect
 
 WINDOW_SHADOW_MARGIN = 12
@@ -13,6 +15,26 @@ WINDOW_SHADOW_ALPHA = 100
 WINDOW_CORNER_RADIUS = 8
 # 倒计时和全屏时钟的默认背景（配置值"主题色"，设置页显示为"默认黑色"）不论主题都是黑底。
 TIMER_THEME_BACKGROUND = QColor("black")
+# 投送、倒计时、时钟和它们在设置里的预览共用解码后的原图，只记最近几张，换图后旧的随即释放。
+SOURCE_CACHE_LIMIT = 3
+_sources: OrderedDict = OrderedDict()
+
+
+def _loadSource(path: str):
+    try:
+        stamp = Path(path).stat().st_mtime_ns
+    except OSError:
+        stamp = None
+    key = (path, stamp)
+    if key in _sources:
+        _sources.move_to_end(key)
+        return key, _sources[key]
+    source = QPixmap(path)
+    source = None if source.isNull() else fitToScreens(source)
+    _sources[key] = source
+    while len(_sources) > SOURCE_CACHE_LIMIT:
+        _sources.popitem(last=False)
+    return key, source
 
 
 def projectionTitleColor() -> QColor:
@@ -49,7 +71,6 @@ class WindowBackground(QWidget):
         self._cachedKey = None
         self._cachedPixmap = None
         self._sourceKey = None
-        self._sourcePixmap = None
         self._borderVisible = False
         self._cornerRadius = 0
         self.setObjectName("window-background")
@@ -161,7 +182,7 @@ class WindowBackground(QWidget):
         width, height = self.width(), self.height()
         if not path or width <= 0 or height <= 0:
             return None
-        source = self._sourceImage(path)
+        self._sourceKey, source = _loadSource(path)
         ratio = self.devicePixelRatioF()
         key = (self._sourceKey, width, height, ratio, self._scaleModeItem.value)
         if key == self._cachedKey:
@@ -208,18 +229,6 @@ class WindowBackground(QWidget):
         self._cachedKey = key
         self._cachedPixmap = target
         return target
-
-    def _sourceImage(self, path: str) -> QPixmap | None:
-        try:
-            stamp = Path(path).stat().st_mtime_ns
-        except OSError:
-            stamp = None
-        key = (path, stamp)
-        if key != self._sourceKey:
-            source = QPixmap(path)
-            self._sourceKey = key
-            self._sourcePixmap = None if source.isNull() else source
-        return self._sourcePixmap
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)

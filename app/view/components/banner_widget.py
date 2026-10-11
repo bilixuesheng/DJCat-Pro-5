@@ -12,11 +12,12 @@ from app.config.cfg import (
     cfg,
 )
 from app.config.paths import ASSET_DIR
+from app.platform.screens import fitToScreens
 
 
 # 主页横幅和设置页的横幅预览显示同一张原图。QPixmap 自带的 QPixmapCache 只收
 # 10 MB 以内的图，超过的（"树人门"预设解码后 15 MB，自定义照片常有几十 MB）会被
-# 两个实例各解码一份并常驻。这里只记最近一张，换图后旧的随即释放。
+# 两个实例各解码一份并常驻。这里只记最近一张，并缩到最大屏幕的尺寸，换图后旧的随即释放。
 _sharedSource: dict = {"key": None, "pixmap": None}
 
 
@@ -32,7 +33,7 @@ def _loadSourceImage(path):
         if pixmap.isNull() and path != fallback:
             pixmap = QPixmap(fallback)
         _sharedSource["key"] = key
-        _sharedSource["pixmap"] = None if pixmap.isNull() else pixmap
+        _sharedSource["pixmap"] = None if pixmap.isNull() else fitToScreens(pixmap)
     return _sharedSource["pixmap"]
 
 

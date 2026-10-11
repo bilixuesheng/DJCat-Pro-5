@@ -1,3 +1,4 @@
+import math
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +19,7 @@ from app.view.components.setting_preview import (
     WindowBackgroundPreview,
     _screenAspectRatio,
 )
+from app.view.components import window_background
 from app.view.components.window_background import (
     WindowBackground,
     projectionThemeBackground,
@@ -577,3 +579,78 @@ class WindowBackgroundPreviewFurnitureTest(TestCase):
                 self.assertAlmostEqual(content.top(), top, delta=0.6)
                 self.assertAlmostEqual(preview.width() - content.right(), right, delta=0.6)
                 self.assertAlmostEqual(preview.height() - content.bottom(), bottom, delta=0.6)
+
+
+class BackgroundSourceTest(TestCase):
+    """Photos used as backgrounds are decoded once, at most screen sized, and shared."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance()
+
+    def setUp(self):
+        self.tempDir = isolateCfg(self)
+        window_background._sources.clear()
+        self.addCleanup(window_background._sources.clear)
+        screen = QApplication.primaryScreen()
+        ratio = screen.devicePixelRatio()
+        self.screenSize = (
+            math.ceil(screen.geometry().width() * ratio),
+            math.ceil(screen.geometry().height() * ratio),
+        )
+
+    def _photo(self, name, width, height):
+        image = QImage(width, height, QImage.Format.Format_RGB32)
+        image.fill(QColor("#2c7ace"))
+        path = self.tempDir / name
+        image.save(str(path))
+        return str(path)
+
+    def _background(self, path):
+        cfg.set(cfg.broadcastBackgroundMode, "图片", save=False)
+        cfg.set(cfg.broadcastBackgroundImagePath, path, save=False)
+        background = WindowBackground(
+            cfg.broadcastBackgroundMode,
+            cfg.broadcastBackgroundColor,
+            cfg.broadcastBackgroundImagePath,
+            cfg.broadcastBackgroundScaleMode,
+        )
+        self.addCleanup(background.deleteLater)
+        background.resize(320, 180)
+        background.grab()
+        return background
+
+    def testPhotoLargerThanTheScreenIsKeptOnlyAtScreenSize(self):
+        width, height = self.screenSize
+        path = self._photo("photo.png", width * 4, height * 3)
+
+        self._background(path)
+
+        source = window_background._loadSource(path)[1]
+        self.assertGreaterEqual(source.width(), width)
+        self.assertEqual(source.height(), height)
+        self.assertLess(source.width(), width * 4)
+
+    def testSmallImageIsKeptAsIs(self):
+        path = self._photo("small.png", 64, 48)
+
+        self._background(path)
+
+        source = window_background._loadSource(path)[1]
+        self.assertEqual((source.width(), source.height()), (64, 48))
+
+    def testWindowAndPreviewShareOneDecodedImage(self):
+        path = self._photo("shared.png", 640, 360)
+
+        self._background(path)
+        self._background(path)
+
+        self.assertEqual(len(window_background._sources), 1)
+
+    def testOnlyRecentImagesStayDecoded(self):
+        for index in range(window_background.SOURCE_CACHE_LIMIT + 2):
+            self._background(self._photo(f"photo{index}.png", 64, 48))
+
+        self.assertEqual(
+            len(window_background._sources), window_background.SOURCE_CACHE_LIMIT
+        )
