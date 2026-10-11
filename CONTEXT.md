@@ -300,7 +300,7 @@ _Avoid_: 应用市场缓存（它不再只装 Application Store 的东西）；�
 
 **Log（日志）**:
 DJCat 运行时按天写下的诊断记录，以及更新器在程序目录留下的那份更新记录，都只保留最近 14 天。按天的日志属于 App Data Directory，Client Update 和 Storage Migration 之后仍在。用户可以随 Cache 一起清理，正在写入的那一份除外。
-_Avoid_: 错误日志（设置里的入口叫法，它记录的不只是错误）
+_Avoid_: 错误日志（它记录的不只是错误）
 
 ### 报错
 
@@ -339,7 +339,7 @@ _Avoid_: 当前主题色（切到预设时两者不同）、上次颜色、颜�
 ### 设置
 
 **Setting Section**:
-设置页层级中的一个节点，由稳定 key、标题、图标和可选说明构成。顶层的"设置"是根 Section，只放通往子 Section 的导航行。其他有子 Section 的节点可以在导航行之外再放 Setting Card 和纯文字小节（如全屏投送设置的「背景」入口和下面的窗口、关闭行为卡片），但不放 Setting Preview。
+设置页层级中的一个节点，由稳定 key、标题、图标和可选说明构成。顶层的"设置"是根 Section，只放通往子 Section 的导航行。其他有子 Section 的节点可以在导航行之外再放 Setting Card 和纯文字小节（如全屏投送的「背景」「AI 整理」入口和下面的窗口、关闭行为卡片），但不放 Setting Preview。
 _Avoid_: group（可折叠分组已退役）、页面（它不是导航页面，MainWindow 不感知它）
 
 **Setting Route**:
@@ -351,7 +351,7 @@ Setting Section 中的一行设置项，通常绑定一个 `cfg` 配置项或一
 _Avoid_: 设置项（泛指值本身）、Home Card
 
 **Setting Preview**:
-Setting Section 中目标界面按当前配置等比缩小后的样子，随所在 Section 的配置项变化立即重绘。它照真实的排布、尺寸和用户自己的数据（例如主页上实际存在的 Home Card）来画，而不是孤立地摆一张图片或一段文字。目标是主窗口时，宽高比跟着主窗口当前的宽高比实时变化。只显示状态，不接受输入。只放在叶子 Section 上，每个至多一个；不同叶子可以画同一个目标界面（横幅设置和外观都画主窗口），但同一条 Setting Route 上不重复。
+Setting Section 中目标界面按当前配置等比缩小后的样子，随所在 Section 的配置项变化立即重绘。它照真实的排布、尺寸和用户自己的数据（例如主页上实际存在的 Home Card）来画，而不是孤立地摆一张图片或一段文字。目标是主窗口时，宽高比跟着主窗口当前的宽高比实时变化。只显示状态，不接受输入。只放在叶子 Section 上，每个至多一个；不同叶子可以画同一个目标界面（主页横幅和外观都画主窗口），但同一条 Setting Route 上不重复。
 _Avoid_: 缩略图、示意图（静态图片）、截图
 
 **Setting Suggestion**:
@@ -374,6 +374,9 @@ _Avoid_: 搜索结果（设置页不再有结果列表）、筛选项
 
 > **Dev:** "在设置里搜'背景颜色'，页面会只留下匹配的卡片吗？"
 > **Domain expert:** "不会。设置搜索只弹 Setting Suggestion，点一条才跳到对应的 Setting Route，页面本身从不筛选。"
+
+> **Dev:** "设置里的「应用」那一节是管应用市场的吧？"
+> **Domain expert:** "不是。那一节管 DJCat 自己的检查更新、开机启动、存储模式、Cache 和 Log；应用市场里可安装的东西才叫 Application，它们没有设置项。"
 
 > **Dev:** "把主窗口的边框再调宽一点，手指好拖。"
 > **Domain expert:** "你说的是 Resize Band，不是边框。可以加宽，但它在右上角三个按钮上始终让位，按钮上一律是点击。"

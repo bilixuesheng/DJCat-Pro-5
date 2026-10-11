@@ -387,11 +387,9 @@ class SettingSearchTest(TestCase):
         self.assertEqual(
             [card.titleLabel.text() for card in root.navigationCards()],
             [
-                "横幅设置",
-                "全屏投送设置",
-                "AI 整理 Markdown 设置",
-                "考试倒计时设置",
-                "全屏时钟设置",
+                "全屏投送",
+                "考试倒计时",
+                "全屏时钟",
                 "个性化",
                 "应用",
                 "关于",
@@ -441,10 +439,10 @@ class SettingSearchTest(TestCase):
         self.window.settingSuggestionMenu.suggestionActivated.emit(
             page.searchSuggestions("横幅亮度")[0]
         )
-        self._waitUntil(lambda: page.currentRouteKey() == "banner")
+        self._waitUntil(lambda: page.currentRouteKey() == "personalization.banner")
 
         self.assertEqual(self.window.searchEdit.text(), "")
-        self.assertEqual(page.currentRouteKey(), "banner")
+        self.assertEqual(page.currentRouteKey(), "personalization.banner")
 
     def testLeavingTheSettingPageClosesTheSuggestions(self):
         self.window.switchTo(self.window.settingPage)

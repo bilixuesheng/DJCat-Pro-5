@@ -28,11 +28,9 @@ from app.view.pages.setting_page import SettingPage
 from tests.support import isolateCfg
 
 TOP_LEVEL_SECTIONS = [
-    "横幅设置",
-    "全屏投送设置",
-    "AI 整理 Markdown 设置",
-    "考试倒计时设置",
-    "全屏时钟设置",
+    "全屏投送",
+    "考试倒计时",
+    "全屏时钟",
     "个性化",
     "应用",
     "关于",
@@ -107,7 +105,7 @@ class SettingSectionTest(TestCase):
         self.navigate(page, "broadcast.background")
         self.assertEqual(visibleKeys(), ["broadcast.background"])
         self.assertEqual(
-            self.crumbs(page), ["设置", "全屏投送设置", "背景"]
+            self.crumbs(page), ["设置", "全屏投送", "背景"]
         )
 
         self.navigate(page, ROOT_SECTION_KEY)
@@ -123,7 +121,7 @@ class SettingSectionTest(TestCase):
         self.app.processEvents()
 
         self.assertEqual(page.currentRouteKey(), "countdown")
-        self.assertEqual(self.crumbs(page), ["设置", "考试倒计时设置"])
+        self.assertEqual(self.crumbs(page), ["设置", "考试倒计时"])
 
     def testNavigationRowIgnoresAPressDraggedOffTheCard(self):
         page = self.buildPage()
@@ -142,7 +140,7 @@ class SettingSectionTest(TestCase):
         QTest.qWait(SLIDE_DURATION_MS + 80)
         self.app.processEvents()
 
-        self.assertEqual(page.currentRouteKey(), "banner")
+        self.assertEqual(page.currentRouteKey(), "broadcast")
 
     def testOnlyVisitedSectionsGrabTheTouchGesture(self):
         page = self.buildPage()
@@ -292,7 +290,7 @@ class SettingSectionTest(TestCase):
     def testShortSectionListDoesNotStretchToThePageBottom(self):
         page = self.buildPage()
         page.resize(900, 1200)
-        self.navigate(page, "aiMarkdown")
+        self.navigate(page, "broadcast.aiMarkdown")
         cardList = page.aiStyleCard.parentWidget()
         while not isinstance(cardList, SettingCardList):
             cardList = cardList.parentWidget()
@@ -300,7 +298,7 @@ class SettingSectionTest(TestCase):
         self.assertEqual(cardList.height(), cardList.sizeHint().height())
         self.assertLess(
             cardList.geometry().bottom(),
-            page.sectionStack.view("aiMarkdown").viewport().height() - 100,
+            page.sectionStack.view("broadcast.aiMarkdown").viewport().height() - 100,
         )
 
     def testLineEditSettingSavesWhileTypingAndFlushesOnLeave(self):
@@ -323,12 +321,36 @@ class SettingSectionTest(TestCase):
         self.assertEqual(cfg.windowTitle.value, "第二版")
         self.assertFalse(page.windowTitleCard.saveTimer.isActive())
 
-    def testAboutSectionKeepsErrorLogBetweenAuthorAndAbout(self):
+    def testLogCardFollowsTheCacheCardInTheApplicationSection(self):
         page = self.buildPage()
 
         self.assertEqual(
+            page.sectionStack.view("software").settingCards()[-2:],
+            (page.cacheCard, page.logCard),
+        )
+        self.assertEqual(
             page.sectionStack.view("about").settingCards(),
-            (page.authorCard, page.errorLogCard, page.aboutCard),
+            (page.authorCard, page.aboutCard),
+        )
+
+    def testBannerAndAIMarkdownLiveUnderTheirOwners(self):
+        page = self.buildPage()
+
+        self.assertEqual(
+            page.routeFor("personalization.banner"),
+            [ROOT_SECTION_KEY, "personalization", "personalization.banner"],
+        )
+        self.assertEqual(
+            [card.titleLabel.text() for card in page.sectionStack.view("personalization").navigationCards()],
+            ["外观", "主页横幅", "软件图标", "系统托盘"],
+        )
+        self.assertEqual(
+            [card.titleLabel.text() for card in page.sectionStack.view("broadcast").navigationCards()],
+            ["背景", "AI 整理"],
+        )
+        self.assertIn(
+            page.aiStyleCard,
+            page.sectionStack.view("broadcast.aiMarkdown").settingCards(),
         )
 
     def testCacheCardBelongsToTheApplicationSection(self):
@@ -399,11 +421,11 @@ class SettingSectionTest(TestCase):
         self.assertEqual(cfg.windowTitle.defaultValue, "")
         self.assertEqual(page.windowTitleCard.lineEdit.placeholderText(), APP_NAME)
 
-    def testErrorLogCardOpensLogDirectory(self):
+    def testLogCardOpensLogDirectory(self):
         page = self.buildPage()
 
         with patch.object(QDesktopServices, "openUrl") as openUrl:
-            page.errorLogCard.clicked.emit()
+            page.logCard.clicked.emit()
 
         openUrl.assert_called_once_with(QUrl.fromLocalFile(str(LOG_DIR)))
 
@@ -412,7 +434,7 @@ class SettingSectionTest(TestCase):
 
         for key, card in (
             ("personalization.appearance", page.themeColorCard),
-            ("aiMarkdown", page.aiStyleCard),
+            ("broadcast.aiMarkdown", page.aiStyleCard),
         ):
             self.navigate(page, key)
             card.setExpandedImmediately(False)
@@ -471,9 +493,9 @@ class SettingSuggestionTest(TestCase):
         self.assertEqual(
             [(item.text, item.routeKey) for item in duplicated],
             [
-                ("全屏投送设置 › 背景 › 背景类型", "broadcast.background"),
-                ("考试倒计时设置 › 背景 › 背景类型", "countdown.background"),
-                ("全屏时钟设置 › 背景 › 背景类型", "fullscreenClock.background"),
+                ("全屏投送 › 背景 › 背景类型", "broadcast.background"),
+                ("考试倒计时 › 背景 › 背景类型", "countdown.background"),
+                ("全屏时钟 › 背景 › 背景类型", "fullscreenClock.background"),
             ],
         )
         self.assertEqual([item.text for item in unique], ["主页横幅亮度"])
@@ -531,7 +553,7 @@ class SettingSuggestionTest(TestCase):
         self.assertEqual(self.page.currentRouteKey(), "broadcast")
         self.assertEqual(
             [item.text for item in self.page.breadcrumbBar.items],
-            ["设置", "全屏投送设置"],
+            ["设置", "全屏投送"],
         )
         self.assertIs(self.page.highlight.parent(), self.page.broadcastRestoreCard)
         self.assertTrue(self.page.highlight.isVisible())
