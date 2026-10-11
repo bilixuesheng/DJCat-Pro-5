@@ -41,6 +41,7 @@ from qfluentwidgets import (
     Theme,
     isDarkTheme,
     qconfig,
+    qrouter,
     setTheme,
     setThemeColor,
 )
@@ -92,6 +93,7 @@ from app.platform.background_effect import (
     suspendsAcrylicDuringMove,
 )
 from app.signal_bus import signalBus
+from app.view.components.scroll_area import refreshOpaqueScrolling
 from app.view.components.setting_suggestion_menu import SettingSuggestionMenu
 from app.view.components.update_toast import UpdateToast
 from app.view.pages.home_page import HomePage
@@ -100,6 +102,8 @@ from app.view.shell.tray import SystemTrayIcon
 
 SCHEDULE_CATCH_UP_LIMIT = timedelta(seconds=60)
 SHUTDOWN_CATCH_UP_LIMIT = timedelta(seconds=5)
+# 主窗口没有返回按钮，qrouter 记下的切页历史从来不会被弹出。
+NAVIGATION_HISTORY_LIMIT = 16
 # Update Toast 下载中的宽度按这个大小的进度文字预留：更新包上限 1 GiB，以 MB 计时数字最长。
 WIDEST_DOWNLOAD_SIZE = 1023.9 * 1024**2
 
@@ -427,6 +431,9 @@ class MainWindow(MSFluentWindow):
         self.tray.show()
 
         signalBus.catchException.connect(self._onExceptionCaught)
+        if cfg.eagerPageLoading.value:
+            self._loadAllPages()
+        cfg.eagerPageLoading.valueChanged.connect(self._onEagerPageLoadingChanged)
         if self.splashScreen:
             splashScreen = self.splashScreen
             self.splashScreen = None
@@ -495,10 +502,13 @@ class MainWindow(MSFluentWindow):
         return super()._normalBackgroundColor()
 
     def _applyBackgroundEffect(self, *_args, removeFirst=True):
-        if sys.platform != "win32":
-            return
-        applyBackgroundEffect(self, cfg.backgroundEffect.value, isDarkTheme(), removeFirst)
-        self.setBackgroundColor(self._normalBackgroundColor())
+        if sys.platform == "win32":
+            applyBackgroundEffect(
+                self, cfg.backgroundEffect.value, isDarkTheme(), removeFirst
+            )
+            self.setBackgroundColor(self._normalBackgroundColor())
+        # 页面底色跟着主题和窗口材质变，不透明滚动的内容要照着重新铺底。
+        refreshOpaqueScrolling()
 
     def _onWindowMoveStarted(self):
         if suspendsAcrylicDuringMove(cfg.backgroundEffect.value):
@@ -1153,6 +1163,21 @@ class MainWindow(MSFluentWindow):
         self._onHomeCardsChanged(self.homePage.homeCardEntries())
         self._updateSearchEdit()
 
+    def _loadAllPages(self):
+        """「停用页面懒加载」（实验性功能）：把懒加载的页面和任务编辑页一次建好。"""
+        for page in (self.appStorePage, self.creditsPage, self.settingPage):
+            page.ensureLoaded()
+        self._getBroadcastEditPage()
+        self._getCountdownPage()
+        self._getSchedulePage()
+        self._getShutdownPage()
+        self._getHomeCardTaskPage()
+
+    def _onEagerPageLoadingChanged(self, enabled):
+        # 打开时当场全部建好；建好的页面没法再变回懒加载，关掉要下次启动才生效。
+        if enabled and not self._resourcesShutdown:
+            self._loadAllPages()
+
     def _setCreditsPageVisible(self, visible):
         self._creditsNavigationItem.setVisible(bool(visible))
         if not visible and self.stackedWidget.currentWidget() is self.creditsPage:
@@ -1300,6 +1325,7 @@ class MainWindow(MSFluentWindow):
         )
 
     def _onNavigationCompleted(self, *args):
+        self._trimNavigationHistory()
         if self.stackedWidget.currentWidget() is not self._navigationTarget:
             return
 
@@ -1308,6 +1334,13 @@ class MainWindow(MSFluentWindow):
         self._pendingNavigation = None
         if pending is not None:
             QTimer.singleShot(0, self, lambda: self._navigateTo(*pending))
+
+    def _trimNavigationHistory(self):
+        del qrouter.history[:-NAVIGATION_HISTORY_LIMIT]
+        stacked = qrouter.stackHistories.get(self.stackedWidget)
+        if stacked is not None:
+            # 第一项是默认页面，不能删。
+            del stacked.history[1:-NAVIGATION_HISTORY_LIMIT]
 
     def _onSearchTextChanged(self, text: str) -> None:
         pendingTarget = (

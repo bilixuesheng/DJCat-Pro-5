@@ -1264,6 +1264,7 @@ class AppStorePage(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.enableTransparentBackground()
+        scroll.enableOpaqueScrolling()
         return scroll
 
     def _createGrid(self, parent):

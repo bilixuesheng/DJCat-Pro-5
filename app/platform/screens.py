@@ -11,7 +11,10 @@ shiboken 把全局 QScreen 当子对象一并作废，之后的父子关系处�
 
 from __future__ import annotations
 
-from PySide6.QtGui import QGuiApplication, QScreen
+import math
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication, QPixmap, QScreen
 from PySide6.QtWidgets import QWidget
 
 
@@ -21,4 +24,31 @@ def screenFor(widget: QWidget) -> QScreen:
     return (
         QGuiApplication.screenAt(window.frameGeometry().center())
         or QGuiApplication.primaryScreen()
+    )
+
+
+def fitToScreens(pixmap: QPixmap) -> QPixmap:
+    """Shrink a decoded image to what the largest screen can show, keeping its ratio.
+
+    Backgrounds and the home banner never cover more than a screen, so pixels beyond
+    the largest screen's physical size are never seen; a phone photo decodes to around
+    a hundred megabytes that would otherwise stay resident. The result still covers
+    the whole screen in both directions, so cropping and stretching lose nothing.
+    """
+    width = height = 0
+    for screen in QGuiApplication.screens():
+        ratio = screen.devicePixelRatio()
+        size = screen.geometry().size()
+        width = max(width, math.ceil(size.width() * ratio))
+        height = max(height, math.ceil(size.height() * ratio))
+    if pixmap.isNull() or not width or not height:
+        return pixmap
+    scale = max(width / pixmap.width(), height / pixmap.height())
+    if scale >= 1:
+        return pixmap
+    return pixmap.scaled(
+        math.ceil(pixmap.width() * scale),
+        math.ceil(pixmap.height() * scale),
+        Qt.AspectRatioMode.IgnoreAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
     )

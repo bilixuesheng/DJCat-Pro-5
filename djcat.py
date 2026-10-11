@@ -30,6 +30,20 @@ def exceptionHook(excType, excValue, excTraceback):
         sys.__excepthook__(*excInfo)
 
 
+def bindExperimentalTouch(app) -> None:
+    """Experimental touch options take effect at once and follow the switches."""
+    from app.config.cfg import cfg
+    from app.platform.touch_input import setTouchPressFeedbackEnabled
+    from app.view.components.scroll_area import setTunedTouchScrollEnabled
+
+    setTouchPressFeedbackEnabled(app, cfg.touchPressFeedback.value)
+    cfg.touchPressFeedback.valueChanged.connect(
+        lambda enabled: setTouchPressFeedbackEnabled(app, enabled)
+    )
+    setTunedTouchScrollEnabled(cfg.tunedTouchScroll.value)
+    cfg.tunedTouchScroll.valueChanged.connect(setTunedTouchScrollEnabled)
+
+
 def startApp(isSilent: bool = False):
     windowClass = MainWindow
     if windowClass is None:
@@ -68,11 +82,11 @@ def main():
 
     from app.platform.application import SingletonApplication, raiseWindow
     from app.platform.animation_timer import unlockQtAnimations
-    from app.platform.touch_input import enableTouchPressFeedback
+    from app.platform.text_rendering import cacheLargeGlyphs
 
+    cacheLargeGlyphs()
     app = SingletonApplication(sys.argv)
     unlockQtAnimations()
-    enableTouchPressFeedback(app)
     isSilent = "--silence" in sys.argv
     activationPending = False
 
@@ -97,10 +111,12 @@ def main():
     from app.platform.dialog_animation import optimizeFluentDialogs
     from app.platform.icon_cache import cacheFluentSvgIcons
     from app.platform.menu_animation import optimizeFluentMenus
+    from app.platform.style_sheet import optimizeFluentStyleSheets
 
     optimizeFluentDialogs()
     optimizeFluentMenus()
     cacheFluentSvgIcons()
+    optimizeFluentStyleSheets()
 
     installTranslators(app)
 
@@ -122,6 +138,7 @@ def main():
     sys.excepthook = exceptionHook
     qconfig.load(CONFIG_PATH, cfg)
     migrateConfig()
+    bindExperimentalTouch(app)
     setThemeColor(QColor(49, 101, 49))
 
     app.window = startApp(isSilent=isSilent)

@@ -1,3 +1,4 @@
+import time
 from ctypes import Structure, c_int
 from types import SimpleNamespace
 from unittest import TestCase
@@ -5,6 +6,7 @@ from unittest.mock import MagicMock, call, patch
 
 from PySide6.QtCore import QEvent
 from PySide6.QtGui import QColor
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import MSFluentWindow, qconfig
 
@@ -250,3 +252,22 @@ class MainWindowBackgroundEffectTest(TestCase):
 
         suspend.assert_not_called()
         apply.assert_not_called()
+
+    def testScrolledContentIsOpaqueOnlyWhileTheWindowPaintsASolidBackground(self):
+        # 主窗口不透明时设置页内容铺上页面底色，滚动时 Qt 只平移像素；挂了材质就保持透明。
+        self._onWindows()
+        cfg.set(cfg.backgroundEffect, "None")
+        self.window.switchTo(self.window.settingPage)
+        deadline = time.monotonic() + 5
+        while self.window.stackedWidget.currentWidget() is not self.window.settingPage:
+            if time.monotonic() > deadline:
+                self.fail("设置页没有切换过来")
+            QTest.qWait(20)
+        view = self.window.settingPage.page.sectionStack.currentView()
+        self.assertEqual(view._backdropPainter.color.alpha(), 255)
+
+        cfg.set(cfg.backgroundEffect, "Acrylic")
+        self.assertIsNone(view._backdropPainter.color)
+
+        cfg.set(cfg.backgroundEffect, "None")
+        self.assertEqual(view._backdropPainter.color.alpha(), 255)

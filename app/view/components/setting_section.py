@@ -275,6 +275,7 @@ class SettingSectionView(ScrollArea):
         self.vBoxLayout.setContentsMargins(11, 4, 11, 36)
         self.vBoxLayout.setSpacing(10)
         self.vBoxLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.enableOpaqueScrolling()
 
     def addPreview(self, widget: QWidget, centered: bool = False) -> QWidget:
         """``centered`` is for fixed-size previews; stretchy ones would shrink to

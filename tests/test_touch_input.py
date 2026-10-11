@@ -6,7 +6,11 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
 from qfluentwidgets import CardWidget, LineEdit
 
-from app.platform.touch_input import enableTouchPressFeedback
+from app.config.cfg import cfg
+from app.platform.touch_input import (
+    enableTouchPressFeedback,
+    setTouchPressFeedbackEnabled,
+)
 from app.view.components.task_picker import TouchTimePicker
 
 
@@ -166,3 +170,43 @@ class TouchPressFeedbackTest(TestCase):
         self._release(edit, point)
 
         self.assertEqual(edit.selectedText(), "投送")
+
+
+class TouchPressFeedbackSwitchTest(TestCase):
+    """「新触控」是实验性功能，默认关；关着时按住按钮与 Qt 原样相同，开关立即生效。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance()
+
+    def setUp(self):
+        self.addCleanup(enableTouchPressFeedback, self.app)
+        self.button = QPushButton("确定")
+        window = QWidget()
+        QVBoxLayout(window).addWidget(self.button)
+        window.resize(320, 240)
+        window.show()
+        self.addCleanup(window.deleteLater)
+        self.app.processEvents()
+
+    def _pressedWhileFingerDown(self):
+        device = _windowsTouchScreen()
+        point = self.button.rect().center()
+        QTest.touchEvent(self.button, device).press(0, point, self.button).commit()
+        self.app.processEvents()
+        pressed = self.button.isDown()
+        QTest.touchEvent(self.button, device).release(0, point, self.button).commit()
+        self.app.processEvents()
+        return pressed
+
+    def testSwitchingOffLeavesTheButtonToWindowsAndBackOnRestoresTheLook(self):
+        setTouchPressFeedbackEnabled(self.app, False)
+        self.assertFalse(self._pressedWhileFingerDown())
+
+        setTouchPressFeedbackEnabled(self.app, True)
+        self.assertTrue(self._pressedWhileFingerDown())
+
+    def testExperimentIsOffUntilSwitchedOn(self):
+        self.assertFalse(cfg.touchPressFeedback.defaultValue)
+        self.assertFalse(cfg.tunedTouchScroll.defaultValue)
+        self.assertFalse(cfg.eagerPageLoading.defaultValue)

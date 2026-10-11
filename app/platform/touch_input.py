@@ -125,7 +125,21 @@ class _TouchPressFeedback(QObject):
             _showPressed(target, False)
 
 
-def enableTouchPressFeedback(application) -> None:
-    """Show the control under a finger as pressed until Windows acts; idempotent."""
-    if getattr(application, "_djcatTouchPressFeedback", None) is None:
+def setTouchPressFeedbackEnabled(application, enabled: bool) -> None:
+    """Show the control under a finger as pressed until Windows acts, or stop; idempotent.
+
+    Off leaves touch exactly as Qt handles it: a control looks pressed only once
+    Windows has turned the touch into a mouse press.
+    """
+    feedback = getattr(application, "_djcatTouchPressFeedback", None)
+    if enabled and feedback is None:
         application._djcatTouchPressFeedback = _TouchPressFeedback(application)
+    elif not enabled and feedback is not None:
+        application.removeEventFilter(feedback)
+        feedback._end()
+        feedback.deleteLater()
+        application._djcatTouchPressFeedback = None
+
+
+def enableTouchPressFeedback(application) -> None:
+    setTouchPressFeedbackEnabled(application, True)

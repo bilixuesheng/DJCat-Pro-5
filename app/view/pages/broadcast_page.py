@@ -56,7 +56,10 @@ from app.config.paths import ASSET_DIR
 from app.platform.screens import screenFor
 from app.view.components.busy_glow import BusyGlowOverlay
 from app.view.components.markdown_view import MarkdownView
-from app.view.components.scroll_area import setTouchScrollSuppressed
+from app.view.components.scroll_area import (
+    setTouchScrollSuppressed,
+    trackTouchScroller,
+)
 from app.view.components.window_background import (
     WINDOW_SHADOW_MARGIN,
     WindowBackground,
@@ -400,6 +403,7 @@ class BroadcastWindow(FramelessWindow):
             self.contentEdit.viewport(),
             QScroller.ScrollerGestureType.TouchGesture,
         )
+        trackTouchScroller(self.contentEdit.viewport())
 
         self.markdownView = MarkdownView(
             self,
@@ -980,6 +984,7 @@ class AIMarkdownDialog(MessageBoxBase):
             self.inputEdit.viewport(),
             QScroller.ScrollerGestureType.TouchGesture,
         )
+        trackTouchScroller(self.inputEdit.viewport())
         self.quotaLabel = CaptionLabel(self)
         self.quotaLabel.setWordWrap(True)
 
@@ -1253,6 +1258,7 @@ class BroadcastEditPage(QWidget):
             self.contentInput.viewport(),
             QScroller.ScrollerGestureType.TouchGesture,
         )
+        trackTouchScroller(self.contentInput.viewport())
         self.vBoxLayout.addWidget(self.contentInput)
         self._inlineAIGlow = BusyGlowOverlay(self.contentInput)
 

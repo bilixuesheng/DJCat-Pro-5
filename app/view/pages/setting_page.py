@@ -88,6 +88,8 @@ from app.view.shell.tray import selectedShortcutKeys
 
 # 配置里存的仍是 WINDOW_BACKGROUND_MODES 的原值，这里只换显示文字：第一项不是强调色，
 # 投送跟随深浅主题铺白底或深灰底，倒计时和时钟不论主题都是黑底。
+# 实验性功能只供开发人员调试，不出现在设置搜索里。
+EXPERIMENTAL_SECTION_KEY = "software.experimental"
 PROJECTION_BACKGROUND_MODE_TEXTS = ("跟随主题", "纯色", "图片")
 TIMER_BACKGROUND_MODE_TEXTS = ("默认黑色", "纯色", "图片")
 
@@ -919,6 +921,26 @@ class SettingPage(QWidget):
             f"© Copyright {YEAR}, {AUTHOR}. Version {VERSION}",
         )
 
+        self.touchPressCard = SwitchSettingCard(
+            FluentIcon.FINGERPRINT,
+            "新触控",
+            "手指按上去立即显示按下效果；关闭时与 Qt 原版相同",
+            cfg.touchPressFeedback,
+        )
+        self.touchScrollCard = SwitchSettingCard(
+            FluentIcon.SCROLL,
+            "新滚动触控",
+            "页面开始滚动才取消点击，惯性和回弹接近 Edge；关闭时与原来相同",
+            cfg.tunedTouchScroll,
+        )
+        self.eagerPageLoadingCard = SwitchSettingCard(
+            FluentIcon.SPEED_HIGH,
+            "停用页面懒加载",
+            "谨慎关闭页面懒加载，关闭后会造成性能不稳定或低配电脑死机。"
+            "打开后立即加载全部页面，关闭后下次启动生效",
+            cfg.eagerPageLoading,
+        )
+
     def _createBackgroundCards(
         self,
         prefix: str,
@@ -1175,6 +1197,20 @@ class SettingPage(QWidget):
                 self.logCard,
             ]
         )
+        experimental = self._addSection(
+            EXPERIMENTAL_SECTION_KEY,
+            "实验性功能",
+            FluentIcon.DEVELOPER_TOOLS,
+            "新触控、新滚动触控和页面懒加载。本选项仅供开发人员调试使用",
+            "software",
+        )
+        experimental.addCardList(
+            [
+                self.touchPressCard,
+                self.touchScrollCard,
+                self.eagerPageLoadingCard,
+            ]
+        )
 
         about = self._addSection(
             "about",
@@ -1428,6 +1464,9 @@ class SettingPage(QWidget):
     def _buildSuggestions(self) -> None:
         entries = []
         for key in self._sectionTitles:
+            if key == EXPERIMENTAL_SECTION_KEY:
+                # 实验性功能只供开发人员调试，不让老师搜到。
+                continue
             view = self.sectionStack.view(key)
             for card in view.settingCards():
                 entries.append((self._cardTarget(card).titleLabel.text(), key, card))

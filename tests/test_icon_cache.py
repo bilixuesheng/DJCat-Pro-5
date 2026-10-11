@@ -87,3 +87,73 @@ class FluentIconCacheTest(TestCase):
         painter.end()
 
         self.assertEqual(len(icon_cache._renderers), icon_cache.CACHE_LIMIT)
+
+
+def _draw(icon, ratio, rect, draw=None):
+    pixmap = QPixmap(round(40 * ratio), round(40 * ratio))
+    pixmap.setDevicePixelRatio(ratio)
+    pixmap.fill(QColor(240, 244, 249))
+    painter = QPainter(pixmap)
+    (draw or fluentIcon.drawSvgIcon)(icon, painter, rect)
+    painter.end()
+    return pixmap.toImage()
+
+
+def _original(icon, painter, rect):
+    icon_cache._originalDrawSvgIcon(icon, painter, rect)
+
+
+class FluentIconPixmapCacheTest(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance()
+        icon_cache.cacheFluentSvgIcons()
+
+    def setUp(self):
+        icon_cache._pixmaps.clear()
+        icon_cache._pixmapBytes = 0
+
+    def testIconsOnWholeDevicePixelsAreRasterizedOnceAndLookTheSame(self):
+        rect = QRectF(4, 6, 16, 16)
+        for ratio in (1.0, 1.5, 3.0):
+            for icon in (FluentIcon.EDIT, FluentIcon.SETTING, FluentIcon.HOME):
+                with self.subTest(ratio=ratio, icon=icon.name):
+                    expected = _draw(icon.path(), ratio, rect, _original)
+                    first = _draw(icon.path(), ratio, rect)
+                    cached = dict(icon_cache._pixmaps)
+                    size = round(16 * ratio)
+                    self.assertIn((icon.path(), size, size), cached)
+                    images = [first] + [_draw(icon.path(), ratio, rect) for _ in range(4)]
+
+                    self.assertEqual(
+                        {key: pixmap.cacheKey() for key, pixmap in icon_cache._pixmaps.items()},
+                        {key: pixmap.cacheKey() for key, pixmap in cached.items()},
+                    )
+                    for image in images:
+                        self.assertEqual(image, expected)
+
+    def testScaledOrFractionalIconsAreDrawnDirectly(self):
+        def scaled(icon, painter, rect):
+            painter.scale(1.25, 1.25)
+            fluentIcon.drawSvgIcon(icon, painter, rect)
+
+        for draw, rect in ((scaled, QRectF(0, 0, 16, 16)), (None, QRectF(0.5, 0, 16, 16))):
+            with self.subTest(rect=rect):
+                _draw(FluentIcon.EDIT.path(), 1.0, rect, draw)
+
+        self.assertEqual(len(icon_cache._pixmaps), 0)
+
+    def testPixmapCacheStaysWithinItsBudget(self):
+        with patch.object(icon_cache, "PIXMAP_CACHE_BYTES", 64 * 64 * 4 * 3):
+            for index in range(10):
+                source = (
+                    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1">'
+                    f'<rect width="1" height="1" fill="#{index:06x}"/></svg>'
+                ).encode()
+                pixmap = QPixmap(64, 64)
+                painter = QPainter(pixmap)
+                fluentIcon.drawSvgIcon(source, painter, QRectF(0, 0, 64, 64))
+                painter.end()
+
+        self.assertEqual(len(icon_cache._pixmaps), 3)
+        self.assertEqual(icon_cache._pixmapBytes, 64 * 64 * 4 * 3)

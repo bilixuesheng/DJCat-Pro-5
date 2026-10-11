@@ -69,7 +69,19 @@ def _setMenuShadow(self, blurRadius=30, offset=(0, 8), color=QColor(0, 0, 0, 30)
     self.view.setGraphicsEffect(self.shadowEffect)
 
 
+_originalMake = MenuAnimationManager.make.__func__
+
+
+def _makeAnimationManager(cls, menu, aniType):
+    manager = _originalMake(cls, menu, aniType)
+    # 管理器都是用完即弃的：菜单每次 exec() 换一个，列表量可用尺寸也借一个。它的位移
+    # 动画却挂在菜单或列表下常驻，反复弹出、反复换项目的菜单（设置搜索建议）越攒越多。
+    manager.destroyed.connect(manager.ani.deleteLater)
+    return manager
+
+
 def optimizeFluentMenus() -> None:
+    MenuAnimationManager.make = classmethod(_makeAnimationManager)
     RoundMenu.setShadowEffect = _setMenuShadow
     MenuAnimationManager.managers[MenuAnimationType.DROP_DOWN] = (
         _SmoothDropDownMenuAnimation
