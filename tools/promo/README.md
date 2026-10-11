@@ -1,6 +1,6 @@
 # 宣传片
 
-电教猫 Pro 5 的 16:9 宣传片（1920 × 1080，60 fps，约 47 秒）。画面是一张 HTML 动画页，逐帧截图后用 ffmpeg 合成；配乐和音效由脚本合成，考试倒计时一段用的是软件自带的 15 分钟提醒 `app/assets/15.wav`。
+电教猫 Pro 5 的 16:9 宣传片（1920 × 1080，60 fps，约 47 秒），成片是 [`djcat-pro-5-promo.mp4`](djcat-pro-5-promo.mp4)。画面是一张 HTML 动画页，逐帧截图后用 ffmpeg 合成；配乐和音效由脚本合成，考试倒计时一段用的是软件自带的 15 分钟提醒 `app/assets/15.wav`。
 
 | 时间 | 场景 |
 |:--|:--|
@@ -28,7 +28,7 @@ node tools/promo/render.cjs        # 视频 → tools/promo/out/djcat-pro-5-prom
 node tools/promo/render.cjs --stills 10,17.5   # 只截几张静帧检查画面
 ```
 
-`FPS=30 node tools/promo/render.cjs` 可以降低帧率加快渲染。
+`FPS=30 node tools/promo/render.cjs` 可以降低帧率加快渲染。改完画面或配乐后，把 `out/` 里的新成片复制到本目录覆盖旧的。
 
 ## 修改时间轴
 
