@@ -12,6 +12,7 @@ from PySide6.QtCore import (
     QParallelAnimationGroup,
     QPoint,
     QPropertyAnimation,
+    QRect,
     QRectF,
     QSize,
     Qt,
@@ -20,7 +21,7 @@ from PySide6.QtCore import (
     QVariantAnimation,
     Signal,
 )
-from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPainterPath, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
     QAbstractButton,
     QAbstractScrollArea,
@@ -57,7 +58,9 @@ from qfluentwidgets import (
     ToggleToolButton,
     ToolButton,
     TransitionStackedWidget,
+    drawIcon,
     isDarkTheme,
+    setCustomStyleSheet,
     themeColor,
 )
 from qfluentwidgets import FluentIcon as FIF
@@ -83,6 +86,7 @@ PROGRESS_RING_SIZE = 16
 STOP_SQUARE_SIZE = 6
 PROGRESS_LINE_HEIGHT = 3
 BUTTON_CORNER_RADIUS = 5  # 与 QFluentWidgets 按钮样式表的 border-radius 一致
+UNINSTALL_COLOR = "#d13438"
 CONTENT_MARGINS = (12, 8, 20, 24)
 _LIVE_CATALOG_URI_SCHEMES = frozenset({"classisland"})
 def _releaseSlotAfterExit(thread, downloadSlots):
@@ -437,6 +441,9 @@ class ActionProgressButton(PrimaryPushButton):
     # 下载和安装期间的样子移植自 Ghost-Downloader-3 的 InstallButton
     # （app/view/components/install_button.py，同为 GPL-3.0）：文字让位给进度环或转圈，
     # 可取消时中间画停止方块。打开和卸载仍显示文字，底边一条不确定进度线。
+    # 与原版不同的一处：原版让布局居中进度环、停止方块按按钮正中画，按钮宽或高为奇数时
+    # 环落在取整后的整数像素上，方块却在半像素处，两者差半个像素。这里环由按钮自己摆，
+    # 方块按环的矩形画，两者始终同心。
     _ringShown = False
     _cancellable = False
 
@@ -453,8 +460,6 @@ class ActionProgressButton(PrimaryPushButton):
         self._lineTimer.timeout.connect(self._advanceLine)
         self.ring = ProgressRing(self)
         self.spinner = IndeterminateProgressRing(self, start=False)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
         for ring in (self.ring, self.spinner):
             ring.setFixedSize(PROGRESS_RING_SIZE, PROGRESS_RING_SIZE)
             ring.setStrokeWidth(2)
@@ -464,7 +469,6 @@ class ActionProgressButton(PrimaryPushButton):
             )
             ring.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             ring.hide()
-            layout.addWidget(ring, 0, Qt.AlignmentFlag.AlignCenter)
 
     # 页面每次刷新状态都会重设文字和可用性；进度环显示期间只记下，环收起时再还原。
     # 不能先禁用再启用：禁用会丢掉正在进行的按压，进度更新时点下的取消就落空了。
@@ -543,6 +547,20 @@ class ActionProgressButton(PrimaryPushButton):
         self._lineOffset = (self._lineOffset + 0.025) % 1.0
         self.update()
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        topLeft = self._ringRect().topLeft()
+        self.ring.move(topLeft)
+        self.spinner.move(topLeft)
+
+    def _ringRect(self):
+        return QRect(
+            (self.width() - PROGRESS_RING_SIZE) // 2,
+            (self.height() - PROGRESS_RING_SIZE) // 2,
+            PROGRESS_RING_SIZE,
+            PROGRESS_RING_SIZE,
+        )
+
     def paintEvent(self, event):
         super().paintEvent(event)
         if self._cancellable:
@@ -555,12 +573,8 @@ class ActionProgressButton(PrimaryPushButton):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(0, 0, 0) if isDarkTheme() else QColor(255, 255, 255))
-        rect = QRectF(
-            (self.width() - STOP_SQUARE_SIZE) / 2,
-            (self.height() - STOP_SQUARE_SIZE) / 2,
-            STOP_SQUARE_SIZE,
-            STOP_SQUARE_SIZE,
-        )
+        rect = QRectF(0, 0, STOP_SQUARE_SIZE, STOP_SQUARE_SIZE)
+        rect.moveCenter(QRectF(self._ringRect()).center())
         painter.drawRoundedRect(rect, 1.5, 1.5)
 
     def _drawLine(self):
@@ -585,6 +599,28 @@ class ActionProgressButton(PrimaryPushButton):
             bar = QPainterPath()
             bar.addRect(rect)
             painter.fillPath(button.intersected(bar), brush)
+
+
+class UninstallButton(ToolButton):
+    # 样式表的 color 管不到 FluentIcon，图标颜色自己画：平时红色，悬停的红底上换白色。
+    # 与 ActionProgressButton 同理不写 __init__：带图标的重载会再调一次 self.__init__(parent)。
+    def _postInit(self):
+        super()._postInit()
+        self.setIcon(FIF.DELETE)
+        # 高度跟随同一行的主按钮，宽度留够触控。
+        self.setFixedWidth(40)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Ignored)
+        # 直接 setStyleSheet 会在切换深浅主题时被组件库的样式表整份换掉。
+        style = (
+            f"ToolButton {{ border: 1px solid {UNINSTALL_COLOR};"
+            f" border-radius: {BUTTON_CORNER_RADIUS}px; }}"
+            f"ToolButton:hover:enabled {{ background: {UNINSTALL_COLOR}; }}"
+        )
+        setCustomStyleSheet(self, style, style)
+
+    def _drawIcon(self, icon, painter, rect, state=QIcon.State.Off):
+        fill = "#ffffff" if self.isHover and self.isEnabled() else UNINSTALL_COLOR
+        drawIcon(icon, painter, rect, state, fill=fill)
 
 
 class ApplicationCard(CardWidget):
@@ -630,13 +666,8 @@ class ApplicationCard(CardWidget):
         setFluentToolTip(self.pinButton, "固定到主页")
         self.pinButton.hide()
         self.actionButton = ActionProgressButton(self)
-        self.removeButton = ToolButton(FIF.DELETE, self)
-        self.removeButton.setFixedSize(40, 40)
+        self.removeButton = UninstallButton(self)
         setFluentToolTip(self.removeButton, "卸载")
-        self.removeButton.setStyleSheet(
-            "ToolButton { color: #d13438; border: 1px solid #d13438; border-radius: 8px; }"
-            "ToolButton:hover { background: #d13438; color: white; }"
-        )
         self.removeButton.hide()
 
         top = QHBoxLayout()
