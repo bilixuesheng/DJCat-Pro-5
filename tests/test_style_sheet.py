@@ -13,7 +13,7 @@ from qfluentwidgets import (
 )
 from qfluentwidgets.common.style_sheet import StyleSheetCompose, styleSheetManager
 
-from app.platform.style_sheet import stopStyleSheetNesting
+from app.platform.style_sheet import optimizeFluentStyleSheets
 from tests.support import isolateCfg
 
 
@@ -21,7 +21,7 @@ class StyleSheetNestingTest(TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance()
-        stopStyleSheetNesting()
+        optimizeFluentStyleSheets()
 
     def setUp(self):
         isolateCfg(self)

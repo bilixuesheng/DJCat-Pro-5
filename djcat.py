@@ -99,12 +99,12 @@ def main():
     from app.platform.dialog_animation import optimizeFluentDialogs
     from app.platform.icon_cache import cacheFluentSvgIcons
     from app.platform.menu_animation import optimizeFluentMenus
-    from app.platform.style_sheet import stopStyleSheetNesting
+    from app.platform.style_sheet import optimizeFluentStyleSheets
 
     optimizeFluentDialogs()
     optimizeFluentMenus()
     cacheFluentSvgIcons()
-    stopStyleSheetNesting()
+    optimizeFluentStyleSheets()
 
     installTranslators(app)
 
