@@ -70,6 +70,10 @@ _Avoid_: Exam Countdown、timer、Scheduled Task
 Projection、Exam Countdown 或 Fullscreen Clock 显示在屏幕上的那个窗口，可在全屏和窗口化之间切换；窗口化时是带阴影的圆角卡片。
 _Avoid_: 全屏窗口（它也可以窗口化）、主窗口
 
+**Corner Button（角落按钮）**:
+Display Window 角落里的那一排按钮：编辑、最小化、窗口化／全屏、重置和关闭，各窗口只有其中几个。关闭按钮用 Theme Color 原色，其余是半透明底。
+_Avoid_: 操作按钮、标题栏按钮（那是主窗口的最小化、最大化、关闭）
+
 **Collapse（收起）**:
 Projection 的 Display Window 暂时让出屏幕、变成 Floating Button 的操作；按钮文字是"最小化"，但窗口不进任务栏。只有 Projection 能 Collapse。
 _Avoid_: minimize、最小化（仅保留在按钮文字中）、隐藏
