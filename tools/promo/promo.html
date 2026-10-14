@@ -1,0 +1,767 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>电教猫 Pro 5 宣传片</title>
+<!--
+  1920 × 1080 的宣传片画面。直接用浏览器打开即可循环预览；render.mjs 带 ?render 打开，
+  逐帧调用 window.seek(t) 截图再交给 ffmpeg。所有动画都是 CSS 动画加 tick(t)，
+  由 seek(t) 统一定位到同一时刻，因此逐帧渲染与实时预览完全一致。
+  时间轴与 music.py 的 CUES 对应，改动任一处的时间要同步另一处。
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Sans+SC:wght@400;500;700;900&display=block" rel="stylesheet">
+<script src="icons.js"></script>
+<style>
+:root {
+  --g: #316531;
+  --g-hover: #3a733a;
+  --g-soft: rgba(49, 101, 49, .10);
+  --ink: #1b1d1b;
+  --sub: #5d625d;
+  --line: #e3e5e2;
+  --eo: cubic-bezier(.16, 1, .3, 1);
+  --eio: cubic-bezier(.65, 0, .35, 1);
+  --ei: cubic-bezier(.55, 0, .9, .4);
+  --spring: cubic-bezier(.34, 1.56, .64, 1);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+body {
+  font-family: "Inter", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+#stage {
+  position: absolute; left: 0; top: 0;
+  width: 1920px; height: 1080px;
+  overflow: hidden; background: #000;
+  transform-origin: 0 0;
+}
+svg.icon { width: 1em; height: 1em; fill: currentColor; flex: none; display: block; }
+
+/* ---------- keyframes ---------- */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fadeOut { to { opacity: 0; } }
+@keyframes hide { to { visibility: hidden; } }
+@keyframes inUp { from { opacity: 0; transform: translateY(46px); } to { opacity: 1; transform: none; } }
+@keyframes inDown { from { opacity: 0; transform: translateY(-30px); } to { opacity: 1; transform: none; } }
+@keyframes inLeft { from { opacity: 0; transform: translateX(60px); } to { opacity: 1; transform: none; } }
+@keyframes outUp { to { opacity: 0; transform: translateY(-50px); filter: blur(6px); } }
+@keyframes inScale { from { opacity: 0; transform: scale(.82); filter: blur(10px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes pop {
+  0% { opacity: 0; transform: scale(.55); }
+  55% { opacity: 1; transform: scale(1.07); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes ripple {
+  0% { opacity: 0; transform: scale(.9); }
+  12% { opacity: .55; }
+  100% { opacity: 0; transform: scale(2.3); }
+}
+@keyframes fadeZoom { from { opacity: 0; transform: scale(1.05); } to { opacity: 1; transform: none; } }
+@keyframes circleIn { from { clip-path: circle(0% at 50% 50%); } to { clip-path: circle(80% at 50% 50%); } }
+@keyframes wipeUp { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes pushInR { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes pushOutL { to { transform: translateX(-28%); filter: brightness(.85); } }
+@keyframes winIn { from { opacity: 0; transform: translateY(90px) scale(.95); } to { opacity: 1; transform: none; } }
+@keyframes drift1 { from { transform: translate(-80px, -40px) scale(1); } to { transform: translate(120px, 60px) scale(1.15); } }
+@keyframes drift2 { from { transform: translate(60px, 50px) scale(1.1); } to { transform: translate(-100px, -30px) scale(.95); } }
+@keyframes slowZoom { from { transform: scale(1.12); } to { transform: scale(1); } }
+@keyframes cursorTo {
+  from { opacity: 0; transform: translate(var(--x0), var(--y0)); }
+  20% { opacity: 1; }
+  to { opacity: 1; transform: translate(var(--x1), var(--y1)); }
+}
+@keyframes click { 0%, 100% { scale: 1; } 40% { scale: .82; } }
+@keyframes clickRing {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(.3); }
+  20% { opacity: .9; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.6); }
+}
+@keyframes pressBtn { 0%, 100% { transform: none; filter: none; } 40% { transform: scale(.96); filter: brightness(.88); } }
+@keyframes projReveal {
+  0% { opacity: 0; clip-path: inset(300px 370px 180px 370px round 12px); }
+  6% { opacity: 1; }
+  100% { opacity: 1; clip-path: inset(0 0 0 0 round 0); }
+}
+@keyframes cdShrink {
+  from { transform: none; border-radius: 0; box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+  to { transform: translate(400px, 10px) scale(.5); border-radius: 30px; box-shadow: 0 0 0 2px rgba(255,255,255,.18), 0 60px 120px rgba(0,0,0,.6); }
+}
+@keyframes drawLine { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes toBlack { from { opacity: 0; } to { opacity: 1; } }
+
+.scene { position: absolute; inset: 0; overflow: hidden; }
+.light {
+  background:
+    radial-gradient(1100px 760px at 88% 6%, rgba(49, 101, 49, .13), transparent 62%),
+    radial-gradient(900px 700px at -4% 104%, rgba(76, 194, 255, .10), transparent 60%),
+    linear-gradient(180deg, #f7f9f6, #eef2ed);
+}
+.dark {
+  background: radial-gradient(1400px 900px at 30% 20%, #2a5a2b, #0c1c0d 72%);
+  color: #fff;
+}
+.abs { position: absolute; }
+.st { animation: inUp .7s var(--eo) var(--d) both; }
+
+/* ---------- copy block ---------- */
+.copy { position: absolute; }
+.kicker {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 9px 20px 9px 16px; border-radius: 999px;
+  background: var(--g-soft); color: var(--g);
+  font-size: 25px; font-weight: 700; letter-spacing: .04em;
+}
+.kicker svg { width: 28px; height: 28px; }
+.copy h2 {
+  font-size: 80px; line-height: 1.16; font-weight: 900;
+  letter-spacing: .02em; margin: 28px 0 26px;
+}
+.copy h2 em { font-style: normal; color: var(--g); }
+.copy p { font-size: 30px; line-height: 1.65; color: var(--sub); }
+.copy.center { left: 0; right: 0; text-align: center; }
+.copy.center h2 { margin: 18px 0 12px; font-size: 64px; }
+
+/* ---------- S1 hook ---------- */
+.blob { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .55; }
+.b1 { width: 720px; height: 720px; left: 1100px; top: -200px; background: #4c9a4c; animation: drift1 4s ease-in-out 0s both; }
+.b2 { width: 620px; height: 620px; left: -120px; top: 560px; background: #2f7fa6; opacity: .35; animation: drift2 4s ease-in-out 0s both; }
+.hook {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; gap: 34px;
+}
+.hl { display: flex; align-items: center; gap: 30px; font-size: 84px; font-weight: 800; letter-spacing: .04em; white-space: nowrap; }
+.hl .hi {
+  width: 108px; height: 108px; border-radius: 28px; display: grid; place-items: center;
+  background: rgba(255, 255, 255, .12); box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .22);
+  font-size: 56px; color: #b9e6b0;
+}
+.hook2 {
+  position: absolute; left: 0; right: 0; top: 50%; margin-top: -78px; padding-left: .06em;
+  text-align: center; font-size: 132px; font-weight: 900; letter-spacing: .06em;
+}
+.hook2 em { font-style: normal; color: #a6e39a; }
+
+/* ---------- S2 logo ---------- */
+.logoWrap {
+  position: absolute; left: 50%; top: 150px; width: 280px; height: 280px; margin-left: -140px;
+  border-radius: 64px; overflow: hidden;
+  box-shadow: 0 40px 80px rgba(20, 50, 20, .28), 0 0 0 1px rgba(0, 0, 0, .06);
+}
+.logoWrap img { width: 100%; height: 100%; display: block; }
+.ripple {
+  position: absolute; left: 50%; top: 150px; width: 280px; height: 280px; margin-left: -140px;
+  border-radius: 64px; border: 3px solid var(--g);
+}
+.brand {
+  position: absolute; left: 0; right: 0; top: 486px; text-align: center;
+  font-size: 140px; font-weight: 900; letter-spacing: .04em; line-height: 1.1;
+}
+.brand b { color: var(--g); font-weight: 900; }
+.tag {
+  position: absolute; left: 0; right: 0; top: 670px; text-align: center;
+  font-size: 50px; font-weight: 500; letter-spacing: .32em; color: #3c423c;
+}
+.meta {
+  position: absolute; left: 0; right: 0; top: 790px;
+  display: flex; justify-content: center; gap: 18px;
+}
+.meta span {
+  font-size: 26px; font-weight: 600; color: var(--g);
+  padding: 10px 24px; border-radius: 999px; background: #fff;
+  box-shadow: 0 0 0 1px rgba(49, 101, 49, .22);
+}
+
+/* ---------- window frames ---------- */
+.win {
+  position: absolute; border-radius: 10px; overflow: hidden; background: #fff;
+  box-shadow: 0 40px 90px rgba(20, 45, 20, .24), 0 0 0 1px rgba(0, 0, 0, .09);
+}
+.win > img { display: block; width: 100%; height: 100%; }
+
+/* ---------- Fluent card ---------- */
+.card {
+  position: absolute; background: #fff; border-radius: 12px;
+  box-shadow: 0 30px 70px rgba(20, 45, 20, .22), 0 0 0 1px rgba(0, 0, 0, .07);
+}
+
+/* ---------- S3 action sequence ---------- */
+.seq { width: 540px; padding: 22px 24px 18px; }
+.seq-head { display: flex; align-items: center; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.seq-head .ic { width: 56px; height: 56px; border-radius: 14px; background: var(--g); color: #fff; display: grid; place-items: center; font-size: 30px; }
+.seq-head b { display: block; font-size: 28px; }
+.seq-head small { display: block; font-size: 19px; color: var(--sub); margin-top: 2px; }
+.seq-head .play { margin-left: auto; width: 54px; height: 54px; border-radius: 50%; background: var(--g-soft); color: var(--g); display: grid; place-items: center; font-size: 26px; }
+.seq-row { display: flex; align-items: center; gap: 16px; height: 62px; font-size: 23px; }
+.seq-row .ri { width: 40px; height: 40px; border-radius: 10px; background: #f1f4f0; color: #3f463f; display: grid; place-items: center; font-size: 23px; }
+.seq-row span { color: var(--sub); }
+.seq-row .stt { margin-left: auto; width: 30px; height: 30px; position: relative; }
+.stt .ring { position: absolute; inset: 0; border-radius: 50%; border: 2.5px solid #d6dbd5; }
+.stt .spin { position: absolute; inset: 0; border-radius: 50%; border: 3px solid transparent; border-top-color: var(--g); border-right-color: var(--g); opacity: 0; }
+.stt .ok { position: absolute; inset: 0; border-radius: 50%; background: var(--g); color: #fff; display: grid; place-items: center; font-size: 18px; opacity: 0; }
+
+.cursor { position: absolute; left: 0; top: 0; width: 34px; height: 46px; z-index: 50; pointer-events: none; }
+.cursor svg { width: 100%; height: 100%; display: block; overflow: visible; filter: drop-shadow(0 3px 4px rgba(0,0,0,.3)); }
+.cring { position: absolute; width: 90px; height: 90px; border-radius: 50%; border: 3px solid var(--g); z-index: 49; }
+
+/* ---------- S4 projection editor ---------- */
+.editor { left: 370px; top: 300px; width: 1180px; height: 600px; padding: 26px 32px 28px; display: flex; flex-direction: column; gap: 18px; }
+.ed-top { display: flex; align-items: center; gap: 18px; }
+.ed-top .back { width: 44px; height: 44px; border-radius: 8px; display: grid; place-items: center; font-size: 22px; color: #444; }
+.ed-top h3 { font-size: 32px; font-weight: 700; }
+.chk { display: flex; align-items: center; gap: 12px; font-size: 22px; margin-left: 26px; }
+.chk i { width: 26px; height: 26px; border-radius: 6px; background: var(--g); color: #fff; display: grid; place-items: center; font-size: 17px; }
+.ed-top .chk:first-of-type { margin-left: auto; }
+.ed-title { height: 62px; border-radius: 8px; border: 1px solid #e2e4e1; border-bottom: 2px solid #c6cbc5; padding: 0 20px; display: flex; align-items: center; font-size: 30px; }
+.ed-text-wrap { position: relative; flex: 1; }
+.glow, .halo { position: absolute; inset: -4px; border-radius: 12px; overflow: hidden; opacity: 0; }
+.halo { inset: -10px; filter: blur(26px); border-radius: 24px; }
+.glow i, .halo i {
+  position: absolute; left: 50%; top: 50%; width: 1600px; height: 1600px; margin: -800px 0 0 -800px;
+  background: conic-gradient(from 0deg, #43b8ff, #7f73ff, #e86bd0, #ff8a5c, #ffd25e, #54d17c, #43b8ff);
+}
+.ed-text {
+  position: absolute; inset: 0; border-radius: 8px; border: 1px solid #e2e4e1; background: #fcfcfc;
+  padding: 18px 22px; font-size: 28px; line-height: 1.62; color: #2b2f2b; white-space: pre-wrap; overflow: hidden;
+}
+.caret { display: inline-block; width: 2px; height: 1.1em; background: #222; vertical-align: -0.18em; margin-left: 1px; }
+.ed-foot { display: flex; align-items: center; gap: 14px; }
+.btn {
+  height: 52px; padding: 0 24px; border-radius: 8px; font-size: 22px; font-weight: 500;
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  background: #fff; box-shadow: 0 0 0 1px #dfe1de, 0 1.5px 0 #d3d6d2; color: #222;
+}
+.btn img { width: 24px; height: 24px; }
+.btn svg { width: 24px; height: 24px; }
+.btn.primary { background: var(--g); color: #fff; box-shadow: 0 1.5px 0 #23472a; min-width: 260px; margin-left: auto; }
+.ai-tip-pos { position: absolute; left: 0; right: 0; bottom: 44px; display: flex; justify-content: center; }
+.ai-tip {
+  display: flex; align-items: center; gap: 12px; padding: 12px 24px; border-radius: 999px;
+  background: #1c1f1c; color: #fff; font-size: 24px; font-weight: 600; white-space: nowrap;
+}
+.ai-tip svg { width: 28px; height: 28px; color: #ffd25e; }
+
+.proj { position: absolute; inset: 0; background: #fff; }
+.pj-title { position: absolute; left: 46px; top: 18px; font-size: 80px; color: var(--g); font-weight: 400; letter-spacing: .02em; }
+.pj-body { position: absolute; left: 53px; right: 53px; top: 132px; }
+.pj-h { font-size: 60px; line-height: 1.18; padding: 0 0 6px 19px; border-bottom: 1.5px solid #d6dbd9; margin-bottom: 6px; }
+.pj-body ul { list-style: none; padding-left: 19px; margin-bottom: 4px; }
+.pj-body li { position: relative; font-size: 42px; line-height: 1.34; padding-left: 26px; color: #1f2328; }
+.pj-body li::before { content: "•"; position: absolute; left: 0; top: -2px; font-weight: 700; }
+.pj-body li b { font-weight: 800; }
+.pj-quote { margin-top: 10px; border-left: 6px solid #d0d7de; padding-left: 14px; font-size: 42px; color: #59636e; line-height: 1.3; }
+.corner { position: absolute; right: 14px; bottom: 14px; display: flex; gap: 14px; }
+.corner div {
+  width: 96px; height: 78px; border-radius: 6px; background: #f2f2f2; color: #1b1b1b;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font-size: 17px;
+}
+.corner div svg { width: 26px; height: 26px; }
+.corner div.go { background: var(--g); color: #fff; }
+.corner.dk div { background: #1c1c1c; color: #fff; }
+.corner.dk div.go { background: var(--g); }
+.pill {
+  position: absolute; display: flex; align-items: center; gap: 14px;
+  padding: 16px 30px 16px 22px; border-radius: 999px;
+  background: rgba(24, 28, 24, .9); color: #fff; font-size: 27px; font-weight: 600; white-space: nowrap;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .25);
+}
+.pill svg { width: 32px; height: 32px; color: #a6e39a; }
+.pill .dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, .45); }
+
+/* ---------- S5 countdown ---------- */
+.cd { position: absolute; inset: 0; background: #000; color: #fff; overflow: hidden; transform-origin: 50% 50%; }
+.cd-title { position: absolute; left: 0; right: 0; top: 160px; text-align: center; font-size: 78px; font-weight: 400; letter-spacing: .02em; }
+.cd-digits { position: absolute; left: 0; right: 0; top: 380px; height: 300px; display: flex; justify-content: center; align-items: center; font-family: "Inter", sans-serif; font-weight: 800; font-size: 240px; font-variant-numeric: tabular-nums; }
+.slot { position: relative; width: 176px; height: 300px; overflow: hidden; }
+.slot b { position: absolute; left: 0; right: 0; top: 0; height: 300px; line-height: 300px; text-align: center; font-weight: 800; }
+.colon { width: 150px; text-align: center; line-height: 300px; position: relative; top: -14px; }
+.voice {
+  position: absolute; left: 50%; top: 760px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 18px; padding: 16px 32px 16px 24px; border-radius: 999px;
+  background: rgba(255, 255, 255, .1); box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .18);
+  font-size: 30px; font-weight: 600; white-space: nowrap;
+}
+.voice > svg { width: 36px; height: 36px; color: #a6e39a; }
+.bars { display: flex; gap: 5px; align-items: center; height: 34px; }
+.bars i { width: 5px; border-radius: 3px; background: #a6e39a; height: 8px; }
+.copy.onDark h2 { color: #fff; }
+.copy.onDark p { color: rgba(255, 255, 255, .72); }
+.copy.onDark .kicker { background: rgba(166, 227, 154, .14); color: #a6e39a; }
+
+/* ---------- S6 automation ---------- */
+.clockLabel { font-size: 26px; color: var(--sub); font-weight: 600; letter-spacing: .1em; }
+.clockNum { font-family: "Inter", sans-serif; font-size: 120px; font-weight: 800; color: var(--g); line-height: 1; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
+.task { position: absolute; left: 0; width: 900px; height: 136px; padding: 0 30px; display: flex; align-items: center; gap: 26px; border-radius: 14px; background: #fff; box-shadow: 0 16px 40px rgba(20, 45, 20, .10), 0 0 0 1px rgba(0, 0, 0, .06); }
+.task .tm { width: 132px; font-family: "Inter", sans-serif; font-size: 44px; font-weight: 700; color: #2a2e2a; font-variant-numeric: tabular-nums; }
+.task .tm.ev { font-family: "Noto Sans SC", sans-serif; font-size: 24px; font-weight: 700; color: var(--g); background: var(--g-soft); border-radius: 999px; text-align: center; padding: 8px 0; width: 132px; }
+.task .ti { width: 72px; height: 72px; border-radius: 18px; background: #eef3ed; color: var(--g); display: grid; place-items: center; font-size: 38px; flex: none; }
+.task b { display: block; font-size: 32px; font-weight: 800; }
+.task small { display: block; font-size: 23px; color: var(--sub); margin-top: 4px; }
+.task .done { margin-left: auto; display: flex; align-items: center; gap: 10px; color: var(--g); font-size: 24px; font-weight: 700; opacity: 0; }
+.task .done i { width: 40px; height: 40px; border-radius: 50%; background: var(--g); color: #fff; display: grid; place-items: center; font-size: 24px; }
+.task .hl { position: absolute; inset: 0; border-radius: 14px; box-shadow: 0 0 0 3px var(--g), 0 0 40px rgba(49, 101, 49, .35); opacity: 0; }
+
+/* ---------- S7 app store ---------- */
+.dlBtn {
+  position: absolute; background: var(--g); color: #fff; border-radius: 5px;
+  display: flex; align-items: center; justify-content: center; font-size: 14px; overflow: hidden;
+}
+.dlBtn .lbl { position: absolute; }
+.dlBtn svg.ringsvg { position: absolute; overflow: visible; }
+.callout { left: 110px; top: 660px; width: 560px; padding: 28px 30px; }
+.co-head { display: flex; align-items: center; gap: 20px; }
+.co-icon { width: 76px; height: 76px; border-radius: 16px; background: #fff url("../../.github/assets/appstore.png") no-repeat; box-shadow: 0 0 0 1px #eceeeb; }
+.co-head b { display: block; font-size: 32px; font-weight: 800; }
+.co-head small { display: block; font-size: 23px; color: var(--sub); margin-top: 4px; }
+.co-btn { position: relative; margin-top: 24px; height: 66px; border-radius: 10px; font-size: 28px; }
+
+/* ---------- S8 features ---------- */
+.tile { position: absolute; width: 500px; height: 196px; padding: 30px 32px; border-radius: 18px; background: rgba(255, 255, 255, .86); box-shadow: 0 18px 44px rgba(20, 45, 20, .10), 0 0 0 1px rgba(0, 0, 0, .06); display: flex; gap: 24px; }
+.tile .ti { width: 76px; height: 76px; border-radius: 20px; background: var(--g); color: #fff; display: grid; place-items: center; font-size: 40px; flex: none; }
+.tile b { display: block; font-size: 36px; font-weight: 800; margin-top: 4px; }
+.tile small { display: block; font-size: 25px; line-height: 1.5; color: var(--sub); margin-top: 10px; }
+
+/* ---------- S9 outro ---------- */
+.outroBg { position: absolute; inset: -40px; background: url("../../app/assets/luoxiaoheimiao.jpg") center 60% / cover; filter: blur(3px); animation: slowZoom 6s var(--eo) 42s both; }
+.outroShade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(8, 24, 9, .55), rgba(8, 24, 9, .82) 70%, rgba(6, 16, 7, .92)); }
+.outro .logoWrap { top: 170px; width: 220px; height: 220px; margin-left: -110px; border-radius: 52px; box-shadow: 0 30px 80px rgba(0, 0, 0, .5), 0 0 0 1.5px rgba(255, 255, 255, .2); }
+.outro .brand { top: 430px; color: #fff; font-size: 128px; }
+.outro .brand b { color: #a6e39a; }
+.outro .tag { top: 606px; color: rgba(255, 255, 255, .86); font-size: 46px; }
+.links { position: absolute; left: 0; right: 0; top: 760px; display: flex; justify-content: center; gap: 22px; }
+.links div {
+  display: flex; align-items: center; gap: 12px; padding: 14px 28px; border-radius: 999px;
+  background: rgba(255, 255, 255, .12); box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .2);
+  color: #fff; font-size: 27px; font-weight: 600; backdrop-filter: blur(8px);
+}
+.links svg { width: 30px; height: 30px; color: #a6e39a; }
+.black { position: absolute; inset: 0; background: #000; }
+</style>
+</head>
+<body>
+<div id="stage">
+
+<!-- ===== S1 · 0–4s：痛点 ===== -->
+<section class="scene dark" style="animation: fadeIn .45s linear 0s both, hide .01s 4.95s forwards">
+  <div class="blob b1"></div><div class="blob b2"></div>
+  <div class="hook">
+    <div class="hl" style="animation: inUp .7s var(--eo) .2s both, outUp .45s var(--ei) 2.4s forwards"><span class="hi" data-icon="full_screen_maximize"></span>通知，要上大屏。</div>
+    <div class="hl" style="animation: inUp .7s var(--eo) .7s both, outUp .45s var(--ei) 2.48s forwards"><span class="hi" data-icon="timer"></span>考试，要倒计时。</div>
+    <div class="hl" style="animation: inUp .7s var(--eo) 1.2s both, outUp .45s var(--ei) 2.56s forwards"><span class="hi" data-icon="megaphone"></span>铃声，要准点响。</div>
+  </div>
+  <div class="hook2" style="animation: inScale .8s var(--eo) 2.85s both">这些，<em>交给它</em>。</div>
+</section>
+
+<!-- ===== S2 · 4–8s：Logo ===== -->
+<section class="scene light" style="animation: circleIn .9s var(--eio) 4s both, pushOutL .8s var(--eio) 8s forwards, hide .01s 8.85s forwards">
+  <div class="ripple" style="animation: ripple 1.5s var(--eo) 4.55s both"></div>
+  <div class="logoWrap" style="animation: pop .9s var(--eo) 4.3s both"><img src="../../app/assets/logo.png" alt=""></div>
+  <h1 class="brand" style="animation: inUp .8s var(--eo) 4.7s both">电教猫 <b>Pro 5</b></h1>
+  <p class="tag" style="animation: inUp .8s var(--eo) 5.0s both">为电教工作提效增色</p>
+  <div class="meta">
+    <span style="animation: inUp .7s var(--eo) 5.4s both">全新重构</span>
+    <span style="animation: inUp .7s var(--eo) 5.5s both">Fluent 设计</span>
+    <span style="animation: inUp .7s var(--eo) 5.6s both">AI 辅助</span>
+    <span style="animation: inUp .7s var(--eo) 5.7s both">触控大屏友好</span>
+  </div>
+</section>
+
+<!-- ===== S3 · 8–13s：主页与自定义卡片 ===== -->
+<section class="scene light" style="animation: pushInR .8s var(--eio) 8s both, hide .01s 13.75s forwards">
+  <div class="copy" style="left: 110px; top: 250px; width: 600px;">
+    <div class="kicker" style="animation: inUp .7s var(--eo) 8.45s both" data-icon="home" data-label="主页"></div>
+    <h2 style="animation: inUp .7s var(--eo) 8.55s both">常用功能<br><em>一点即达</em></h2>
+    <p style="animation: inUp .7s var(--eo) 8.7s both">自定义卡片把启动程序、打开网页、执行命令串成一组动作，点一下全做完。</p>
+  </div>
+  <div class="win" style="left: 730px; top: 110px; width: 1100px; height: 720px; animation: winIn 1s var(--eo) 8.35s both"><img src="../../.github/assets/home.png" alt=""></div>
+  <div class="card seq" style="left: 1272px; top: 650px; animation: inUp .8s var(--eo) 9.5s both">
+    <div class="seq-head">
+      <div class="ic" data-icon="sparkle"></div>
+      <div><b>上课准备</b><small>自定义卡片 · 4 个动作</small></div>
+      <div class="play" data-icon="play"></div>
+    </div>
+    <div class="seq-row"><div class="ri" data-icon="window"></div>启动程序 <span>白板软件</span><div class="stt" data-seq="10.45"><div class="ring"></div><div class="spin"></div><div class="ok" data-icon="checkmark"></div></div></div>
+    <div class="seq-row"><div class="ri" data-icon="globe"></div>打开网页 <span>班级课程表</span><div class="stt" data-seq="10.95"><div class="ring"></div><div class="spin"></div><div class="ok" data-icon="checkmark"></div></div></div>
+    <div class="seq-row"><div class="ri" data-icon="hourglass_half"></div>延时 <span>3 秒</span><div class="stt" data-seq="11.45"><div class="ring"></div><div class="spin"></div><div class="ok" data-icon="checkmark"></div></div></div>
+    <div class="seq-row"><div class="ri" data-icon="window_console"></div>执行命令 <span>调高音量</span><div class="stt" data-seq="11.95"><div class="ring"></div><div class="spin"></div><div class="ok" data-icon="checkmark"></div></div></div>
+  </div>
+  <div class="cring" style="left: 1756px; top: 712px; animation: clickRing .6s var(--eo) 10.2s both"></div>
+  <div class="cursor" style="--x0: 1560px; --y0: 1010px; --x1: 1756px; --y1: 712px; animation: cursorTo .7s var(--eo) 9.5s both, fadeOut .4s linear 10.9s forwards" data-cursor><div style="animation: click .25s ease 10.15s both" data-cursor-svg></div></div>
+</section>
+
+<!-- ===== S4 · 13–21s：全屏投送 + AI 整理 ===== -->
+<section class="scene light" style="animation: fadeZoom .7s var(--eo) 13s both, hide .01s 21.7s forwards">
+  <div class="copy center" style="top: 64px;">
+    <div class="kicker" style="animation: inUp .7s var(--eo) 13.3s both" data-icon="full_screen_maximize" data-label="全屏投送"></div>
+    <h2 style="animation: inUp .7s var(--eo) 13.4s both">一句话，也能上大屏</h2>
+  </div>
+  <div class="card editor" style="animation: winIn .9s var(--eo) 13.3s both">
+    <div class="ed-top">
+      <div class="back" data-icon="arrow_left"></div>
+      <h3>全屏投送编辑器</h3>
+      <div class="chk"><i data-icon="checkmark"></i>整理并投送</div>
+      <div class="chk"><i data-icon="checkmark"></i>使用 Markdown 语法</div>
+    </div>
+    <div class="ed-title">班级通知</div>
+    <div class="ed-text-wrap">
+      <div class="halo" id="halo" style="animation: fadeIn .3s linear 15.5s both, fadeOut .3s linear 16.45s forwards"><i></i></div>
+      <div class="glow" id="glow" style="animation: fadeIn .3s linear 15.5s both, fadeOut .3s linear 16.45s forwards"><i></i></div>
+      <div class="ed-text" id="rawText"></div>
+      <div class="ai-tip-pos"><div class="ai-tip" style="animation: inUp .5s var(--eo) 15.5s both, fadeOut .25s linear 16.5s forwards" data-icon="sparkle" data-label="AI 正在整理排版…"></div></div>
+    </div>
+    <div class="ed-foot">
+      <div class="btn" data-icon="document" data-label="导入"></div>
+      <div class="btn"><img src="../../app/assets/deepseek.png" alt="">AI 整理 Markdown</div>
+      <div class="btn primary" style="animation: pressBtn .3s ease 15.25s both" data-icon="send" data-label="整理并投送"></div>
+    </div>
+  </div>
+  <div class="cring" style="left: 1414px; top: 852px; animation: clickRing .6s var(--eo) 15.28s both"></div>
+  <div class="cursor" style="--x0: 1200px; --y0: 1060px; --x1: 1414px; --y1: 852px; animation: cursorTo .6s var(--eo) 14.65s both, fadeOut .25s linear 15.6s forwards" data-cursor><div style="animation: click .25s ease 15.22s both" data-cursor-svg></div></div>
+
+  <div class="proj" style="animation: projReveal .7s var(--eio) 16.5s both">
+    <div class="pj-title st" style="--d: 16.75s">班级通知</div>
+    <div class="pj-body">
+      <div class="pj-h st" style="--d: 16.85s">今日作业</div>
+      <ul>
+        <li class="st" style="--d: 16.95s"><b>语文</b>：背诵《岳阳楼记》第 3 段，明早默写</li>
+        <li class="st" style="--d: 17.03s"><b>数学</b>：练习册 P42–43，第 5 题写出完整过程</li>
+        <li class="st" style="--d: 17.11s"><b>英语</b>：Unit 4 单词听写准备</li>
+      </ul>
+      <div class="pj-h st" style="--d: 17.22s">明天安排</div>
+      <ul>
+        <li class="st" style="--d: 17.32s">7:20 前到校，大课间照常跑操</li>
+        <li class="st" style="--d: 17.4s">下午第三节课在<b>多媒体教室</b>上公开课，请提前 5 分钟就座</li>
+      </ul>
+      <div class="pj-quote st" style="--d: 17.5s">值日生：第三组。放学后记得关灯、关窗、关大屏。</div>
+    </div>
+    <div class="corner st" style="--d: 17.6s">
+      <div><svg data-svg="edit"></svg>编辑</div>
+      <div><svg data-svg="arrow_minimize"></svg>最小化</div>
+      <div><svg data-svg="copy"></svg>窗口化</div>
+      <div class="go"><svg data-svg="dismiss"></svg>关闭</div>
+    </div>
+    <div class="pill" style="left: 72px; bottom: 60px; animation: inUp .7s var(--eo) 18.6s both">
+      <svg data-svg="sparkle"></svg>AI 一键排版<span class="dot"></span>纯文本 / Markdown<span class="dot"></span>意外退出自动恢复
+    </div>
+  </div>
+</section>
+
+<!-- ===== S5 · 21–28s：考试倒计时 ===== -->
+<section class="scene" style="background: radial-gradient(1200px 900px at 15% 50%, #173418, #050805 70%); animation: wipeUp .7s var(--eio) 21s both, hide .01s 28.75s forwards">
+  <div class="copy onDark" style="left: 110px; top: 330px; width: 640px;">
+    <div class="kicker" style="animation: inUp .7s var(--eo) 25.45s both" data-icon="timer" data-label="考试倒计时"></div>
+    <h2 style="animation: inUp .7s var(--eo) 25.55s both">考试，<br>就交给它</h2>
+    <p style="animation: inUp .7s var(--eo) 25.7s both">大字倒计时，临近结束语音提醒；全屏、窗口化随心切换，另有全屏时钟。</p>
+  </div>
+  <div class="cd" style="animation: cdShrink 1s var(--eio) 25.05s both">
+    <div class="cd-title">距离数学期中考试结束还有</div>
+    <div class="cd-digits" id="cdDigits"></div>
+    <div class="voice" style="animation: inUp .6s var(--eo) 21.7s both">
+      <svg data-svg="speaker_2"></svg>
+      <div class="bars" id="bars"><i></i><i></i><i></i><i></i><i></i></div>
+      临近结束 · 语音提醒
+    </div>
+    <div class="corner dk">
+      <div><svg data-svg="arrow_clockwise"></svg>重置</div>
+      <div><svg data-svg="copy"></svg>窗口化</div>
+      <div class="go"><svg data-svg="dismiss"></svg>关闭</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== S6 · 28–33s：定时与自动任务 ===== -->
+<section class="scene light" style="animation: fadeZoom .7s var(--eo) 28s both, pushOutL .8s var(--eio) 33s forwards, hide .01s 33.85s forwards">
+  <div class="copy" style="left: 110px; top: 300px; width: 640px;">
+    <div class="kicker" style="animation: inUp .7s var(--eo) 28.3s both" data-icon="history" data-label="自动任务"></div>
+    <h2 style="animation: inUp .7s var(--eo) 28.4s both">到点，<br><em>自己干活</em></h2>
+    <p style="animation: inUp .7s var(--eo) 28.55s both">定时播报、自动任务、定时关机。按时间触发，也能在电教猫启动、退出时触发。</p>
+  </div>
+  <div class="abs" style="left: 880px; top: 92px; animation: inUp .7s var(--eo) 28.35s both">
+    <div class="clockLabel">今天</div>
+    <div class="clockNum" id="autoClock">07:15</div>
+  </div>
+  <div class="abs" style="left: 880px; top: 300px;">
+    <div class="task" style="top: 0; animation: inLeft .7s var(--eo) 28.45s both" data-fire="29">
+      <div class="tm ev">启动时</div><div class="ti" data-icon="rocket"></div>
+      <div><b>自动任务</b><small>恢复上次的全屏投送</small></div>
+      <div class="done"><i data-icon="checkmark"></i>已执行</div><div class="hl"></div>
+    </div>
+    <div class="task" style="top: 156px; animation: inLeft .7s var(--eo) 28.55s both" data-fire="29.85">
+      <div class="tm">07:20</div><div class="ti" data-icon="megaphone"></div>
+      <div><b>定时播报</b><small>早读铃声 · 语音播报</small></div>
+      <div class="done"><i data-icon="checkmark"></i>已播报</div><div class="hl"></div>
+    </div>
+    <div class="task" style="top: 312px; animation: inLeft .7s var(--eo) 28.65s both" data-fire="30.75">
+      <div class="tm">12:10</div><div class="ti" data-icon="clock"></div>
+      <div><b>自动任务</b><small>午休 · 打开全屏时钟</small></div>
+      <div class="done"><i data-icon="checkmark"></i>已执行</div><div class="hl"></div>
+    </div>
+    <div class="task" style="top: 468px; animation: inLeft .7s var(--eo) 28.75s both" data-fire="31.65">
+      <div class="tm">17:40</div><div class="ti" data-icon="power"></div>
+      <div><b>定时关机</b><small>先提示，再自动关机</small></div>
+      <div class="done"><i data-icon="checkmark"></i>已提示</div><div class="hl"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== S7 · 33–38s：应用市场 ===== -->
+<section class="scene light" style="animation: pushInR .8s var(--eio) 33s both, hide .01s 38.75s forwards">
+  <div class="copy" style="left: 110px; top: 150px; width: 580px;">
+    <div class="kicker" style="animation: inUp .7s var(--eo) 33.45s both" data-icon="apps" data-label="应用市场"></div>
+    <h2 style="animation: inUp .7s var(--eo) 33.55s both">常用软件<br><em>一站装齐</em></h2>
+    <p style="animation: inUp .7s var(--eo) 33.7s both">一键下载、安装、更新和打开，装好的应用还能固定到主页。</p>
+  </div>
+  <div class="win" style="left: 730px; top: 180px; width: 1100px; height: 720px; animation: winIn 1s var(--eo) 33.35s both">
+    <img src="../../.github/assets/appstore.png" alt="">
+    <div class="dlBtn" id="dlSmall" style="left: 99px; top: 488px; width: 296px; height: 31px;"></div>
+  </div>
+  <svg class="abs" style="left: 0; top: 0; width: 1920px; height: 1080px; overflow: visible; animation: fadeIn .3s linear 34s both" viewBox="0 0 1920 1080">
+    <path d="M 670 760 C 745 760, 760 700, 826 700" fill="none" stroke="#316531" stroke-width="3" stroke-dasharray="1" pathLength="1" stroke-linecap="round" style="animation: drawLine .6s var(--eo) 34s both"/>
+    <circle cx="826" cy="700" r="6" fill="#316531" style="animation: fadeIn .2s linear 34.5s both"/>
+  </svg>
+  <div class="card callout" style="animation: inUp .8s var(--eo) 33.8s both">
+    <div class="co-head">
+      <div class="co-icon" style="background-position: -127px -491px; background-size: 1441px 943px;"></div>
+      <div><b>ClassIsland 2</b><small id="coStatus">适用于班级大屏的课表信息显示工具</small></div>
+    </div>
+    <div class="dlBtn co-btn" id="dlBig"></div>
+  </div>
+  <div class="cring" style="left: 967px; top: 703px; animation: clickRing .6s var(--eo) 34.95s both"></div>
+  <div class="cursor" style="--x0: 1180px; --y0: 1040px; --x1: 967px; --y1: 703px; animation: cursorTo .65s var(--eo) 34.2s both, fadeOut .3s linear 35.5s forwards" data-cursor><div style="animation: click .25s ease 34.88s both" data-cursor-svg></div></div>
+</section>
+
+<!-- ===== S8 · 38–42s：细节 ===== -->
+<section class="scene light" style="animation: fadeZoom .7s var(--eo) 38s both, hide .01s 43s forwards">
+  <div class="copy center" style="top: 130px;">
+    <h2 style="font-size: 76px; animation: inUp .7s var(--eo) 38.2s both">每个细节，都为<em>教室</em>打磨</h2>
+  </div>
+  <div class="tile" style="left: 170px; top: 370px; animation: inUp .7s var(--eo) 38.45s both"><div class="ti" data-icon="usb_stick"></div><div><b>便携模式</b><small>数据跟着程序走，<br>不怕冰点还原</small></div></div>
+  <div class="tile" style="left: 710px; top: 370px; animation: inUp .7s var(--eo) 38.53s both"><div class="ti" data-icon="hand_left"></div><div><b>触控大屏</b><small>滑动与点按互不误触，<br>手指操作也顺手</small></div></div>
+  <div class="tile" style="left: 1250px; top: 370px; animation: inUp .7s var(--eo) 38.61s both"><div class="ti" data-icon="pin"></div><div><b>托盘常驻</b><small>常用卡片固定到托盘，<br>不开主窗口也能用</small></div></div>
+  <div class="tile" style="left: 170px; top: 606px; animation: inUp .7s var(--eo) 38.69s both"><div class="ti" data-icon="search"></div><div><b>设置可搜索</b><small>带实时预览，<br>改什么一眼就知道</small></div></div>
+  <div class="tile" style="left: 710px; top: 606px; animation: inUp .7s var(--eo) 38.77s both"><div class="ti" data-icon="paint_brush"></div><div><b>随心换装</b><small>主题色、背景、图标<br>和窗口标题都能换</small></div></div>
+  <div class="tile" style="left: 1250px; top: 606px; animation: inUp .7s var(--eo) 38.85s both"><div class="ti" data-icon="arrow_sync"></div><div><b>应用内更新</b><small>新版本一键升级，<br>失败也能自动回退</small></div></div>
+</section>
+
+<!-- ===== S9 · 42–47s：结尾 ===== -->
+<section class="scene dark outro" style="animation: circleIn 1s var(--eio) 42s both">
+  <div class="outroBg"></div><div class="outroShade"></div>
+  <div class="logoWrap" style="animation: pop .9s var(--eo) 42.45s both"><img src="../../app/assets/logo.png" alt=""></div>
+  <h1 class="brand" style="animation: inUp .8s var(--eo) 42.7s both">电教猫 <b>Pro 5</b></h1>
+  <p class="tag" style="animation: inUp .8s var(--eo) 42.95s both">为电教工作提效增色</p>
+  <div class="links">
+    <div style="animation: inUp .7s var(--eo) 43.3s both"><svg data-svg="heart"></svg>免费开源 · Windows 10+</div>
+    <div style="animation: inUp .7s var(--eo) 43.4s both"><svg data-svg="arrow_download"></svg>github.com/bilixuesheng/DJCat-Pro-5</div>
+    <div style="animation: inUp .7s var(--eo) 43.5s both"><svg data-svg="people_community"></svg>交流群 767989508</div>
+  </div>
+  <div class="black" style="animation: toBlack .7s linear 46.3s both"></div>
+</section>
+
+</div>
+<script>
+const DURATION = 47;
+
+// ---------- icons ----------
+function svgFor(name) {
+  const [viewBox, inner] = ICONS[name];
+  return `<svg class="icon" viewBox="${viewBox}">${inner}</svg>`;
+}
+for (const el of document.querySelectorAll("[data-icon]")) {
+  el.insertAdjacentHTML("afterbegin", svgFor(el.dataset.icon));
+  if (el.dataset.label) el.insertAdjacentText("beforeend", el.dataset.label);
+}
+for (const el of document.querySelectorAll("svg[data-svg]")) {
+  el.outerHTML = svgFor(el.dataset.svg);
+}
+const CURSOR = '<svg viewBox="0 0 24 32"><path d="M2 1.5 V25 L7.6 19.6 L11.4 28.6 L15.2 27 L11.5 18.2 H19.2 Z" fill="#fff" stroke="#111" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+for (const el of document.querySelectorAll("[data-cursor-svg]")) el.innerHTML = CURSOR;
+
+// ---------- helpers ----------
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const prog = (t, s, d) => clamp((t - s) / d);
+const easeOut = x => 1 - Math.pow(1 - x, 3);
+const easeIO = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const backOut = x => { const c = 1.9; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+const ticks = [];
+
+// ---------- S3：动作序列逐个执行 ----------
+for (const el of document.querySelectorAll("[data-seq]")) {
+  const start = parseFloat(el.dataset.seq);
+  const spin = el.querySelector(".spin"), ok = el.querySelector(".ok"), ring = el.querySelector(".ring");
+  ticks.push(t => {
+    const running = t >= start && t < start + .42;
+    spin.style.opacity = running ? 1 : 0;
+    spin.style.transform = `rotate(${(t - start) * 900}deg)`;
+    const k = prog(t, start + .42, .35);
+    ok.style.opacity = k > 0 ? 1 : 0;
+    ok.style.transform = `scale(${k > 0 ? backOut(k) : 0})`;
+    ring.style.opacity = t >= start ? 0 : 1;
+  });
+}
+
+// ---------- S4：输入正文、Busy Glow ----------
+const RAW = "今日作业 语文背诵岳阳楼记第3段明早默写 数学练习册P42-43 第5题写出完整过程 英语Unit4单词听写准备\n明天7:20前到校 大课间照常跑操 下午第三节在多媒体教室上公开课 请提前5分钟就座\n值日生第三组 放学后记得关灯关窗关大屏";
+const rawText = document.getElementById("rawText");
+const glowSpin = [...document.querySelectorAll("#glow i, #halo i")];
+ticks.push(t => {
+  const n = Math.round(RAW.length * easeIO(prog(t, 13.75, 1.35)));
+  const typing = t > 13.6 && t < 15.25;
+  const caretOn = typing || Math.floor(t * 2.2) % 2 === 0;
+  rawText.innerHTML = RAW.slice(0, n).replace(/&/g, "&amp;").replace(/</g, "&lt;") +
+    (t > 13.6 && t < 15.5 && caretOn ? '<span class="caret"></span>' : "");
+  const angle = (t - 15.5) * 260;
+  for (const el of glowSpin) el.style.transform = `rotate(${angle}deg)`;
+});
+
+// ---------- S5：倒计时滚动数字 ----------
+const cdDigits = document.getElementById("cdDigits");
+const slots = [];
+function addSlot() {
+  const s = document.createElement("div"); s.className = "slot";
+  const a = document.createElement("b"), b = document.createElement("b");
+  s.append(a, b); cdDigits.append(s); slots.push([a, b]);
+}
+function addColon() { const c = document.createElement("div"); c.className = "colon"; c.textContent = ":"; cdDigits.append(c); }
+addSlot(); addColon(); addSlot(); addSlot(); addColon(); addSlot(); addSlot();
+// 第 0 次跳动前是 0:15:01，每次跳动减 1 秒；21.75s 跳到 0:15:00，同时响起语音提醒
+const CD_TICKS = [21.75, 22.75, 23.75, 24.75, 25.75, 26.75, 27.75];
+const fmt = s => { const m = Math.floor(s / 60), r = s % 60; return `${Math.floor(m / 60)}${String(m % 60).padStart(2, "0")}${String(r).padStart(2, "0")}`; };
+const bars = [...document.querySelectorAll("#bars i")];
+ticks.push(t => {
+  let i = CD_TICKS.filter(x => t >= x).length;
+  const cur = fmt(901 - i);
+  const prev = fmt(901 - Math.max(0, i - 1));
+  const k = i > 0 ? easeOut(prog(t, CD_TICKS[i - 1], .32)) : 1;
+  slots.forEach(([a, b], j) => {
+    if (cur[j] !== prev[j] && k < 1) {
+      a.textContent = prev[j]; b.textContent = cur[j];
+      a.style.transform = `translateY(${-k * 100}%)`; a.style.opacity = 1 - k;
+      b.style.transform = `translateY(${(1 - k) * 100}%)`; b.style.opacity = k;
+    } else {
+      a.textContent = cur[j]; a.style.transform = "none"; a.style.opacity = 1;
+      b.textContent = ""; b.style.opacity = 0;
+    }
+  });
+  const speaking = t > 21.8 && t < 27.3;
+  bars.forEach((el, j) => {
+    const h = speaking ? 8 + 24 * Math.abs(Math.sin(t * (7 + j * 1.7) + j * 1.3)) * Math.abs(Math.sin(t * 2.3 + j)) : 8;
+    el.style.height = `${h}px`;
+  });
+});
+
+// ---------- S6：时钟走动、任务依次触发 ----------
+const autoClock = document.getElementById("autoClock");
+const CLOCK_KEYS = [[29.25, 435], [29.85, 440], [30.75, 730], [31.65, 1060]];  // [时刻, 当天分钟]
+ticks.push(t => {
+  let minutes = 435;
+  for (let i = 1; i < CLOCK_KEYS.length; i++) {
+    const [t0, m0] = CLOCK_KEYS[i - 1], [t1, m1] = CLOCK_KEYS[i];
+    if (t >= t0) minutes = m0 + (m1 - m0) * easeIO(prog(t, t0, t1 - t0));
+  }
+  minutes = Math.round(minutes);
+  autoClock.textContent = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+});
+for (const el of document.querySelectorAll("[data-fire]")) {
+  const at = parseFloat(el.dataset.fire);
+  const done = el.querySelector(".done"), hl = el.querySelector(".hl"), ti = el.querySelector(".ti");
+  ticks.push(t => {
+    const k = prog(t, at, .45);
+    done.style.opacity = k > 0 ? 1 : 0;
+    done.style.transform = `scale(${k > 0 ? backOut(k) : .5})`;
+    const flash = t >= at ? Math.max(0, 1 - (t - at) / .9) : 0;
+    hl.style.opacity = flash;
+    ti.style.background = t >= at ? "var(--g)" : "";
+    ti.style.color = t >= at ? "#fff" : "";
+    el.style.transform = t >= at ? `scale(${1 + .025 * Math.sin(Math.PI * prog(t, at, .35))})` : "";
+  });
+}
+
+// ---------- S7：下载按钮（照应用市场：进度环 + 停止方块 → 安装中 → 打开） ----------
+const RING_R = 6.5, RING_C = 2 * Math.PI * RING_R;
+function buildBtn(host, scale) {
+  host.innerHTML = `<span class="lbl"></span>
+    <svg class="ringsvg" width="${16 * scale}" height="${16 * scale}" viewBox="0 0 16 16">
+      <circle cx="8" cy="8" r="${RING_R}" fill="none" stroke="currentColor" stroke-opacity=".28" stroke-width="1.6"/>
+      <circle class="arc" cx="8" cy="8" r="${RING_R}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" transform="rotate(-90 8 8)"/>
+      <rect class="stop" x="5.5" y="5.5" width="5" height="5" rx="1" fill="currentColor"/>
+    </svg>`;
+  return { lbl: host.querySelector(".lbl"), svg: host.querySelector("svg"), arc: host.querySelector(".arc"), track: host.querySelector("circle"), stop: host.querySelector(".stop") };
+}
+const btns = [buildBtn(document.getElementById("dlSmall"), 1), buildBtn(document.getElementById("dlBig"), 2.2)];
+const coStatus = document.getElementById("coStatus");
+const T_CLICK = 34.95, T_DET = 35.25, T_DONE = 36.65, T_INSTALLED = 37.25;
+function downloadProgress(t) {
+  // 前快后慢、中间停顿一下，像真实下载
+  const x = prog(t, T_DET, T_DONE - T_DET);
+  return clamp(x < .55 ? easeOut(x / .55) * .62 : .62 + easeIO((x - .55) / .45) * .38);
+}
+ticks.push(t => {
+  for (const b of btns) {
+    let state = "idle";
+    if (t >= T_INSTALLED) state = "open";
+    else if (t >= T_DONE) state = "installing";
+    else if (t >= T_DET) state = "progress";
+    else if (t >= T_CLICK) state = "starting";
+    const showRing = state === "starting" || state === "progress" || state === "installing";
+    b.lbl.textContent = state === "open" ? "打开" : "下载";
+    b.lbl.style.opacity = showRing ? 0 : 1;
+    b.svg.style.opacity = showRing ? 1 : 0;
+    b.stop.style.opacity = state === "installing" ? 0 : 1;
+    if (state === "progress") {
+      const p = downloadProgress(t);
+      b.arc.setAttribute("stroke-dasharray", `${RING_C * p} ${RING_C}`);
+      b.svg.style.transform = "none";
+      b.track.setAttribute("stroke-opacity", ".28");
+    } else {
+      b.arc.setAttribute("stroke-dasharray", `${RING_C * (.28 + .12 * Math.sin(t * 5))} ${RING_C}`);
+      b.svg.style.transform = `rotate(${t * 520}deg)`;
+      b.track.setAttribute("stroke-opacity", "0");
+    }
+  }
+  if (t >= T_INSTALLED) coStatus.textContent = "已安装 · 可固定到主页";
+  else if (t >= T_DONE) coStatus.textContent = "安装中…";
+  else if (t >= T_DET) coStatus.textContent = `下载中 ${Math.round(downloadProgress(t) * 100)}%`;
+  else if (t >= T_CLICK) coStatus.textContent = "正在连接…";
+  else coStatus.textContent = "适用于班级大屏的课表信息显示工具";
+  coStatus.style.color = t >= T_INSTALLED ? "var(--g)" : "";
+  coStatus.style.fontWeight = t >= T_INSTALLED ? "700" : "";
+});
+
+// ---------- 统一时间轴 ----------
+function seek(t) {
+  for (const a of document.getAnimations()) {
+    a.pause();
+    a.currentTime = t * 1000;
+  }
+  for (const f of ticks) f(t);
+}
+window.seek = seek;
+window.DURATION = DURATION;
+
+function fit() {
+  if (new URLSearchParams(location.search).has("render")) return;
+  const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+  const stage = document.getElementById("stage");
+  stage.style.transform = `scale(${s})`;
+  stage.style.left = `${(innerWidth - 1920 * s) / 2}px`;
+  stage.style.top = `${(innerHeight - 1080 * s) / 2}px`;
+}
+addEventListener("resize", fit); fit();
+
+if (!new URLSearchParams(location.search).has("render")) {
+  const from = parseFloat(new URLSearchParams(location.search).get("t") || "0");
+  let t0 = null;
+  document.fonts.ready.then(() => requestAnimationFrame(function loop(now) {
+    if (t0 === null) t0 = now - from * 1000;
+    seek(((now - t0) / 1000) % DURATION);
+    requestAnimationFrame(loop);
+  }));
+} else {
+  seek(0);
+}
+</script>
+</body>
+</html>

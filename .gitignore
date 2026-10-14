@@ -12,3 +12,6 @@ dist/
 ai_markdown_usage.sqlite3
 DJCatPro/
 config/
+
+# 宣传片渲染输出
+tools/promo/out/
