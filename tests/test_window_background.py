@@ -153,6 +153,20 @@ class WindowBackgroundTest(TestCase):
         window.setContent("标题", "正文")
         self.assertIn(projectionTitleColor().name(), window.titleLabel.styleSheet())
 
+    def testPureWhiteProjectionTitleTurnsBlackOnTheLightBackground(self):
+        original = QColor(qconfig.themeColor.value)
+        self.addCleanup(qconfig.set, qconfig.themeColor, original, False)
+        qconfig.set(qconfig.themeColor, QColor("#FFFFFF"), False)
+
+        qconfig.set(qconfig.themeMode, Theme.LIGHT, False)
+        self.assertEqual(projectionTitleColor(), QColor("black"))
+        qconfig.set(qconfig.themeColor, QColor("#FAFAFA"), False)
+        self.assertEqual(projectionTitleColor(), QColor("#FAFAFA"))
+
+        qconfig.set(qconfig.themeColor, QColor("#000000"), False)
+        qconfig.set(qconfig.themeMode, Theme.DARK, False)
+        self.assertEqual(projectionTitleColor().name(), "#ffffff")
+
     def testThemeBackgroundPreviewMatchesTheRealWindows(self):
         cfg.set(cfg.broadcastBackgroundMode, "主题色", save=False)
         cfg.set(cfg.countdownBackgroundMode, "主题色", save=False)
