@@ -6,7 +6,6 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
 from qfluentwidgets import CardWidget, LineEdit
 
-from app.config.cfg import cfg
 from app.platform.touch_input import (
     enableTouchPressFeedback,
     setTouchPressFeedbackEnabled,
@@ -173,7 +172,7 @@ class TouchPressFeedbackTest(TestCase):
 
 
 class TouchPressFeedbackSwitchTest(TestCase):
-    """「新触控」是实验性功能，默认关；关着时按住按钮与 Qt 原样相同，开关立即生效。"""
+    """「新触控」默认开，可在开发人员选项里停用；停用时按住按钮与 Qt 原样相同，立即生效。"""
 
     @classmethod
     def setUpClass(cls):
@@ -205,8 +204,3 @@ class TouchPressFeedbackSwitchTest(TestCase):
 
         setTouchPressFeedbackEnabled(self.app, True)
         self.assertTrue(self._pressedWhileFingerDown())
-
-    def testExperimentIsOffUntilSwitchedOn(self):
-        self.assertFalse(cfg.touchPressFeedback.defaultValue)
-        self.assertFalse(cfg.tunedTouchScroll.defaultValue)
-        self.assertFalse(cfg.eagerPageLoading.defaultValue)

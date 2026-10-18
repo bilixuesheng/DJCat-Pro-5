@@ -30,18 +30,31 @@ def exceptionHook(excType, excValue, excTraceback):
         sys.__excepthook__(*excInfo)
 
 
-def bindExperimentalTouch(app) -> None:
-    """Experimental touch options take effect at once and follow the switches."""
+def bindDeveloperOptions(app) -> None:
+    """Developer Options take effect at once and follow their switches."""
     from app.config.cfg import cfg
+    from app.platform.animation_timer import setSuperFrameRateEnabled
     from app.platform.touch_input import setTouchPressFeedbackEnabled
+    from app.view.components.frame_rate import setFrameRateShown
     from app.view.components.scroll_area import setTunedTouchScrollEnabled
 
-    setTouchPressFeedbackEnabled(app, cfg.touchPressFeedback.value)
-    cfg.touchPressFeedback.valueChanged.connect(
-        lambda enabled: setTouchPressFeedbackEnabled(app, enabled)
+    def follow(item, apply):
+        apply(item.value)
+        item.valueChanged.connect(apply)
+
+    follow(
+        cfg.disableTouchPressFeedback,
+        lambda disabled: setTouchPressFeedbackEnabled(app, not disabled),
     )
-    setTunedTouchScrollEnabled(cfg.tunedTouchScroll.value)
-    cfg.tunedTouchScroll.valueChanged.connect(setTunedTouchScrollEnabled)
+    follow(
+        cfg.disableTunedTouchScroll,
+        lambda disabled: setTunedTouchScrollEnabled(not disabled),
+    )
+    follow(
+        cfg.disableSuperFrameRate,
+        lambda disabled: setSuperFrameRateEnabled(not disabled),
+    )
+    follow(cfg.showFrameRate, setFrameRateShown)
 
 
 def startApp(isSilent: bool = False):
@@ -81,12 +94,10 @@ def main():
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
     from app.platform.application import SingletonApplication, raiseWindow
-    from app.platform.animation_timer import unlockQtAnimations
     from app.platform.text_rendering import cacheLargeGlyphs
 
     cacheLargeGlyphs()
     app = SingletonApplication(sys.argv)
-    unlockQtAnimations()
     isSilent = "--silence" in sys.argv
     activationPending = False
 
@@ -138,7 +149,8 @@ def main():
     sys.excepthook = exceptionHook
     qconfig.load(CONFIG_PATH, cfg)
     migrateConfig()
-    bindExperimentalTouch(app)
+    # 超级帧率优化也在这里，读出配置才知道要不要设 1 ms，仍早于任何动画。
+    bindDeveloperOptions(app)
     setThemeColor(QColor(49, 101, 49))
 
     app.window = startApp(isSilent=isSilent)

@@ -5,6 +5,7 @@ from qfluentwidgets import FluentIcon as FIF
 from qframelesswindow import FramelessWindow
 
 from app.platform.screens import screenFor
+from app.view.components.frame_rate import trackFrameRate
 from app.view.components.setting_card_group import QWIDGETSIZE_MAX
 from app.view.components.window_background import (
     TIMER_THEME_BACKGROUND,
@@ -52,6 +53,7 @@ class TimerWindow(FramelessWindow):
         self.background.lower()
         self.background.setGeometry(self.contentsRect())
         self.transition = WindowTransition(self)
+        trackFrameRate(self)
 
         self.isWindowed = False
         self._closeFlyout = None

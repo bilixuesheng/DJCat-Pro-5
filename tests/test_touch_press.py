@@ -13,16 +13,24 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import CardWidget
 
-from app.view.components.scroll_area import ScrollArea
+from app.view.components import scroll_area
+from app.view.components.scroll_area import ScrollArea, setTunedTouchScrollEnabled
 
 
 class TouchPressInScrollAreaTest(TestCase):
     """Offscreen Qt synthesizes mouse events from the touch, standing in for the press
-    Windows sends once a finger starts to drag: the scroll must cancel it either way."""
+    Windows sends once a finger starts to drag: the scroll must cancel it either way.
+
+    These pin the distance-based cancel that 停用新滑动触控 brings back; the default
+    cancel at scroll start is covered in test_touch_scroll_profile."""
 
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance()
+
+    def setUp(self):
+        self.addCleanup(setTunedTouchScrollEnabled, scroll_area.isTunedTouchScrollEnabled())
+        setTunedTouchScrollEnabled(False)
 
     def _scrollArea(self, target):
         scroll = ScrollArea()

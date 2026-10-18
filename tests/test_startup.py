@@ -140,23 +140,35 @@ class StartupTest(TestCase):
             cacheLargeGlyphs()
             self.assertEqual(os.environ["QT_MAX_CACHED_GLYPH_SIZE"], "64")
 
-    def testExperimentalTouchFollowsItsSwitchesFromStartup(self):
+    def testDeveloperOptionsFollowTheirSwitchesFromStartup(self):
         from app.config.cfg import cfg
 
         app = object()
         with (
             patch("app.platform.touch_input.setTouchPressFeedbackEnabled") as press,
             patch("app.view.components.scroll_area.setTunedTouchScrollEnabled") as scroll,
-            patch.object(cfg.touchPressFeedback, "valueChanged") as pressChanged,
-            patch.object(cfg.tunedTouchScroll, "valueChanged") as scrollChanged,
+            patch("app.platform.animation_timer.setSuperFrameRateEnabled") as frames,
+            patch("app.view.components.frame_rate.setFrameRateShown") as shown,
+            patch.object(cfg.disableTouchPressFeedback, "valueChanged") as pressChanged,
+            patch.object(cfg.disableTunedTouchScroll, "valueChanged") as scrollChanged,
+            patch.object(cfg.disableSuperFrameRate, "valueChanged") as framesChanged,
+            patch.object(cfg.showFrameRate, "valueChanged") as shownChanged,
         ):
-            djcat.bindExperimentalTouch(app)
-            press.assert_called_once_with(app, cfg.touchPressFeedback.value)
-            scroll.assert_called_once_with(cfg.tunedTouchScroll.value)
+            djcat.bindDeveloperOptions(app)
+            press.assert_called_once_with(app, not cfg.disableTouchPressFeedback.value)
+            scroll.assert_called_once_with(not cfg.disableTunedTouchScroll.value)
+            frames.assert_called_once_with(not cfg.disableSuperFrameRate.value)
+            shown.assert_called_once_with(cfg.showFrameRate.value)
 
+            # 停用开关打开就关掉对应的功能，关上就恢复。
             pressChanged.connect.call_args.args[0](True)
-            press.assert_called_with(app, True)
-            scrollChanged.connect.assert_called_once_with(scroll)
+            press.assert_called_with(app, False)
+            scrollChanged.connect.call_args.args[0](False)
+            scroll.assert_called_with(True)
+            framesChanged.connect.call_args.args[0](True)
+            frames.assert_called_with(False)
+            shownChanged.connect.call_args.args[0](True)
+            shown.assert_called_with(True)
 
     def runWithTranslators(self, body, bundledOnly=False):
         """在独立进程里装翻译器：翻译器是 QApplication 全局的，会影响同进程的其他测试。"""

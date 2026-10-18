@@ -85,8 +85,8 @@ class _BackdropPainter(QObject):
         return False
 
 
-# 「新滚动触控」（实验性功能）的手感，照 Edge 调：甩得越快滑得越远，减速带长尾，
-# 到头轻轻回弹。关掉时一律用 Qt 的默认值，与以前完全相同。
+# 「新滑动触控」的手感，照 Edge 调：甩得越快滑得越远，减速带长尾，到头轻轻回弹。
+# 在开发人员选项里停用后一律用 Qt 的默认值，与以前完全相同。
 # 速度单位 m/s，减速度 m/s²，滑行距离 = 2v²/(9a)：86 寸大屏上 1.5 m/s 一甩约滑一屏。
 _TUNED_TOUCH_SCROLL_METRICS = (
     (QScrollerProperties.ScrollMetric.DragVelocitySmoothingFactor, 1.0),
@@ -103,7 +103,7 @@ TUNED_DRAG_START_MM = 5.0
 TUNED_DRAG_START_PIXELS = (3.0, 12.0)
 
 _touchScrollViewports = weakref.WeakSet()
-_tunedTouchScroll = False
+_tunedTouchScroll = True
 
 
 def isTunedTouchScrollEnabled() -> bool:
@@ -260,7 +260,7 @@ class _TouchScrollGuard(QObject):
                 _touchPressTargets.discard(target)
 
     def scrollStarted(self, scrollArea):
-        # 「新滚动触控」：页面一动就不再算点按，没动就照常点击。不再自己量距离，
+        # 「新滑动触控」：页面一动就不再算点按，没动就照常点击。不再自己量距离，
         # 以免和 QScroller 的起滑距离对不上，出现按钮已经弹起、页面却还没动的空档。
         if _tunedTouchScroll and scrollArea is self.activeScrollArea:
             self.suppressScrollArea = scrollArea
