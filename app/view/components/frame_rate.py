@@ -15,7 +15,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PySide6.QtWidgets import QWidget
 
 SAMPLE_INTERVAL_MS = 1000
-MARGIN = 8
+CORNER_INSET = 8
 
 _trackedWindows = weakref.WeakSet()
 _shown = False
@@ -44,7 +44,7 @@ class FrameRateLabel(QWidget):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._sample)
         self._timer.start(SAMPLE_INTERVAL_MS)
-        self._show(0)
+        self._setFramesPerSecond(0)
         window.installEventFilter(self)
         self._place()
         self.show()
@@ -74,9 +74,9 @@ class FrameRateLabel(QWidget):
         frames = max(self._frames - self._ownRepaints, 0)
         self._frames = 0
         self._ownRepaints = 0
-        self._show(round(frames * 1000 / elapsed))
+        self._setFramesPerSecond(round(frames * 1000 / elapsed))
 
-    def _show(self, framesPerSecond: int) -> None:
+    def _setFramesPerSecond(self, framesPerSecond: int) -> None:
         text = f"{framesPerSecond} FPS"
         if text == self._text:
             return
@@ -87,7 +87,7 @@ class FrameRateLabel(QWidget):
         self.update()
 
     def _place(self):
-        self.move(self.parentWidget().contentsRect().topLeft() + QPoint(MARGIN, MARGIN))
+        self.move(self.parentWidget().contentsRect().topLeft() + QPoint(CORNER_INSET, CORNER_INSET))
 
     def _raiseAboveSiblings(self):
         siblings = [
@@ -115,16 +115,16 @@ def setFrameRateShown(shown: bool) -> None:
     global _shown
     _shown = bool(shown)
     for window in tuple(_trackedWindows):
-        _apply(window)
+        _syncLabel(window)
 
 
 def trackFrameRate(window: QWidget) -> None:
     """Let ``window`` carry the label whenever 显示帧率 is on."""
     _trackedWindows.add(window)
-    _apply(window)
+    _syncLabel(window)
 
 
-def _apply(window):
+def _syncLabel(window):
     try:
         label = window.findChild(
             FrameRateLabel, options=Qt.FindChildOption.FindDirectChildrenOnly

@@ -108,7 +108,7 @@ class FrameRateSwitchTest(_FrameRateTest):
 
         for frames in (0, 7, 60, 144, 999):
             with self.subTest(frames=frames):
-                label._show(frames)
+                label._setFramesPerSecond(frames)
                 self.assertEqual(label.text(), f"{frames} FPS")
                 self.assertEqual(label.width(), width)
                 self.assertGreaterEqual(
@@ -120,7 +120,9 @@ class FrameRateCountTest(_FrameRateTest):
     def testIdleWindowReadsZeroAndItsOwnLabelDoesNotCount(self):
         setFrameRateShown(True)
         window = self._window()
-        _label(window)._show(37)
+        # 窗口显示时那一下是真的重画，等它数过去。
+        QTest.qWait(2 * SAMPLE_MS)
+        _label(window)._setFramesPerSecond(37)
 
         # 标签换数字自己也要重画一次；那一次不算，静止的窗口才稳在 0。
         self.assertEqual(self._samples(window, 5)[1:], ["0 FPS"] * 4)

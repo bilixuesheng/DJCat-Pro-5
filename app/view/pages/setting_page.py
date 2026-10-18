@@ -88,10 +88,10 @@ from app.view.shell.tray import selectedShortcutKeys
 
 # 配置里存的仍是 WINDOW_BACKGROUND_MODES 的原值，这里只换显示文字：第一项不是强调色，
 # 投送跟随深浅主题铺白底或深灰底，倒计时和时钟不论主题都是黑底。
-# 开发人员选项只供开发人员调试，不出现在设置搜索里。
-DEVELOPER_SECTION_KEY = "software.developer"
 PROJECTION_BACKGROUND_MODE_TEXTS = ("跟随主题", "纯色", "图片")
 TIMER_BACKGROUND_MODE_TEXTS = ("默认黑色", "纯色", "图片")
+# 开发人员选项只供开发人员调试，不出现在设置搜索里。
+DEVELOPER_SECTION_KEY = "software.developer"
 
 
 def _backgroundItems(prefix: str) -> tuple:
@@ -927,7 +927,7 @@ class SettingPage(QWidget):
             "手指按上去不再立即显示按下效果，与 Qt 原版相同",
             cfg.disableTouchPressFeedback,
         )
-        self.disableTouchScrollCard = SwitchSettingCard(
+        self.disableTunedTouchScrollCard = SwitchSettingCard(
             FluentIcon.SCROLL,
             "停用新滑动触控",
             "起滑改按手指移动距离取消点击，惯性和回弹恢复 Qt 原版",
@@ -1219,7 +1219,7 @@ class SettingPage(QWidget):
         developer.addCardList(
             [
                 self.disableTouchPressCard,
-                self.disableTouchScrollCard,
+                self.disableTunedTouchScrollCard,
                 self.disableSuperFrameRateCard,
                 self.eagerPageLoadingCard,
                 self.showFrameRateCard,
