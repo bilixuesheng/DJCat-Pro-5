@@ -56,6 +56,7 @@ from app.config.constants import AI_MARKDOWN_API
 from app.config.paths import ASSET_DIR
 from app.platform.screens import screenFor
 from app.view.components.busy_glow import BusyGlowOverlay
+from app.view.components.frame_rate import trackFrameRate
 from app.view.components.markdown_view import MarkdownView
 from app.view.components.scroll_area import (
     setTouchScrollSuppressed,
@@ -406,6 +407,7 @@ class BroadcastWindow(FramelessWindow):
         self.background.setGeometry(self.contentsRect())
         qconfig.themeChanged.connect(self.background.refresh)
         self.transition = WindowTransition(self)
+        trackFrameRate(self)
 
         self.vBoxLayout = QVBoxLayout(self)
         self.vBoxLayout.setContentsMargins(40, 20, 40, 0)

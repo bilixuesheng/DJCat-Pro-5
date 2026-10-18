@@ -88,10 +88,10 @@ from app.view.shell.tray import selectedShortcutKeys
 
 # 配置里存的仍是 WINDOW_BACKGROUND_MODES 的原值，这里只换显示文字：第一项不是强调色，
 # 投送跟随深浅主题铺白底或深灰底，倒计时和时钟不论主题都是黑底。
-# 实验性功能只供开发人员调试，不出现在设置搜索里。
-EXPERIMENTAL_SECTION_KEY = "software.experimental"
 PROJECTION_BACKGROUND_MODE_TEXTS = ("跟随主题", "纯色", "图片")
 TIMER_BACKGROUND_MODE_TEXTS = ("默认黑色", "纯色", "图片")
+# 开发人员选项只供开发人员调试，不出现在设置搜索里。
+DEVELOPER_SECTION_KEY = "software.developer"
 
 
 def _backgroundItems(prefix: str) -> tuple:
@@ -921,17 +921,23 @@ class SettingPage(QWidget):
             f"© Copyright {YEAR}, {AUTHOR}. Version {VERSION}",
         )
 
-        self.touchPressCard = SwitchSettingCard(
+        self.disableTouchPressCard = SwitchSettingCard(
             FluentIcon.FINGERPRINT,
-            "新触控",
-            "手指按上去立即显示按下效果；关闭时与 Qt 原版相同",
-            cfg.touchPressFeedback,
+            "停用新触控",
+            "手指按上去不再立即显示按下效果，与 Qt 原版相同",
+            cfg.disableTouchPressFeedback,
         )
-        self.touchScrollCard = SwitchSettingCard(
+        self.disableTunedTouchScrollCard = SwitchSettingCard(
             FluentIcon.SCROLL,
-            "新滚动触控",
-            "页面开始滚动才取消点击，惯性和回弹接近 Edge；关闭时与原来相同",
-            cfg.tunedTouchScroll,
+            "停用新滑动触控",
+            "起滑改按手指移动距离取消点击，惯性和回弹恢复 Qt 原版",
+            cfg.disableTunedTouchScroll,
+        )
+        self.disableSuperFrameRateCard = SwitchSettingCard(
+            FluentIcon.SPEED_OFF,
+            "停用超级帧率优化",
+            "动画计时退回 Qt 默认的 16 ms，动画最多约 60 帧；屏幕刷新率不受影响",
+            cfg.disableSuperFrameRate,
         )
         self.eagerPageLoadingCard = SwitchSettingCard(
             FluentIcon.SPEED_HIGH,
@@ -939,6 +945,12 @@ class SettingPage(QWidget):
             "谨慎关闭页面懒加载，关闭后会造成性能不稳定或低配电脑死机。"
             "打开后立即加载全部页面，关闭后下次启动生效",
             cfg.eagerPageLoading,
+        )
+        self.showFrameRateCard = SwitchSettingCard(
+            FluentIcon.STOP_WATCH,
+            "显示帧率",
+            "在主窗口、投送、考试倒计时和全屏时钟的左上角显示每秒重画的次数",
+            cfg.showFrameRate,
         )
 
     def _createBackgroundCards(
@@ -1197,18 +1209,20 @@ class SettingPage(QWidget):
                 self.logCard,
             ]
         )
-        experimental = self._addSection(
-            EXPERIMENTAL_SECTION_KEY,
-            "实验性功能",
+        developer = self._addSection(
+            DEVELOPER_SECTION_KEY,
+            "开发人员选项",
             FluentIcon.DEVELOPER_TOOLS,
-            "新触控、新滚动触控和页面懒加载。本选项仅供开发人员调试使用",
+            "触控、帧率和页面懒加载。本选项仅供开发人员调试使用",
             "software",
         )
-        experimental.addCardList(
+        developer.addCardList(
             [
-                self.touchPressCard,
-                self.touchScrollCard,
+                self.disableTouchPressCard,
+                self.disableTunedTouchScrollCard,
+                self.disableSuperFrameRateCard,
                 self.eagerPageLoadingCard,
+                self.showFrameRateCard,
             ]
         )
 
@@ -1464,8 +1478,8 @@ class SettingPage(QWidget):
     def _buildSuggestions(self) -> None:
         entries = []
         for key in self._sectionTitles:
-            if key == EXPERIMENTAL_SECTION_KEY:
-                # 实验性功能只供开发人员调试，不让老师搜到。
+            if key == DEVELOPER_SECTION_KEY:
+                # 开发人员选项只供开发人员调试，不让老师搜到。
                 continue
             view = self.sectionStack.view(key)
             for card in view.settingCards():

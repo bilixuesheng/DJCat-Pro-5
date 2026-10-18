@@ -19,7 +19,11 @@ from qfluentwidgets import ComboBox
 from shiboken6 import delete, isValid
 
 from app.config.cfg import cfg
-from app.view.components.scroll_area import ScrollArea
+from app.view.components.scroll_area import (
+    ScrollArea,
+    isTunedTouchScrollEnabled,
+    setTunedTouchScrollEnabled,
+)
 from app.view.components.task_page import ScheduledTaskPage
 from app.view.components.task_picker import TaskFormSettingCard, TouchTimePicker
 from app.view.pages.home_card_task_page import (
@@ -268,7 +272,9 @@ class ScheduleShutdownUiTest(TestCase):
         self.assertEqual(clicks, [])
         self.assertFalse(button.isDown())
 
-    def testTouchDragStartingOnComboBoxDoesNotOpenIt(self):
+    def _comboBoxInScrollArea(self, tuned):
+        self.addCleanup(setTunedTouchScrollEnabled, isTunedTouchScrollEnabled())
+        setTunedTouchScrollEnabled(tuned)
         scroll = ScrollArea()
         content = QWidget()
         layout = QVBoxLayout(content)
@@ -283,7 +289,11 @@ class ScheduleShutdownUiTest(TestCase):
         scroll.show()
         self.addCleanup(scroll.deleteLater)
         self.app.processEvents()
+        return scroll, comboBox
 
+    def testTouchDragStartingOnComboBoxDoesNotOpenIt(self):
+        # 停用新滑动触控后按手指移动距离取消，一下挪 100 px 就够。
+        scroll, comboBox = self._comboBoxInScrollArea(tuned=False)
         device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
         start = comboBox.rect().center()
         end = start + QPoint(0, -100)
@@ -294,6 +304,29 @@ class ScheduleShutdownUiTest(TestCase):
         QTest.touchEvent(comboBox, device).release(0, end, comboBox).commit()
         QTest.qWait(200)
 
+        self.assertIsNone(comboBox.dropMenu)
+        self.assertFalse(comboBox.isDown())
+
+    def testSwipeThatMovesThePageFromAComboBoxDoesNotOpenIt(self):
+        # 新滑动触控：页面跟着手指动起来，这次触控就不算点按。
+        scroll, comboBox = self._comboBoxInScrollArea(tuned=True)
+        viewport = scroll.viewport()
+        device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
+        start = comboBox.mapTo(viewport, comboBox.rect().center())
+        QTest.touchEvent(viewport, device).press(0, start, viewport).commit()
+        self.app.processEvents()
+        for step in range(1, 61):
+            QTest.qWait(8)
+            QTest.touchEvent(viewport, device).move(
+                0, start + QPoint(0, -step), viewport
+            ).commit()
+            self.app.processEvents()
+        QTest.touchEvent(viewport, device).release(
+            0, start + QPoint(0, -60), viewport
+        ).commit()
+        QTest.qWait(200)
+
+        self.assertGreater(scroll.verticalScrollBar().value(), 0)
         self.assertIsNone(comboBox.dropMenu)
         self.assertFalse(comboBox.isDown())
 

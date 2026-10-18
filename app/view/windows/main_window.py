@@ -93,6 +93,7 @@ from app.platform.background_effect import (
     suspendsAcrylicDuringMove,
 )
 from app.signal_bus import signalBus
+from app.view.components.frame_rate import trackFrameRate
 from app.view.components.scroll_area import refreshOpaqueScrolling
 from app.view.components.setting_suggestion_menu import SettingSuggestionMenu
 from app.view.components.update_toast import UpdateToast
@@ -418,6 +419,7 @@ class MainWindow(MSFluentWindow):
             cfg.set(cfg.homeCardTasks, homeCardTasks)
 
         self.initWindow()
+        trackFrameRate(self)
         if not isSilent:
             self.initSplashScreen()
             QApplication.processEvents()
@@ -1164,7 +1166,7 @@ class MainWindow(MSFluentWindow):
         self._updateSearchEdit()
 
     def _loadAllPages(self):
-        """「停用页面懒加载」（实验性功能）：把懒加载的页面和任务编辑页一次建好。"""
+        """「停用页面懒加载」（开发人员选项）：把懒加载的页面和任务编辑页一次建好。"""
         for page in (self.appStorePage, self.creditsPage, self.settingPage):
             page.ensureLoaded()
         self._getBroadcastEditPage()
