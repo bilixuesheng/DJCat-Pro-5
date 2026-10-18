@@ -3,8 +3,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 from qfluentwidgets import isDarkTheme, qconfig
 
@@ -127,20 +127,51 @@ class WindowBackground(QWidget):
         shadow = self.graphicsEffect()
         return shadow is not None and shadow.isEnabled()
 
-    def grabCard(self) -> QPixmap:
+    def grabCard(self) -> QImage:
         """The window's pixels over this background, without the shadow it casts.
 
-        The shadow also lies under the transparent rounded corners; a snapshot that
-        kept it there would get a second shadow from whoever draws one around it.
+        Full screen there is neither shadow nor rounded corner, and the window holds
+        exactly what it last put on screen: copy that rather than paint the whole
+        window again, which at 4K takes longer than the Window Transition itself.
+        Windowed, the shadow also lies under the transparent rounded corners, and a
+        snapshot that kept it there would get a second shadow from whoever draws one
+        around it; the card, a quarter of the screen at most, is painted again without.
         """
+        if not self._cornerRadius:
+            painted = self._paintedCard()
+            if painted is not None:
+                return painted
         shadow = self.graphicsEffect() if self.castsShadow() else None
         if shadow is not None:
-            shadow.setEnabled(False)
+            shadow.setShadowHidden(True)
         try:
-            return self.window().grab(self.geometry())
+            return self.window().grab(self.geometry()).toImage()
         finally:
             if shadow is not None:
-                shadow.setEnabled(True)
+                shadow.setShadowHidden(False)
+
+    def _paintedCard(self) -> QImage | None:
+        window = self.window()
+        handle = window.windowHandle()
+        store = window.backingStore()
+        if handle is None or not handle.isExposed() or store is None:
+            return None
+        image = store.paintDevice()
+        if not isinstance(image, QImage):
+            return None
+        ratio = image.devicePixelRatio()
+        geometry = self.geometry()
+        rect = QRect(
+            round(geometry.x() * ratio),
+            round(geometry.y() * ratio),
+            round(geometry.width() * ratio),
+            round(geometry.height() * ratio),
+        )
+        if not image.rect().contains(rect):
+            return None
+        card = image.copy(rect)
+        card.setDevicePixelRatio(ratio)
+        return card
 
     def setRoundedWindow(self, enabled: bool, shadow: bool = True) -> None:
         """``shadow=False`` keeps the rounded corners for in-page previews,

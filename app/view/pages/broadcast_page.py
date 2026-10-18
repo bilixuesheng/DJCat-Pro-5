@@ -3,7 +3,7 @@ import sys
 import threading
 
 import requests
-from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QTextBlockFormat, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QScroller,
     QStyle,
     QStyleOptionButton,
+    QStyleOptionToolButton,
     QStylePainter,
     QTextEdit,
     QToolButton,
@@ -285,6 +286,33 @@ class _BroadcastContentDragFilter(QObject):
         return self.window._filterContentDragEvent(obj, event)
 
 
+class _FloatingButtonFace(QToolButton):
+    """The Floating Button's round face, its icon centred whether pressed or not.
+
+    Qt's Windows styles shift a pressed tool button's icon one pixel right and down,
+    three device pixels at 300 %. The face is drawn as usual without the icon, and
+    the icon goes on top at the centre.
+    """
+
+    downChanged = Signal(bool)
+
+    def setDown(self, down: bool) -> None:
+        # 鼠标的按下由 FloatingMiniWindow 自己记账，「新触控」落指时也经这里；两路都要跟着
+        # 改窗口不透明度。
+        super().setDown(down)
+        self.downChanged.emit(down)
+
+    def paintEvent(self, event) -> None:
+        option = QStyleOptionToolButton()
+        self.initStyleOption(option)
+        option.icon = QIcon()
+        painter = QStylePainter(self)
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
+        rect = QRect(QPoint(), self.iconSize())
+        rect.moveCenter(self.rect().center())
+        self.icon().paint(painter, rect)
+
+
 class FloatingMiniWindow(QWidget):
     """The Floating Button a collapsed Projection leaves in a screen corner."""
 
@@ -298,12 +326,14 @@ class FloatingMiniWindow(QWidget):
 
         self.setFixedSize(60, 60)
 
-        self.btn = QToolButton(self)
+        self.btn = _FloatingButtonFace(self)
         self.btn.setFixedSize(60, 60)
         self.btn.setIconSize(QSize(24, 24))
 
         self.btn.installEventFilter(self)
+        self.btn.downChanged.connect(self._refreshOpacity)
 
+        self._hovered = False
         self._opacity = self.IDLE_OPACITY
         self.setWindowOpacity(self._opacity)
         self._dragPos = QPoint()
@@ -313,15 +343,18 @@ class FloatingMiniWindow(QWidget):
         qconfig.themeColor.valueChanged.connect(self._updateStyle)
 
     def _updateStyle(self):
-        themeColor = qconfig.themeColor.value.name()
+        themeColor = qconfig.themeColor.value
         self.btn.setStyleSheet(f"""
             QToolButton {{
-                background-color: {themeColor};
+                background-color: {themeColor.name()};
                 border-radius: 30px;
                 border: none;
             }}
             QToolButton:hover {{
-                background-color: {themeColor};
+                background-color: {themeColor.name()};
+            }}
+            QToolButton:pressed {{
+                background-color: {closeButtonColors().pressed.name()};
             }}
         """)
         self.btn.setIcon(FIF.FULL_SCREEN.icon(color=QColor("white")))
@@ -329,23 +362,30 @@ class FloatingMiniWindow(QWidget):
     def eventFilter(self, obj, event):
         if obj == self.btn:
             if event.type() == QEvent.Type.Enter:
-                self._setOpacity(1.0)
+                self._hovered = True
+                self._refreshOpacity()
                 return False
             elif event.type() == QEvent.Type.Leave:
-                self._setOpacity(self.IDLE_OPACITY)
+                self._hovered = False
+                self._refreshOpacity()
                 return False
             elif event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 self._isDragging = False
                 self._dragPos = event.globalPosition().toPoint() - self.pos()
+                self.btn.setDown(True)
                 return True
             elif event.type() == QEvent.Type.MouseMove and event.buttons() == Qt.MouseButton.LeftButton:
                 if not self._dragPos.isNull():
                     # 手抖不算拖动
-                    if (event.globalPosition().toPoint() - self.pos() - self._dragPos).manhattanLength() > 3:
+                    if not self._isDragging and (event.globalPosition().toPoint() - self.pos() - self._dragPos).manhattanLength() > 3:
                         self._isDragging = True
+                        self.btn.setDown(False)
                     self.move(event.globalPosition().toPoint() - self._dragPos)
                 return True
             elif event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+                # 按下和松开都被这里吞掉，按钮自己不会复位；「新触控」把按下态交给按钮之后
+                # 也不再管它。
+                self.btn.setDown(False)
                 if not self._isDragging:
                     self.restoreSignal.emit()
                 self._isDragging = False
@@ -353,12 +393,16 @@ class FloatingMiniWindow(QWidget):
                 return True
         return super().eventFilter(obj, event)
 
+    def _refreshOpacity(self, *_):
+        self._setOpacity(1.0 if self._hovered or self.btn.isDown() else self.IDLE_OPACITY)
+
     def _setOpacity(self, opacity):
         self._opacity = opacity
         self.setWindowOpacity(opacity)
 
     def showAt(self, position):
         # 窗口不透明度交给 WindowTransition：它先把按钮藏成全透明，形变结束才还原到这里记下的值。
+        self._hovered = False
         self._opacity = self.IDLE_OPACITY
         self._updateStyle()
         self.move(position)
@@ -370,7 +414,7 @@ class FloatingMiniWindow(QWidget):
             self.rect(),
             self.width() / 2,
             opacity=self._opacity,
-            snapshot=self.grab,
+            snapshot=lambda: self.grab().toImage(),
             fill=QColor(qconfig.themeColor.value),
             icon=self.btn.icon().pixmap(self.btn.iconSize(), self.devicePixelRatioF()),
         )
