@@ -339,7 +339,7 @@ _Avoid_: 滑动、甩动（那是手势本身）、惯性滚动
 ### 外观
 
 **Theme Color（主题色）**:
-全软件的强调色，取自某个 Theme Color Preset 或 Custom Theme Color。深色主题下，软件自己背景上的控件显示它提亮后的样子（纯黑因此显示为白色）；Floating Button 和展示窗口的按钮始终用原色。
+全软件的强调色，取自某个 Theme Color Preset 或 Custom Theme Color。深色主题下，软件自己背景上的控件显示它提亮后的样子（纯黑因此显示为白色）；Floating Button 和 Corner Button 始终用原色。
 _Avoid_: 投送、倒计时和时钟背景里的"主题色"选项（历史名称，指默认底色，不是强调色）、强调色
 
 **Theme Color Preset（预设主题色）**:

@@ -1,8 +1,11 @@
 from unittest import TestCase
 from unittest.mock import patch
 
-from PySide6.QtGui import QColor
-from qfluentwidgets import Theme, qconfig, setTheme
+from PySide6.QtCore import QPoint
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtWidgets import QWidget
+from qfluentwidgets import FluentIcon as FIF
+from qfluentwidgets import Theme, qconfig, setTheme, setThemeColor
 
 from app.config.cfg import (
     CUSTOM_THEME_COLOR,
@@ -11,6 +14,7 @@ from app.config.cfg import (
     currentThemeColor,
     migrateConfig,
 )
+from app.view.components.window_background import closeButtonColors
 from app.view.pages.broadcast_page import VerticalButton
 from app.view.pages.setting_page import ThemeColorSettingCard
 from tests.support import isolateCfg
@@ -18,6 +22,7 @@ from tests.support import isolateCfg
 GREEN = QColor(49, 101, 49)
 BLUE = QColor(76, 194, 255)
 BLACK = QColor(0, 0, 0)
+WHITE = QColor(255, 255, 255)
 RED = QColor(200, 30, 30)
 
 
@@ -156,16 +161,59 @@ class ThemeColorSettingCardTest(TestCase):
 class CornerButtonEdgeTest(TestCase):
     def setUp(self):
         isolateCfg(self)
-
-    def testEveryCornerButtonHasPreviewEdge(self):
-        # 罗小黑的关闭按钮落在倒计时和时钟的黑底上，只能靠这道细边分辨。
         setTheme(Theme.LIGHT, save=False)
-        for primary, forceDark, edge in (
-            (True, True, "rgba(255, 255, 255, 110)"),
-            (False, True, "rgba(255, 255, 255, 110)"),
-            (True, False, "rgba(0, 0, 0, 40)"),
-            (False, False, "rgba(0, 0, 0, 40)"),
+
+    def _button(self, primary, forceDark=True):
+        button = VerticalButton(FIF.CLOSE, "关闭", primary=primary, forceDark=forceDark)
+        self.addCleanup(button.deleteLater)
+        return button
+
+    def testOnlyPureBlackOrWhiteCloseButtonHasEdge(self):
+        # 罗小黑的关闭按钮落在倒计时和时钟的黑底上，只能靠这道细边分辨；纯白同理。
+        for color, edge in (
+            (GREEN, None),
+            (BLUE, None),
+            (QColor("#050505"), None),
+            (BLACK, QColor(255, 255, 255, 110)),
+            (WHITE, QColor(0, 0, 0, 40)),
         ):
-            button = VerticalButton(None, "关闭", primary=primary, forceDark=forceDark)
-            self.addCleanup(button.deleteLater)
-            self.assertIn(f"border: 1px solid {edge}", button.styleSheet())
+            setThemeColor(color)
+            self.assertEqual(closeButtonColors().edge, edge, color.name())
+            for primary in (True, False):
+                self.assertIn("border: none", self._button(primary).styleSheet())
+
+    def testPureWhiteCloseButtonHasBlackForeground(self):
+        setThemeColor(WHITE)
+        self.assertEqual(self._button(True)._foregroundColor(), QColor("black"))
+        setThemeColor(BLACK)
+        self.assertEqual(self._button(True)._foregroundColor(), QColor("white"))
+
+    def testPureBlackAndWhiteStillChangeOnHoverAndPress(self):
+        # lighter()/darker() 对纯黑纯白不起作用。
+        for color in (BLACK, WHITE):
+            setThemeColor(color)
+            colors = closeButtonColors()
+            self.assertEqual(len({colors.normal.name(), colors.hover.name(), colors.pressed.name()}), 3)
+
+    def testCloseButtonFollowsThemeColorWhileOpen(self):
+        setThemeColor(GREEN)
+        button = self._button(True)
+        projectionButton = self._button(False, forceDark=False)
+        setThemeColor(BLACK)
+        self.assertIn("background-color: #000000", button.styleSheet())
+        self.assertEqual(button._closeColors.edge, QColor(255, 255, 255, 110))
+        setTheme(Theme.DARK, save=False)
+        self.assertIn("rgba(255, 255, 255, 26)", projectionButton.styleSheet())
+
+    def testEdgeIsOneStrokeWithoutBrightJoints(self):
+        # 样式表的圆角边框在直边和圆弧的接头处叠出亮点（110 叠成 173）。
+        setThemeColor(BLACK)
+        button = self._button(True)
+        image = QImage(button.size() * 3, QImage.Format.Format_ARGB32)
+        image.setDevicePixelRatio(3)
+        image.fill(BLACK)
+        button.render(image, QPoint(), renderFlags=QWidget.RenderFlag.DrawChildren)
+        ring = [image.pixelColor(x, y).red() for x in range(image.width()) for y in range(3)]
+        ring += [image.pixelColor(x, y).red() for y in range(image.height()) for x in range(3)]
+        self.assertGreater(max(ring), 100)
+        self.assertLess(max(ring), 120)
