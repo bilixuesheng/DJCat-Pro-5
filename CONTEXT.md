@@ -135,7 +135,7 @@ _Avoid_: 软件、程序（仅保留在既有 UI 文案中）、package
 _Avoid_: Application、Client Installer、binary
 
 **Installed Application**:
-已由 Application Store 安装并可被 DJCat 识别的 Application。版本落后于 Application Catalog 中同 ID 的 Application 时形成 Application Update。只有版本变化才形成 Application Update；同一版本下名称、简介、图标、公告、Open Action 或 Application Preset 的变化只同步到本机记录，不重新下载 Package。
+已由 Application Store 安装并可被 DJCat 识别的 Application。版本落后于 Application Catalog 中同 ID 的 Application 时形成 Application Update。只有版本变化才形成 Application Update；同一版本下名称、简介、图标、公告、Open Action 或 Application Preset 的变化只同步到本机记录，不重新下载 Package。卸载和 Application Update 替换文件前，都先强制关闭从它安装目录运行的程序。
 _Avoid_: downloaded application、Package
 
 **Application Install Location（应用安装位置）**:
@@ -143,7 +143,7 @@ _Avoid_: downloaded application、Package
 _Avoid_: 安装目录（那是单个 Application 的文件夹）、Program 目录、下载目录
 
 **Application Relocation（应用迁移）**:
-更改 Application Install Location 时，先强制关闭从中运行的程序，再把全部 Installed Application 搬到新位置的一次操作。全有或全无：任何一步失败都退回旧位置，Application Install Location 不变。没有 Installed Application 时更改位置不产生 Application Relocation。
+更改 Application Install Location 时，先强制关闭从中运行的程序，再把全部 Installed Application 搬到新位置的一次操作。它在 DJCat 运行中进行，开始后不能取消，期间不能安装、更新、卸载或打开任何 Application。全有或全无：任何一步失败都退回旧位置，Application Install Location 不变；中途退出或断电时，下次启动把它收尾到其中一边。没有 Installed Application 时更改位置不产生 Application Relocation。
 _Avoid_: Storage Migration（那是整个 App Data Directory）；不加限定地称迁移
 
 **Relocation Toast（迁移进度卡）**:
