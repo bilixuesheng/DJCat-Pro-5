@@ -113,15 +113,22 @@ class Config(QConfig):
         "Personalization", "ShowCreditsPage", True, BoolValidator()
     )
 
-    # 实验性功能，只供开发人员调试，默认全关。
-    touchPressFeedback = ConfigItem(
-        "Experimental", "TouchPressFeedback", False, BoolValidator()
+    # 开发人员选项，只供开发人员调试，默认全关。分组名 Experimental 是改名前留下的，
+    # 照旧沿用，停用页面懒加载已存的值才不会丢。
+    disableTouchPressFeedback = ConfigItem(
+        "Experimental", "DisableTouchPressFeedback", False, BoolValidator()
     )
-    tunedTouchScroll = ConfigItem(
-        "Experimental", "TunedTouchScroll", False, BoolValidator()
+    disableTunedTouchScroll = ConfigItem(
+        "Experimental", "DisableTunedTouchScroll", False, BoolValidator()
+    )
+    disableSuperFrameRate = ConfigItem(
+        "Experimental", "DisableSuperFrameRate", False, BoolValidator()
     )
     eagerPageLoading = ConfigItem(
         "Experimental", "EagerPageLoading", False, BoolValidator()
+    )
+    showFrameRate = ConfigItem(
+        "Experimental", "ShowFrameRate", False, BoolValidator()
     )
 
     trayIconSource = OptionsConfigItem(

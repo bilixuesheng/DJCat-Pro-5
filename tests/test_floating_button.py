@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication, QStyleFactory
 from qfluentwidgets import qconfig
 
 from app.platform.touch_input import setTouchPressFeedbackEnabled
+from app.view.components.window_background import closeButtonColors
 from app.view.pages.broadcast_page import FloatingMiniWindow
 
 
@@ -48,7 +49,7 @@ class FloatingButtonTest(TestCase):
         self.assertEqual(_iconBounds(pressed), _iconBounds(idle))
         theme = QColor(qconfig.themeColor.value)
         self.assertEqual(idle.pixelColor(8, 30).rgb(), theme.rgb())
-        self.assertEqual(pressed.pixelColor(8, 30).rgb(), theme.darker(108).rgb())
+        self.assertEqual(pressed.pixelColor(8, 30).rgb(), closeButtonColors().pressed.rgb())
 
     def testMouseLooksPressedUntilTheDragStarts(self):
         button = self.show()
