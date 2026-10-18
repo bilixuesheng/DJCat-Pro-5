@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from collections import OrderedDict
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath
 from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
@@ -19,30 +19,41 @@ _blurCache: OrderedDict = OrderedDict()
 
 
 class SilhouetteShadowEffect(QGraphicsDropShadowEffect):
-    """A drop shadow blurred once from the widget's rounded-rect outline.
+    """A drop shadow stretched from one blur of the widget's rounded-rect outline.
 
     ``QGraphicsDropShadowEffect`` re-renders its whole subtree offscreen and runs
     the blur again on every repaint that touches the widget: a hovered menu item,
     a caret blink, or anything repainted under a translucent dialog stacked above.
     Dialog cards and menu panels are opaque rounded rectangles, so their shadow
-    depends only on size and radius. It is blurred once per geometry, tinted once
-    per colour, and the widget itself is drawn straight through without an
-    offscreen copy. Like Qt's own effect the blur radius is in device pixels and
-    the offset in logical pixels, so the look matches at every scale factor.
-    Colour changes (the dialog's shadow fade-in) only re-tint the cached blur.
+    depends only on size and radius. The blur is made once for the smallest
+    rounded rect with the same corner and blur radius and stretched as a nine-patch
+    to each new size, tinted once per colour, and the widget itself is drawn
+    straight through without an offscreen copy. Like Qt's own effect the blur
+    radius is in device pixels and the offset in logical pixels, so the look
+    matches at every scale factor. Colour changes (the dialog's shadow fade-in)
+    only re-tint the stretched shadow.
     """
 
     def __init__(self, cornerRadius: float, parent=None):
         super().__init__(parent)
         self._cornerRadius = cornerRadius
-        self._blurKey = None
-        self._blurred = None
+        self._shapeKey = None
+        self._shape = None
         self._tintKey = None
         self._tinted = None
+        self._shadowHidden = False
+
+    def setShadowHidden(self, hidden: bool) -> None:
+        """Leave the shadow out of what is drawn next, without scheduling a repaint.
+
+        For a snapshot of the widget alone (the Window Transition's card): toggling
+        ``setEnabled()`` instead repaints the widget and everything over it twice.
+        """
+        self._shadowHidden = hidden
 
     def draw(self, painter: QPainter) -> None:
         color = self.color()
-        if color.alpha() > 0:
+        if color.alpha() > 0 and not self._shadowHidden:
             source = self.sourceBoundingRect(Qt.CoordinateSystem.LogicalCoordinates)
             device = painter.device()
             ratio = device.devicePixelRatioF() if device is not None else 1.0
@@ -64,20 +75,20 @@ class SilhouetteShadowEffect(QGraphicsDropShadowEffect):
         height = round(size.height() * ratio)
         if width <= 0 or height <= 0:
             return None
-        blurKey = (width, height, self.blurRadius(), ratio, self._cornerRadius)
-        if blurKey != self._blurKey:
-            self._blurKey = blurKey
-            self._blurred = _cachedSilhouette(
+        shapeKey = (width, height, self.blurRadius(), ratio, self._cornerRadius)
+        if shapeKey != self._shapeKey:
+            self._shapeKey = shapeKey
+            self._shape = _stretchedSilhouette(
                 width,
                 height,
                 self._cornerRadius * ratio,
                 self.blurRadius(),
             )
             self._tintKey = None
-        tintKey = (color.rgb() & 0xFFFFFF, blurKey)
+        tintKey = (color.rgb() & 0xFFFFFF, shapeKey)
         if tintKey != self._tintKey:
             self._tintKey = tintKey
-            tinted = QImage(self._blurred)
+            tinted = QImage(self._shape)
             painter = QPainter(tinted)
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
             painter.fillRect(tinted.rect(), QColor(color.red(), color.green(), color.blue()))
@@ -141,6 +152,45 @@ def paintSilhouetteShadow(
                 ),
             )
     painter.restore()
+
+
+def _stretchedSilhouette(width: int, height: int, cornerRadius: float, blur: float) -> QImage:
+    """The blurred silhouette of a whole rounded rect, in device pixels, from a small blur.
+
+    Blurring the whole outline of a window-sized card takes a quarter of a second at
+    300 %; stretching the blur of the smallest rounded rect with the same corners takes
+    a few milliseconds and differs by no more than the rounding of the blur itself.
+    Every patch lands on whole pixels of one image, so no seam shows at any scale.
+    """
+    radius = round(cornerRadius)
+    margin = math.ceil(blur)
+    corner = radius + 2 * margin
+    side = 2 * (radius + margin) + 2
+    if width < side or height < side:
+        return _cachedSilhouette(width, height, cornerRadius, blur)
+    patch = _cachedSilhouette(side, side, radius, blur)
+    full = patch.width()
+    image = QImage(width + 2 * margin, height + 2 * margin, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    sources = (0, corner, full - corner, full)
+    xs = (0, corner, image.width() - corner, image.width())
+    ys = (0, corner, image.height() - corner, image.height())
+    painter = QPainter(image)
+    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+    for row in range(3):
+        for column in range(3):
+            painter.drawImage(
+                QRect(xs[column], ys[row], xs[column + 1] - xs[column], ys[row + 1] - ys[row]),
+                patch,
+                QRect(
+                    sources[column],
+                    sources[row],
+                    sources[column + 1] - sources[column],
+                    sources[row + 1] - sources[row],
+                ),
+            )
+    painter.end()
+    return image
 
 
 def _cachedSilhouette(width: int, height: int, cornerRadius: float, blur: float) -> QImage:
