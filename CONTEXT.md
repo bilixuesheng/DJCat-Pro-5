@@ -138,6 +138,18 @@ _Avoid_: Application、Client Installer、binary
 已由 Application Store 安装并可被 DJCat 识别的 Application。版本落后于 Application Catalog 中同 ID 的 Application 时形成 Application Update。只有版本变化才形成 Application Update；同一版本下名称、简介、图标、公告、Open Action 或 Application Preset 的变化只同步到本机记录，不重新下载 Package。
 _Avoid_: downloaded application、Package
 
+**Application Install Location（应用安装位置）**:
+本机所有 Installed Application 所在的根文件夹，每个 Application 在其中占一个以它的安装目录名命名的子文件夹。默认是 App Data Directory 下的 `Program`，随 Storage Migration 一起搬动；用户可改为本机磁盘上的其他文件夹，此后它不再随 Storage Migration 移动。DJCat 同一时间只认一个 Application Install Location。
+_Avoid_: 安装目录（那是单个 Application 的文件夹）、Program 目录、下载目录
+
+**Application Relocation（应用迁移）**:
+更改 Application Install Location 时，先强制关闭从中运行的程序，再把全部 Installed Application 搬到新位置的一次操作。全有或全无：任何一步失败都退回旧位置，Application Install Location 不变。没有 Installed Application 时更改位置不产生 Application Relocation。
+_Avoid_: Storage Migration（那是整个 App Data Directory）；不加限定地称迁移
+
+**Relocation Toast（迁移进度卡）**:
+一次 Application Relocation 从开始到成功或失败，主窗口右下角始终是同一张卡片，外观与 Update Toast 相同。
+_Avoid_: Update Toast（只属于 Client Update）、进度条
+
 **Application Action**:
 由 Application Catalog 提供、在 Application 边界内执行的受限动作。作为应用默认入口时称 Open Action；由 Application Preset 引用时称 Preset Action。
 _Avoid_: Home Action、Shell action
@@ -242,7 +254,7 @@ _Avoid_: Application Update；不加限定地称 update
 
 **Update Toast（更新通知卡）**:
 一次 Client Update 下载从开始到完成或失败，主窗口右下角始终是同一张卡片：下载中显示进度且不可关闭，完成时提供立即更新或稍后，失败时提供重试。它只属于 Client Update；Application Update 的进度显示在 Application Store 的按钮上。
-_Avoid_: 进度条（那只是卡片底边的一条线）、StateToolTip、ProgressToast（QFluentWidgets Pro 的组件名）
+_Avoid_: 进度条（那只是卡片底边的一条线）、StateToolTip、ProgressToast（QFluentWidgets Pro 的组件名）、Relocation Toast（外观相同，但属于 Application Relocation）
 
 **Client Version**:
 用户可见的 DJCat 版本号，唯一来源是 `app/common/config.py`。
@@ -291,8 +303,8 @@ App Data Directory 位于程序旁 `DJCatPro/` 的存储模式。全新安装默
 _Avoid_: 便携 ZIP 的文件格式、Application 的安装目录
 
 **Storage Migration**:
-切换 Installed Mode 与 Portable Mode 时，复制整个 App Data Directory 并改写配置中的绝对路径。迁移发生在进程退出阶段，运行中不切换路径。
-_Avoid_: 只复制 `UserConfig.json`、运行中热切换路径
+切换 Installed Mode 与 Portable Mode 时，复制整个 App Data Directory 并改写配置中的绝对路径。迁移发生在进程退出阶段，运行中不切换路径。自定义的 Application Install Location 不在 App Data Directory 中，不随之搬动。
+_Avoid_: 只复制 `UserConfig.json`、运行中热切换路径；Application Relocation
 
 **Cache（缓存）**:
 DJCat 在本机留下、清理后不影响任何设置或已安装内容的数据：Application Store 的图片和临时 Package，以及除正在写入那一份之外的日志。图片和 Package 清理后会在需要时重新下载，日志删掉就没有了。它属于整个 DJCat，不只属于 Application Store。
