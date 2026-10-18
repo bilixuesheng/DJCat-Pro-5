@@ -70,6 +70,10 @@ _Avoid_: Exam Countdown、timer、Scheduled Task
 Projection、Exam Countdown 或 Fullscreen Clock 显示在屏幕上的那个窗口，可在全屏和窗口化之间切换；窗口化时是带阴影的圆角卡片。
 _Avoid_: 全屏窗口（它也可以窗口化）、主窗口
 
+**Corner Button（角落按钮）**:
+Display Window 角落里的那一排按钮：编辑、最小化、窗口化／全屏、重置和关闭，各窗口只有其中几个。关闭按钮用 Theme Color 原色，其余是半透明底。
+_Avoid_: 操作按钮、标题栏按钮（那是主窗口的最小化、最大化、关闭）
+
 **Collapse（收起）**:
 Projection 的 Display Window 暂时让出屏幕、变成 Floating Button 的操作；按钮文字是"最小化"，但窗口不进任务栏。只有 Projection 能 Collapse。
 _Avoid_: minimize、最小化（仅保留在按钮文字中）、隐藏
@@ -335,7 +339,7 @@ _Avoid_: 滑动、甩动（那是手势本身）、惯性滚动
 ### 外观
 
 **Theme Color（主题色）**:
-全软件的强调色，取自某个 Theme Color Preset 或 Custom Theme Color。深色主题下，软件自己背景上的控件显示它提亮后的样子（纯黑因此显示为白色）；Floating Button 和展示窗口的按钮始终用原色。
+全软件的强调色，取自某个 Theme Color Preset 或 Custom Theme Color。深色主题下，软件自己背景上的控件显示它提亮后的样子（纯黑因此显示为白色）；Floating Button 和 Corner Button 始终用原色。
 _Avoid_: 投送、倒计时和时钟背景里的"主题色"选项（历史名称，指默认底色，不是强调色）、强调色
 
 **Theme Color Preset（预设主题色）**:

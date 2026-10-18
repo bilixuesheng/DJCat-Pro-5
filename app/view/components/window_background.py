@@ -1,6 +1,7 @@
 from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
+from typing import NamedTuple
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
@@ -50,6 +51,30 @@ def projectionTitleColor() -> QColor:
 def projectionThemeBackground() -> QColor:
     """投送的默认背景（配置值"主题色"，设置页显示为"跟随主题"）：跟随深浅主题，不是强调色。"""
     return QColor("#202020" if isDarkTheme() else "#FFFFFF")
+
+
+class CloseButtonColors(NamedTuple):
+    normal: QColor
+    hover: QColor
+    pressed: QColor
+    foreground: QColor
+    edge: QColor | None
+
+
+def closeButtonColors() -> CloseButtonColors:
+    """Corner Button 里关闭按钮的配色，取主题色原色；真实窗口和设置里的预览共用。
+
+    纯黑和纯白可能与背景同色，只有它们加一道与按钮反色的细边；lighter()/darker()
+    对它们不起作用，悬停和按下改用固定的灰阶。纯白按钮上的图标和文字用黑色。
+    """
+    color = QColor(qconfig.themeColor.value.name())
+    if color.name() == "#000000":
+        hover, pressed = QColor("#1A1A1A"), QColor("#0F0F0F")
+        return CloseButtonColors(color, hover, pressed, QColor("white"), QColor(255, 255, 255, 110))
+    if color.name() == "#ffffff":
+        hover, pressed = QColor("#F5F5F5"), QColor("#ECECEC")
+        return CloseButtonColors(color, hover, pressed, QColor("black"), QColor(0, 0, 0, 40))
+    return CloseButtonColors(color, color.lighter(108), color.darker(108), QColor("white"), None)
 
 
 class WindowBackground(QWidget):
