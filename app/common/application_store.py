@@ -26,13 +26,19 @@ from app.common.application_version import (
     isUpdateAvailable,
     versionKey,
 )
+from app.common.install_location import (
+    MANIFEST_NAME,
+    applicationsBlocked,
+    installLocation,
+    isDefaultInstallLocation,
+)
 from app.common.process_environment import externalProcessEnvironment
 from app.common.update_download import isHttpsResponseChain
 from app.config.paths import (
     APP_STORE_CACHE_DIR,
     APP_STORE_DOWNLOAD_DIR,
-    PROGRAM_DIR,
 )
+from app.platform.processes import processesUnder, terminateProcessesUnder
 
 CATALOG_PATH = "/app-store/catalog"
 MAX_ZIP_COMPRESSED = 2 * 1024 * 1024 * 1024
@@ -47,7 +53,6 @@ ZIP_CHUNK_SIZE = 1024 * 1024
 CACHE_MAX_AGE = 7 * 24 * 60 * 60
 CACHE_SWEEP_INTERVAL = CACHE_MAX_AGE
 ARCHITECTURES = ("x86_64", "arm64")
-MANIFEST_NAME = ".djcat-app.json"
 _SAFE_INSTALL_DIR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}$")
 _INSTALL_ARTIFACT = re.compile(
     r"^\.(?P<install>.+)\.(?P<kind>staging|backup|uninstall)-[a-f0-9]{32}$"
@@ -98,45 +103,11 @@ class InstalledApplication:
 
 
 def _runningExecutablesUnder(directory: Path) -> list[Path]:
-    if os.name != "nt":
-        return []
-    try:
-        import ctypes
-        from ctypes import wintypes
+    return [executable for _pid, executable in processesUnder(directory)]
 
-        processIds = (wintypes.DWORD * 4096)()
-        bytesNeeded = wintypes.DWORD()
-        if not ctypes.windll.psapi.EnumProcesses(
-            processIds, ctypes.sizeof(processIds), ctypes.byref(bytesNeeded)
-        ):
-            return []
-        root = directory.resolve(strict=False)
-        running = []
-        count = bytesNeeded.value // ctypes.sizeof(wintypes.DWORD)
-        for processId in processIds[:count]:
-            if not processId or processId == os.getpid():
-                continue
-            handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, processId)
-            if not handle:
-                continue
-            try:
-                length = wintypes.DWORD(32768)
-                buffer = ctypes.create_unicode_buffer(length.value)
-                if not ctypes.windll.kernel32.QueryFullProcessImageNameW(
-                    handle, 0, buffer, ctypes.byref(length)
-                ):
-                    continue
-                executable = Path(buffer.value).resolve(strict=False)
-                try:
-                    executable.relative_to(root)
-                except ValueError:
-                    continue
-                running.append(executable)
-            finally:
-                ctypes.windll.kernel32.CloseHandle(handle)
-        return running
-    except (AttributeError, OSError, ValueError):
-        return []
+
+def _terminateProcessesUnder(directory: Path) -> None:
+    terminateProcessesUnder(directory)
 
 
 def _manifestRevision(value) -> int:
@@ -671,12 +642,17 @@ class ApplicationStore:
     def __init__(
         self,
         apiBaseUrl: str | None = None,
-        programDir: Path = PROGRAM_DIR,
+        programDir: Path | None = None,
         cache: ImageCache | None = None,
     ):
         self.apiBaseUrl = (apiBaseUrl or os.environ.get("DJCATAI_API_BASE_URL", "https://api.djcatpro.top")).rstrip("/") + "/"
-        self.programDir = Path(programDir).resolve()
-        self.programDir.mkdir(parents=True, exist_ok=True)
+        # 自定义的 Application Install Location 不可用时（U 盘拔了）不重建，按没有应用显示。
+        create = programDir is not None or isDefaultInstallLocation()
+        self.programDir = Path(
+            installLocation() if programDir is None else programDir
+        ).resolve()
+        if create:
+            self.programDir.mkdir(parents=True, exist_ok=True)
         self.cache = cache or appStoreImageCache
         self.architecture = clientArchitecture()
         self.downloadSlots = packageSlots
@@ -689,6 +665,21 @@ class ApplicationStore:
         self._installedCopies = {}
         self._cleanupThread = None
         self._recoverInstallArtifacts()
+
+    def setProgramDir(self, programDir: Path, create: bool = True) -> None:
+        """换到另一个 Application Install Location；create 为假时文件夹不在也不建。"""
+        programDir = Path(programDir).resolve()
+        if create:
+            programDir.mkdir(parents=True, exist_ok=True)
+        with self._installedLock:
+            self.programDir = programDir
+            self._installedCache = None
+            self._installedStamp = None
+            self._installedCopies = {}
+        self._recoverInstallArtifacts()
+
+    def locationAvailable(self) -> bool:
+        return self.programDir.is_dir()
 
     def shutdown(self) -> None:
         self._activationStop.set()
@@ -758,6 +749,22 @@ class ApplicationStore:
                 self._launchedProcesses.pop(launchKey, None)
         return running or bool(_runningExecutablesUnder(target))
 
+    def _closeApplication(self, target: Path) -> None:
+        """强制关闭从 target 运行的程序，卸载和 Application Update 替换文件前调用。"""
+        for launchKey, processes in tuple(self._launchedProcesses.items()):
+            if launchKey[0] != target:
+                continue
+            for process in processes:
+                if process.poll() is None:
+                    try:
+                        process.kill()
+                        process.wait(5)
+                    except (OSError, subprocess.TimeoutExpired):
+                        pass
+        _terminateProcessesUnder(target)
+        if self._applicationRunning(target):
+            raise ApplicationStoreError("软件无法关闭，请手动退出后重试")
+
     def _activateProcess(self, process) -> None:
         if self._activationStop.is_set():
             return
@@ -806,6 +813,9 @@ class ApplicationStore:
     def installZip(self, app: dict, zipPath: Path, cancelEvent=None) -> InstalledApplication:
         if cancelEvent is not None and cancelEvent.is_set():
             raise ApplicationStoreError("安装已取消")
+        _ensureNotRelocating()
+        if not self.locationAvailable():
+            raise ApplicationStoreError("应用安装位置不可用，请在设置里更改")
         validateZip(zipPath)
         if cancelEvent is not None and cancelEvent.is_set():
             raise ApplicationStoreError("安装已取消")
@@ -875,10 +885,7 @@ class ApplicationStore:
                         raise ApplicationStoreError(
                             "应用安装目录已被其他软件占用"
                         )
-                    if self._applicationRunning(target):
-                        raise ApplicationStoreError(
-                            "软件仍在运行，请完全退出后再更新"
-                        )
+                    self._closeApplication(target)
                     backup = self.programDir / f".{installDir}.backup-{uuid.uuid4().hex}"
                     target.replace(backup)
                 staging.replace(target)
@@ -998,6 +1005,7 @@ class ApplicationStore:
             installDir = local.installDir if local else appOrInstallDir.get("install_dir")
         installDir = _safeInstallDir(installDir)
         target = _underRoot(self.programDir / installDir, self.programDir)
+        _ensureNotRelocating()
         tombstones = []
         with self._installedLock:
             self.installed()
@@ -1007,13 +1015,9 @@ class ApplicationStore:
             ]
             if not targets:
                 targets = [target]
-            if any(
-                path.exists() and self._applicationRunning(path)
-                for path in targets
-            ):
-                raise ApplicationStoreError(
-                    "软件仍在运行，请完全退出后再卸载"
-                )
+            for path in targets:
+                if path.exists():
+                    self._closeApplication(path)
             try:
                 for path in targets:
                     if not path.exists():
@@ -1191,6 +1195,7 @@ class ApplicationStore:
         return result
 
     def executeAction(self, application: dict | InstalledApplication, action: dict | None = None):
+        _ensureNotRelocating()
         if isinstance(application, InstalledApplication):
             metadata = application.metadata
             installPath = application.path
@@ -1252,6 +1257,11 @@ class ApplicationStore:
                 return True
             return webbrowser.open(target)
         raise ApplicationStoreError("未知的打开动作")
+
+
+def _ensureNotRelocating() -> None:
+    if applicationsBlocked():
+        raise ApplicationStoreError("应用正在迁移，请完成后再试")
 
 
 def downloadWorker(app: dict, store: ApplicationStore):

@@ -45,6 +45,7 @@ from qfluentwidgets import (
     HorizontalFlipView,
     IndeterminateProgressRing,
     InfoBar,
+    InfoBarIcon,
     InfoBarPosition,
     MessageBox,
     PipsPager,
@@ -74,7 +75,13 @@ from app.common.home_cards import (
     DIRECT_APPLICATION_PRESET_ID,
     normalizePinnedCards,
 )
+from app.common.install_location import (
+    applicationsBlocked,
+    installLocation,
+    isDefaultInstallLocation,
+)
 from app.config.cfg import cfg
+from app.signal_bus import signalBus
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import LabelElideFilter
 from app.view.components.tool_tip import setFluentToolTip
@@ -1079,6 +1086,7 @@ class AppStorePage(QWidget):
         self._categoryIndex = 0
         self._renderingAll = False
         self._allEmptyAction = None
+        self._locationAvailable = self.store.locationAvailable()
         self._downloadProgressSignal.connect(self._queueDownloadProgress)
         self._downloadRetrySignal.connect(self._showDownloadRetry)
         self._downloadFinishedSignal.connect(self._onDownloadFinished)
@@ -1089,6 +1097,8 @@ class AppStorePage(QWidget):
         self.setObjectName("AppStorePage")
         self._buildUi()
         cfg.pinnedHomeCards.valueChanged.connect(self._refreshPinStates)
+        cfg.appInstallLocation.valueChanged.connect(self._onInstallLocationChanged)
+        signalBus.installLocationStateChanged.connect(self._onRelocationStateChanged)
 
     def _buildUi(self):
         # 选项卡栏固定在顶部，两个选项卡各自滚动、各自记住位置：切换和进出详情时
@@ -1123,6 +1133,22 @@ class AppStorePage(QWidget):
         self.refreshButton.clicked.connect(self._loadCatalog)
         header.addWidget(self.refreshButton)
         catalogLayout.addLayout(header)
+
+        # 自定义的 Application Install Location 不可用时（U 盘拔了）一直提示，不自动退回默认位置。
+        self.locationBar = InfoBar(
+            InfoBarIcon.WARNING,
+            "应用安装位置不可用",
+            self._locationBarText(),
+            isClosable=False,
+            duration=-1,
+            position=InfoBarPosition.NONE,
+            parent=self.catalogPage,
+        )
+        locationLayout = QHBoxLayout()
+        locationLayout.setContentsMargins(CONTENT_MARGINS[0], 0, CONTENT_MARGINS[2], 0)
+        locationLayout.addWidget(self.locationBar)
+        catalogLayout.addLayout(locationLayout)
+        self._refreshLocationBar()
 
         self.catalogStack = HorizontalTransitionStackedWidget(self.catalogPage)
         catalogLayout.addWidget(self.catalogStack, 1)
@@ -1455,6 +1481,12 @@ class AppStorePage(QWidget):
             self._renderAll()
 
     def showEvent(self, event):
+        # 自定义位置可能刚插回或拔掉；可用性变了才重读安装清单。
+        available = self.store.locationAvailable()
+        if available != self._locationAvailable:
+            self._locationAvailable = available
+            self._refreshLocationBar()
+            self._reloadState()
         self._layoutTimer.stop()
         self._applyLayoutUpdate()
         super().showEvent(event)
@@ -1825,7 +1857,11 @@ class AppStorePage(QWidget):
             enabled,
             hasOpenAction,
             directKey in self._pinnedKeys(),
-            removeEnabled=installedPage and appId not in self._downloadStates,
+            removeEnabled=(
+                installedPage
+                and appId not in self._downloadStates
+                and not applicationsBlocked()
+            ),
         )
         self._applyProgress(card.actionButton, app)
 
@@ -1834,7 +1870,11 @@ class AppStorePage(QWidget):
         state = self._downloadStates.get(int(app["id"]))
         if state:
             return state, False
+        if applicationsBlocked():
+            return "迁移中", False
         supported = bool(app.get("architecture_supported"))
+        if not app.get("installed") and not self._locationAvailable:
+            return ("下载" if supported else "不支持"), False
         if showUpdate and app.get("update_available"):
             return "更新", supported
         if app.get("installed"):
@@ -2298,6 +2338,21 @@ class AppStorePage(QWidget):
         ):
             self._startLaunch(app)
             return
+        if app.get("installed") and self._applicationRunning(app):
+            name = app.get("name", "")
+            box = MessageBox(
+                f"更新 {name}",
+                f"{name} 正在运行。下载完成后会先强制关闭它再安装，未保存的内容会丢失。",
+                self,
+            )
+            box.yesButton.setText("更新")
+            box.cancelButton.setText("取消")
+            try:
+                accepted = box.exec()
+            finally:
+                box.deleteLater()
+            if not accepted or self._isBusy(appId):
+                return
         try:
             self.store.downloadSlots.acquire()
         except ApplicationStoreError as error:
@@ -2355,7 +2410,48 @@ class AppStorePage(QWidget):
             or appId in self._launching
             or appId in self._installing
             or appId in self._uninstalling
+            or applicationsBlocked()
         )
+
+    def hasActiveOperations(self):
+        """有应用正在下载、安装、卸载或打开时，不能开始 Application Relocation。"""
+        return bool(
+            self._downloadJobs or self._launching or self._installing or self._uninstalling
+        )
+
+    def _onInstallLocationChanged(self, _value=None):
+        if self._shuttingDown:
+            return
+        self.store.setProgramDir(
+            installLocation(), create=isDefaultInstallLocation()
+        )
+        self._locationAvailable = self.store.locationAvailable()
+        self._refreshLocationBar()
+        self._reloadState()
+
+    @staticmethod
+    def _locationBarText():
+        return (
+            f"「{installLocation()}」现在无法访问。插回对应的磁盘，"
+            "或在「设置 › 应用 › 应用市场」里更改应用安装位置。"
+        )
+
+    def _refreshLocationBar(self):
+        self.locationBar.content = self._locationBarText()
+        self.locationBar._adjustText()
+        self.locationBar.setVisible(not self._locationAvailable)
+
+    def _onRelocationStateChanged(self, _state):
+        if self._shuttingDown:
+            return
+        self._refreshPinStates()
+        self._updateDetailAction()
+
+    def _applicationRunning(self, app):
+        try:
+            return self.store.applicationRunning(app)
+        except Exception:
+            return False
 
     def _startLaunch(self, app, preset=None):
         # 打开应用和打开预设共用"打开中"：卡片、详情按钮和预设按钮一起禁用，
@@ -2477,16 +2573,7 @@ class AppStorePage(QWidget):
             self._updateDetailAction()
 
     def _downloadInBackground(self, app, worker):
-        # 程序是否在运行原本要等下载、解压完、替换目录时才查；那时才失败，
-        # 下载好的包也跟着删掉，关掉程序后还得整包重下。
-        if app.get("installed"):
-            try:
-                running = self.store.applicationRunning(app)
-            except Exception:
-                running = False
-            if running:
-                worker.finished.emit("", "软件仍在运行，请完全退出后再更新", False)
-                return
+        # 正在运行的应用在点「更新」时已经确认过；下载期间照常可用，替换目录前才强制关闭。
         worker.run()
 
     def _showDownloadRetry(self, name, message):
@@ -2589,13 +2676,17 @@ class AppStorePage(QWidget):
             self._updateDetailAction()
             return
         self._reloadState()
-        InfoBar.success("安装完成", f"{installed.name} 已安装到 Program/{installed.installDir}。", duration=3500, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
+        InfoBar.success("安装完成", f"{installed.name} 已安装到 {installed.path}。", duration=3500, position=InfoBarPosition.BOTTOM_RIGHT, parent=self)
 
     def _confirmUninstall(self, app):
         appId = int(app["id"])
         if self._isBusy(appId):
             return
-        box = MessageBox("确认卸载", f"将删除 {app.get('name', '')} 的安装目录，是否继续？", self)
+        name = app.get("name", "")
+        content = f"将删除 {name} 的安装目录，是否继续？"
+        if self._applicationRunning(app):
+            content += f"\n\n{name} 正在运行，卸载时会被强制关闭，未保存的内容会丢失。"
+        box = MessageBox("确认卸载", content, self)
         try:
             accepted = box.exec()
         finally:
@@ -2874,6 +2965,12 @@ class AppStorePage(QWidget):
         appId = item["app_id"]
         if appId in self._launching:
             return
+        if applicationsBlocked():
+            self._showPinnedCardNotice(
+                "warning", "应用暂时无法打开", "应用正在迁移，请完成后再试。"
+            )
+            self.pinnedCardFailed.emit()
+            return
         if self._isBusy(appId):
             self._showPinnedCardNotice(
                 "warning",
@@ -2916,6 +3013,13 @@ class AppStorePage(QWidget):
         level = title = message = ""
         try:
             installed = self.store.installed().get(appId)
+            if not installed and not self.store.locationAvailable():
+                raise _PinnedCardNotice(
+                    "warning",
+                    "应用安装位置不可用",
+                    f"「{self.store.programDir}」现在无法访问。插回对应的磁盘，"
+                    "或在设置里更改应用安装位置。",
+                )
             if not installed:
                 raise _PinnedCardNotice(
                     "warning",

@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -14,6 +15,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from shiboken6 import delete
 
+from app.common import install_location
 from app.common.application_store import ApplicationStoreError
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
@@ -332,6 +334,56 @@ class SettingSectionTest(TestCase):
             page.sectionStack.view("about").settingCards(),
             (page.authorCard, page.aboutCard),
         )
+
+    def testInstallLocationLivesInTheApplicationStoreSection(self):
+        page = self.buildPage()
+
+        self.assertEqual(
+            page.routeFor("software.appStore"),
+            [ROOT_SECTION_KEY, "software", "software.appStore"],
+        )
+        self.assertEqual(
+            [card.titleLabel.text() for card in page.sectionStack.view("software").navigationCards()],
+            ["应用市场", "实验性功能"],
+        )
+        self.assertEqual(
+            page.sectionStack.view("software.appStore").settingCards(),
+            (page.installLocationCard,),
+        )
+        self.assertIn(
+            "应用安装位置",
+            [suggestion.text for suggestion in page.searchSuggestions("安装位置")],
+        )
+
+    def testInstallLocationCardFollowsTheLocationAndRelocationState(self):
+        isolateCfg(self)
+        page = self.buildPage()
+        card = page.installLocationCard
+        requested = []
+        page.installLocationChangeRequested.connect(requested.append)
+        self.addCleanup(install_location.setRelocationState, install_location.IDLE)
+
+        self.assertIn("（默认）", card.contentLabel.text())
+        self.assertFalse(card.resetButton.isEnabled())
+
+        cfg.set(cfg.appInstallLocation, "D:/missing-apps-folder", save=False)
+        self.assertIn("（不可用）", card.contentLabel.text())
+        self.assertTrue(card.resetButton.isEnabled())
+        card.resetButton.click()
+        self.assertEqual(requested, [""])
+
+        install_location.setRelocationState(install_location.RELOCATING)
+        self.assertIn("正在迁移", card.contentLabel.text())
+        self.assertFalse(card.changeButton.isEnabled())
+        self.assertFalse(card.resetButton.isEnabled())
+
+        install_location.setRelocationState(install_location.IDLE)
+        with patch(
+            "app.view.pages.setting_page.QFileDialog.getExistingDirectory",
+            return_value="E:/apps",
+        ):
+            card.changeButton.click()
+        self.assertEqual(requested, ["", str(Path("E:/apps"))])
 
     def testBannerAndAIMarkdownLiveUnderTheirOwners(self):
         page = self.buildPage()

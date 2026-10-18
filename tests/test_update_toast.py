@@ -6,7 +6,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 from qfluentwidgets import InfoBarIcon
 
-from app.view.components.update_toast import UpdateToast
+from app.view.components.update_toast import RelocationToast, UpdateToast
 
 WIDEST = "100% · 1023.9 MB / 1023.9 MB · 1023.9 MB/s"
 
@@ -177,3 +177,25 @@ def testStateChangeDuringSlideInLandsAtTheNewSize(host):
     settle(toast)
 
     assert rightEdge(toast) == host.width() - 24
+
+
+def testRelocationToastHasNoButtonsAndClosesItselfAfterSuccess(host):
+    toast = RelocationToast(host)
+    toast.start("正在迁移应用", "已复制 0 B / 3.4 GB", "已复制 3.4 GB / 3.4 GB")
+    settle(toast)
+    toast.setProgress("已复制 1.0 GB / 3.4 GB", 30)
+
+    assert toast.closeButton.isHidden()
+    toast.succeed("应用迁移完成", "已将 2 个应用迁移到「D:\\Apps」。")
+
+    assert toast.closeButton.isVisible()
+    assert toast._buttonBox.isHidden()
+    assert toast._closeTimer.isActive()
+
+    # 成功后还没收起又开始下一次时，计时不能把新进度收掉。
+    toast.start("正在迁移应用", "正在移动 2 个应用…", "正在移动 2 个应用…")
+    assert not toast._closeTimer.isActive()
+    toast.fail("应用迁移失败", "有文件正被其他程序占用。应用仍在原位置。")
+    assert not toast._closeTimer.isActive()
+    assert toast._buttonBox.isHidden()
+    assert toast.closeButton.isVisible()
