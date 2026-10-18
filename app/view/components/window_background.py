@@ -40,10 +40,11 @@ def _loadSource(path: str):
 
 def projectionTitleColor() -> QColor:
     """投送标题的主题色。深色底上原始主题色往往太暗，按 QFluentWidgets 深色主题的
-    主色规则提亮（饱和度 ×0.84、明度拉满），与软件里其他深色控件的强调色一致。"""
+    主色规则提亮（饱和度 ×0.84、明度拉满），与软件里其他深色控件的强调色一致。
+    浅色底上只有纯白看不见，换成黑色，正如深色底上纯黑会被提亮成白色。"""
     color = QColor(qconfig.themeColor.value)
     if not isDarkTheme():
-        return color
+        return QColor("black") if color.name() == "#ffffff" else color
     hue, saturation, _value, alpha = color.getHsvF()
     return QColor.fromHsvF(hue, saturation * 0.84, 1.0, alpha)
 
