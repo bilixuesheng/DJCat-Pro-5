@@ -74,6 +74,14 @@ class FrameRateSwitchTest(_FrameRateTest):
         self.assertIsNone(_label(window))
         self.assertIsNone(_label(later))
 
+        # 关了又立刻开，旧标签还没删掉也要换上新的。
+        setFrameRateShown(True)
+        setFrameRateShown(False)
+        setFrameRateShown(True)
+        self.assertIsNotNone(_label(window))
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.assertEqual(len(window.findChildren(FrameRateLabel)), 1)
+
     def testLabelSitsInTheVisibleCardAndLetsTouchesThrough(self):
         setFrameRateShown(True)
         window = self._window()
@@ -165,9 +173,18 @@ class FrameRateWindowsTest(TestCase):
         self.app.processEvents()
         label = _label(window)
         self.assertIsNotNone(label)
-        self.assertEqual(
-            label.pos(), window.contentsRect().topLeft() + QPoint(8, 8)
-        )
+        for _ in range(2):
+            # 窗口化时阴影留白不算，标签落在可见卡片的角上；切回全屏跟着回去。
+            self.assertEqual(
+                label.pos(), window.contentsRect().topLeft() + QPoint(8, 8)
+            )
+            window.toggleWindowMode()
+            self.app.processEvents()
+        window.toggleWindowMode()
+        self.app.processEvents()
+        self.assertTrue(window.isWindowed)
+        self.assertGreater(window.contentsRect().left(), 0)
+        self.assertEqual(label.pos(), window.contentsRect().topLeft() + QPoint(8, 8))
 
     def testDisplayWindows(self):
         from app.view.pages.broadcast_page import BroadcastWindow

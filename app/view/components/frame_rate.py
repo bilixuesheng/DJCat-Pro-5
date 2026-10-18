@@ -66,7 +66,8 @@ class FrameRateLabel(QWidget):
 
     def detach(self) -> None:
         self.parentWidget().removeEventFilter(self)
-        self.hide()
+        # 先离开窗口，删掉之前马上又打开时才会换上新的。
+        self.setParent(None)
         self.deleteLater()
 
     def _sample(self):
