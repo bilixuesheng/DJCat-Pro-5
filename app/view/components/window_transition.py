@@ -20,8 +20,17 @@ from PySide6.QtCore import (
     Qt,
     QTimer,
 )
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPixmap
+from PySide6.QtGui import (
+    QColor,
+    QGuiApplication,
+    QImage,
+    QPainter,
+    QPainterPath,
+    QPixmap,
+    QWindow,
+)
 from PySide6.QtWidgets import QWidget
+from shiboken6 import isValid
 
 from app.config.cfg import cfg
 from app.platform.screens import screenFor
@@ -37,6 +46,9 @@ TRANSITION_DURATION_MS = 250
 _COVER_TIMEOUT_MS = 100
 # 真全屏由系统异步改尺寸，等窗口尺寸落定再截终点快照；等不到就按当时的样子截。
 _SETTLE_TIMEOUT_MS = 200
+# 系统对切换的回应（新尺寸、Expose）晚于切换本身送到；连续这么多个节拍不再有，才算落定。
+_QUIET_TICKS = 2
+_WINDOW_NEWS = (QEvent.Type.Expose, QEvent.Type.Resize, QEvent.Type.Move)
 _FALLBACK_REFRESH_RATE = 60.0
 
 _IDLE, _COVERING, _SETTLING, _ANIMATING = range(4)
@@ -57,7 +69,7 @@ class TransitionSurface(NamedTuple):
     radius: float
     shadow: bool = False
     opacity: float = 1.0
-    snapshot: Callable[[], QPixmap] | None = None
+    snapshot: Callable[[], QImage] | None = None
     fill: QColor | None = None
     icon: QPixmap | None = None
 
@@ -78,7 +90,7 @@ class _Look(NamedTuple):
     radius: float
     shadow: float
     opacity: float
-    image: QPixmap | None
+    image: QImage | None
     fill: QColor | None
     icon: QPixmap | None
 
@@ -206,7 +218,7 @@ class _TransitionOverlay(QWidget):
         if exact and look.image is not None:
             # 两端的快照与真窗口一一对应，自带圆角的抗锯齿：只按矩形裁。
             painter.setClipRect(rect)
-            painter.drawPixmap(rect, look.image, QRectF(look.image.rect()))
+            painter.drawImage(rect, look.image, QRectF(look.image.rect()))
         elif look.fill is not None:
             # 有底色的形状（Floating Button）途中按底色和图标画：它的快照是圆的，
             # 铺满途中的大矩形会变成一个巨大的圆。
@@ -223,7 +235,7 @@ class _TransitionOverlay(QWidget):
             scale = max(rect.width() / size.width(), rect.height() / size.height())
             target = QRectF(0, 0, size.width() * scale, size.height() * scale)
             target.moveCenter(rect.center())
-            painter.drawPixmap(target, look.image, QRectF(look.image.rect()))
+            painter.drawImage(target, look.image, QRectF(look.image.rect()))
         painter.restore()
 
 
@@ -243,6 +255,9 @@ class WindowTransition(QObject):
         self._target: Callable[[], TransitionSurface] | None = None
         self._source: _Look | None = None
         self._overlay: _TransitionOverlay | None = None
+        self._watched: QWindow | None = None
+        self._windowNews = 0
+        self._quietTicks = 0
         self._easing = QEasingCurve(QEasingCurve.Type.OutCubic)
         self._clock = QElapsedTimer()
         self._timer = QTimer(self)
@@ -333,18 +348,55 @@ class WindowTransition(QObject):
             self._stop()
             raise
         overlay.raise_()
-        if self._settled():
-            self._begin()
+        self._watch(self._target().window.windowHandle())
 
     def _settled(self) -> bool:
         window = self._target().window
         handle = window.windowHandle()
-        return window.isVisible() and (handle is None or handle.geometry() == window.geometry())
+        news, self._windowNews = self._windowNews, 0
+        self._quietTicks = 0 if news else self._quietTicks + 1
+        return window.isVisible() and (
+            handle is None
+            or (
+                self._quietTicks >= _QUIET_TICKS
+                and handle.isExposed()
+                and handle.geometry() == window.geometry()
+            )
+        )
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self._watched and event.type() in _WINDOW_NEWS:
+            self._windowNews += 1
+        return False
+
+    def _watch(self, handle: QWindow | None) -> None:
+        # 系统对切换的回应排在事件队列里：动画开始后才到，就会在动画中途引出整窗重画。
+        self._unwatch()
+        self._windowNews = self._quietTicks = 0
+        if handle is not None:
+            self._watched = handle
+            handle.installEventFilter(self)
+
+    def _unwatch(self) -> None:
+        if self._watched is not None and isValid(self._watched):
+            self._watched.removeEventFilter(self)
+        self._watched = None
 
     def _begin(self) -> None:
-        # 切换引起的排版请求还排在事件队列里，先处理掉，终点快照才与真窗口一致。
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
-        target = _capture(self._target())
+        self._unwatch()
+        # 切换引起的排版请求和排队调用（滚动区按新尺寸显示或隐藏滚动条，接着又要排版）
+        # 还在事件队列里，先处理掉：终点快照才与真窗口一致，它们引起的重画也不落到动画中途。
+        for _ in range(2):
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.MetaCall)
+        if self._phase != _SETTLING:
+            # 排队调用里有关闭窗口的，过渡已随 cancel() 结束。
+            return
+        surface = self._target()
+        # 切换后终点窗口整窗都要重画，现在就同步画完：排到动画开始之后，它会一口气占掉
+        # 好几帧，4K 下整段动画一帧也画不出来。快照随后直接取这次画好的像素。
+        surface.window.repaint()
+        target = _capture(surface)
         self._phase = _ANIMATING
         self._clock.restart()
         self._timer.setInterval(self._frameInterval())
@@ -363,6 +415,7 @@ class WindowTransition(QObject):
 
     def _end(self) -> None:
         self._timer.stop()
+        self._unwatch()
         self._phase = _IDLE
         self._change = None
         self._target = None

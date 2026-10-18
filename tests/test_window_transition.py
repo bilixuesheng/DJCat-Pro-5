@@ -2,7 +2,7 @@ import time
 from unittest import TestCase
 from unittest.mock import patch
 
-from PySide6.QtCore import QPoint, QRect
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import qconfig
@@ -14,6 +14,18 @@ from app.view.pages.broadcast_page import BroadcastWindow, FloatingMiniWindow
 from app.view.pages.countdown_page import CountdownWindow
 from app.view.pages.fullscreen_clock import FullscreenClockWindow
 from tests.support import isolateCfg
+
+
+class _PaintCounter(QObject):
+    def __init__(self, widget):
+        super().__init__(widget)
+        self.count = 0
+        widget.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Paint:
+            self.count += 1
+        return False
 
 
 def _worstDifference(expected: QImage, actual: QImage) -> int:
@@ -198,6 +210,37 @@ class WindowTransitionTest(TestCase):
                 transition.finish()
                 windowed = window.grab().toImage()
                 self.assertLessEqual(_worstDifference(windowed, end), 4)
+
+    def testRealWindowIsNotRepaintedWhileTheShapeMorphs(self):
+        window = self.startBroadcast()
+        window.setContent("标题", "\n".join(f"- 第 {i} 项" for i in range(30)), True)
+        transition = window.transition
+        paints = _PaintCounter(window.background)
+
+        for name, action in (
+            ("fullscreen→windowed", window.toggleWindowMode),
+            ("windowed→fullscreen", window.toggleWindowMode),
+            ("collapse", window.minimizeToMini),
+            ("restore", window.restoreFromMini),
+        ):
+            with self.subTest(name):
+                action()
+                self.pumpUntilAnimating(transition)
+                # 终点窗口整窗重画一遍，4K 下比整段动画还长：要在动画开始前画完。
+                paints.count = 0
+                self.pumpUntil(lambda: transition._phase != window_transition._ANIMATING, "never ended")
+                self.assertEqual(paints.count, 0)
+                transition.finish()
+
+    def testFullscreenSnapshotReusesWhatIsOnScreen(self):
+        window = self.startBroadcast()
+        onScreen = window.grab().toImage()
+        with patch.object(BroadcastWindow, "grab", wraps=window.grab) as grab:
+            window.toggleWindowMode()
+            self.assertEqual(grab.call_count, 0)
+        snapshot = window.transition._source.image
+        self.assertLessEqual(_worstDifference(onScreen, snapshot), 0)
+        window.transition.finish()
 
     def testMidwayFrameIsARoundedCardBetweenTheEnds(self):
         window = self.startCountdown()
