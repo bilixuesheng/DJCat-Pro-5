@@ -34,7 +34,9 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 
 Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cfg.applicationIconPath` 持久化，Tray Icon 由 `cfg.trayIconSource` 与 `cfg.trayIconPath` 持久化，解析结果统一经 `app/common/application_icon.py` 缓存（`applicationIcon()`、`trayIcon()`、`trayHomeIcon()`）；自定义的托盘图片读不到时退回跟随。主页横幅与设置页的横幅预览共用一份解码后的原图；横幅按物理像素渲染缓存图再标上设备像素比，缓存键包含设备像素比。MainWindow 同步更新 QApplication 和主窗口图标，启动页直接复用主窗口图标；SystemTrayIcon 同时监听两组配置，同步更新系统托盘及已存在的"主页"菜单项，不重建菜单，也不要求重新启动。
 
-Theme Color 由 `cfg.themeColorPreset` 决定：预设取 `THEME_COLOR_PRESETS` 里的颜色，"自定义"取 `cfg.customThemeColor`，统一经 `currentThemeColor()` 解析。`cfg.customThemeColor` 只存 Custom Theme Color，选预设时不得改写它；`cfg.hasCustomThemeColor` 表示它是否存在，旧配置在 `migrateConfig()` 里按当时是否选着"自定义"补上。选色框取消时什么都不变。自绘时，画在软件自己背景上的（进度线、卡片描边、横幅底色）用 QFluentWidgets 推导后的 `themeColor()`，深色主题下与标准控件一样提亮，罗小黑因此显示为白色；Floating Button 和展示窗口角落按钮画在桌面或用户背景上，用原色 `qconfig.themeColor.value`，角落按钮都带与 Setting Preview 相同的细边。
+Theme Color 由 `cfg.themeColorPreset` 决定：预设取 `THEME_COLOR_PRESETS` 里的颜色，"自定义"取 `cfg.customThemeColor`，统一经 `currentThemeColor()` 解析。`cfg.customThemeColor` 只存 Custom Theme Color，选预设时不得改写它；`cfg.hasCustomThemeColor` 表示它是否存在，旧配置在 `migrateConfig()` 里按当时是否选着"自定义"补上。选色框取消时什么都不变。自绘时，画在软件自己背景上的（进度线、卡片描边、横幅底色）用 QFluentWidgets 推导后的 `themeColor()`，深色主题下与标准控件一样提亮，罗小黑因此显示为白色；Floating Button 和 Corner Button 画在桌面或用户背景上，用原色 `qconfig.themeColor.value`。
+
+Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯黑或纯白（接近的不算），边色与按钮反色、不看背景；纯白时图标和文字用黑色，纯黑纯白的悬停和按下用固定灰阶。这套配色统一经 `window_background.closeButtonColors()` 取，真实窗口和 Setting Preview 共用。细边在 `paintEvent` 里用一条圆角路径画完，不用样式表的 `border`：样式表把直边和圆弧分开画，半透明的边在接头处叠出亮点（`tests/test_theme_color.py` 检查）。Corner Button 从 QFluentWidgets 的样式表登记里注销，自己跟着主题和主题色重设样式；登记着的话，组件库每换一次主题或主题色就把它套回自己的按钮样式。
 
 **`app/common/install_location.py` 独占 Application Install Location 与 Application Relocation 的规则。** 其他模块用 `installLocation()` 取位置，不拿 `PROGRAM_DIR` 当安装位置。它管新位置能不能用（`targetProblem()`：程序目录和数据目录里面、与当前位置互相包含、磁盘根目录、网络位置都不行）、能不能写、提权（`grantUsersModify()` 以管理员身份运行 `icacls`，给 Users 组 `S-1-5-32-545` 授继承的"修改"；`Windows` 目录和 `Program Files`、`ProgramData`、`Users` 根目录不提权）、同名冲突、大小与空间、搬动与撤回、迁移记录的收尾，以及提交（`commitInstallLocation()` 一次存盘，搬过应用时按 Storage Migration 的规则改写 `cfg` 里落在旧位置下的绝对路径）。搬动先结束可执行文件在旧位置下的进程；同一个盘逐个改名，跨盘复制进 `.<名>.relocating-<token>` 再改名；任何一步失败都撤回到旧位置。配置里的位置已经是新位置就算提交了：`cfg.appRelocation` 只记旧位置、新位置、文件夹和 token，下次启动由 `recoverRelocation()` 据此收尾到其中一边，旧位置暂时不可用时留着记录下次再试。`relocationState()` 是唯一的进度状态：`RELOCATING` 期间 `applicationsBlocked()` 为真，ApplicationStore 拒绝安装、卸载和打开，应用市场按钮显示"迁移中"。
 
@@ -42,7 +44,9 @@ Theme Color 由 `cfg.themeColorPreset` 决定：预设取 `THEME_COLOR_PRESETS` 
 
 **`app/platform/processes.py` 独占按目录查找和强制结束进程。** 判定一律是"可执行文件位于该目录下面"：应用市场判断应用是否在运行、卸载和 Application Update 替换文件前强制关闭应用、Application Relocation 开始前关闭旧位置里运行的程序都用它。只是开着里面文件的别的程序不结束，由文件被占用的失败路径报告。
 
-**`app/platform/animation_timer.py` 独占 Qt 全局 Animation Tick 间隔。** View 和业务模块不直接调用 Qt 私有动画 API；私有符号不可用时保留 Qt 默认行为。
+**`app/platform/animation_timer.py` 独占 Qt 全局 Animation Tick 间隔。** View 和业务模块不直接调用 Qt 私有动画 API；私有符号不可用时保留 Qt 默认行为。Super Frame Rate Optimization 默认开，`setSuperFrameRateEnabled()` 跟着开发人员选项「停用超级帧率优化」（`cfg.disableSuperFrameRate`）在 1 ms 和 Qt 默认的 16 ms 之间当场切换；从启动起就停用时不碰私有符号。
+
+**`app/view/components/frame_rate.py` 独占 Frame Rate 的统计和显示。** 开发人员选项「显示帧率」（`cfg.showFrameRate`）打开时，主窗口、投送、考试倒计时和全屏时钟（构造时 `trackFrameRate(self)`，后两者在共用的 `TimerWindow` 里）在 `contentsRect()` 左上角内缩 8 px 显示"N FPS"，每秒数一次 Qt 投给这个顶层窗口的 `UpdateRequest`，也就是它刷到屏幕上的重画次数；标签自己换数字的那一次不算，静止的窗口才稳在 0。Windows 8.1 起 `DwmGetCompositionTimingInfo` 只接受 NULL，拿不到单个窗口实际显示的帧数，所以数的是重画。标签不接收鼠标和触控；窗口每添一个子控件（蒙层弹窗、InfoBar、启动页），它就把自己抬回最上面，此后自己 `raise_()` 的兄弟控件（角落按钮）仍会盖过它，目前都不在左上角。主窗口的标签落在标题栏里，不盖页面栈，不透明滚动照常平移。Window Transition 的快照带着标签，与真窗口一致。悬浮按钮、Shutdown Prompt、Window Transition 动画层和弹出层不挂标签。
 
 **`app/platform/menu_animation.py` 独占 QFluentWidgets 的 Menu Reveal 适配。** 它只替换 `DROP_DOWN` 和 `PULL_UP` 两种动画管理器，并把 `RoundMenu.setShadowEffect` 换成 Silhouette Shadow；其他动画类型及页面组件不再分别接管菜单动画。菜单展开期间不暂停弹窗卡片的阴影：卡片阴影已缓存，暂停和恢复反而各引起一次整卡重绘并让阴影闪一下。Tray Menu 的 `AcrylicMenu` 不走 `RoundMenu.__init__`，不受影响。它还包住 `MenuAnimationManager.make()`：管理器都是用完即弃的（每次 `exec()` 换一个，`MenuActionListWidget.adjustSize()` 量尺寸也借一个），它的位移动画却挂在菜单或列表下，管理器销毁时要一并删掉，否则反复弹出的菜单（设置搜索建议）越攒越多。
 
@@ -68,13 +72,13 @@ Theme Color 由 `cfg.themeColorPreset` 决定：预设取 `THEME_COLOR_PRESETS` 
 
 `ScrollArea` 的触控手势抓取只做一次，不能反复抓了又放：抓放循环留下的残留会在之后创建任意窗口时崩溃。Setting Section 用 `ScrollArea(parent, grabTouch=False)` 构造，首次显示时才 `grabTouchGesture()`；是否已抓由实例自己记账，不能拿 `QScroller.grabbedGesture()` 判断。
 
-**`ScrollArea` 统一仲裁单指触控滚动与子控件点击。** 从按钮、下拉框或卡片上起滑时，移动达到系统拖动阈值后必须取消该触控序列的按压和释放，不能在滚动结束时触发原控件；未达到阈值的短按仍按正常点击处理。打开实验性的「新滚动触控」时不再自己量距离，改为页面（`QScroller`）一开始拖动就取消：页面动了就不算点按，没动就算点击，按钮弹起和页面开始滚动在同一刻。页面不得各自复制这套判定。HomePage 进入卡片编辑态时由排序手势独占触控，并依靠卡片拖动的边缘自动滚动跨越视口；退出编辑态后恢复页面触控滚动。
+**`ScrollArea` 统一仲裁单指触控滚动与子控件点击。** 从按钮、下拉框或卡片上起滑时，必须取消该触控序列的按压和释放，不能在滚动结束时触发原控件。「新滑动触控」默认开：页面（`QScroller`）一开始拖动就取消，页面动了就不算点按，没动就算点击，按钮弹起和页面开始滚动在同一刻。开发人员选项「停用新滑动触控」后改回自己量距离：移动达到系统拖动阈值才取消，未达到阈值的短按仍按正常点击处理。页面不得各自复制这套判定。HomePage 进入卡片编辑态时由排序手势独占触控，并依靠卡片拖动的边缘自动滚动跨越视口；退出编辑态后恢复页面触控滚动。
 
 拖动本身就是操作的控件（色板、滑块）用 `scroll_area.registerTouchDragTarget()` 登记：从它们上起滑的整个触控序列归控件，所在 `ScrollArea` 在这一序列内抬高拖动阈值、不取消按压、不吞松开，抬手后复原。颜色选择弹窗的色板和亮度滑块、设置里的横幅亮度、Broadcast Task 的音量滑块都已登记；新增放在 `ScrollArea` 里的滑块同样登记。组件库弹窗里的滚动区（如 `ColorDialog` 的 `SingleDirectionScrollArea`）不抓触控手势，要换成项目 `ScrollArea`（见 `app/view/components/color_dialog.py`），不另写一套触控；这类弹窗在 `done()` 里停止 scroller 并释放一次手势，与 `_ResponsiveMessageBox` 相同，视口随弹窗销毁，不会再抓。
 
-**触控输入交给 Windows，DJCat 只补按下的外观。** Windows 要先分辨轻点、拖动和长按才发出鼠标消息，手指按住控件时本来没有按下态。补按下态是实验性的「新触控」，默认关，开关由 `djcat.py` 的 `bindExperimentalTouch()` 跟着 `cfg.touchPressFeedback` 当场装上或卸下（`setTouchPressFeedbackEnabled()`）；关着时与 Qt 原样相同。打开时 `app/platform/touch_input.py` 的应用级过滤器在落指时把指下的按钮（`setDown`）或带布尔 `isPressed` 的 QFluentWidgets 控件（如 `CardWidget`）画成按下，直到 Windows 自己的按下到来（此后交还控件，抬手时不再复位），或手指抬起、挪出轻点容差（微软触控规范的 2.7 mm，约 10 px）。它只改外观，不产生点击；自动连发的按钮、输入框／滑块／数值框／列表上的落指、自己接触控的控件（`WA_AcceptTouchEvents`，滚动区视口除外）一律不碰。长按到方框后松手弹右键菜单、选区、拖标题栏、弹出面板都是 Windows 原本的行为，不得再用 `nomousefromtouch` 之类让 Qt 自己合成按下，也不得在页面里仿造长按菜单或标题栏拖动。从控件上起滑时，`ScrollArea` 的起滑取消把按钮的 `isDown`、`CardWidget` 的 `isPressed` 和登记过的自绘目标一并复位；起滑后的松开被仲裁吞掉，控件自己不会复位。理由见 `docs/adr/0008-touch-press-look-only.md`（它取代了 0004）。
+**触控输入交给 Windows，DJCat 只补按下的外观。** Windows 要先分辨轻点、拖动和长按才发出鼠标消息，手指按住控件时本来没有按下态。补按下态是「新触控」，默认开；`djcat.py` 的 `bindDeveloperOptions()` 跟着开发人员选项「停用新触控」（`cfg.disableTouchPressFeedback`）当场卸下或装上（`setTouchPressFeedbackEnabled()`），停用时与 Qt 原样相同。装着时 `app/platform/touch_input.py` 的应用级过滤器在落指时把指下的按钮（`setDown`）或带布尔 `isPressed` 的 QFluentWidgets 控件（如 `CardWidget`）画成按下，直到 Windows 自己的按下到来（此后交还控件，抬手时不再复位），或手指抬起、挪出轻点容差（微软触控规范的 2.7 mm，约 10 px）。它只改外观，不产生点击；自动连发的按钮、输入框／滑块／数值框／列表上的落指、自己接触控的控件（`WA_AcceptTouchEvents`，滚动区视口除外）一律不碰。长按到方框后松手弹右键菜单、选区、拖标题栏、弹出面板都是 Windows 原本的行为，不得再用 `nomousefromtouch` 之类让 Qt 自己合成按下，也不得在页面里仿造长按菜单或标题栏拖动。从控件上起滑时，`ScrollArea` 的起滑取消把按钮的 `isDown`、`CardWidget` 的 `isPressed` 和登记过的自绘目标一并复位；起滑后的松开被仲裁吞掉，控件自己不会复位。理由见 `docs/adr/0008-touch-press-look-only.md`（它取代了 0004）。
 
-**`app/view/components/scroll_area.py` 独占触控滚动的手感。** 所有抓了触控手势的 viewport 都经 `trackTouchScroller()`（`ScrollArea.grabTouchGesture()` 自动调用）由它配置 `QScrollerProperties`，别处不得自己设。默认是 Qt 的原值，与以前完全相同；实验性的「新滚动触控」打开后照 Edge 调：松手速度上限 3 m/s、`OutCubic` 减速（滑行距离 = 2v²/(9a)，甩得越快滑得越远）、拖到头最多拉出视口的 1/4、甩到头最多冲出 1/10 并在 0.3 秒内弹回、保留连续甩动加速；起滑距离仍是 5 mm（红外框有约 ±2 mm 抖动），换成逻辑像素后限制在 3～12 px，防止大屏报给系统的物理尺寸不对。`setTunedTouchScrollEnabled()` 当场作用于所有已有 viewport；被抑制的 viewport 保持抑制，解除时恢复当前手感的阈值。
+**`app/view/components/scroll_area.py` 独占触控滚动的手感。** 所有抓了触控手势的 viewport 都经 `trackTouchScroller()`（`ScrollArea.grabTouchGesture()` 自动调用）由它配置 `QScrollerProperties`，别处不得自己设。默认是「新滑动触控」，照 Edge 调：松手速度上限 3 m/s、`OutCubic` 减速（滑行距离 = 2v²/(9a)，甩得越快滑得越远）、拖到头最多拉出视口的 1/4、甩到头最多冲出 1/10 并在 0.3 秒内弹回、保留连续甩动加速；起滑距离仍是 5 mm（红外框有约 ±2 mm 抖动），换成逻辑像素后限制在 3～12 px，防止大屏报给系统的物理尺寸不对。开发人员选项「停用新滑动触控」（`cfg.disableTunedTouchScroll`）后一律用 Qt 的原值，与以前完全相同。`setTunedTouchScrollEnabled()` 当场作用于所有已有 viewport；被抑制的 viewport 保持抑制，解除时恢复当前手感的阈值。
 
 **滚动区的内容不透明，Qt 才平移像素。** `ScrollArea.enableOpaqueScrolling()` 让内容先铺一层身后的颜色（各层 `render()` 在视口四角和中心叠出来的颜色，五处一致且完全不透明才铺），视口在右边让出悬浮滚动条的 13 px，并从内容布局的右边距里还回去；Qt 于是只平移已画好的像素、补画新露出的一条。身后不是一种实色（挂了 Background Effect、渐变、图片）或滚动区藏着时，内容保持透明、照旧整块重画。MainWindow 换主题和 Background Effect 后调 `refreshOpaqueScrolling()`。目前只有 Setting Section 和应用市场两个选项卡开了；主页横幅和特别鸣谢的条目铺到了滚动条下面，不开。开了的滚动区视口上方不要再盖兄弟控件，盖着期间 Qt 退回整块重画。理由见 `docs/adr/0009-opaque-scrolling.md`。
 
@@ -117,9 +121,9 @@ Lazy Page 必须保留外部调用需要的最小接口：
 
 调用方不得直接依赖 `lazyPage.page` 的存在；需要真实页面时调用 `ensureLoaded()`，只做关闭或缓存失效时应保持未加载状态。
 
-实验性的「停用页面懒加载」（`cfg.eagerPageLoading`）打开时，MainWindow 当场用 `_loadAllPages()` 建好三个 Lazy Page 和五个任务编辑页，以后每次启动也都建好；关掉只能下次启动生效，已建好的页面不拆。
+开发人员选项「停用页面懒加载」（`cfg.eagerPageLoading`）打开时，MainWindow 当场用 `_loadAllPages()` 建好三个 Lazy Page 和五个任务编辑页，以后每次启动也都建好；关掉只能下次启动生效，已建好的页面不拆。
 
-**Experimental Feature 集中在 Setting Section `应用 › 实验性功能`（`software.experimental`）。** 入口说明写明只供开发人员调试；三张卡（新触控、新滚动触控、停用页面懒加载）默认全关，不参与 Setting Suggestion。新增实验性功能放在这里，同样不参与搜索。
+**Developer Option 集中在 Setting Section `应用 › 开发人员选项`（`software.developer`）。** 入口说明写明只供开发人员调试；五张卡（停用新触控、停用新滑动触控、停用超级帧率优化、停用页面懒加载、显示帧率）默认全关，都当场生效（停用页面懒加载关掉时除外），不参与 Setting Suggestion。新增开发人员选项放在这里，同样不参与搜索。
 
 主窗口没有返回按钮，`qrouter` 的切页历史从不弹出；`MainWindow._trimNavigationHistory()` 每次切页后只留最近 16 条。
 
@@ -285,14 +289,14 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 |---|---|
 | `djcat.py` | 进程入口、工作目录、单实例应用、日志、配置加载和 MainWindow 创建 |
 | `app/platform/` | Windows 单实例/IPC、唤起窗口、开机启动及 Qt 运行时适配 |
-| `app/platform/animation_timer.py` | Qt 全局 Animation Tick 间隔的私有 API 适配和安全回退 |
+| `app/platform/animation_timer.py` | Super Frame Rate Optimization：Qt 全局 Animation Tick 间隔的私有 API 适配和安全回退 |
 | `app/platform/dialog_animation.py` | QFluentWidgets 蒙层弹窗的阴影复用和淡入淡出阴影暂停 |
 | `app/platform/shadow_effect.py` | Silhouette Shadow：按尺寸缓存模糊的圆角矩形投影 |
 | `app/platform/menu_animation.py` | QFluentWidgets 全局 Menu Reveal 管理器适配，不改变原版展开视觉 |
 | `app/platform/icon_cache.py` | QFluentWidgets SVG 图标的解析和位图缓存，只缓存资源路径和源码 |
 | `app/platform/style_sheet.py` | QFluentWidgets 样式表登记：换主题不再层层嵌套，样式没变的控件不重新套用 |
 | `app/platform/text_rendering.py` | Qt 大字形缓存上限，让投送的大字按位图缓存 |
-| `app/platform/touch_input.py` | 实验性的「新触控」：手指按住时给指下的按钮和卡片画上按下态；触控输入本身仍由 Windows 判定 |
+| `app/platform/touch_input.py` | 「新触控」：手指按住时给指下的按钮和卡片画上按下态；触控输入本身仍由 Windows 判定 |
 | `app/platform/background_effect.py` | Background Effect：照 Ghost Downloader 给主窗口挂 Windows 透明材质，Win10 的 Acrylic 在窗口移动时暂停模糊 |
 | `app/platform/processes.py` | 按可执行文件所在目录查找和强制结束 Windows 进程 |
 | `app/platform/screens.py` | 取窗口所在屏幕，绕开 PySide 把 QScreen 挂成控件子对象的返回值启发式；把解码的大图缩到最大屏幕的物理尺寸 |
@@ -310,6 +314,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/view/components/` | 多页面复用的 Markdown、背景、滚动和设置卡片组件 |
 | `app/view/components/busy_glow.py` | Busy Glow 的几何、配色和绘制；不知道 AI Markdown 的业务规则 |
 | `app/view/components/update_toast.py` | Update Toast 的三种状态、按钮和底边进度线；不知道下载、版本和安装的规则 |
+| `app/view/components/frame_rate.py` | Frame Rate：数每个登记窗口每秒的重画次数，标在它的左上角 |
 | `app/view/components/window_transition.py` | Window Transition：Display Window 在全屏、窗口化和 Floating Button 之间切换的快照形变、动画层和交接顺序 |
 | `app/view/components/setting_section.py` | Setting Section 的下钻容器、导航行、推移动画和命中高亮 |
 | `app/view/components/setting_preview.py` | Setting Preview：`MainWindowReplica` 用真实组件按主窗口当前尺寸复刻整个主窗口（主页横幅、外观、软件图标三处共用）、托盘菜单与任务栏、投送／倒计时／时钟窗口（标题、正文或大时间、角落按钮） |
@@ -345,14 +350,14 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 set working directory
   → cacheLargeGlyphs (QT_MAX_CACHED_GLYPH_SIZE, before QApplication draws any text)
   → SingletonApplication (Windows single instance + IPC)
-  → unlockQtAnimations (before any QWidget animation is created)
   → optimizeFluentDialogs + optimizeFluentMenus (before MainWindow or its popups are created)
   → cacheFluentSvgIcons (before any QFluentWidgets icon is painted)
   → optimizeFluentStyleSheets (no ever-deeper style registry, no re-polish of unchanged QSS)
   → installTranslators (Qt qtbase + QFluentWidgets Chinese strings)
   → configure logging (adopt legacy APP_DIR\Log, drop logs older than 14 days) and clear stale Client Update files
   → qconfig.load(CONFIG_PATH, cfg)
-  → bindExperimentalTouch (touch press look and touch scroll feel follow their switches)
+  → bindDeveloperOptions (touch press look, touch scroll feel, Super Frame Rate Optimization
+    and Frame Rate follow their switches; before any QWidget animation is created)
   → MainWindow(isSilent)
       → HomePage eagerly
       → register Lazy Pages without constructing their real pages
@@ -370,7 +375,7 @@ set working directory
 
 App Data Directory 必须在导入 `cfg` 和调用 `qconfig.load` 前由 `app/config/paths.py` 确定。第二个 Windows 实例只通知现有实例显示窗口，然后退出；它不创建 MainWindow。
 
-`unlockQtAnimations()` 必须在 QApplication 创建之后、任何动画启动之前、GUI 主线程上调用。它只针对项目锁定的 Qt 运行时查找私有符号；找不到符号或动态库时记录警告并保留 Qt 默认 16 ms 间隔，不允许加载系统中另一份 Qt 来凑合。
+Super Frame Rate Optimization 读出配置才知道开不开，所以由 `bindDeveloperOptions()` 设置：在 QApplication 创建之后、任何动画启动之前、GUI 主线程上。之后的切换当场生效，正在跑的动画也一样（Qt 换间隔时重启自己的动画驱动）。它只针对项目锁定的 Qt 运行时查找私有符号；找不到符号或动态库时记录一次警告并保留 Qt 默认 16 ms 间隔，不允许加载系统中另一份 Qt 来凑合。
 
 `installTranslators()` 装两份中文翻译：`FluentTranslator` 管 QFluentWidgets 自带文案（开关、输入框右键菜单、颜色对话框），Qt 的 `qtbase_zh_CN.qm` 管原生控件（Markdown 链接的"复制链接地址"等 Qt 自带文案；数字框用的是 QFluentWidgets 的 `LineEditMenu`，归前者）。Nuitka 只在用到 QtWebEngine 时才打包 Qt 的 translations 目录，所以 `deploy.py` 单独把 qtbase 这一份打进 `QT_TRANSLATIONS_DIR`；源码运行时先用 PySide6 自带的目录。
 
@@ -410,7 +415,7 @@ Tray Menu quit → MainWindow.requestQuit()
 
 ## Animation scheduling
 
-`app/platform/animation_timer.py` 通过 Qt 私有 `QUnifiedTimer::setTimingInterval()` 把默认 16 ms Animation Tick 间隔改为 1 ms。
+`app/platform/animation_timer.py` 通过 Qt 私有 `QUnifiedTimer::setTimingInterval()` 把默认 16 ms Animation Tick 间隔改为 1 ms，即 Super Frame Rate Optimization。
 
 该适配有四条边界：
 
@@ -474,6 +479,6 @@ def __init__(self, parent=None):
 - "懒加载页面"不等于只隐藏 QWidget。真实页面及其重量级依赖必须尚未构造；纯版本比较被拆到轻量模块，避免 MainWindow 提前初始化应用市场缓存。
 - Application Store 的"全部"与"已安装"是两个操作上下文：即使存在 Application Update，"全部"卡片仍显示"打开"；"已安装"和详情页才显示"更新"。
 - 主窗口右上角关闭曾被理解为退出。已消歧：**close** 只隐藏主窗口；**quit** 才清理资源并结束进程。
-- "解除 Qt 60 帧限制"容易被理解为绕过 VSync 或保证某个 FPS。已消歧：本实现只把 **Animation Tick** 的默认 16 ms 间隔改为 1 ms，不控制 **Presented Frame**。
+- "解除 Qt 60 帧限制"和"超级帧率优化"容易被理解为绕过 VSync 或保证某个 FPS。已消歧：本实现只把 **Animation Tick** 的默认 16 ms 间隔改为 1 ms，不控制 **Presented Frame**；「显示帧率」数的是每个窗口的重画次数，也不是 Presented Frame。
 - Application Store 的"全部应用 → 全部"分类固定每页最多展示 6 个 Application；"推荐"分类展示全部推荐项，不参与分页。
 - 应用市场里的"选项卡"有三层，说的时候要指明是哪一层：顶部的"已安装 / 全部应用"（Catalog 选项卡），"全部应用"里的"推荐 / 全部"（分类），以及"全部"下面的分页。三者都是同级横移；进入应用详情不是选项卡切换。

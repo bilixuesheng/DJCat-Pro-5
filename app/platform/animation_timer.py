@@ -11,6 +11,7 @@ from loguru import logger
 # A zero timer can monopolize the event loop; 1 ms removes the practical frame
 # cap without delaying an already overdue animation tick.
 UNLOCKED_TIMER_INTERVAL_MS = 1
+DEFAULT_TIMER_INTERVAL_MS = 16
 
 
 # PySide6 doesn't bind QAnimationDriver, but the pinned Qt runtime exports its
@@ -90,17 +91,26 @@ class _QtAnimationTimer:
 
 
 _animationTimer: _QtAnimationTimer | None = None
+_timerUnavailable = False
 
 
-def unlockQtAnimations() -> None:
-    global _animationTimer
+def setSuperFrameRateEnabled(enabled: bool) -> None:
+    """Super Frame Rate Optimization: a 1 ms Animation Tick, or Qt's own 16 ms.
 
-    if _animationTimer is not None:
+    Off from startup never touches Qt's private symbols. A switch takes effect at
+    once, running animations included: Qt restarts its driver on a new interval.
+    """
+    global _animationTimer, _timerUnavailable
+
+    if _animationTimer is None and (not enabled or _timerUnavailable):
         return
-
     try:
-        timer = _QtAnimationTimer.create()
-        timer.setInterval(UNLOCKED_TIMER_INTERVAL_MS)
-        _animationTimer = timer
+        if _animationTimer is None:
+            _animationTimer = _QtAnimationTimer.create()
+        _animationTimer.setInterval(
+            UNLOCKED_TIMER_INTERVAL_MS if enabled else DEFAULT_TIMER_INTERVAL_MS
+        )
     except (OSError, RuntimeError) as error:
+        _animationTimer = None
+        _timerUnavailable = True
         logger.warning("无法解除 Qt 动画帧率限制，将使用默认值: {}", error)

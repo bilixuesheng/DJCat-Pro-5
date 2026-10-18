@@ -58,6 +58,7 @@ from app.view.components.setting_card_group import SettingMaterialCard
 from app.view.components.window_background import (
     TIMER_THEME_BACKGROUND,
     WindowBackground,
+    closeButtonColors,
     projectionThemeBackground,
     projectionTitleColor,
 )
@@ -278,22 +279,21 @@ class WindowBackgroundPreview(WindowBackground):
         dark = self._darkFurniture()
         scale = self._actionButtonScale()
         foreground = QColor(255, 255, 255) if dark else QColor(0, 0, 0)
+        closeColors = closeButtonColors()
         for icon, button in zip(self.actionButtonIcons(), self.actionButtonRects()):
             primary = icon is FIF.CLOSE
-            # 与真实按钮同色：关闭是主题色，其余是按深浅主题的半透明底。细边让
-            # 主题色的关闭按钮落在同色背景上也能分辨。
-            painter.setPen(
-                QPen(QColor(255, 255, 255, 110) if dark else QColor(0, 0, 0, 40), 1)
-            )
+            # 与真实按钮同色：关闭是主题色，只有纯黑和纯白带细边；其余是按深浅主题的半透明底。
+            edge = closeColors.edge if primary else None
+            painter.setPen(QPen(edge, 1) if edge is not None else Qt.PenStyle.NoPen)
             painter.setBrush(
-                qconfig.themeColor.value
+                closeColors.normal
                 if primary
                 else QColor(255, 255, 255, 26) if dark else QColor(0, 0, 0, 13)
             )
             radius = 8 * scale
             painter.drawRoundedRect(button, radius, radius)
             # 图标在上、文字在下；文字缩小后认不出，用一道横条代替。
-            color = QColor(255, 255, 255) if primary else foreground
+            color = QColor(closeColors.foreground if primary else foreground)
             iconSize = 20 * scale
             icon.icon(color=color).paint(
                 painter,

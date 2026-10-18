@@ -344,7 +344,7 @@ class SettingSectionTest(TestCase):
         )
         self.assertEqual(
             [card.titleLabel.text() for card in page.sectionStack.view("software").navigationCards()],
-            ["应用市场", "实验性功能"],
+            ["应用市场", "开发人员选项"],
         )
         self.assertEqual(
             page.sectionStack.view("software.appStore").settingCards(),

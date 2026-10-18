@@ -3,8 +3,8 @@ import sys
 import threading
 
 import requests
-from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QTextBlockFormat, QTextCursor
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QTextBlockFormat, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -40,6 +40,7 @@ from qfluentwidgets import (
     qconfig,
 )
 from qfluentwidgets import FluentIcon as FIF
+from qfluentwidgets.common.style_sheet import styleSheetManager
 from qframelesswindow import FramelessWindow
 
 if sys.platform == "win32":
@@ -55,6 +56,7 @@ from app.config.constants import AI_MARKDOWN_API
 from app.config.paths import ASSET_DIR
 from app.platform.screens import screenFor
 from app.view.components.busy_glow import BusyGlowOverlay
+from app.view.components.frame_rate import trackFrameRate
 from app.view.components.markdown_view import MarkdownView
 from app.view.components.scroll_area import (
     setTouchScrollSuppressed,
@@ -63,6 +65,7 @@ from app.view.components.scroll_area import (
 from app.view.components.window_background import (
     WINDOW_SHADOW_MARGIN,
     WindowBackground,
+    closeButtonColors,
     projectionThemeBackground,
     projectionTitleColor,
 )
@@ -156,15 +159,23 @@ class _VerticalButtonMixin:
         self.setIconSize(QSize(20, 20))
         self.setFixedSize(80, 65)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # 样式表全由 updateStyle() 给出。组件库换主题或主题色时会把登记过的控件重新套上
+        # 它的按钮样式，盖掉这里的配色，所以注销登记，自己跟着换。
+        styleSheetManager.deregister(self)
         self.updateStyle()
+        if primary:
+            qconfig.themeColor.valueChanged.connect(self.updateStyle)
+        elif not forceDark:
+            qconfig.themeChanged.connect(self.updateStyle)
 
     def updateStyle(self):
         dark = self.forceDark or isDarkTheme()
-        if self._primary:
-            normal = qconfig.themeColor.value.name()
-            hover = qconfig.themeColor.value.lighter(108).name()
-            pressed = qconfig.themeColor.value.darker(108).name()
-            foreground = "white"
+        self._closeColors = closeButtonColors() if self._primary else None
+        if self._closeColors is not None:
+            normal = self._closeColors.normal.name()
+            hover = self._closeColors.hover.name()
+            pressed = self._closeColors.pressed.name()
+            foreground = self._closeColors.foreground.name()
         elif dark:
             normal = "rgba(255, 255, 255, 26)"
             hover = "rgba(255, 255, 255, 38)"
@@ -175,12 +186,10 @@ class _VerticalButtonMixin:
             hover = "rgba(0, 0, 0, 26)"
             pressed = "rgba(0, 0, 0, 20)"
             foreground = "black"
-        # 与 Setting Preview 同一道细边：主题色的关闭按钮落在同色背景上（如罗小黑配黑底）也能分辨。
-        edge = "rgba(255, 255, 255, 110)" if dark else "rgba(0, 0, 0, 40)"
 
         self.setStyleSheet(
             f"QPushButton {{ color: {foreground}; background-color: {normal};"
-            f" border: 1px solid {edge}; border-radius: 8px; padding: 0; }}"
+            " border: none; border-radius: 8px; padding: 0; }"
             f" QPushButton:hover {{ background-color: {hover}; }}"
             f" QPushButton:pressed {{ background-color: {pressed}; }}"
         )
@@ -199,6 +208,16 @@ class _VerticalButtonMixin:
 
         painter = QStylePainter(self)
         painter.drawControl(QStyle.ControlElement.CE_PushButton, option)
+        edge = self._closeColors.edge if self._closeColors is not None else None
+        if edge is not None:
+            # 样式表的圆角边框是四条直边和四段圆弧分开画的：半透明的边在接头处叠出亮点，
+            # 高缩放下圆弧还比直边细。一笔画完就没有接缝。
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(QPen(edge, 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 7.5, 7.5)
+            painter.restore()
         if not self.isEnabled():
             painter.setOpacity(0.36)
         elif self.isDown():
@@ -223,8 +242,10 @@ class _VerticalButtonMixin:
             )
 
     def _foregroundColor(self):
+        if self._closeColors is not None:
+            return self._closeColors.foreground
         dark = self.forceDark or isDarkTheme()
-        return QColor("white") if self._primary or dark else QColor("black")
+        return QColor("white") if dark else QColor("black")
 
 
 class _VerticalPushButton(_VerticalButtonMixin, PushButton):
@@ -386,6 +407,7 @@ class BroadcastWindow(FramelessWindow):
         self.background.setGeometry(self.contentsRect())
         qconfig.themeChanged.connect(self.background.refresh)
         self.transition = WindowTransition(self)
+        trackFrameRate(self)
 
         self.vBoxLayout = QVBoxLayout(self)
         self.vBoxLayout.setContentsMargins(40, 20, 40, 0)
