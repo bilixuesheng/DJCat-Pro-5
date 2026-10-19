@@ -1,7 +1,8 @@
 import sys
 from typing import NamedTuple
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from loguru import logger
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QIcon, QPainter
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -20,6 +21,7 @@ from qframelesswindow import WindowEffect
 from app.common.application_icon import TRAY_ICON_ITEMS, trayHomeIcon, trayIcon
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
+from app.signal_bus import signalBus
 
 # 三类任务总开关：建菜单和刷新文字共用这一份名称与图标。
 TRAY_TASK_ACTIONS = (
@@ -45,6 +47,11 @@ TRAY_TASK_ACTIONS = (
         FIF.POWER_BUTTON,
     ),
 )
+
+
+def _isWindows11() -> bool:
+    return sys.platform == "win32" and sys.getwindowsversion().build >= 22000
+
 
 class CustomMenuStyle(QProxyStyle):
     def __init__(self, iconSize=14):
@@ -140,10 +147,22 @@ class AcrylicMenu(RoundMenu):
         self.windowEffect.enableBlurBehindWindow(self.winId())
         self.windowEffect.setAcrylicEffect(self.winId(), "00000030" if isDarkTheme() else "FFFFFF30")
         self.adjustPosition()
+        if not self.isSubMenu:
+            logger.info(
+                "托盘菜单摆在 {}，设备像素比 {}",
+                self.geometry().getRect(),
+                self.devicePixelRatioF(),
+            )
         self.raise_()
         self.activateWindow()
         self.setFocus()
         return super().showEvent(event)
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        # RoundMenu.hideEvent 不调 QMenu.hideEvent，而原生 QMenu.exec() 的事件循环只在那里退出。
+        # 不补这一句，托盘菜单和它的二级菜单每 exec() 一次，就留下一个永远退不出去的事件循环。
+        QMenu.hideEvent(self, e)
 
     def paintEvent(self, e):
         painter = QPainter(self)
@@ -240,6 +259,8 @@ class SystemTrayIcon(QSystemTrayIcon):
             item.valueChanged.connect(self._updateTrayIcon)
         cfg.trayTooltip.valueChanged.connect(self._updateTrayTooltip)
 
+        self._menuOpen = False
+        self._reopenMenu = False
         self._homeCards = []
         self.setHomeCards(homeCards)
         for _name, showItem, enabledItem, _label, _icon in TRAY_TASK_ACTIONS:
@@ -247,6 +268,8 @@ class SystemTrayIcon(QSystemTrayIcon):
             showItem.valueChanged.connect(self._rebuildMenu)
         cfg.trayHomeCardKeys.valueChanged.connect(self._rebuildMenu)
         cfg.trayHomeCardsInSubmenu.valueChanged.connect(self._rebuildMenu)
+        # 菜单宽度在建的时候按字体量好，换字体后重建。
+        signalBus.appFontChanged.connect(self._rebuildMenu)
         self._rebuildMenu()
         self.activated.connect(self.onTrayIconClick)
 
@@ -310,6 +333,42 @@ class SystemTrayIcon(QSystemTrayIcon):
     def onTrayIconClick(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             if cfg.trayLeftClickAction.value == "ShowMenu":
-                self.menu.exec(QCursor.pos())
+                self._openMenu()
             else:
                 self.showRequested.emit()
+
+    def _openMenu(self):
+        # Win11 上手指点任务栏不会让菜单失去焦点收起，菜单开着时再点托盘，这一下就落在上一次
+        # exec() 的事件循环里。在开着的菜单上再 exec() 会嵌套：菜单收起时只退出最里层，外层那个
+        # 事件循环再也退不出来。所以这里只收起菜单，回到外层再在新位置打开。
+        if self._menuOpen:
+            logger.info("托盘菜单开着时又点了托盘，收起后重新打开")
+            self._reopenMenu = True
+            self.menu.hide()
+            return
+        self._menuOpen = True
+        try:
+            self._reopenMenu = True
+            while self._reopenMenu:
+                self._reopenMenu = False
+                # 长按弹出的菜单还开着时，先收起才会重新走 showEvent() 的位置调整。
+                self.menu.hide()
+                self.menu.exec(self._menuPosition())
+        finally:
+            self._menuOpen = False
+
+    def _menuPosition(self) -> QPoint:
+        # Win11 的任务栏被手指点时不移动鼠标指针，指针还停在上一次在别处点过的地方。指针不在
+        # 图标上就当作点了图标正中；Windows 给不出图标位置时照旧按指针。
+        cursor = QCursor.pos()
+        icon = self.geometry() if _isWindows11() else None
+        anchor = cursor
+        if icon is not None and not icon.isEmpty() and not icon.contains(cursor):
+            anchor = icon.center()
+        logger.info(
+            "点托盘打开菜单：指针 {}，图标 {}，按 {} 打开",
+            (cursor.x(), cursor.y()),
+            icon.getRect() if icon is not None else None,
+            (anchor.x(), anchor.y()),
+        )
+        return anchor

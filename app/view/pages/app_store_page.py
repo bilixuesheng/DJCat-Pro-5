@@ -662,8 +662,8 @@ class ApplicationCard(CardWidget):
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Fixed,
         )
-        descriptionHeight = self.descriptionLabel.fontMetrics().lineSpacing() * 2
-        self.descriptionLabel.setFixedHeight(descriptionHeight)
+        self._fitDescriptionHeight()
+        signalBus.appFontChanged.connect(self._fitDescriptionHeight)
         self._elideFilter = LabelElideFilter(maximumLines=1)
         self._descriptionElideFilter = LabelElideFilter(maximumLines=2)
         self.titleLabel.installEventFilter(self._elideFilter)
@@ -706,6 +706,11 @@ class ApplicationCard(CardWidget):
         self.actionButton.clicked.connect(self.actionClicked)
         self.pinButton.clicked.connect(self.pinClicked)
         self.removeButton.clicked.connect(self.uninstallClicked)
+
+    def _fitDescriptionHeight(self) -> None:
+        self.descriptionLabel.setFixedHeight(
+            self.descriptionLabel.fontMetrics().lineSpacing() * 2
+        )
 
     def setApplication(self, app: dict, imagePath: str = "") -> None:
         sameApplication = self.appId == int(app["id"])
@@ -1206,10 +1211,12 @@ class AppStorePage(QWidget):
         self.adDescription = BodyLabel(self.adOverlay)
         self.adDescription.setStyleSheet("color: rgba(255,255,255,220);")
         self.adDescription.setWordWrap(True)
-        self.adTitle.setFixedHeight(self.adTitle.fontMetrics().lineSpacing())
         self.adDescription.setFixedHeight(
             self.adDescription.fontMetrics().lineSpacing() * 2
         )
+        self._fitAdTitleHeight()
+        signalBus.appFontChanged.connect(self._fitAdTitleHeight)
+        signalBus.appFontChanged.connect(self._fitAdText)
         self._adTitleElide = LabelElideFilter(maximumLines=1)
         self._adDescriptionElide = LabelElideFilter(maximumLines=2)
         self.adTitle.installEventFilter(self._adTitleElide)
@@ -2156,6 +2163,9 @@ class AppStorePage(QWidget):
                 self.adFlipView.scrollBar.duration = 0
                 self.adFlipView.scrollToIndex(self.adFlipView.currentIndex())
                 self.adFlipView.scrollBar.duration = duration
+
+    def _fitAdTitleHeight(self) -> None:
+        self.adTitle.setFixedHeight(self.adTitle.fontMetrics().lineSpacing())
 
     def _fitAdText(self):
         # 描述按实际行数占高度：固定预留两行时，一行描述会在按钮上方空出一整行，

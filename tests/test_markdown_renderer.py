@@ -205,7 +205,8 @@ class MarkdownRendererTest(TestCase):
         self.assertEqual(plainFont.pointSizeF(), 26.0)
         self.assertEqual(paragraph.font().pointSizeF(), 26.0)
         self.assertEqual(heading.font().pointSizeF(), 49.0)
-        self.assertIn("Microsoft YaHei", paragraph.font().families())
+        # 两种正文都跟着 App Font，不各写一套字体。
+        self.assertEqual(paragraph.font().families(), plainFont.families())
         self.assertIn(
             f"line-height: {MarkdownView.LARGE_TEXT_LINE_HEIGHT}%", paragraph.text()
         )
