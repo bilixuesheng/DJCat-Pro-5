@@ -36,6 +36,12 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 Theme Color 由 `cfg.themeColorPreset` 决定：预设取 `THEME_COLOR_PRESETS` 里的颜色，"自定义"取 `cfg.customThemeColor`，统一经 `currentThemeColor()` 解析。`cfg.customThemeColor` 只存 Custom Theme Color，选预设时不得改写它；`cfg.hasCustomThemeColor` 表示它是否存在，旧配置在 `migrateConfig()` 里按当时是否选着"自定义"补上。选色框取消时什么都不变。自绘时，画在软件自己背景上的（进度线、卡片描边、横幅底色）用 QFluentWidgets 推导后的 `themeColor()`，深色主题下与标准控件一样提亮，罗小黑因此显示为白色；Floating Button 和 Corner Button 画在桌面或用户背景上，用原色 `qconfig.themeColor.value`。
 
+**`app/common/app_font.py` 独占 App Font。** 设置存在 `cfg.appFontMode`、`cfg.appFont`、`cfg.latinFont` 和 `cfg.cjkFont`，三个字体各存各的，切换 Font Mode 不改写任何一个；值是字体名，或 `DEFAULT_FONT`、`SYSTEM_FONT`（只用于统一和西文那两档）。统一经 `appFontFamilies()` 解析成一串字体：西文在前、中文在后，末尾总补上默认中文字体（微软雅黑），选的字体没装时按默认，配置不改。Qt 给每个字按顺序取第一款含有它的字体，所以只分得出西文和中文两档：单给英文符号的字体会连字母一起抢走。
+
+QFluentWidgets 的控件经样式表和 `getFont()` 用 `qconfig.fontFamilies`，普通 Qt 控件（主页横幅的"主页"、倒计时和时钟的标题、投送正文、Markdown 正文）不写字体、跟着 QApplication 字体；`applyAppFont()` 把两边设成同一串。`djcat.py` 的 `bindAppFont()` 在创建任何控件之前套用一次，之后跟着配置当场换。少了启动这一步，Qt 6 在 Windows 上把程序字体取成系统消息字体，用户把它换成只有西文的字体后，Qt 不走 Windows 的字体链接（SystemLink），按自己的候补列表找汉字，简体中文区域排第一的是宋体。「跟随系统」读的也是这个系统字体，Windows 里改了要下次启动才跟上。当场换的顺序固定：先改 `qconfig.fontFamilies` 和 QApplication 字体，再重新套用组件库样式表，最后从顶层窗口往下处理仍是旧那串的控件（程序字体的变化传不到自己设过字体的控件、挂着样式表的控件和它们的子控件，Qt 文档也说 QApplication::setFont 不要和样式表混用）：自己设过字体的只换家族，其余的 `setFont(QFont())` 重新从已换好的父控件继承，样式表定的字号粗细照旧；全部换完才发 `signalBus.appFontChanged`。不得改成对控件重新 `polish` 或 `unpolish`：在 Windows 上从这里调 `QStyle.polish`／`unpolish` 会访问冲突（CI 的 test-windows 崩过两次）。按字体量出尺寸或缓存了画面的地方接这个信号重算：主页和应用市场卡片的两行说明、广告文字、倒计时和时钟的字号、Tray Menu、Setting Preview；帧率标签在自己的 `FontChange` 里重算。`tests/test_app_font.py` 检查换完后没有一个控件停在旧字体上。页面和 `pyqt_github_markdown` 不得在样式表里写 `font-family`，也不得用带字体名的 `QFont` 改正文字体；只改字号和粗细时用 `QFont()` 或控件自己的 `font()`。代码块的等宽字体例外。
+
+`app/view/components/font_picker.py` 的字体选择弹窗用一个自绘的 `FontList` 画全部字体，每行用这款字体自己写名字（符号字体改用界面字体），理由与 `IconGrid` 相同；中文字体那一档只列含简体中文的字体；西文字体那一档只列不含简体中文的字体，「跟随系统」也只在系统字体不含汉字时列出，否则汉字也由西文字体显示、中文字体永远不起作用；竖排的 `@` 字体一律不列。
+
 Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯黑或纯白（接近的不算），边色与按钮反色、不看背景；纯白时图标和文字用黑色，纯黑纯白的悬停和按下用固定灰阶。这套配色统一经 `window_background.closeButtonColors()` 取，真实窗口和 Setting Preview 共用。细边在 `paintEvent` 里用一条圆角路径画完，不用样式表的 `border`：样式表把直边和圆弧分开画，半透明的边在接头处叠出亮点（`tests/test_theme_color.py` 检查）。Corner Button 从 QFluentWidgets 的样式表登记里注销，自己跟着主题和主题色重设样式；登记着的话，组件库每换一次主题或主题色就把它套回自己的按钮样式。
 
 **`app/common/install_location.py` 独占 Application Install Location 与 Application Relocation 的规则。** 其他模块用 `installLocation()` 取位置，不拿 `PROGRAM_DIR` 当安装位置。它管新位置能不能用（`targetProblem()`：程序目录和数据目录里面、与当前位置互相包含、磁盘根目录、网络位置都不行）、能不能写、提权（`grantUsersModify()` 以管理员身份运行 `icacls`，给 Users 组 `S-1-5-32-545` 授继承的"修改"；`Windows` 目录和 `Program Files`、`ProgramData`、`Users` 根目录不提权）、同名冲突、大小与空间、搬动与撤回、迁移记录的收尾，以及提交（`commitInstallLocation()` 一次存盘，搬过应用时按 Storage Migration 的规则改写 `cfg` 里落在旧位置下的绝对路径）。搬动先结束可执行文件在旧位置下的进程；同一个盘逐个改名，跨盘复制进 `.<名>.relocating-<token>` 再改名；任何一步失败都撤回到旧位置。配置里的位置已经是新位置就算提交了：`cfg.appRelocation` 只记旧位置、新位置、文件夹和 token，下次启动由 `recoverRelocation()` 据此收尾到其中一边，旧位置暂时不可用时留着记录下次再试。`relocationState()` 是唯一的进度状态：`RELOCATING` 期间 `applicationsBlocked()` 为真，ApplicationStore 拒绝安装、卸载和打开，应用市场按钮显示"迁移中"。
@@ -66,7 +72,7 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 
 **`app/view/components/setting_preview.py` 独占 Setting Preview。** 画主窗口的预览不截取真实页面（会逼 Lazy Page 提前构造，还会截到设置页自己），而是由 `MainWindowReplica` 用真实组件——导航按钮、`BannerWidget`、主页的 `ActionCard`、标题栏按钮——按主窗口当前尺寸摆好，画到目标两倍大小再平滑缩小，结果按尺寸、设备像素比缓存，配置变化时作废。宽高比实时跟随主窗口（监听 `window()` 的尺寸变化），限高 280；复刻在第一次画时才搭。`tests/test_setting_preview.py` 逐项核对复刻和真实主窗口的几何一致，改主窗口或主页的排布时必须同步改复刻。托盘预览的菜单来自 `buildTrayMenu()`，按 `AcrylicMenu`／`RoundMenu` 的定位规则 1:1 摆在任务栏右侧。投送、倒计时和时钟的预览按屏幕比例画全屏，标题、正文和按钮离窗口边的距离照真实窗口的比例；角落按钮用真实图标和 80 × 65 的比例，缩放取屏幕比例与 0.4 中较大的一个，否则图标只剩几个像素；时钟定格在预览出现的那一刻。理由见 `docs/adr/0007-setting-preview-replica.md`。
 
-**Setting Card 默认各自成卡，照 Win11 设置排布。** 相邻两张卡（导航行也一样）隔 4 px，预览、小节标题和其他内容前后隔 10 px。只有 Linked Setting Cards 经 `SettingSectionView.addLinkedSettingCards()` 共用一块底板：控制卡片在前，显隐或取值受它控制的卡片紧随其后，目前是三处背景、主页横幅、软件图标和托盘图标；其余一律 `addSettingCards()`。新卡片只有显隐或取值跟着另一张卡变时才进组（`tests/test_setting_sections.py` 逐组核对）。关掉「显示主页横幅」时横幅的其余卡片隐藏，按条件隐藏的规则不出现在 Setting Suggestion 里。主题色和 AI 整理风格这类展开卡片各自成卡，展开后的子项仍连在一起。
+**Setting Card 默认各自成卡，照 Win11 设置排布。** 相邻两张卡（导航行也一样）隔 4 px，预览、小节标题和其他内容前后隔 10 px。只有 Linked Setting Cards 经 `SettingSectionView.addLinkedSettingCards()` 共用一块底板：控制卡片在前，显隐或取值受它控制的卡片紧随其后，目前是三处背景、主页横幅、字体、软件图标和托盘图标；其余一律 `addSettingCards()`。新卡片只有显隐或取值跟着另一张卡变时才进组（`tests/test_setting_sections.py` 逐组核对）。关掉「显示主页横幅」时横幅的其余卡片隐藏，按条件隐藏的规则不出现在 Setting Suggestion 里。主题色和 AI 整理风格这类展开卡片各自成卡，展开后的子项仍连在一起。
 
 **设置页搜索只产出 Setting Suggestion。** 页面本身不筛选、不折叠、不重排；建议只按 Setting Card 的标题匹配，条件隐藏的卡片不参与，跨 Section 重名的标题才补完整 Route 前缀。`SettingPage` 提供 `searchSuggestions()` 和 `navigateToRoute()`，弹窗由 MainWindow 拥有——搜索框属于标题栏，设置页不得反向持有它。选中建议后清空搜索框、跳到目标 Route、滚动到卡片并描一圈主题色边框，绝不改写用户的前置设置来让隐藏卡片现身。
 
@@ -322,9 +328,11 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/view/components/time_text.py` | Display Window 的时间：按固定数字格排字，比例字体走秒也不晃 |
 | `app/view/components/window_transition.py` | Window Transition：Display Window 在全屏、窗口化和 Floating Button 之间切换的快照形变、动画层和交接顺序 |
 | `app/view/components/setting_section.py` | Setting Section 的下钻容器、导航行、推移动画和命中高亮 |
-| `app/view/components/setting_preview.py` | Setting Preview：`MainWindowReplica` 用真实组件按主窗口当前尺寸复刻整个主窗口（主页横幅、外观、软件图标三处共用）、托盘菜单与任务栏、投送／倒计时／时钟窗口（标题、正文或大时间、角落按钮） |
+| `app/view/components/setting_preview.py` | Setting Preview：`MainWindowReplica` 用真实组件按主窗口当前尺寸复刻整个主窗口（主页横幅、外观、字体、软件图标四处共用）、托盘菜单与任务栏、投送／倒计时／时钟窗口（标题、正文或大时间、角落按钮） |
 | `app/view/components/color_dialog.py` | QFluentWidgets 颜色选择弹窗换上项目 `ScrollArea`，色板和亮度滑块登记为触控拖动目标 |
+| `app/view/components/font_picker.py` | App Font 的设置卡片和字体选择弹窗：搜索、每行用字体自己写名字、示例文字 |
 | `app/view/components/setting_suggestion_menu.py` | Setting Suggestion 弹窗；选中后交回 Route，不把文本写回搜索框 |
+| `app/common/app_font.py` | App Font：解析字体设置，让 QApplication 字体与 QFluentWidgets 的字体是同一串，并当场换到所有控件上 |
 | `app/common/application_icon.py` | Application Icon 与 Tray Icon 的解析：主窗口、启动页、托盘与 Tray Menu“主页”共用一处 |
 | `app/common/logs.py` | Log 的位置、14 天保留、Cache 中可清理的日志，以及旧 `APP_DIR\Log` 的迁入 |
 | `app/common/error_report.py` | Error Report 的客户端一侧：整理调用栈、去掉安装位置和用户名、同一次运行去重、后台上报 |
@@ -361,6 +369,8 @@ set working directory
   → installTranslators (Qt qtbase + QFluentWidgets Chinese strings)
   → configure logging (adopt legacy APP_DIR\Log, drop logs older than 14 days) and clear stale Client Update files
   → qconfig.load(CONFIG_PATH, cfg)
+  → bindAppFont (QApplication font and qconfig.fontFamilies carry the App Font before any widget
+    is created, then follow 个性化 › 字体)
   → bindDeveloperOptions (touch press look, touch scroll feel, Super Frame Rate Optimization
     and Frame Rate follow their switches; before any QWidget animation is created)
   → MainWindow(isSilent)

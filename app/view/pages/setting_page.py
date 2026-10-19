@@ -51,6 +51,7 @@ from app.common.application_store import (
 )
 from app.common.logs import clearableLogSize, clearLogs
 from app.config.cfg import (
+    APP_FONT_MODES,
     BANNER_IMAGE_PRESETS,
     BANNER_PRESET_SCALE_MODES,
     CUSTOM_THEME_COLOR,
@@ -64,6 +65,7 @@ from app.config.paths import LOG_DIR
 from app.platform.background_effect import BACKGROUND_EFFECTS
 from app.signal_bus import signalBus
 from app.view.components.color_dialog import ColorDialog
+from app.view.components.font_picker import FontSettingCard
 from app.view.components.scroll_area import registerTouchDragTarget
 from app.view.components.setting_card_group import (
     CollapsibleSettingCard,
@@ -612,6 +614,22 @@ class SettingPage(QWidget):
             texts=["浅色", "深色", "跟随系统设置"],
         )
         self.themeColorCard = ThemeColorSettingCard()
+        self.fontModeCard = ComboBoxSettingCard(
+            cfg.appFontMode,
+            FluentIcon.FONT,
+            "字体模式",
+            "统一用一款字体，或中西文各用一款",
+            texts=list(APP_FONT_MODES),
+        )
+        self.appFontCard = FontSettingCard(
+            cfg.appFont, "字体", "软件显示文字所用的字体；选的字体没有汉字时，中文用默认字体"
+        )
+        self.latinFontCard = FontSettingCard(
+            cfg.latinFont, "西文字体", "字母、数字和英文符号，只能选不含汉字的字体"
+        )
+        self.cjkFontCard = FontSettingCard(
+            cfg.cjkFont, "中文字体", "汉字和中文标点，只能选含简体中文的字体"
+        )
         self.backgroundEffectCard = ComboBoxSettingCard(
             cfg.backgroundEffect,
             FluentIcon.TRANSPARENT,
@@ -1188,7 +1206,7 @@ class SettingPage(QWidget):
             "personalization",
             "个性化",
             FluentIcon.BRUSH,
-            "外观、主页横幅、软件图标和系统托盘",
+            "外观、字体、主页横幅、软件图标和系统托盘",
             ROOT_SECTION_KEY,
         )
         appearance = self._addSection(
@@ -1208,6 +1226,17 @@ class SettingPage(QWidget):
                 self.windowTitleCard,
                 self.showCreditsCard,
             ]
+        )
+        font = self._addSection(
+            "personalization.font",
+            "字体",
+            FluentIcon.FONT,
+            "软件字体，可统一设置或中西文分开设置",
+            "personalization",
+        )
+        font.addPreview(self._registerHomeCardPreview(MainWindowPreview()))
+        font.addLinkedSettingCards(
+            [self.fontModeCard, self.appFontCard, self.latinFontCard, self.cjkFontCard]
         )
         banner = self._addSection(
             "personalization.banner",
@@ -1340,6 +1369,7 @@ class SettingPage(QWidget):
         )
         self.logCard.clicked.connect(self._onOpenLogClicked)
         self.aiQuotaReceived.connect(self._onAIQuotaReceived)
+        cfg.appFontMode.valueChanged.connect(self._refreshConditionalCards)
         cfg.applicationIconSource.valueChanged.connect(self._refreshConditionalCards)
         cfg.trayIconSource.valueChanged.connect(self._refreshConditionalCards)
         cfg.bannerImageSource.valueChanged.connect(self._onBannerImageSourceChanged)
@@ -1358,8 +1388,12 @@ class SettingPage(QWidget):
             cfg.set(cfg.bannerScaleMode, scaleMode)
 
     def _conditionalCardVisibility(self) -> dict[QWidget, bool]:
+        separateFonts = cfg.appFontMode.value == APP_FONT_MODES[1]
         bannerShown = bool(cfg.showBanner.value)
         visibility = {
+            self.appFontCard: not separateFonts,
+            self.latinFontCard: separateFonts,
+            self.cjkFontCard: separateFonts,
             self.applicationIconCard: cfg.applicationIconSource.value == "自定义",
             self.trayIconCard: cfg.trayIconSource.value == "自定义",
             self.bannerSourceCard: bannerShown,

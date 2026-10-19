@@ -32,10 +32,7 @@ class FrameRateLabel(QWidget):
         # 等宽数字，位数变了也不晃。
         font.setFeature(QFont.Tag("tnum"), 1)
         self.setFont(font)
-        metrics = QFontMetrics(font)
-        self.setFixedSize(
-            metrics.horizontalAdvance("0000 FPS") + 12, metrics.height() + 6
-        )
+        self._fitSize()
         self._text = ""
         self._frames = 0
         self._ownRepaints = 0
@@ -48,6 +45,18 @@ class FrameRateLabel(QWidget):
         window.installEventFilter(self)
         self._place()
         self.show()
+
+    def _fitSize(self) -> None:
+        metrics = QFontMetrics(self.font())
+        self.setFixedSize(
+            metrics.horizontalAdvance("0000 FPS") + 12, metrics.height() + 6
+        )
+
+    def changeEvent(self, event):
+        # App Font 换了家族，宽度按新字体重算。
+        if event.type() == QEvent.Type.FontChange:
+            self._fitSize()
+        super().changeEvent(event)
 
     def text(self) -> str:
         return self._text

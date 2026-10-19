@@ -21,6 +21,7 @@ from qframelesswindow import WindowEffect
 from app.common.application_icon import TRAY_ICON_ITEMS, trayHomeIcon, trayIcon
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
+from app.signal_bus import signalBus
 
 # 三类任务总开关：建菜单和刷新文字共用这一份名称与图标。
 TRAY_TASK_ACTIONS = (
@@ -267,6 +268,8 @@ class SystemTrayIcon(QSystemTrayIcon):
             showItem.valueChanged.connect(self._rebuildMenu)
         cfg.trayHomeCardKeys.valueChanged.connect(self._rebuildMenu)
         cfg.trayHomeCardsInSubmenu.valueChanged.connect(self._rebuildMenu)
+        # 菜单宽度在建的时候按字体量好，换字体后重建。
+        signalBus.appFontChanged.connect(self._rebuildMenu)
         self._rebuildMenu()
         self.activated.connect(self.onTrayIconClick)
 
