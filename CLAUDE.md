@@ -45,7 +45,7 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 
 **`app/platform/processes.py` 独占按目录查找和强制结束进程。** 判定一律是"可执行文件位于该目录下面"：应用市场判断应用是否在运行、卸载和 Application Update 替换文件前强制关闭应用、Application Relocation 开始前关闭旧位置里运行的程序都用它。只是开着里面文件的别的程序不结束，由文件被占用的失败路径报告。Process Guard 用 `runningExecutables()` 判断程序在不在运行：只看当前登录会话里的进程；`ProcessIdToSessionId` 要 `PROCESS_QUERY_INFORMATION`，普通权限读不出提权进程的会话，读不出的当作同一会话（别的用户的进程连有限查询都打不开）。
 
-**`app/common/process_guard.py` 独占 Process Guard 的规则。** MainWindow 创建 `ProcessGuard`，按 `cfg.homeCardTasks` 和 `cfg.homeCardTasksEnabled` 调 `setRules()`；开机静默启动时先 `holdLaunches(60)` 再 `start()`，60 秒内只看不拉，因为被守护的程序可能也在自启。检查在后台线程里每 3 秒一轮，连续两次没看到才拉起，放过程序自我重启的空档；按可执行文件完整路径认定，不弹 UAC。拉起后撑不过 30 秒、连续 6 次，或者拉起失败（文件不存在、错误 740 需要管理员权限、其他报错），这一条在本次运行内停止并发出 `stopped`：MainWindow 弹一次「自动任务执行失败」，并把 `stoppedReasons()` 交给自动任务页显示在卡片摘要里。没变的规则保留检查进度和停止状态；关掉再打开、关开总开关或换了程序都从头开始；同一个程序只守护列表里的第一条（新建对话框拒绝重复、非 `.exe` 和不存在的文件，行内编辑不校验，靠这里去重）。从托盘点「退出」的那一刻、Qt 的 `commitDataRequest`（Windows 关机或注销）、定时关机真正执行时和 `_shutdownResources()` 都调 `shutdown()`，之后不再守护：先退出的程序被拉回来会拖住关机，"电教猫关闭时"的自动任务关掉的程序也不能被拉回来。Application Relocation 期间跳过 Application Install Location 下的程序；卸载和 Application Update 不另外避让，它们关掉程序后几毫秒内就换掉目录，赶不上二次确认，「确认卸载」框经 `guardedUnder()` 补一句守护会停止。
+**`app/common/process_guard.py` 独占 Process Guard 的规则。** MainWindow 创建 `ProcessGuard`，按 `cfg.homeCardTasks` 和 `cfg.homeCardTasksEnabled` 调 `setRules()`；开机静默启动时先 `holdLaunches(60)` 再 `start()`，60 秒内只看不拉，因为被守护的程序可能也在自启。检查在后台线程里每 3 秒一轮，连续两次没看到才拉起，放过程序自我重启的空档；按可执行文件完整路径认定，不弹 UAC。拉起后撑不过 30 秒、连续 6 次，或者拉起失败（文件不存在、错误 740 需要管理员权限、其他报错），这一条在本次运行内停止并发出 `stopped`：MainWindow 弹一次「自动任务执行失败」，并把 `stoppedReasons()` 交给自动任务页显示在卡片摘要里。没变的规则保留检查进度和停止状态；关掉的规则把停止原因留到重新打开为止，重新打开、关开总开关或换了程序、参数、工作目录都从头开始；同一个程序只守护列表里的第一条。新建对话框拒绝重复、非 `.exe` 和不存在的文件；行内编辑在输完（`editingFinished`）时才存，程序路径按同样的规则校验，不合格就退回原值，边打字边存的话，打到一半的路径会被当成新规则去拉起。`runningExecutables()` 列不出进程时返回 `None`，这一轮跳过，不能当成"都没在运行"。一次拉起从最后确认到 `Popen` 返回都握着 `_launchLock`，`shutdown()` 等它放开。从托盘点「退出」的那一刻、Qt 的 `commitDataRequest`（Windows 关机或注销）、定时关机真正执行时和 `_shutdownResources()` 都调 `shutdown()`，之后不再守护：先退出的程序被拉回来会拖住关机，"电教猫关闭时"的自动任务关掉的程序也不能被拉回来。Application Relocation 期间跳过 Application Install Location 下的程序；卸载和 Application Update 不另外避让，它们关掉程序后几毫秒内就换掉目录，赶不上二次确认，「确认卸载」框经 `guardedUnder()` 补一句守护会停止。
 
 **`app/platform/animation_timer.py` 独占 Qt 全局 Animation Tick 间隔。** View 和业务模块不直接调用 Qt 私有动画 API；私有符号不可用时保留 Qt 默认行为。Super Frame Rate Optimization 默认开，`setSuperFrameRateEnabled()` 跟着开发人员选项「停用超级帧率优化」（`cfg.disableSuperFrameRate`）在 1 ms 和 Qt 默认的 16 ms 之间当场切换；从启动起就停用时不碰私有符号。
 
@@ -301,7 +301,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/platform/text_rendering.py` | Qt 大字形缓存上限，让投送的大字按位图缓存 |
 | `app/platform/touch_input.py` | 「新触控」：手指按住时给指下的按钮和卡片画上按下态；触控输入本身仍由 Windows 判定 |
 | `app/platform/background_effect.py` | Background Effect：照 Ghost Downloader 给主窗口挂 Windows 透明材质，Win10 的 Acrylic 在窗口移动时暂停模糊 |
-| `app/platform/processes.py` | 按可执行文件所在目录查找和强制结束 Windows 进程 |
+| `app/platform/processes.py` | 按可执行文件所在目录查找和强制结束 Windows 进程；列出当前会话里运行着的可执行文件（Process Guard 用） |
 | `app/platform/screens.py` | 取窗口所在屏幕，绕开 PySide 把 QScreen 挂成控件子对象的返回值启发式；把解码的大图缩到最大屏幕的物理尺寸 |
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |

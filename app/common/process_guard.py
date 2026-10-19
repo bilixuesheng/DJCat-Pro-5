@@ -32,33 +32,39 @@ QUICK_EXIT_LIMIT = 6
 REPEATED_EXIT = "反复退出"
 MISSING_PROGRAM = "文件不存在"
 NEEDS_ELEVATION = "需要管理员权限"
-LAUNCH_FAILED = "无法启动"
 ERROR_ELEVATION_REQUIRED = 740
+# 停止原因 → (卡片摘要里的简称, 提示里的说明)；不在表里的原因是 Windows 给的报错原文。
+_STOP_TEXTS = {
+    REPEATED_EXIT: (
+        REPEATED_EXIT,
+        "程序打开后反复退出，已停止守护。选中的可能是启动器，请改选它打开的主程序。",
+    ),
+    MISSING_PROGRAM: (MISSING_PROGRAM, "程序文件不存在，已停止守护。"),
+    NEEDS_ELEVATION: (
+        NEEDS_ELEVATION,
+        "程序需要管理员权限，电教猫无法打开它，已停止守护。",
+    ),
+}
 
 
-def _key(path) -> str:
+def _pathKey(path) -> str:
     return os.path.normcase(str(Path(os.path.expandvars(str(path))).resolve(strict=False)))
 
 
 def stopLabel(reason: str) -> str:
-    """停止原因的简称，卡片摘要用；Windows 给的报错原文只在提示里出现。"""
-    return reason if reason in (REPEATED_EXIT, MISSING_PROGRAM, NEEDS_ELEVATION) else LAUNCH_FAILED
+    """停止原因的简称，卡片摘要用。"""
+    return _STOP_TEXTS.get(reason, ("无法启动", ""))[0]
 
 
 def stopMessage(reason: str) -> str:
     """停止守护时提示里的说明。"""
-    if reason == REPEATED_EXIT:
-        return "程序打开后反复退出，已停止守护。选中的可能是启动器，请改选它打开的主程序。"
-    if reason == MISSING_PROGRAM:
-        return "程序文件不存在，已停止守护。"
-    if reason == NEEDS_ELEVATION:
-        return "程序需要管理员权限，电教猫无法打开它，已停止守护。"
-    return f"无法打开程序（{reason}），已停止守护。"
+    texts = _STOP_TEXTS.get(reason)
+    return texts[1] if texts else f"无法打开程序（{reason}），已停止守护。"
 
 
 def isSameProgram(first, second) -> bool:
     """两个路径是不是同一个程序：展开环境变量后按完整路径比较，不分大小写。"""
-    return _key(first) == _key(second)
+    return _pathKey(first) == _pathKey(second)
 
 
 def guardRules(tasks) -> list[dict]:
@@ -96,14 +102,14 @@ def launchProgram(program: dict) -> str | None:
 
 
 def _within(key: str, directory) -> bool:
-    root = _key(directory).rstrip(os.sep)
+    root = _pathKey(directory).rstrip(os.sep)
     return key == root or key.startswith(root + os.sep)
 
 
 def guardedUnder(directory, tasks, enabled: bool) -> bool:
     """启用中的 Process Guard 里有没有守护 directory 下面的程序。"""
     return enabled and any(
-        task["enabled"] and _within(_key(task["program"]["target"]), directory)
+        task["enabled"] and _within(_pathKey(task["program"]["target"]), directory)
         for task in guardRules(tasks)
     )
 
@@ -118,7 +124,7 @@ def _relocating(key: str) -> bool:
 
 
 @dataclass
-class _Guarded:
+class _GuardState:
     program: dict
     key: str
     misses: int = 0
@@ -143,7 +149,11 @@ class ProcessGuard(QObject):
         self._launch = launch
         self._clock = clock
         self._lock = threading.Lock()
-        self._guarded: dict[str, _Guarded] = {}
+        # 一次拉起从最后确认到 Popen 返回都握着它，shutdown() 等它放开：叫停之后不能再有程序被拉起。
+        self._launchLock = threading.Lock()
+        self._guarded: dict[str, _GuardState] = {}
+        # 关掉的规则：只留着停止原因给卡片摘要，重新打开时从头开始。
+        self._parked: dict[str, _GuardState] = {}
         self._holdUntil = float("-inf")
         self._halted = threading.Event()
         self._thread = None
@@ -151,32 +161,41 @@ class ProcessGuard(QObject):
     def setRules(self, tasks, enabled: bool) -> None:
         """按 Home Card Task 列表和自动任务总开关换上要守护的规则。
 
-        没变的规则保留检查进度和停止状态；新出现的（刚启用、刚打开总开关、换了程序）从头开始。
-        同一个程序只守护列表里的第一条。
+        没变的规则保留检查进度和停止状态；新出现的（刚启用、刚打开总开关、换了程序、参数或
+        工作目录）从头开始。同一个程序只守护列表里的第一条。
         """
+        programs = {}
         rules = []
-        if enabled:
-            keys = set()
-            for task in guardRules(tasks):
-                if not task["enabled"]:
-                    continue
-                program = task["program"]
-                key = _key(program["target"])
-                if key not in keys:
-                    keys.add(key)
-                    rules.append((task["id"], program, key))
+        keys = set()
+        for task in guardRules(tasks):
+            program = task["program"]
+            programs[task["id"]] = program
+            if not (enabled and task["enabled"]):
+                continue
+            key = _pathKey(program["target"])
+            if key not in keys:
+                keys.add(key)
+                rules.append((task["id"], program, key))
         with self._lock:
             if self._halted.is_set():
                 return
             previous = self._guarded
-            self._guarded = {
-                taskId: (
-                    previous[taskId]
-                    if taskId in previous and previous[taskId].program == program
-                    else _Guarded(program, key)
+            guarded = {}
+            for taskId, program, key in rules:
+                state = previous.get(taskId)
+                guarded[taskId] = (
+                    state
+                    if state is not None and state.program == program
+                    else _GuardState(program, key)
                 )
-                for taskId, program, key in rules
+            self._parked = {
+                taskId: state
+                for taskId, state in {**self._parked, **previous}.items()
+                if taskId not in guarded
+                and state.stoppedReason
+                and programs.get(taskId) == state.program
             }
+            self._guarded = guarded
 
     def holdLaunches(self, seconds: float) -> None:
         """接下来 seconds 秒只检查不拉起，期间程序自己起来了就什么都不做。"""
@@ -192,6 +211,9 @@ class ProcessGuard(QObject):
         with self._lock:
             self._halted.set()
             self._guarded = {}
+            self._parked = {}
+        with self._launchLock:
+            pass
 
     def _run(self) -> None:
         while not self._halted.is_set():
@@ -202,11 +224,11 @@ class ProcessGuard(QObject):
             self._halted.wait(CHECK_INTERVAL)
 
     def stoppedReasons(self) -> dict[str, str]:
-        """本次运行内已经停止守护的规则：任务 ID → 原因。"""
+        """本次运行内已经停止守护的规则：任务 ID → 原因，关掉的规则留到重新打开为止。"""
         with self._lock:
             return {
                 taskId: state.stoppedReason
-                for taskId, state in self._guarded.items()
+                for taskId, state in {**self._parked, **self._guarded}.items()
                 if state.stoppedReason
             }
 
@@ -219,7 +241,11 @@ class ProcessGuard(QObject):
             ]
         if not guarded:
             return
-        running = {_key(path) for path in self._runningPrograms()}
+        programs = self._runningPrograms()
+        if programs is None:
+            # 列不出进程时什么都不知道，当成"都没在运行"会把开着的程序再拉起一份。
+            return
+        running = {os.path.normcase(str(path)) for path in programs}
         now = self._clock()
         for taskId, state in guarded:
             if state.key in running:
@@ -245,18 +271,20 @@ class ProcessGuard(QObject):
                     continue
             if now < self._holdUntil or _relocating(state.key):
                 continue
-            with self._lock:
-                if self._guarded.get(taskId) is not state:
+            with self._launchLock:
+                with self._lock:
+                    current = self._guarded.get(taskId) is state
+                if not current:
                     continue
-            logger.info("进程守护拉起 {}", state.program["target"])
-            error = self._launch(dict(state.program))
+                logger.info("进程守护拉起 {}", state.program["target"])
+                error = self._launch(dict(state.program))
             if error:
                 self._stop(taskId, state, error)
                 continue
             state.launchedAt = now
             state.misses = 0
 
-    def _stop(self, taskId: str, state: _Guarded, reason: str) -> None:
+    def _stop(self, taskId: str, state: _GuardState, reason: str) -> None:
         with self._lock:
             # 检查途中规则被关掉或换了程序，就不再替旧规则报停止。
             if self._guarded.get(taskId) is not state:

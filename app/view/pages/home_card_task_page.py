@@ -153,12 +153,13 @@ def _pathInput(parent, placeholder, choose):
     line = LineEdit(wrapper)
     line.setPlaceholderText(placeholder)
     line.setFixedWidth(260)
-    button = PushButton(FIF.FOLDER, "浏览", wrapper)
+    button = PushButton(FIF.FOLDER, "选择", wrapper)
 
     def browse():
         path = choose(parent)
         if path:
             line.setText(QDir.toNativeSeparators(path))
+            line.editingFinished.emit()
 
     button.clicked.connect(browse)
     row.addWidget(line)
@@ -476,7 +477,7 @@ def homeCardTaskData(widgets):
     }
 
 
-def _guardProgramProblem(target):
+def _guardProgramProblem(target, taskId=None):
     if not target:
         return "请选择要守护的程序"
     # 快捷方式不是进程，没法据此判断程序在不在运行。
@@ -485,7 +486,7 @@ def _guardProgramProblem(target):
     if not Path(os.path.expandvars(target)).is_file():
         return "程序文件不存在"
     if any(
-        isSameProgram(rule["program"]["target"], target)
+        rule["id"] != taskId and isSameProgram(rule["program"]["target"], target)
         for rule in guardRules(cfg.homeCardTasks.value)
     ):
         return "已有守护这个程序的自动任务"
@@ -568,12 +569,33 @@ class HomeCardTaskCard(ScheduledTaskCard):
         widgets["homeCardCombo"].currentIndexChanged.connect(self._refreshFormHeight)
         widgets["operationCombo"].currentIndexChanged.connect(self._saveData)
         widgets["actionEditor"].changed.connect(self._saveData)
-        for name in ("programInput", "argumentsInput", "workingDirInput"):
-            widgets[name].textChanged.connect(self._saveData)
+        # 输完才存：边打字边存，打到一半的路径会被守护当成新规则去拉起。
+        widgets["programInput"].editingFinished.connect(self._onProgramEdited)
+        widgets["argumentsInput"].editingFinished.connect(self._saveData)
+        widgets["workingDirInput"].editingFinished.connect(self._saveData)
 
     def _formData(self):
         self.formWidgets["targetTitle"] = self.data.get("targetTitle", "")
         return homeCardTaskData(self.formWidgets)
+
+    def _onProgramEdited(self):
+        programInput = self.formWidgets["programInput"]
+        saved = self.data.get("program", {}).get("target", "")
+        target = programInput.text().strip()
+        if target == saved:
+            return
+        problem = _guardProgramProblem(target, self.data["id"])
+        if problem:
+            programInput.setText(saved)
+            InfoBar.error(
+                "无法保存",
+                problem,
+                duration=3000,
+                position=InfoBarPosition.TOP,
+                parent=self.window(),
+            )
+            return
+        self._saveData()
 
     def setGuardStop(self, reason):
         if reason == self._guardStop:

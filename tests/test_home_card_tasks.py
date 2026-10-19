@@ -415,6 +415,54 @@ class HomeCardTaskUiTest(TestCase):
             card.expandCard.card.contentLabel.text(), "进程守护 · ClassApp.exe"
         )
 
+    def guardCard(self, target="C:\\Class\\ClassApp.exe"):
+        task = {
+            **existing_task(),
+            "trigger": PROCESS_GUARD_TRIGGER,
+            "program": {"target": target},
+        }
+        cfg.set(cfg.homeCardTasks, [task])
+        page = HomeCardTaskPage(home_cards())
+        self.addCleanup(page.deleteLater)
+        return page, page._cards[0]
+
+    def testProcessGuardProgramIsSavedWhenEditingFinishesNotWhileTyping(self):
+        directory = isolateCfg(self)
+        program = directory / "New.exe"
+        program.write_bytes(b"MZ")
+        page, card = self.guardCard()
+
+        for name, value in (
+            ("programInput", str(program)),
+            ("argumentsInput", "--tray"),
+            ("workingDirInput", str(directory)),
+        ):
+            card.formWidgets[name].setText(value)
+        self.assertFalse(page._savePending)
+
+        card.formWidgets["programInput"].editingFinished.emit()
+        self.assertTrue(page._savePending)
+        self.assertEqual(
+            card.data["program"],
+            {
+                "target": str(program),
+                "arguments": "--tray",
+                "working_dir": str(directory),
+            },
+        )
+
+    def testInlineProgramThatCannotBeGuardedIsPutBackWithTheReason(self):
+        page, card = self.guardCard()
+        programInput = card.formWidgets["programInput"]
+        programInput.setText("C:\\Class\\readme.txt")
+
+        with patch("app.view.pages.home_card_task_page.InfoBar.error") as showError:
+            programInput.editingFinished.emit()
+
+        self.assertFalse(page._savePending)
+        self.assertEqual(programInput.text(), "C:\\Class\\ClassApp.exe")
+        self.assertIn(".exe", showError.call_args.args[1])
+
     def testPageDebouncesEditsAndFlushesLatestTask(self):
         cfg.set(cfg.homeCardTasks, [existing_task()])
         page = HomeCardTaskPage(home_cards())

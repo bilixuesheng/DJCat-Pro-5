@@ -1,4 +1,5 @@
 import tempfile
+import threading
 import time
 from pathlib import Path
 from unittest import TestCase
@@ -43,9 +44,12 @@ class FakeComputer:
         self.launched = []
         self.keepsRunning = True
         self.launchErrors = {}
+        self.listingFails = False
 
     def runningPrograms(self):
-        return [Path(target) for target in self.running]
+        if self.listingFails:
+            return None
+        return [Path(target).resolve() for target in self.running]
 
     def launch(self, program):
         target = program["target"]
@@ -186,6 +190,7 @@ class ProcessGuardTest(TestCase):
         self.assertEqual(self.guard.stoppedReasons(), {"guard-one": MISSING_PROGRAM})
 
         self.guard.setRules([guardTask(enabled=False)], True)
+        self.assertEqual(self.guard.stoppedReasons(), {"guard-one": MISSING_PROGRAM})
         self.guard.setRules([guardTask()], True)
         self.assertEqual(self.guard.stoppedReasons(), {})
         self.computer.launchErrors = {}
@@ -198,7 +203,17 @@ class ProcessGuardTest(TestCase):
         self.check(2)
 
         self.guard.setRules([guardTask()], False)
+        self.assertEqual(self.guard.stoppedReasons(), {"guard-one": MISSING_PROGRAM})
         self.guard.setRules([guardTask()], True)
+
+        self.assertEqual(self.guard.stoppedReasons(), {})
+
+    def testDeletedRuleLeavesNoStopBehind(self):
+        self.computer.launchErrors = {CLASSROOM_APP: MISSING_PROGRAM}
+        self.guard.setRules([guardTask()], True)
+        self.check(2)
+
+        self.guard.setRules([], True)
 
         self.assertEqual(self.guard.stoppedReasons(), {})
 
@@ -242,6 +257,47 @@ class ProcessGuardTest(TestCase):
         install_location.setRelocationState(install_location.CLEANING)
         self.check()
         self.assertEqual(self.computer.launched, [outside, installed])
+
+    def testRoundWhoseProcessListFailsIsSkipped(self):
+        self.computer.running.add(CLASSROOM_APP)
+        self.guard.setRules([guardTask()], True)
+        self.computer.listingFails = True
+
+        self.check(4)
+        self.computer.listingFails = False
+        self.check()
+
+        self.assertEqual(self.computer.launched, [])
+
+    def testShutdownWaitsForALaunchAlreadyUnderWay(self):
+        launching = threading.Event()
+        release = threading.Event()
+
+        def slowLaunch(program):
+            launching.set()
+            release.wait(5)
+            return self.computer.launch(program)
+
+        guard = ProcessGuard(
+            runningPrograms=self.computer.runningPrograms,
+            launch=slowLaunch,
+            clock=self.computer.clock,
+        )
+        self.addCleanup(guard.deleteLater)
+        guard.setRules([guardTask()], True)
+        guard.tick()
+        checking = threading.Thread(target=guard.tick)
+        checking.start()
+        self.assertTrue(launching.wait(5))
+        stopping = threading.Thread(target=guard.shutdown)
+        stopping.start()
+
+        stopping.join(0.2)
+        self.assertTrue(stopping.is_alive())
+        release.set()
+        stopping.join(5)
+        checking.join(5)
+        self.assertFalse(stopping.is_alive())
 
     def testShutdownEndsGuardingForGood(self):
         self.guard.setRules([guardTask()], True)

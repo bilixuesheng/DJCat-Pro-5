@@ -9,6 +9,7 @@ Relocation 开始前关闭从 Application Install Location 运行的程序，都
 
 import os
 import time
+from functools import lru_cache
 from pathlib import Path
 
 PROCESS_TERMINATE = 0x0001
@@ -45,8 +46,17 @@ def _kernel32():
     return kernel32
 
 
-def _processes(sameSession: bool = False) -> list[tuple[int, Path]]:
-    """其他进程的 (进程 ID, 可执行文件)；sameSession 为真时只要和本进程同一个登录会话的。"""
+@lru_cache(maxsize=1024)
+def _resolvedImage(path: str) -> Path:
+    # Process Guard 每 3 秒列一遍进程，resolve() 要逐个打开文件；同一个可执行文件只解析一次。
+    return Path(path).resolve(strict=False)
+
+
+def _processes(sameSession: bool = False) -> list[tuple[int, Path]] | None:
+    """其他进程的 (进程 ID, 可执行文件)；sameSession 为真时只要和本进程同一个登录会话的。
+
+    列不出来时返回 None，与"一个都没有"区分开。
+    """
     if os.name != "nt":
         return []
     try:
@@ -58,13 +68,13 @@ def _processes(sameSession: bool = False) -> list[tuple[int, Path]]:
         if not ctypes.windll.psapi.EnumProcesses(
             processIds, ctypes.sizeof(processIds), ctypes.byref(bytesNeeded)
         ):
-            return []
+            return None
         kernel32 = _kernel32()
         session = wintypes.DWORD()
         if sameSession and not kernel32.ProcessIdToSessionId(
             os.getpid(), ctypes.byref(session)
         ):
-            return []
+            return None
         found = []
         count = bytesNeeded.value // ctypes.sizeof(wintypes.DWORD)
         for processId in processIds[:count]:
@@ -91,12 +101,12 @@ def _processes(sameSession: bool = False) -> list[tuple[int, Path]]:
                     handle, 0, buffer, ctypes.byref(length)
                 ):
                     continue
-                found.append((int(processId), Path(buffer.value).resolve(strict=False)))
+                found.append((int(processId), _resolvedImage(buffer.value)))
             finally:
                 kernel32.CloseHandle(handle)
         return found
     except (AttributeError, OSError, ValueError):
-        return []
+        return None
 
 
 def processesUnder(directory: Path) -> list[tuple[int, Path]]:
@@ -106,7 +116,7 @@ def processesUnder(directory: Path) -> list[tuple[int, Path]]:
     except (OSError, ValueError):
         return []
     running = []
-    for processId, executable in _processes():
+    for processId, executable in _processes() or []:
         try:
             executable.relative_to(root)
         except ValueError:
@@ -115,9 +125,13 @@ def processesUnder(directory: Path) -> list[tuple[int, Path]]:
     return running
 
 
-def runningExecutables() -> list[Path]:
-    """当前登录会话里其他进程的可执行文件；别的用户（快速切换用户、远程桌面）开着的不算。"""
-    return [executable for _processId, executable in _processes(sameSession=True)]
+def runningExecutables() -> list[Path] | None:
+    """当前登录会话里其他进程的可执行文件（已 resolve）；别的用户（快速切换用户、远程桌面）
+    开着的不算。列不出来时返回 None。"""
+    processes = _processes(sameSession=True)
+    if processes is None:
+        return None
+    return [executable for _processId, executable in processes]
 
 
 def terminateProcesses(processIds, timeout: float = TERMINATE_TIMEOUT) -> None:
