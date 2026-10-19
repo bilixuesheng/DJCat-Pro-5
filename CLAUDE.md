@@ -36,6 +36,8 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 Theme Color 由 `cfg.themeColorPreset` 决定：预设取 `THEME_COLOR_PRESETS` 里的颜色，"自定义"取 `cfg.customThemeColor`，统一经 `currentThemeColor()` 解析。`cfg.customThemeColor` 只存 Custom Theme Color，选预设时不得改写它；`cfg.hasCustomThemeColor` 表示它是否存在，旧配置在 `migrateConfig()` 里按当时是否选着"自定义"补上。选色框取消时什么都不变。自绘时，画在软件自己背景上的（进度线、卡片描边、横幅底色）用 QFluentWidgets 推导后的 `themeColor()`，深色主题下与标准控件一样提亮，罗小黑因此显示为白色；Floating Button 和 Corner Button 画在桌面或用户背景上，用原色 `qconfig.themeColor.value`。
 
+**`app/common/app_font.py` 独占 App Font。** QFluentWidgets 的控件经样式表和 `getFont()` 用 `qconfig.fontFamilies`，普通 Qt 控件（主页横幅的"主页"、倒计时和时钟的标题、投送正文、Markdown 正文）不写字体、跟着 QApplication 字体；`applyAppFont()` 把两边设成同一串，`djcat.py` 在创建任何控件之前调用它。少了这一步，Qt 6 在 Windows 上把程序字体取成系统消息字体，用户把它换成只有西文的字体后，Qt 不走 Windows 的字体链接（SystemLink），按自己的候补列表找汉字，简体中文区域排第一的是宋体。页面和 `pyqt_github_markdown` 不得在样式表里写 `font-family`，也不得用带字体名的 `QFont` 改正文字体；只改字号和粗细时用 `QFont()` 或控件自己的 `font()`。代码块的等宽字体例外。
+
 Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯黑或纯白（接近的不算），边色与按钮反色、不看背景；纯白时图标和文字用黑色，纯黑纯白的悬停和按下用固定灰阶。这套配色统一经 `window_background.closeButtonColors()` 取，真实窗口和 Setting Preview 共用。细边在 `paintEvent` 里用一条圆角路径画完，不用样式表的 `border`：样式表把直边和圆弧分开画，半透明的边在接头处叠出亮点（`tests/test_theme_color.py` 检查）。Corner Button 从 QFluentWidgets 的样式表登记里注销，自己跟着主题和主题色重设样式；登记着的话，组件库每换一次主题或主题色就把它套回自己的按钮样式。
 
 **`app/common/install_location.py` 独占 Application Install Location 与 Application Relocation 的规则。** 其他模块用 `installLocation()` 取位置，不拿 `PROGRAM_DIR` 当安装位置。它管新位置能不能用（`targetProblem()`：程序目录和数据目录里面、与当前位置互相包含、磁盘根目录、网络位置都不行）、能不能写、提权（`grantUsersModify()` 以管理员身份运行 `icacls`，给 Users 组 `S-1-5-32-545` 授继承的"修改"；`Windows` 目录和 `Program Files`、`ProgramData`、`Users` 根目录不提权）、同名冲突、大小与空间、搬动与撤回、迁移记录的收尾，以及提交（`commitInstallLocation()` 一次存盘，搬过应用时按 Storage Migration 的规则改写 `cfg` 里落在旧位置下的绝对路径）。搬动先结束可执行文件在旧位置下的进程；同一个盘逐个改名，跨盘复制进 `.<名>.relocating-<token>` 再改名；任何一步失败都撤回到旧位置。配置里的位置已经是新位置就算提交了：`cfg.appRelocation` 只记旧位置、新位置、文件夹和 token，下次启动由 `recoverRelocation()` 据此收尾到其中一边，旧位置暂时不可用时留着记录下次再试。`relocationState()` 是唯一的进度状态：`RELOCATING` 期间 `applicationsBlocked()` 为真，ApplicationStore 拒绝安装、卸载和打开，应用市场按钮显示"迁移中"。
@@ -320,6 +322,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/view/components/setting_preview.py` | Setting Preview：`MainWindowReplica` 用真实组件按主窗口当前尺寸复刻整个主窗口（主页横幅、外观、软件图标三处共用）、托盘菜单与任务栏、投送／倒计时／时钟窗口（标题、正文或大时间、角落按钮） |
 | `app/view/components/color_dialog.py` | QFluentWidgets 颜色选择弹窗换上项目 `ScrollArea`，色板和亮度滑块登记为触控拖动目标 |
 | `app/view/components/setting_suggestion_menu.py` | Setting Suggestion 弹窗；选中后交回 Route，不把文本写回搜索框 |
+| `app/common/app_font.py` | App Font：让 QApplication 字体与 QFluentWidgets 的字体是同一串 |
 | `app/common/application_icon.py` | Application Icon 与 Tray Icon 的解析：主窗口、启动页、托盘与 Tray Menu“主页”共用一处 |
 | `app/common/logs.py` | Log 的位置、14 天保留、Cache 中可清理的日志，以及旧 `APP_DIR\Log` 的迁入 |
 | `app/common/error_report.py` | Error Report 的客户端一侧：整理调用栈、去掉安装位置和用户名、同一次运行去重、后台上报 |
@@ -356,6 +359,7 @@ set working directory
   → installTranslators (Qt qtbase + QFluentWidgets Chinese strings)
   → configure logging (adopt legacy APP_DIR\Log, drop logs older than 14 days) and clear stale Client Update files
   → qconfig.load(CONFIG_PATH, cfg)
+  → applyAppFont (QApplication font carries the App Font families, before any widget is created)
   → bindDeveloperOptions (touch press look, touch scroll feel, Super Frame Rate Optimization
     and Frame Rate follow their switches; before any QWidget animation is created)
   → MainWindow(isSilent)

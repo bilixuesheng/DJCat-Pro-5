@@ -115,6 +115,7 @@ def main():
     from PySide6.QtGui import QColor
     from qfluentwidgets import qconfig, setThemeColor
 
+    from app.common.app_font import applyAppFont
     from app.common.logs import configureLogging
     from app.common.update_download import clearUpdateDirectory, restoreUpdaterBinary
     from app.config.cfg import cfg, migrateConfig
@@ -149,6 +150,8 @@ def main():
     sys.excepthook = exceptionHook
     qconfig.load(CONFIG_PATH, cfg)
     migrateConfig()
+    # 早于任何控件：样式表挂上之后再改程序字体，控件不会跟着换。
+    applyAppFont()
     # 超级帧率优化也在这里，读出配置才知道要不要设 1 ms，仍早于任何动画。
     bindDeveloperOptions(app)
     setThemeColor(QColor(49, 101, 49))
