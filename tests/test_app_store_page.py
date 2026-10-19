@@ -41,6 +41,7 @@ from qfluentwidgets import (
 )
 
 from app.common import install_location
+from app.common.home_card_tasks import PROCESS_GUARD_TRIGGER
 from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
 from app.view.pages.app_store_page import (
@@ -53,6 +54,7 @@ from app.view.pages.app_store_page import (
     HorizontalTransitionStackedWidget,
     SLIDE_DURATION_MS,
 )
+from tests.support import isolateCfg
 
 
 class _Store:
@@ -3162,6 +3164,40 @@ class AppStorePageTest(TestCase):
 
         self.assertIn("Demo 正在运行，卸载时会被强制关闭", boxes[0])
         self.assertNotIn(app["id"], self.page._uninstalling)
+
+    def testUninstallConfirmationSaysProcessGuardWillStop(self):
+        isolateCfg(self)
+        app = _apps(1)[0] | {"name": "Demo", "installed": True}
+        self.page.store.applicationRunning = Mock(return_value=False)
+        self.page.store.installed = Mock(
+            return_value={app["id"]: SimpleNamespace(path=Path("/apps/Demo"))}
+        )
+        guard = {
+            "id": "guard",
+            "trigger": PROCESS_GUARD_TRIGGER,
+            "program": {"target": "/apps/Demo/bin/demo.exe"},
+            "enabled": True,
+        }
+        cfg.set(cfg.homeCardTasksEnabled, True, save=False)
+        boxes = []
+
+        class _Box:
+            def __init__(self, title, content, parent):
+                boxes.append(content)
+
+            def exec(self):
+                return 0
+
+            def deleteLater(self):
+                pass
+
+        with patch("app.view.pages.app_store_page.MessageBox", _Box):
+            for enabled in (True, False):
+                cfg.set(cfg.homeCardTasks, [guard | {"enabled": enabled}], save=False)
+                self.page._confirmUninstall(app)
+
+        self.assertIn("Demo 正被进程守护，卸载后守护会停止", boxes[0])
+        self.assertNotIn("进程守护", boxes[1])
 
     def testApplicationRelocationBlocksEveryApplication(self):
         app = _apps(1)[0] | {"name": "Demo", "installed": True}

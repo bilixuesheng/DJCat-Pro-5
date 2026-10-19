@@ -80,6 +80,7 @@ from app.common.install_location import (
     installLocation,
     isDefaultInstallLocation,
 )
+from app.common.process_guard import guardedUnder
 from app.config.cfg import cfg
 from app.signal_bus import signalBus
 from app.view.components.scroll_area import ScrollArea
@@ -2463,6 +2464,15 @@ class AppStorePage(QWidget):
         except Exception:
             return False
 
+    def _processGuarded(self, app):
+        try:
+            local = self.store.installed().get(int(app["id"]))
+            return local is not None and guardedUnder(
+                local.path, cfg.homeCardTasks.value, cfg.homeCardTasksEnabled.value
+            )
+        except Exception:
+            return False
+
     def _startLaunch(self, app, preset=None):
         # 打开应用和打开预设共用"打开中"：卡片、详情按钮和预设按钮一起禁用，
         # 同一应用不会并发出第二次启动。
@@ -2696,6 +2706,8 @@ class AppStorePage(QWidget):
         content = f"将删除 {name} 的安装目录，是否继续？"
         if self._applicationRunning(app):
             content += f"\n\n{name} 正在运行，卸载时会被强制关闭，未保存的内容会丢失。"
+        if self._processGuarded(app):
+            content += f"\n\n{name} 正被进程守护，卸载后守护会停止。"
         box = MessageBox("确认卸载", content, self)
         try:
             accepted = box.exec()

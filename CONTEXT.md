@@ -89,7 +89,7 @@ _Avoid_: 最大化动画（没有最大化）、缩放动画（圆角和内容�
 ### 定时与自动任务
 
 **Scheduled Task**:
-按对应 Task Master Switch、独立启用状态、星期和精确时间反复匹配的本地规则。Broadcast Task、使用固定时间的 Home Card Task 和 Shutdown Task 属于 Scheduled Task；软件行为触发的 Home Card Task 不参与定时匹配。
+按对应 Task Master Switch、独立启用状态、星期和精确时间反复匹配的本地规则。Broadcast Task、使用固定时间的 Home Card Task 和 Shutdown Task 属于 Scheduled Task；软件行为触发的 Home Card Task 和 Process Guard 不参与定时匹配。
 _Avoid_: alarm、job；不加限定地称 task
 
 **Task Master Switch**:
@@ -105,12 +105,16 @@ Broadcast Task 要播放的内容来源，分为内置报时或铃声、系统 T
 _Avoid_: Broadcast Type、media type
 
 **Home Card Task**:
-"自动任务"中的本地自动化规则，可按固定时间或 Application Lifecycle Event 触发。它可以引用现存 Home Card、关闭正在运行的 Default Home Card，或直接拥有一个 Action Sequence。UI 名称"自动任务"不等同于所有 Scheduled Task。
+"自动任务"中的本地自动化规则，可按固定时间或 Application Lifecycle Event 触发，也可作为 Process Guard 持续生效。它可以引用现存 Home Card、关闭正在运行的 Default Home Card，或直接拥有一个 Action Sequence。UI 名称"自动任务"不等同于所有 Scheduled Task。
 _Avoid_: Broadcast Task、Custom Home Card、复制卡片
 
 **Application Lifecycle Event**:
 Home Card Task 可选择的软件行为，当前包括每次启动、开机静默启动和从 Tray Menu 退出。关闭主窗口、更新安装退出或其他非 Tray Menu 退出不触发退出事件。
 _Avoid_: Scheduled Task、操作系统关机、主窗口关闭
+
+**Process Guard（进程守护）**:
+"自动任务"中的一种 Home Card Task：电教猫运行期间持续确保一个指定程序在当前用户的桌面上运行，发现它不在就把它启动起来。程序按可执行文件的完整路径认定，同名但位置不同的程序不算。它不是一次性触发，不参与定时匹配；不判断程序是否未响应，也不阻止别人关闭它。被拉起后反复撑不过 30 秒或根本启动不了时，这一条在本次运行内停止守护，直到重新打开它的开关或下次启动电教猫；Windows 关机或注销时全部停止。
+_Avoid_: 进程保活、看门狗、Application Lifecycle Event（守护不是一次事件）
 
 **Shutdown Task**:
 "定时关机"中的 Scheduled Task，在匹配时直接关闭计算机或先进入 Shutdown Prompt。"本次不关机"只跳过当前触发，不会禁用或删除任务。
@@ -423,6 +427,9 @@ _Avoid_: 搜索结果（设置页不再有结果列表）、筛选项
 
 > **Dev:** "关闭主窗口时，会不会触发'电教猫关闭时'的自动任务？"
 > **Domain expert:** "不会。关闭主窗口只是隐藏；该 Application Lifecycle Event 只由 Tray Menu 的退出程序触发。"
+
+> **Dev:** "想让班级优化大师一直开着，加一条'电教猫启动时'打开它的自动任务就行吧？"
+> **Domain expert:** "那只在启动时打开一次，学生关掉就没了。要它一直开着，用 Process Guard：电教猫运行期间它一不在就被拉起来。"
 
 > **Dev:** "发现新版本后直接走应用市场更新就行吗？"
 > **Domain expert:** "先说清是哪一种版本。Client Update 更新 DJCat；Application Update 更新市场里的某个 Application。"

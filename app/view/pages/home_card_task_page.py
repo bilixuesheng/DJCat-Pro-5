@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QTime
+import os
+from pathlib import Path, PureWindowsPath
+
+from PySide6.QtCore import QDir, QTime
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     CaptionLabel,
     ComboBox,
@@ -10,6 +13,7 @@ from qfluentwidgets import (
     InfoBarPosition,
     LineEdit,
     PillPushButton,
+    PushButton,
     StrongBodyLabel,
     isDarkTheme,
 )
@@ -24,11 +28,13 @@ from app.common.home_card_tasks import (
     EXISTING_HOME_CARD_TASK,
     HOME_CARD_TASK_KEY,
     OPEN_HOME_CARD_ACTION,
+    PROCESS_GUARD_TRIGGER,
     SCHEDULED_HOME_CARD_TRIGGER,
     SILENT_STARTUP_EVENT,
     normalizeHomeCardTasks,
 )
 from app.common.home_cards import newId
+from app.common.process_guard import guardRules, isSameProgram, stopLabel
 from app.config.cfg import cfg
 from app.view.components.home_card_dialog import ActionSequenceEditor
 from app.view.components.task_page import (
@@ -140,6 +146,27 @@ def updateHomeCardOptions(widgets, entries):
     widgets["homeCards"] = {entry["key"]: entry for entry in cards}
 
 
+def _pathInput(parent, placeholder, choose):
+    wrapper = QWidget(parent)
+    row = QHBoxLayout(wrapper)
+    row.setContentsMargins(0, 0, 0, 0)
+    line = LineEdit(wrapper)
+    line.setPlaceholderText(placeholder)
+    line.setFixedWidth(260)
+    button = PushButton(FIF.FOLDER, "选择", wrapper)
+
+    def browse():
+        path = choose(parent)
+        if path:
+            line.setText(QDir.toNativeSeparators(path))
+            line.editingFinished.emit()
+
+    button.clicked.connect(browse)
+    row.addWidget(line)
+    row.addWidget(button)
+    return wrapper, line
+
+
 def createHomeCardTaskForm(
     parent,
     homeCards,
@@ -158,6 +185,7 @@ def createHomeCardTaskForm(
         "targetKey": "",
         "targetTitle": "",
         "actions": [],
+        "program": {"target": "", "arguments": "", "working_dir": ""},
     }
     form = QWidget(parent)
     layout = QVBoxLayout(form)
@@ -186,6 +214,7 @@ def createHomeCardTaskForm(
     triggerCombo = ComboBox(form)
     triggerCombo.addItem("固定时间", userData=SCHEDULED_HOME_CARD_TRIGGER)
     triggerCombo.addItem("软件行为", userData=APPLICATION_HOME_CARD_TRIGGER)
+    triggerCombo.addItem("进程守护", userData=PROCESS_GUARD_TRIGGER)
     triggerIndex = triggerCombo.findData(data.get("trigger"))
     triggerCombo.setCurrentIndex(triggerIndex if triggerIndex >= 0 else 0)
     triggerCombo.setFixedWidth(180)
@@ -193,7 +222,7 @@ def createHomeCardTaskForm(
         TaskFormSettingCard(
             FIF.HISTORY,
             "触发时机",
-            "选择固定时间或软件行为触发",
+            "选择固定时间、软件行为或进程守护",
             triggerCombo,
             form,
         )
@@ -216,6 +245,58 @@ def createHomeCardTaskForm(
     layout.addWidget(eventCard)
     widgets["eventCombo"] = eventCombo
     widgets["eventCard"] = eventCard
+
+    program = data.get("program") if isinstance(data.get("program"), dict) else {}
+    programWrapper, programInput = _pathInput(
+        form,
+        "要一直开着的 .exe",
+        lambda owner: QFileDialog.getOpenFileName(
+            owner, "选择要守护的程序", "", "程序 (*.exe)"
+        )[0],
+    )
+    programInput.setText(program.get("target", ""))
+    programCard = TaskFormSettingCard(
+        FIF.APPLICATION,
+        "守护程序",
+        "电教猫运行期间，它一不在就把它重新打开",
+        programWrapper,
+        form,
+    )
+    layout.addWidget(programCard)
+    widgets["programInput"] = programInput
+    widgets["programCard"] = programCard
+
+    argumentsInput = LineEdit(form)
+    argumentsInput.setPlaceholderText("可选，例如 --tray")
+    argumentsInput.setFixedWidth(260)
+    argumentsInput.setText(program.get("arguments", ""))
+    argumentsCard = TaskFormSettingCard(
+        FIF.COMMAND_PROMPT,
+        "启动参数",
+        "重新打开时传给程序的参数",
+        argumentsInput,
+        form,
+    )
+    layout.addWidget(argumentsCard)
+    widgets["argumentsInput"] = argumentsInput
+    widgets["argumentsCard"] = argumentsCard
+
+    workingDirWrapper, workingDirInput = _pathInput(
+        form,
+        "可选，默认为电教猫的工作目录",
+        lambda owner: QFileDialog.getExistingDirectory(owner, "选择工作目录"),
+    )
+    workingDirInput.setText(program.get("working_dir", ""))
+    workingDirCard = TaskFormSettingCard(
+        FIF.FOLDER,
+        "工作目录",
+        "重新打开程序时使用的工作目录",
+        workingDirWrapper,
+        form,
+    )
+    layout.addWidget(workingDirCard)
+    widgets["workingDirInput"] = workingDirInput
+    widgets["workingDirCard"] = workingDirCard
 
     timePicker = TouchTimePicker(form, showSeconds=True)
     taskTime = QTime.fromString(data.get("time", ""), "HH:mm:ss")
@@ -258,16 +339,16 @@ def createHomeCardTaskForm(
     modeIndex = modeCombo.findData(data.get("mode"))
     modeCombo.setCurrentIndex(modeIndex if modeIndex >= 0 else 0)
     modeCombo.setFixedWidth(180)
-    layout.addWidget(
-        TaskFormSettingCard(
-            FIF.APPLICATION,
-            "任务类型",
-            "执行已有主页卡片，或编排自定义动作",
-            modeCombo,
-            form,
-        )
+    modeCard = TaskFormSettingCard(
+        FIF.APPLICATION,
+        "任务类型",
+        "执行已有主页卡片，或编排自定义动作",
+        modeCombo,
+        form,
     )
+    layout.addWidget(modeCard)
     widgets["modeCombo"] = modeCombo
+    widgets["modeCard"] = modeCard
 
     homeCardCombo = ComboBox(form)
     homeCardCombo.setFixedWidth(280)
@@ -328,16 +409,21 @@ def createHomeCardTaskForm(
     widgets["actionCard"] = actionCard
 
     def updateVisibility(*args):
+        trigger = triggerCombo.currentData()
+        isGuard = trigger == PROCESS_GUARD_TRIGGER
         isExisting = modeCombo.currentData() == EXISTING_HOME_CARD_TASK
-        isScheduled = triggerCombo.currentData() == SCHEDULED_HOME_CARD_TRIGGER
+        isScheduled = trigger == SCHEDULED_HOME_CARD_TRIGGER
         selected = widgets.get("homeCards", {}).get(homeCardCombo.currentData())
         isDefault = selected is not None and selected.get("source") == "default"
-        eventCard.setVisible(not isScheduled)
+        eventCard.setVisible(trigger == APPLICATION_HOME_CARD_TRIGGER)
         timeCard.setVisible(isScheduled)
         weekCard.setVisible(isScheduled)
-        homeCardCard.setVisible(isExisting)
-        operationCard.setVisible(isExisting and isDefault)
-        actionCard.setVisible(not isExisting)
+        for card in (programCard, argumentsCard, workingDirCard):
+            card.setVisible(isGuard)
+        modeCard.setVisible(not isGuard)
+        homeCardCard.setVisible(not isGuard and isExisting)
+        operationCard.setVisible(not isGuard and isExisting and isDefault)
+        actionCard.setVisible(not isGuard and not isExisting)
 
     triggerCombo.currentIndexChanged.connect(updateVisibility)
     modeCombo.currentIndexChanged.connect(updateVisibility)
@@ -383,7 +469,28 @@ def homeCardTaskData(widgets):
             else widgets.get("targetTitle", "")
         ),
         "actions": actions,
+        "program": {
+            "target": widgets["programInput"].text().strip(),
+            "arguments": widgets["argumentsInput"].text().strip(),
+            "working_dir": widgets["workingDirInput"].text().strip(),
+        },
     }
+
+
+def _guardProgramProblem(target, taskId=None):
+    if not target:
+        return "请选择要守护的程序"
+    # 快捷方式不是进程，没法据此判断程序在不在运行。
+    if not target.lower().endswith(".exe"):
+        return "只能守护 .exe 程序；快捷方式可右键「打开文件所在的位置」找到它"
+    if not Path(os.path.expandvars(target)).is_file():
+        return "程序文件不存在"
+    if any(
+        rule["id"] != taskId and isSameProgram(rule["program"]["target"], target)
+        for rule in guardRules(cfg.homeCardTasks.value)
+    ):
+        return "已有守护这个程序的自动任务"
+    return ""
 
 
 class AddHomeCardTaskDialog(ScheduledTaskDialog):
@@ -406,13 +513,19 @@ class AddHomeCardTaskDialog(ScheduledTaskDialog):
     def validate(self):
         widgets = self.formWidgets
         data = homeCardTaskData(widgets)
-        if data["mode"] != EXISTING_HOME_CARD_TASK:
+        if data["trigger"] == PROCESS_GUARD_TRIGGER:
+            problem = _guardProgramProblem(data["program"]["target"])
+        elif data["mode"] != EXISTING_HOME_CARD_TASK:
             return widgets["actionEditor"].validate(self)
-        if data["targetKey"] in widgets.get("homeCards", {}):
+        elif data["targetKey"] in widgets.get("homeCards", {}):
+            problem = ""
+        else:
+            problem = "请选择一个当前存在的主页卡片"
+        if not problem:
             return True
         InfoBar.error(
             "无法保存",
-            "请选择一个当前存在的主页卡片",
+            problem,
             duration=3000,
             position=InfoBarPosition.TOP,
             parent=self,
@@ -424,9 +537,10 @@ class AddHomeCardTaskDialog(ScheduledTaskDialog):
 
 
 class HomeCardTaskCard(ScheduledTaskCard):
-    def __init__(self, data, homeCards, scrollArea, parent=None):
+    def __init__(self, data, homeCards, scrollArea, guardStop="", parent=None):
         self._homeCards = homeCards
         self._scrollArea = scrollArea
+        self._guardStop = guardStop
         self._homeCardKeys = {
             entry["key"] for entry in _availableHomeCards(homeCards)
         }
@@ -455,12 +569,47 @@ class HomeCardTaskCard(ScheduledTaskCard):
         widgets["homeCardCombo"].currentIndexChanged.connect(self._refreshFormHeight)
         widgets["operationCombo"].currentIndexChanged.connect(self._saveData)
         widgets["actionEditor"].changed.connect(self._saveData)
+        # 输完才存：边打字边存，打到一半的路径会被守护当成新规则去拉起。
+        widgets["programInput"].editingFinished.connect(self._onProgramEdited)
+        widgets["argumentsInput"].editingFinished.connect(self._saveData)
+        widgets["workingDirInput"].editingFinished.connect(self._saveData)
 
     def _formData(self):
         self.formWidgets["targetTitle"] = self.data.get("targetTitle", "")
         return homeCardTaskData(self.formWidgets)
 
+    def _onProgramEdited(self):
+        programInput = self.formWidgets["programInput"]
+        saved = self.data.get("program", {}).get("target", "")
+        target = programInput.text().strip()
+        if target == saved:
+            return
+        problem = _guardProgramProblem(target, self.data["id"])
+        if problem:
+            programInput.setText(saved)
+            InfoBar.error(
+                "无法保存",
+                problem,
+                duration=3000,
+                position=InfoBarPosition.TOP,
+                parent=self.window(),
+            )
+            return
+        self._saveData()
+
+    def setGuardStop(self, reason):
+        if reason == self._guardStop:
+            return
+        self._guardStop = reason
+        self.expandCard.card.setContent(self._summary())
+
     def _summary(self):
+        if self.data.get("trigger") == PROCESS_GUARD_TRIGGER:
+            target = self.data.get("program", {}).get("target", "")
+            summary = f"进程守护 · {PureWindowsPath(target).name or '未选择程序'}"
+            if self._guardStop:
+                summary += f"（已停止：{stopLabel(self._guardStop)}）"
+            return summary
         if self.data.get("mode") == CUSTOM_HOME_CARD_TASK:
             target = f"自定义动作：{len(self.data.get('actions', []))} 个"
         else:
@@ -492,6 +641,7 @@ class HomeCardTaskCard(ScheduledTaskCard):
 class HomeCardTaskPage(ScheduledTaskPage):
     def __init__(self, homeCards=None, parent=None):
         self._homeCards = _availableHomeCards(homeCards or [])
+        self._guardStops = {}
         super().__init__(
             "自动任务",
             "还没有设置自动任务哦 ~",
@@ -505,11 +655,23 @@ class HomeCardTaskPage(ScheduledTaskPage):
         for card in self._cards:
             card.setHomeCards(self._homeCards)
 
+    def setGuardStops(self, stops):
+        """本次运行内已经停止守护的 Process Guard（任务 ID → 原因），显示在卡片摘要里。"""
+        self._guardStops = dict(stops)
+        for card in self._cards:
+            card.setGuardStop(self._guardStops.get(card.data["id"], ""))
+
     def _normalizeTasks(self, tasks):
         return normalizeHomeCardTasks(tasks)
 
     def _createCard(self, task):
-        return HomeCardTaskCard(task, self._homeCards, self.scrollArea, self.view)
+        return HomeCardTaskCard(
+            task,
+            self._homeCards,
+            self.scrollArea,
+            self._guardStops.get(task["id"], ""),
+            self.view,
+        )
 
     def _createDialog(self):
         return AddHomeCardTaskDialog(self._homeCards, self.window())

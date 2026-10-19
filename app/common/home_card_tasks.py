@@ -10,9 +10,11 @@ HOME_CARD_TASK_KEY = "自动任务"
 HOME_CARD_TASK_MODES = (EXISTING_HOME_CARD_TASK, CUSTOM_HOME_CARD_TASK)
 SCHEDULED_HOME_CARD_TRIGGER = "time"
 APPLICATION_HOME_CARD_TRIGGER = "application"
+PROCESS_GUARD_TRIGGER = "guard"
 HOME_CARD_TASK_TRIGGERS = (
     SCHEDULED_HOME_CARD_TRIGGER,
     APPLICATION_HOME_CARD_TRIGGER,
+    PROCESS_GUARD_TRIGGER,
 )
 APPLICATION_STARTUP_EVENT = "startup"
 SILENT_STARTUP_EVENT = "silent-startup"
@@ -66,6 +68,15 @@ def _weeks(value) -> list[int]:
     return weeks
 
 
+def _program(value) -> dict:
+    value = value if isinstance(value, dict) else {}
+    return {
+        "target": _text(value.get("target")),
+        "arguments": _text(value.get("arguments")),
+        "working_dir": _text(value.get("working_dir")),
+    }
+
+
 def normalizeHomeCardTasks(value) -> list[dict]:
     tasks = []
     taskIds = set()
@@ -101,6 +112,7 @@ def normalizeHomeCardTasks(value) -> list[dict]:
                 "targetKey": _text(raw.get("targetKey")),
                 "targetTitle": _text(raw.get("targetTitle"))[:40],
                 "actions": normalizeActions(raw.get("actions", [])),
+                "program": _program(raw.get("program")),
                 "enabled": _enabled(raw.get("enabled", True)),
             }
         )
