@@ -40,7 +40,7 @@ Theme Color 由 `cfg.themeColorPreset` 决定：预设取 `THEME_COLOR_PRESETS` 
 
 QFluentWidgets 的控件经样式表和 `getFont()` 用 `qconfig.fontFamilies`，普通 Qt 控件（主页横幅的"主页"、倒计时和时钟的标题、投送正文、Markdown 正文）不写字体、跟着 QApplication 字体；`applyAppFont()` 把两边设成同一串。`djcat.py` 的 `bindAppFont()` 在创建任何控件之前套用一次，之后跟着配置当场换。少了启动这一步，Qt 6 在 Windows 上把程序字体取成系统消息字体，用户把它换成只有西文的字体后，Qt 不走 Windows 的字体链接（SystemLink），按自己的候补列表找汉字，简体中文区域排第一的是宋体。「跟随系统」读的也是这个系统字体，Windows 里改了要下次启动才跟上。当场换的顺序固定：先改 `qconfig.fontFamilies` 和 QApplication 字体，再把自己设过字体、仍是旧那串的控件换掉，重新套用组件库样式表，最后把仍是旧那串、挂着样式表的控件重新 polish（Qt 不把程序字体的变化传给样式表定下的字体，文档也说两者不要混用），全部换完才发 `signalBus.appFontChanged`。按字体量出尺寸或缓存了画面的地方接这个信号重算：主页和应用市场卡片的两行说明、广告文字、倒计时和时钟的字号、Tray Menu、Setting Preview；帧率标签在自己的 `FontChange` 里重算。`tests/test_app_font.py` 检查换完后没有一个控件停在旧字体上。页面和 `pyqt_github_markdown` 不得在样式表里写 `font-family`，也不得用带字体名的 `QFont` 改正文字体；只改字号和粗细时用 `QFont()` 或控件自己的 `font()`。代码块的等宽字体例外。
 
-`app/view/components/font_picker.py` 的字体选择弹窗用一个自绘的 `FontList` 画全部字体，每行用这款字体自己写名字（符号字体改用界面字体），理由与 `IconGrid` 相同；中文字体那一档只列含简体中文的字体，竖排的 `@` 字体一律不列。
+`app/view/components/font_picker.py` 的字体选择弹窗用一个自绘的 `FontList` 画全部字体，每行用这款字体自己写名字（符号字体改用界面字体），理由与 `IconGrid` 相同；中文字体那一档只列含简体中文的字体；西文字体那一档只列不含简体中文的字体，「跟随系统」也只在系统字体不含汉字时列出，否则汉字也由西文字体显示、中文字体永远不起作用；竖排的 `@` 字体一律不列。
 
 Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯黑或纯白（接近的不算），边色与按钮反色、不看背景；纯白时图标和文字用黑色，纯黑纯白的悬停和按下用固定灰阶。这套配色统一经 `window_background.closeButtonColors()` 取，真实窗口和 Setting Preview 共用。细边在 `paintEvent` 里用一条圆角路径画完，不用样式表的 `border`：样式表把直边和圆弧分开画，半透明的边在接头处叠出亮点（`tests/test_theme_color.py` 检查）。Corner Button 从 QFluentWidgets 的样式表登记里注销，自己跟着主题和主题色重设样式；登记着的话，组件库每换一次主题或主题色就把它套回自己的按钮样式。
 

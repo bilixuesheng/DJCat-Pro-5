@@ -241,13 +241,19 @@ class FontPickerTest(AppFontCase):
         super().setUp()
         for name, value in (
             ("families", lambda *_args: list(self.FAMILIES)),
-            ("writingSystems", lambda family: self.SYSTEMS[family]),
+            ("writingSystems", lambda family: self.SYSTEMS.get(family, [])),
             ("isPrivateFamily", lambda _family: False),
         ):
             patcher = patch.object(QFontDatabase, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
         patcher = patch("app.view.components.font_picker.fontInstalled", _installed)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.systemFont = "System Sans"
+        patcher = patch(
+            "app.view.components.font_picker.systemFontFamily", lambda: self.systemFont
+        )
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -259,10 +265,18 @@ class FontPickerTest(AppFontCase):
             self._values(cfg.appFont),
             [DEFAULT_FONT, SYSTEM_FONT, "Inter", "Microsoft YaHei", "Wingdings", "KaiTi"],
         )
-        self.assertEqual(self._values(cfg.latinFont), self._values(cfg.appFont))
 
     def testChineseFontListsOnlySimplifiedChineseFonts(self):
         self.assertEqual(self._values(cfg.cjkFont), [DEFAULT_FONT, "Microsoft YaHei", "KaiTi"])
+
+    def testLatinFontListsOnlyFontsWithoutChinese(self):
+        # 西文字体带着汉字的话，Qt 让它连汉字一起显示，中文字体永远轮不到。
+        self.assertEqual(
+            self._values(cfg.latinFont), [DEFAULT_FONT, SYSTEM_FONT, "Inter", "Wingdings"]
+        )
+        self.systemFont = "Microsoft YaHei"
+        self.assertEqual(self._values(cfg.latinFont), [DEFAULT_FONT, "Inter", "Wingdings"])
+        self.assertIn(SYSTEM_FONT, self._values(cfg.appFont))
 
     def testEachNameIsWrittenInItsOwnFaceExceptSymbolFonts(self):
         choices = {choice.value: choice for choice in fontChoices(cfg.appFont)}

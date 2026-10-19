@@ -612,7 +612,7 @@ class SettingPage(QWidget):
             cfg.appFont, "字体", "软件显示文字所用的字体；选的字体没有汉字时，中文用默认字体"
         )
         self.latinFontCard = FontSettingCard(
-            cfg.latinFont, "西文字体", "字母、数字和英文符号"
+            cfg.latinFont, "西文字体", "字母、数字和英文符号，只能选不含汉字的字体"
         )
         self.cjkFontCard = FontSettingCard(
             cfg.cjkFont, "中文字体", "汉字和中文标点，只能选含简体中文的字体"

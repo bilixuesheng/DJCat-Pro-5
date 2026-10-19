@@ -55,13 +55,17 @@ class FontChoice:
 def fontChoices(item) -> list[FontChoice]:
     """「默认」first, then 「跟随系统」 where it applies, then the installed families.
 
-    The CJK Font lists only fonts that cover Simplified Chinese; vertical ``@`` faces
-    and application-private families are never offered.
+    The CJK Font lists only fonts that cover Simplified Chinese, and the Latin Font only
+    fonts that do not: a Latin font with Chinese glyphs would also take every Chinese
+    character, and the CJK Font would never show. Vertical ``@`` faces and
+    application-private families are never offered.
     """
-    cjkOnly = item is cfg.cjkFont
     choices = [FontChoice(DEFAULT_FONT, "默认", tuple(previewFamilies(item, DEFAULT_FONT)))]
-    if not cjkOnly:
-        system = systemFontFamily()
+    system = systemFontFamily()
+    systemHasChinese = (
+        QFontDatabase.WritingSystem.SimplifiedChinese in QFontDatabase.writingSystems(system)
+    )
+    if item is cfg.appFont or (item is cfg.latinFont and not systemHasChinese):
         choices.append(
             FontChoice(SYSTEM_FONT, f"跟随系统（{system}）", (system, *DEFAULT_CJK_FAMILIES))
         )
@@ -70,7 +74,7 @@ def fontChoices(item) -> list[FontChoice]:
             continue
         systems = QFontDatabase.writingSystems(family)
         chinese = QFontDatabase.WritingSystem.SimplifiedChinese in systems
-        if cjkOnly and not chinese:
+        if (item is cfg.cjkFont and not chinese) or (item is cfg.latinFont and chinese):
             continue
         # 符号字体（Wingdings 之类）用自己写出来是一串图形，名字改用界面字体写。
         readable = chinese or QFontDatabase.WritingSystem.Latin in systems
