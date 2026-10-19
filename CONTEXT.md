@@ -89,7 +89,7 @@ _Avoid_: 最大化动画（没有最大化）、缩放动画（圆角和内容�
 ### 定时与自动任务
 
 **Scheduled Task**:
-按对应 Task Master Switch、独立启用状态、星期和精确时间反复匹配的本地规则。Broadcast Task、使用固定时间的 Home Card Task 和 Shutdown Task 属于 Scheduled Task；软件行为触发的 Home Card Task 不参与定时匹配。
+按对应 Task Master Switch、独立启用状态、星期和精确时间反复匹配的本地规则。Broadcast Task、使用固定时间的 Home Card Task 和 Shutdown Task 属于 Scheduled Task；软件行为触发的 Home Card Task 和 Process Guard 不参与定时匹配。
 _Avoid_: alarm、job；不加限定地称 task
 
 **Task Master Switch**:
@@ -105,12 +105,16 @@ Broadcast Task 要播放的内容来源，分为内置报时或铃声、系统 T
 _Avoid_: Broadcast Type、media type
 
 **Home Card Task**:
-"自动任务"中的本地自动化规则，可按固定时间或 Application Lifecycle Event 触发。它可以引用现存 Home Card、关闭正在运行的 Default Home Card，或直接拥有一个 Action Sequence。UI 名称"自动任务"不等同于所有 Scheduled Task。
+"自动任务"中的本地自动化规则，可按固定时间或 Application Lifecycle Event 触发，也可作为 Process Guard 持续生效。它可以引用现存 Home Card、关闭正在运行的 Default Home Card，或直接拥有一个 Action Sequence。UI 名称"自动任务"不等同于所有 Scheduled Task。
 _Avoid_: Broadcast Task、Custom Home Card、复制卡片
 
 **Application Lifecycle Event**:
 Home Card Task 可选择的软件行为，当前包括每次启动、开机静默启动和从 Tray Menu 退出。关闭主窗口、更新安装退出或其他非 Tray Menu 退出不触发退出事件。
 _Avoid_: Scheduled Task、操作系统关机、主窗口关闭
+
+**Process Guard（进程守护）**:
+"自动任务"中的一种 Home Card Task：电教猫运行期间持续确保一个指定程序在运行，发现它不在就把它启动起来。程序按可执行文件的完整路径认定，同名但位置不同的程序不算。它不是一次性触发，不参与定时匹配；不判断程序是否未响应，也不阻止别人关闭它。
+_Avoid_: 进程保活、看门狗、Application Lifecycle Event（守护不是一次事件）
 
 **Shutdown Task**:
 "定时关机"中的 Scheduled Task，在匹配时直接关闭计算机或先进入 Shutdown Prompt。"本次不关机"只跳过当前触发，不会禁用或删除任务。
