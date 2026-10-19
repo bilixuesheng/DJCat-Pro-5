@@ -111,12 +111,15 @@ def _processes(sameSession: bool = False) -> list[tuple[int, Path]] | None:
 
 def processesUnder(directory: Path) -> list[tuple[int, Path]]:
     """可执行文件位于 directory 下的进程，按 (进程 ID, 可执行文件) 列出，不含本进程。"""
+    processes = _processes()
+    if not processes:
+        return []
     try:
         root = Path(directory).resolve(strict=False)
     except (OSError, ValueError):
         return []
     running = []
-    for processId, executable in _processes() or []:
+    for processId, executable in processes:
         try:
             executable.relative_to(root)
         except ValueError:
