@@ -1,5 +1,6 @@
 import time
 from datetime import datetime
+from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -16,13 +17,16 @@ from app.common.home_card_tasks import (
     EXISTING_HOME_CARD_TASK,
     HOME_CARD_TASK_KEY,
     OPEN_HOME_CARD_ACTION,
+    PROCESS_GUARD_TRIGGER,
     SCHEDULED_HOME_CARD_TRIGGER,
     SILENT_STARTUP_EVENT,
     normalizeHomeCardTasks,
 )
+from app.common.process_guard import MISSING_PROGRAM, REPEATED_EXIT
 from app.config.cfg import HOME_CARD_SCHEMA_VERSION, cfg, migrateConfig
 from app.view.components.task_picker import TouchTimePicker
 from app.view.pages.home_card_task_page import (
+    AddHomeCardTaskDialog,
     HomeCardTaskPage,
     createHomeCardTaskForm,
     homeCardTaskData,
@@ -165,6 +169,35 @@ class HomeCardTaskDataTest(TestCase):
         self.assertEqual(normalized["event"], SILENT_STARTUP_EVENT)
         self.assertEqual(normalized["operation"], CLOSE_HOME_CARD_ACTION)
 
+    def testProcessGuardKeepsItsProgramAndOtherTasksGetAnEmptyOne(self):
+        guard = existing_task()
+        guard.update(
+            {
+                "trigger": PROCESS_GUARD_TRIGGER,
+                "program": {
+                    "target": " C:\\Tools\\guard.exe ",
+                    "arguments": "--tray",
+                    "working_dir": "C:\\Tools",
+                },
+            }
+        )
+
+        normalized, other = normalizeHomeCardTasks([guard, custom_task()])
+
+        self.assertEqual(normalized["trigger"], PROCESS_GUARD_TRIGGER)
+        self.assertEqual(
+            normalized["program"],
+            {
+                "target": "C:\\Tools\\guard.exe",
+                "arguments": "--tray",
+                "working_dir": "C:\\Tools",
+            },
+        )
+        self.assertEqual(
+            other["program"],
+            {"target": "", "arguments": "", "working_dir": ""},
+        )
+
 
 class HomeCardTaskUiTest(TestCase):
     @classmethod
@@ -211,6 +244,79 @@ class HomeCardTaskUiTest(TestCase):
         data = homeCardTaskData(widgets)
         self.assertEqual(data["trigger"], APPLICATION_HOME_CARD_TRIGGER)
         self.assertEqual(data["event"], APPLICATION_QUIT_EVENT)
+
+    def testProcessGuardAsksForAProgramInsteadOfATimeOrCard(self):
+        form, widgets = createHomeCardTaskForm(None, home_cards())
+        self.addCleanup(form.deleteLater)
+
+        widgets["triggerCombo"].setCurrentIndex(
+            widgets["triggerCombo"].findData(PROCESS_GUARD_TRIGGER)
+        )
+        widgets["programInput"].setText("C:\\Class\\ClassApp.exe")
+        widgets["argumentsInput"].setText("--tray")
+        widgets["workingDirInput"].setText("C:\\Class")
+
+        self.assertEqual(widgets["triggerCombo"].currentText(), "进程守护")
+        for name in ("programCard", "argumentsCard", "workingDirCard"):
+            self.assertFalse(widgets[name].isHidden(), name)
+        for name in (
+            "timeCard",
+            "weekCard",
+            "eventCard",
+            "modeCard",
+            "homeCardCard",
+            "operationCard",
+            "actionCard",
+        ):
+            self.assertTrue(widgets[name].isHidden(), name)
+        data = homeCardTaskData(widgets)
+        self.assertEqual(data["trigger"], PROCESS_GUARD_TRIGGER)
+        self.assertEqual(
+            data["program"],
+            {
+                "target": "C:\\Class\\ClassApp.exe",
+                "arguments": "--tray",
+                "working_dir": "C:\\Class",
+            },
+        )
+
+    def testNewProcessGuardNeedsAnExistingExeThatIsNotGuardedYet(self):
+        directory = isolateCfg(self)
+        program = directory / "ClassApp.exe"
+        program.write_bytes(b"MZ")
+        notes = directory / "notes.txt"
+        notes.write_text("", encoding="utf-8")
+        guarded = directory / "Guarded.exe"
+        guarded.write_bytes(b"MZ")
+        cfg.set(
+            cfg.homeCardTasks,
+            [
+                {
+                    **existing_task(),
+                    "trigger": PROCESS_GUARD_TRIGGER,
+                    "program": {"target": str(guarded)},
+                    "enabled": False,
+                }
+            ],
+        )
+        parent = QWidget()
+        parent.resize(900, 700)
+        self.addCleanup(parent.deleteLater)
+        dialog = AddHomeCardTaskDialog(home_cards(), parent)
+        self.addCleanup(dialog.deleteLater)
+        widgets = dialog.formWidgets
+        widgets["triggerCombo"].setCurrentIndex(
+            widgets["triggerCombo"].findData(PROCESS_GUARD_TRIGGER)
+        )
+
+        for target in ("", str(notes), str(directory / "gone.exe"), str(guarded)):
+            with self.subTest(target=target):
+                widgets["programInput"].setText(target)
+                self.assertFalse(dialog.validate())
+
+        widgets["programInput"].setText(str(program))
+        self.assertTrue(dialog.validate())
+        self.assertEqual(dialog.getData()["program"]["target"], str(program))
 
     def testCloseActionIsOnlyAvailableForDefaultHomeCards(self):
         form, widgets = createHomeCardTaskForm(None, home_cards())
@@ -279,6 +385,35 @@ class HomeCardTaskUiTest(TestCase):
         self.addCleanup(page.deleteLater)
 
         self.assertIn("旧卡片（已失效）", page._cards[0]._summary())
+
+    def testProcessGuardSummaryNamesTheProgramAndWhyItStopped(self):
+        task = {
+            **existing_task(),
+            "trigger": PROCESS_GUARD_TRIGGER,
+            "program": {"target": "C:\\Class\\ClassApp.exe"},
+        }
+        cfg.set(cfg.homeCardTasks, [task])
+        page = HomeCardTaskPage(home_cards())
+        self.addCleanup(page.deleteLater)
+        card = page._cards[0]
+        self.assertEqual(card._summary(), "进程守护 · ClassApp.exe")
+
+        for reason, shown in (
+            (REPEATED_EXIT, REPEATED_EXIT),
+            (MISSING_PROGRAM, MISSING_PROGRAM),
+            ("拒绝访问。", "无法启动"),
+        ):
+            with self.subTest(reason=reason):
+                page.setGuardStops({task["id"]: reason})
+                self.assertEqual(
+                    card.expandCard.card.contentLabel.text(),
+                    f"进程守护 · ClassApp.exe（已停止：{shown}）",
+                )
+
+        page.setGuardStops({})
+        self.assertEqual(
+            card.expandCard.card.contentLabel.text(), "进程守护 · ClassApp.exe"
+        )
 
     def testPageDebouncesEditsAndFlushesLatestTask(self):
         cfg.set(cfg.homeCardTasks, [existing_task()])

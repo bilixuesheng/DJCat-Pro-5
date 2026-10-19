@@ -68,6 +68,7 @@ from app.common.home_card_tasks import (
     normalizeHomeCardTasks,
 )
 from app.common.home_cards import ActionSequenceWorker, normalizePinnedCards
+from app.common.process_guard import STARTUP_HOLD_SECONDS, ProcessGuard, stopMessage
 from app.common.update_download import (
     MAX_UPDATE_BYTES,
     UpdateDownloadWorker,
@@ -486,6 +487,9 @@ class MainWindow(MSFluentWindow):
             else:
                 cfg.set(cfg.lastBroadcast, {**broadcast, "active": False})
 
+        if isSilent:
+            self.processGuard.holdLaunches(STARTUP_HOLD_SECONDS)
+        self.processGuard.start()
         self._runApplicationHomeCardTasks(APPLICATION_STARTUP_EVENT)
         if isSilent:
             self._runApplicationHomeCardTasks(SILENT_STARTUP_EVENT)
@@ -608,6 +612,13 @@ class MainWindow(MSFluentWindow):
         self.scheduleTimer = QTimer(self)
         self.scheduleTimer.timeout.connect(self._checkSchedule)
         self.scheduleTimer.start(1000)
+        self.processGuard = ProcessGuard(self)
+        self.processGuard.stopped.connect(self._onProcessGuardStopped)
+        self._syncProcessGuard()
+        cfg.homeCardTasks.valueChanged.connect(self._syncProcessGuard)
+        cfg.homeCardTasksEnabled.valueChanged.connect(self._syncProcessGuard)
+        # Qt 收到 WM_QUERYENDSESSION 时发出它：关机或注销时先退出的程序不能再被拉回来拖住关机。
+        QApplication.instance().commitDataRequest.connect(self._onSessionEnding)
         self._downloadProgressTimer = QTimer(self)
         self._downloadProgressTimer.setInterval(100)
         self._downloadProgressTimer.timeout.connect(self._flushDownloadProgress)
@@ -983,9 +994,12 @@ class MainWindow(MSFluentWindow):
                 lambda: self._handleShutdownTask(task),
             )
 
-    @staticmethod
-    def _shutdownNow():
+    def _shutdownNow(self):
+        self.processGuard.shutdown()
         QProcess.startDetached("shutdown.exe", ["/s", "/t", "0"])
+
+    def _onSessionEnding(self, _sessionManager):
+        self.processGuard.shutdown()
 
     def _handleHomeCardTask(self, rawTask):
         tasks = normalizeHomeCardTasks([rawTask])
@@ -1034,6 +1048,31 @@ class MainWindow(MSFluentWindow):
                 and task["event"] == event
             ):
                 self._handleHomeCardTask(task)
+
+    def _syncProcessGuard(self, *args):
+        self.processGuard.setRules(
+            cfg.homeCardTasks.value, cfg.homeCardTasksEnabled.value
+        )
+        self._showProcessGuardStops()
+
+    def _onProcessGuardStopped(self, taskId, reason):
+        self._showProcessGuardStops()
+        if self._resourcesShutdown:
+            return
+        task = next(
+            (
+                item
+                for item in normalizeHomeCardTasks(cfg.homeCardTasks.value)
+                if item["id"] == taskId
+            ),
+            {"name": "进程守护"},
+        )
+        self._showHomeCardTaskError(task, stopMessage(reason))
+
+    def _showProcessGuardStops(self):
+        page = getattr(self, "homeCardTaskPage", None)
+        if page is not None:
+            page.setGuardStops(self.processGuard.stoppedReasons())
 
     def _closeHomeCard(self, key):
         if key == "全屏投送":
@@ -1321,11 +1360,13 @@ class MainWindow(MSFluentWindow):
     def _getHomeCardTaskPage(self):
         from app.view.pages.home_card_task_page import HomeCardTaskPage
 
-        page, _ = self._getTaskPage(
+        page, created = self._getTaskPage(
             "homeCardTaskPage",
             lambda parent: HomeCardTaskPage(self.homePage.homeCardEntries(), parent),
             "HomeCardTaskPage",
         )
+        if created:
+            self._showProcessGuardStops()
         return page
 
     def _updateSearchEdit(self, *args):
@@ -1870,6 +1911,8 @@ class MainWindow(MSFluentWindow):
         if self._quitRequested:
             return
         self._quitRequested = True
+        # "电教猫关闭时"的自动任务可能正要关掉被守护的程序，不能再把它拉回来。
+        self.processGuard.shutdown()
         self._saveGeometry()
         self._runApplicationHomeCardTasks(APPLICATION_QUIT_EVENT)
         if self._quitTaskIds:
@@ -1900,6 +1943,7 @@ class MainWindow(MSFluentWindow):
         self.stackedWidget.view._stopAnimation()
         self._navigationTarget = None
         self.scheduleTimer.stop()
+        self.processGuard.shutdown()
         self._cancelPendingEdgeTts()
         if self.tts is not None:
             self.tts.stop()

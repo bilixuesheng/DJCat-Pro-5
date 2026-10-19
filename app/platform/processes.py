@@ -3,7 +3,8 @@
 应用市场判断应用是否在运行、卸载和 Application Update 替换文件前关闭应用、Application
 Relocation 开始前关闭从 Application Install Location 运行的程序，都用同一个判定：进程的
 可执行文件位于该目录下面。别的程序只是开着里面的文件（资源管理器开着文件夹、Word 打开了
-里面的文档）不算，也不会被结束。非 Windows 上没有可找的进程，一律当作没有。
+里面的文档）不算，也不会被结束。Process Guard 判断被守护的程序在不在运行，看的是当前会话里
+有没有进程的可执行文件正是那个文件。非 Windows 上没有可找的进程，一律当作没有。
 """
 
 import os
@@ -36,11 +37,16 @@ def _kernel32():
     kernel32.WaitForSingleObject.restype = wintypes.DWORD
     kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
     kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.ProcessIdToSessionId.argtypes = (
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    )
+    kernel32.ProcessIdToSessionId.restype = wintypes.BOOL
     return kernel32
 
 
-def processesUnder(directory: Path) -> list[tuple[int, Path]]:
-    """可执行文件位于 directory 下的进程，按 (进程 ID, 可执行文件) 列出，不含本进程。"""
+def _processes(sameSession: bool = False) -> list[tuple[int, Path]]:
+    """其他进程的 (进程 ID, 可执行文件)；sameSession 为真时只要和本进程同一个登录会话的。"""
     if os.name != "nt":
         return []
     try:
@@ -54,11 +60,24 @@ def processesUnder(directory: Path) -> list[tuple[int, Path]]:
         ):
             return []
         kernel32 = _kernel32()
-        root = Path(directory).resolve(strict=False)
-        running = []
+        session = wintypes.DWORD()
+        if sameSession and not kernel32.ProcessIdToSessionId(
+            os.getpid(), ctypes.byref(session)
+        ):
+            return []
+        found = []
         count = bytesNeeded.value // ctypes.sizeof(wintypes.DWORD)
         for processId in processIds[:count]:
             if not processId or processId == os.getpid():
+                continue
+            # ProcessIdToSessionId 要 PROCESS_QUERY_INFORMATION，普通权限拿不到提权进程的，
+            # 读不出会话就当同一个会话：别的用户的进程连下面的有限查询都打不开。
+            processSession = wintypes.DWORD()
+            if (
+                sameSession
+                and kernel32.ProcessIdToSessionId(processId, ctypes.byref(processSession))
+                and processSession.value != session.value
+            ):
                 continue
             handle = kernel32.OpenProcess(
                 PROCESS_QUERY_LIMITED_INFORMATION, False, processId
@@ -72,17 +91,33 @@ def processesUnder(directory: Path) -> list[tuple[int, Path]]:
                     handle, 0, buffer, ctypes.byref(length)
                 ):
                     continue
-                executable = Path(buffer.value).resolve(strict=False)
-                try:
-                    executable.relative_to(root)
-                except ValueError:
-                    continue
-                running.append((int(processId), executable))
+                found.append((int(processId), Path(buffer.value).resolve(strict=False)))
             finally:
                 kernel32.CloseHandle(handle)
-        return running
+        return found
     except (AttributeError, OSError, ValueError):
         return []
+
+
+def processesUnder(directory: Path) -> list[tuple[int, Path]]:
+    """可执行文件位于 directory 下的进程，按 (进程 ID, 可执行文件) 列出，不含本进程。"""
+    try:
+        root = Path(directory).resolve(strict=False)
+    except (OSError, ValueError):
+        return []
+    running = []
+    for processId, executable in _processes():
+        try:
+            executable.relative_to(root)
+        except ValueError:
+            continue
+        running.append((processId, executable))
+    return running
+
+
+def runningExecutables() -> list[Path]:
+    """当前登录会话里其他进程的可执行文件；别的用户（快速切换用户、远程桌面）开着的不算。"""
+    return [executable for _processId, executable in _processes(sameSession=True)]
 
 
 def terminateProcesses(processIds, timeout: float = TERMINATE_TIMEOUT) -> None:

@@ -22,4 +22,5 @@ class ProcessesTest(TestCase):
     def testOtherPlatformsHaveNoProcessesToFind(self):
         with patch.object(processes.os, "name", "posix"):
             self.assertEqual(processes.processesUnder(Path("/apps")), [])
+            self.assertEqual(processes.runningExecutables(), [])
             processes.terminateProcesses([1, 2])

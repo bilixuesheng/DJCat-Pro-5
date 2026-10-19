@@ -20,6 +20,7 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 - **Custom Home Card** 包含一个 Action Sequence；`ActionSequenceWorker` 每次执行前读取最新动作列表，同一动作 ID 在一次运行中至多执行一次。
 - Custom Home Card 与 Custom 模式的 **Home Card Task** 共享 `ActionSequenceEditor` 和 Home Action 校验规则；两者只共享编辑与执行能力，不共享标题、图标或持久化对象。
 - Broadcast Task、Home Card Task 与 Shutdown Task 持久化在 `cfg`；对应设置页只编辑规则，MainWindow 负责按时间匹配或分发 Application Lifecycle Event。
+- **Process Guard** 是 `trigger` 为 `guard` 的 Home Card Task，和其他自动任务存在同一个 `cfg.homeCardTasks` 里、共用 Task Master Switch 和各条的启用开关；定时匹配和 Application Lifecycle Event 都跳过它。理由见 `docs/adr/0011-process-guard.md`。
 - Existing-card 模式的 **Home Card Task** 只保存稳定 Home Card key、用于失效提示的标题快照和打开／关闭动作；关闭只适用于 Default Home Card。Custom 模式直接拥有 Action Sequence，但不会创建 Custom Home Card。
 - AI Markdown Conversion 使用 Machine Identity 领取和结算 Daily Quota；Machine Code 只是定位该身份的可见别名。
 - **Last Seen** 与 **IP Location** 一起改写：服务端收到某个 Machine Identity 的注册、查额度、整理或 Error Report 请求时记下时间和来源 IP 的属地，只存属地文字，不存 IP。客户端每次启动都向 `/register` 报到一次，已有 Machine Code 也一样。
@@ -42,7 +43,9 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 
 **`app/view/windows/application_relocation.py` 拥有更改 Application Install Location 的界面流程。** MainWindow 创建它，设置页的「更改」「重置」只发出 `installLocationChangeRequested(路径)`（空字符串为重置）。顺序固定：禁选位置 → 应用市场有进行中的操作就拒绝 → 当前位置不可用先确认 → 后台查写入权限 → 没权限时问是否提权（非空文件夹加一句已有文件也会开放修改；UAC 点「否」等于取消）→ 后台列应用、查冲突，跨盘才量大小和空间 → 没有应用直接改 → 确认框列出会被强制关闭的应用 → 再查一次应用市场是否空闲 → 写迁移记录、开始搬。确认之前任何一步都不碰进程。成功后先提交配置再在后台删旧文件；失败时 Relocation Toast 写明"应用仍在原位置"，不给「重试」。退出时不等待，下次启动 `recoverAtStartup()` 收尾。它不加载 Application Store 页面，只通过 `LazyAppStorePage.hasActiveOperations()` 询问。
 
-**`app/platform/processes.py` 独占按目录查找和强制结束进程。** 判定一律是"可执行文件位于该目录下面"：应用市场判断应用是否在运行、卸载和 Application Update 替换文件前强制关闭应用、Application Relocation 开始前关闭旧位置里运行的程序都用它。只是开着里面文件的别的程序不结束，由文件被占用的失败路径报告。
+**`app/platform/processes.py` 独占按目录查找和强制结束进程。** 判定一律是"可执行文件位于该目录下面"：应用市场判断应用是否在运行、卸载和 Application Update 替换文件前强制关闭应用、Application Relocation 开始前关闭旧位置里运行的程序都用它。只是开着里面文件的别的程序不结束，由文件被占用的失败路径报告。Process Guard 用 `runningExecutables()` 判断程序在不在运行：只看当前登录会话里的进程；`ProcessIdToSessionId` 要 `PROCESS_QUERY_INFORMATION`，普通权限读不出提权进程的会话，读不出的当作同一会话（别的用户的进程连有限查询都打不开）。
+
+**`app/common/process_guard.py` 独占 Process Guard 的规则。** MainWindow 创建 `ProcessGuard`，按 `cfg.homeCardTasks` 和 `cfg.homeCardTasksEnabled` 调 `setRules()`；开机静默启动时先 `holdLaunches(60)` 再 `start()`，60 秒内只看不拉，因为被守护的程序可能也在自启。检查在后台线程里每 3 秒一轮，连续两次没看到才拉起，放过程序自我重启的空档；按可执行文件完整路径认定，不弹 UAC。拉起后撑不过 30 秒、连续 6 次，或者拉起失败（文件不存在、错误 740 需要管理员权限、其他报错），这一条在本次运行内停止并发出 `stopped`：MainWindow 弹一次「自动任务执行失败」，并把 `stoppedReasons()` 交给自动任务页显示在卡片摘要里。没变的规则保留检查进度和停止状态；关掉再打开、关开总开关或换了程序都从头开始；同一个程序只守护列表里的第一条（新建对话框拒绝重复、非 `.exe` 和不存在的文件，行内编辑不校验，靠这里去重）。从托盘点「退出」的那一刻、Qt 的 `commitDataRequest`（Windows 关机或注销）、定时关机真正执行时和 `_shutdownResources()` 都调 `shutdown()`，之后不再守护：先退出的程序被拉回来会拖住关机，"电教猫关闭时"的自动任务关掉的程序也不能被拉回来。Application Relocation 期间跳过 Application Install Location 下的程序；卸载和 Application Update 不另外避让，它们关掉程序后几毫秒内就换掉目录，赶不上二次确认，「确认卸载」框经 `guardedUnder()` 补一句守护会停止。
 
 **`app/platform/animation_timer.py` 独占 Qt 全局 Animation Tick 间隔。** View 和业务模块不直接调用 Qt 私有动画 API；私有符号不可用时保留 Qt 默认行为。Super Frame Rate Optimization 默认开，`setSuperFrameRateEnabled()` 跟着开发人员选项「停用超级帧率优化」（`cfg.disableSuperFrameRate`）在 1 ms 和 Qt 默认的 16 ms 之间当场切换；从启动起就停用时不碰私有符号。
 
@@ -304,6 +307,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
 | `app/common/install_location.py` | Application Install Location 与 Application Relocation 的规则：位置、校验、权限、搬动与撤回、迁移记录收尾、提交；不涉及界面 |
 | `app/common/home_card_tasks.py` | Home Card Task schema 归一化、稳定 ID、触发事件和动作常量；不负责计时或 QWidget |
+| `app/common/process_guard.py` | Process Guard：守护规则、后台检查、拉起和停止原因；不知道自动任务页和 InfoBar |
 | `tools/updater/updater.c` | Client Update 的独立更新器：等待进程退出、把暂存目录整目录换名为程序目录（失败时换回备份）、重启 DJCat |
 | `app/view/windows/main_window.py` | 桌面组合根、导航、长期运行任务和 Client Update UI |
 | `app/view/windows/application_relocation.py` | 更改 Application Install Location 的界面流程：检查、提权、确认、后台迁移和 Relocation Toast |
@@ -366,8 +370,9 @@ set working directory
       → publish the complete Home Card snapshot to the Setting page and Tray Menu
       → finish an interrupted Application Relocation from cfg.appRelocation in a background thread
       → report Last Seen to the AI Markdown server in a background thread
-      → create tray and long-lived timers/workers
+      → create tray and long-lived timers/workers, including Process Guard (rules from cfg.homeCardTasks)
       → restore valid active Projection Snapshot only when recovery is enabled
+      → start Process Guard (after silent startup it only watches for the first 60 s)
       → dispatch startup event and, when applicable, silent-startup event
   → bind activation request and aboutToQuit
   → Qt event loop
@@ -397,6 +402,7 @@ switchTo(target)
 
 ```text
 Tray Menu quit → MainWindow.requestQuit()
+  → stop Process Guard, so quit tasks can close guarded programs
   → dispatch application-quit Home Card Tasks
   → wait asynchronously for newly started custom Action Sequences
   → MainWindow._shutdownResources()
