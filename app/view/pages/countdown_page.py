@@ -252,9 +252,9 @@ class CountdownWindow(TimerWindow):
         minutes, seconds = divmod(rest, 60)
         separator = "\u2009:\u2009" if self.isWindowed else " : "
         self.timeLabel.setText(
-            f"{hours}{separator}{minutes}{separator}{seconds}"
+            f"{hours:02d}{separator}{minutes:02d}{separator}{seconds:02d}"
         )
-        # 文本长度变化会影响窗口化下的自适应字号
+        # 超过 99 小时多出一格，窗口化下的自适应字号要重新量
         if self.isWindowed:
             self._applyFonts(self.contentsRect().height())
 

@@ -1,11 +1,11 @@
 from unittest import TestCase
 
 from PySide6.QtCore import QTime
-from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import Flyout, PushButton
 
 from app.config.cfg import HOME_CARD_SCHEMA_VERSION, cfg, migrateConfig
+from app.view.components.time_text import timeTextWidth
 from app.view.pages.fullscreen_clock import FullscreenClockWindow
 from tests.support import isolateCfg
 
@@ -101,9 +101,7 @@ class FullscreenClockTest(TestCase):
 
         margins = self.window.vBoxLayout.contentsMargins()
         available = self.window.width() - margins.left() - margins.right()
-        width = QFontMetrics(self.window.timeLabel.font()).horizontalAdvance(
-            self.window.timeLabel.text()
-        )
+        width = timeTextWidth(self.window.timeLabel.font(), self.window.timeLabel.text())
         self.assertLessEqual(width, available)
 
     def testCloseButtonUsesClockConfirmationSetting(self):
