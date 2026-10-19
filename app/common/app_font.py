@@ -15,7 +15,7 @@ can be set: a font for English punctuation alone would also take the letters.
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontDatabase
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 from qfluentwidgets import qconfig
 from qfluentwidgets.common.style_sheet import updateStyleSheet
 
@@ -94,14 +94,17 @@ def _refreshWidgets(oldFamilies: list[str], families: list[str]) -> None:
     updateStyleSheet()
     # 挂着样式表的控件在 polish 时就按样式表定下字体，程序字体再变也不重算
     # （Qt 文档也说 QApplication::setFont 不要和样式表混用），只能重新 polish。
-    for widget in QApplication.allWidgets():
-        style = widget.style()
-        if (
-            widget.font().families() == oldFamilies
-            and style.metaObject().className() == "QStyleSheetStyle"
-        ):
-            style.unpolish(widget)
-            style.polish(widget)
+    # 照 Qt 自己换样式表时的做法自上而下只 polish：子控件按父控件的新字体算，
+    # 先 unpolish 在 Windows 上会访问冲突。
+    for window in QApplication.topLevelWidgets():
+        for widget in (window, *window.findChildren(QWidget)):
+            style = widget.style()
+            if (
+                widget.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)
+                and widget.font().families() == oldFamilies
+                and style.metaObject().className() == "QStyleSheetStyle"
+            ):
+                style.polish(widget)
 
 
 def bindAppFont() -> None:
