@@ -378,7 +378,7 @@ set working directory
 
 App Data Directory 必须在导入 `cfg` 和调用 `qconfig.load` 前由 `app/config/paths.py` 确定。第二个 Windows 实例只通知现有实例显示窗口，然后退出；它不创建 MainWindow。
 
-Super Frame Rate Optimization 读出配置才知道开不开，所以由 `bindDeveloperOptions()` 设置：在 QApplication 创建之后、任何动画启动之前、GUI 主线程上。之后的切换当场生效，正在跑的动画也一样（Qt 换间隔时重启自己的动画驱动）。它只针对项目锁定的 Qt 运行时查找私有符号；找不到符号或动态库时记录一次警告并保留 Qt 默认 16 ms 间隔，不允许加载系统中另一份 Qt 来凑合。
+Super Frame Rate Optimization 读出配置才知道开不开，所以由 `bindDeveloperOptions()` 设置：在 QApplication 创建之后、任何动画启动之前、GUI 主线程上。之后的切换当场生效，正在跑的动画也一样（Qt 换间隔时重启自己的动画驱动）。私有符号只从进程里已经加载的那份 QtCore 取（Windows 用 `GetModuleHandleW`，Linux 用 `RTLD_NOLOAD`，其他平台取不到），不按 `QLibraryInfo` 的路径去找：Nuitka 把 Qt 的 DLL 放在 `djcat.exe` 旁边，PySide6 报的 Prefix 却仍是 `PySide6\`，按路径找在发行版里一次也没找到过。进程里没有 QtCore 或找不到符号时记录一次警告并保留 Qt 默认 16 ms 间隔，不允许加载另一份 Qt 来凑合。
 
 `installTranslators()` 装两份中文翻译：`FluentTranslator` 管 QFluentWidgets 自带文案（开关、输入框右键菜单、颜色对话框），Qt 的 `qtbase_zh_CN.qm` 管原生控件（Markdown 链接的"复制链接地址"等 Qt 自带文案；数字框用的是 QFluentWidgets 的 `LineEditMenu`，归前者）。Nuitka 只在用到 QtWebEngine 时才打包 Qt 的 translations 目录，所以 `deploy.py` 单独把 qtbase 这一份打进 `QT_TRANSLATIONS_DIR`；源码运行时先用 PySide6 自带的目录。
 
@@ -425,7 +425,7 @@ Tray Menu quit → MainWindow.requestQuit()
 - 动画 duration 仍按真实经过时间计算，不能按 tick 次数累计时间。
 - 不读取显示器刷新率，也不按 60/120/160 Hz 切换间隔；机器负载决定实际可处理的 tick 数。
 - 不承诺 Presented Frame 数；DWM、VSync 和绘制耗时仍可限制屏幕实际帧率。
-- Qt 版本或打包布局变化导致私有符号不可用时必须安全退回默认动画驱动；升级 PySide6 时需要在 Windows x64 重新验证导出符号和端到端动画时长。
+- Qt 版本或打包布局变化导致私有符号不可用时必须安全退回默认动画驱动；升级 PySide6 或改打包方式时需要在 Windows x64 重新验证导出符号和端到端动画时长，并且要在打包后的程序上验证（日志里没有"无法解除 Qt 动画帧率限制"）：源码运行时测试全绿，不代表发行版也开得起来。
 
 1 ms 间隔只对改位置和透明度的动画是净收益。凡是每帧要调操作系统或强制同步布局的回调，都必须自己限流，否则 tick 变密等于把这类开销放大十几倍：`setMask` 在顶层菜单上落到 `SetWindowRgn`，`QLayout.activate()` 是不受 `LayoutRequest` 事件压缩保护的同步重排。只打脏标记的调用（`setFixedHeight`、`update()`）由 Qt 自行合并，不要给它们加限流——那只会让控件几何落后于动画值。顶层透明窗口是例外：它的每次重绘都要把位图交给系统合成，Window Transition 的整屏动画层因此按屏幕刷新率自限，Busy Glow 自限 60 Hz。
 
