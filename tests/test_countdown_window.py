@@ -2,7 +2,6 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QFontMetrics
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QScroller, QWidget
 from qfluentwidgets import Flyout, PrimaryPushButton, PushButton
@@ -10,6 +9,7 @@ from qfluentwidgets import Flyout, PrimaryPushButton, PushButton
 from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.task_picker import TouchTimePicker
+from app.view.components.time_text import timeTextWidth
 from app.view.pages.countdown_page import CountdownEditPage, CountdownWindow
 from tests.support import isolateCfg
 
@@ -44,7 +44,7 @@ class CountdownWindowTest(TestCase):
         self.window._refreshTime()
         self.assertEqual(
             self.window.timeLabel.text(),
-            "1\u2009:\u20092\u2009:\u20093",
+            "01\u2009:\u200902\u2009:\u200903",
         )
 
         self.window.remaining = 86399
@@ -55,9 +55,7 @@ class CountdownWindowTest(TestCase):
             - margins.left()
             - margins.right()
         )
-        width = QFontMetrics(self.window.timeLabel.font()).horizontalAdvance(
-            self.window.timeLabel.text()
-        )
+        width = timeTextWidth(self.window.timeLabel.font(), self.window.timeLabel.text())
         self.assertLessEqual(width, available)
 
     def testEditPageUsesTouchTimePicker(self):

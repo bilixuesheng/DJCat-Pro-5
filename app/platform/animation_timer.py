@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import ctypes
+import os
 import sys
-from pathlib import Path
 
-from PySide6.QtCore import QLibraryInfo
 from loguru import logger
 
 
@@ -51,37 +50,21 @@ class _QtAnimationTimer:
 
         raise RuntimeError("当前 QtCore 未导出 QUnifiedTimer")
 
+    # Only the QtCore this process already runs on: Nuitka puts it beside
+    # djcat.exe, not where QLibraryInfo points, and loading another copy is never
+    # acceptable.
     @staticmethod
     def _loadQtCore():
-        qtRoot = Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.PrefixPath))
-        libraryPath = Path(
-            QLibraryInfo.path(QLibraryInfo.LibraryPath.LibrariesPath)
-        )
-        binariesPath = Path(
-            QLibraryInfo.path(QLibraryInfo.LibraryPath.BinariesPath)
-        )
-
         if sys.platform == "win32":
-            names = ("Qt6Core.dll",)
-            load = ctypes.WinDLL
-        elif sys.platform == "darwin":
-            names = (
-                "QtCore.framework/QtCore",
-                "libQt6Core.6.dylib",
-                "libQt6Core.dylib",
-            )
-            load = ctypes.CDLL
-        else:
-            names = ("libQt6Core.so.6", "libQt6Core.so")
-            load = ctypes.CDLL
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
+            kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+            handle = kernel32.GetModuleHandleW("Qt6Core.dll")
+            if not handle:
+                raise RuntimeError("进程里没有加载 Qt6Core")
+            return ctypes.WinDLL("Qt6Core.dll", handle=handle)
 
-        for directory in (libraryPath, binariesPath, qtRoot):
-            for name in names:
-                path = directory / name
-                if path.is_file():
-                    return load(str(path))
-
-        raise RuntimeError("找不到 Qt6Core 动态库")
+        return ctypes.CDLL("libQt6Core.so.6", mode=os.RTLD_NOLOAD)
 
     def setInterval(self, interval: int) -> None:
         instance = self._instance()
