@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
+from PySide6.QtCore import QLibraryInfo
 
 from app.platform import animation_timer
 
@@ -68,18 +68,9 @@ def test_super_frame_rate_falls_back_once_when_qt_hides_the_timer():
     warning.assert_called_once()
 
 
-def test_qt_core_loader_stays_inside_pyside_runtime(tmp_path):
-    qtRoot = tmp_path / "runtime"
-    qtRoot.mkdir()
-    (tmp_path / "libQt6Core.so.6").touch()
+def test_qt_core_is_the_copy_already_in_the_process(tmp_path):
+    # Nuitka puts Qt6Core beside djcat.exe, where QLibraryInfo never points.
+    with patch.object(QLibraryInfo, "path", return_value=str(tmp_path)):
+        timer = animation_timer._QtAnimationTimer.create()
 
-    with (
-        patch.object(animation_timer.sys, "platform", "linux"),
-        patch.object(
-            animation_timer.QLibraryInfo,
-            "path",
-            return_value=str(qtRoot),
-        ),
-        pytest.raises(RuntimeError, match="找不到 Qt6Core"),
-    ):
-        animation_timer._QtAnimationTimer._loadQtCore()
+    timer.setInterval(animation_timer.DEFAULT_TIMER_INTERVAL_MS)
