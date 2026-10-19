@@ -50,6 +50,10 @@ HIGHLIGHT_WIDTH = 2
 
 ROOT_SECTION_KEY = "root"
 
+# Win11 设置里相邻两张卡片隔 4 px；预览、小节标题和其他内容前后仍隔 10 px。
+CARD_SPACING = 4
+BLOCK_SPACING = 10
+
 
 def _cubicBezierCurve(x1: float, y1: float, x2: float, y2: float) -> QEasingCurve:
     curve = QEasingCurve(QEasingCurve.Type.BezierSpline)
@@ -263,6 +267,7 @@ class SettingSectionView(ScrollArea):
         self._cardLists = []
         self._navigationCards = []
         self._previews = []
+        self._lastIsCard = False
 
         self._initWidget()
 
@@ -273,43 +278,64 @@ class SettingSectionView(ScrollArea):
         self.setObjectName(f"SettingSection_{self.key.replace('.', '_')}")
         self.enableTransparentBackground()
         self.vBoxLayout.setContentsMargins(11, 4, 11, 36)
-        self.vBoxLayout.setSpacing(10)
+        self.vBoxLayout.setSpacing(CARD_SPACING)
         self.vBoxLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.enableOpaqueScrolling()
+
+    def _addBlock(
+        self,
+        widget: QWidget,
+        isCard: bool,
+        alignment: Qt.AlignmentFlag | None = None,
+    ) -> None:
+        # QBoxLayout 的间距只算在非空项之间，垫块两侧不另加：4 + 6 正好是 10。
+        if self.vBoxLayout.count() and not (isCard and self._lastIsCard):
+            self.vBoxLayout.addSpacing(BLOCK_SPACING - CARD_SPACING)
+        widget.setParent(self.container)
+        if alignment is None:
+            self.vBoxLayout.addWidget(widget)
+        else:
+            self.vBoxLayout.addWidget(widget, 0, alignment)
+        self._lastIsCard = isCard
 
     def addPreview(self, widget: QWidget, centered: bool = False) -> QWidget:
         """``centered`` is for fixed-size previews; stretchy ones would shrink to
         their size hint under an alignment flag."""
-        widget.setParent(self.container)
-        if centered:
-            self.vBoxLayout.addWidget(widget, 0, Qt.AlignmentFlag.AlignHCenter)
-        else:
-            self.vBoxLayout.addWidget(widget)
+        self._addBlock(
+            widget,
+            isCard=False,
+            alignment=Qt.AlignmentFlag.AlignHCenter if centered else None,
+        )
         self._previews.append(widget)
         return widget
 
     def addWidget(self, widget: QWidget) -> QWidget:
         """Content that is neither a preview nor a searchable card list."""
-        widget.setParent(self.container)
-        self.vBoxLayout.addWidget(widget)
+        self._addBlock(widget, isCard=False)
         return widget
 
     def addNavigationCard(self, card: SettingNavigationCard) -> SettingNavigationCard:
-        card.setParent(self.container)
-        self.vBoxLayout.addWidget(card)
+        self._addBlock(card, isCard=True)
         self._navigationCards.append(card)
         return card
 
     def addSubsectionTitle(self, text: str) -> StrongBodyLabel:
         label = StrongBodyLabel(text, self.container)
         label.setContentsMargins(6, 12, 0, 0)
-        self.vBoxLayout.addWidget(label)
+        self._addBlock(label, isCard=False)
         return label
 
-    def addCardList(self, cards: list[QWidget]) -> SettingCardList:
+    def addSettingCards(self, cards: list[QWidget]) -> None:
+        """Each Setting Card stands alone, the way Windows 11 settings lists them."""
+        for card in cards:
+            self.addLinkedSettingCards([card])
+
+    def addLinkedSettingCards(self, cards: list[QWidget]) -> SettingCardList:
+        """Linked Setting Cards: a controlling card followed by the cards it shows,
+        hides or changes, sharing one panel."""
         cardList = SettingCardList(self.container)
         cardList.addSettingCards(cards)
-        self.vBoxLayout.addWidget(cardList)
+        self._addBlock(cardList, isCard=True)
         self._cardLists.append(cardList)
         return cardList
 

@@ -12,16 +12,19 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
+from qfluentwidgets import FluentIcon, StrongBodyLabel
 from shiboken6 import delete
 
 from app.common import install_location
 from app.common.application_store import ApplicationStoreError
-from app.config.cfg import cfg
+from app.config.cfg import BANNER_IMAGE_PRESETS, cfg
 from app.config.constants import APP_NAME
 from app.config.paths import LOG_DIR
 from app.view.components.setting_card_group import SettingCardList
 from app.view.components.setting_section import (
+    BLOCK_SPACING,
+    CARD_SPACING,
     ROOT_SECTION_KEY,
     SLIDE_DURATION_MS,
     SettingNavigationCard,
@@ -288,6 +291,111 @@ class SettingSectionTest(TestCase):
 
         card.switchButton.setChecked(False)
         self.assertFalse(cfg.windowTransitionEnabled.value)
+
+    def panel(self, card) -> SettingCardList:
+        widget = card.parentWidget()
+        while not isinstance(widget, SettingCardList):
+            widget = widget.parentWidget()
+        return widget
+
+    def gap(self, upper: QWidget, lower: QWidget) -> int:
+        return lower.geometry().top() - upper.geometry().bottom() - 1
+
+    def testOnlyLinkedSettingCardsShareAPanel(self):
+        page = self.buildPage()
+        linked = {
+            tuple(page._backgroundCardSets[prefix])
+            for prefix in ("broadcast", "countdown", "fullscreenClock")
+        } | {
+            (
+                page.showBannerCard,
+                page.bannerSourceCard,
+                page.chooseImageCard,
+                page.bannerScaleCard,
+                page.bannerBrightnessCard,
+            ),
+            (page.applicationIconSourceCard, page.applicationIconCard),
+            (page.trayIconSourceCard, page.trayIconCard),
+        }
+
+        shared = {
+            cardList.settingCards()
+            for view in page.sectionStack.views()
+            for cardList in view.cardLists()
+            if len(cardList.settingCards()) > 1
+        }
+        self.assertEqual(shared, linked)
+
+    def testTrayCardShortcutsStandAloneToo(self):
+        page = self.buildPage()
+        page.trayCardShortcutList.setHomeCards(
+            [
+                {"key": "a", "icon": FluentIcon.HOME, "title": "甲"},
+                {"key": "b", "icon": FluentIcon.HOME, "title": "乙"},
+            ]
+        )
+        cards = page.trayCardShortcutList.cards()
+
+        self.assertEqual(len(cards), 2)
+        for card in cards:
+            with self.subTest(card=card.titleLabel.text()):
+                self.assertEqual(self.panel(card).settingCards(), (card,))
+
+    def testAdjacentCardsSitCloserThanOtherContent(self):
+        page = self.buildPage()
+        self.navigate(page, "broadcast")
+        view = page.sectionStack.view("broadcast")
+        background, aiMarkdown = view.navigationCards()
+        title = next(
+            label
+            for label in view.container.findChildren(StrongBodyLabel)
+            if label.text() == "窗口与显示"
+        )
+        taskbar = self.panel(page.broadcastTaskbarCard)
+
+        self.assertEqual(self.gap(background, aiMarkdown), CARD_SPACING)
+        self.assertEqual(
+            self.gap(taskbar, self.panel(page.broadcastTopmostFullscreenCard)),
+            CARD_SPACING,
+        )
+        self.assertEqual(self.gap(aiMarkdown, title), BLOCK_SPACING)
+        self.assertEqual(self.gap(title, taskbar), BLOCK_SPACING)
+
+        self.navigate(page, "broadcast.background")
+        preview = page.sectionStack.view("broadcast.background").previews()[0]
+        self.assertEqual(
+            self.gap(preview, self.panel(page.broadcastBackgroundModeCard)),
+            BLOCK_SPACING,
+        )
+
+    def testTurningTheBannerOffHidesTheRestOfItsLinkedCards(self):
+        isolateCfg(self)
+        cfg.set(cfg.showBanner, True)
+        cfg.set(cfg.bannerImageSource, "自定义")
+        page = self.buildPage()
+        rest = (
+            page.bannerSourceCard,
+            page.chooseImageCard,
+            page.bannerScaleCard,
+            page.bannerBrightnessCard,
+        )
+        self.assertFalse(any(card.isHidden() for card in rest))
+
+        cfg.set(cfg.showBanner, False)
+        self.assertFalse(page.showBannerCard.isHidden())
+        self.assertTrue(all(card.isHidden() for card in rest))
+        self.assertEqual(page.searchSuggestions("横幅亮度"), [])
+
+        cfg.set(cfg.showBanner, True)
+        cfg.set(cfg.bannerImageSource, next(iter(BANNER_IMAGE_PRESETS)))
+        self.assertTrue(page.chooseImageCard.isHidden())
+        self.assertFalse(
+            any(card.isHidden() for card in rest if card is not page.chooseImageCard)
+        )
+        self.assertEqual(
+            [item.card for item in page.searchSuggestions("横幅亮度")],
+            [page.bannerBrightnessCard],
+        )
 
     def testShortSectionListDoesNotStretchToThePageBottom(self):
         page = self.buildPage()
