@@ -41,7 +41,7 @@ DJCat 系统托盘图标提供的快捷操作集合。右键始终打开它；�
 _Avoid_: context menu、右键菜单（它不只可由右键打开）
 
 **Tray Click Action**:
-用户左键单击系统托盘图标时的行为，取值为显示主窗口或打开 Tray Menu；右键不受它影响。
+用户左键单击或用手指轻点系统托盘图标时的行为，取值为显示主窗口或打开 Tray Menu；右键不受它影响。
 _Avoid_: left-click preference、mouse mode
 
 **Tray Card Shortcut**:

@@ -1,9 +1,9 @@
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
-from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QImage, QInputDevice
-from PySide6.QtWidgets import QApplication, QScroller, QWidget
+from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QHideEvent, QIcon, QImage, QInputDevice
+from PySide6.QtWidgets import QApplication, QMenu, QScroller, QWidget
 from PySide6.QtTest import QTest
 from shiboken6 import isValid
 from qfluentwidgets import FluentIcon as FIF, RoundMenu, StrongBodyLabel
@@ -855,6 +855,81 @@ class TrayMenuTest(TestCase):
 
                 tray.onTrayIconClick(tray.ActivationReason.Context)
                 self.assertEqual(showMenu.call_count, 1)
+        finally:
+            tray.deleteLater()
+
+    def testTrayMenuExecReturnsOnceTheMenuHides(self):
+        cfg.set(cfg.trayHomeCardsInSubmenu, True)
+        tray = self._createTray()
+        try:
+            for menu in (tray.menu, tray.menu.findChildren(RoundMenu)[0]):
+                stuck = []
+
+                def rescue(menu=menu, stuck=stuck):
+                    # 回不来时由基类 hideEvent 退出事件循环，测试失败而不是卡死。
+                    stuck.append(True)
+                    QMenu.hideEvent(menu, QHideEvent())
+
+                watchdog = QTimer(menu)
+                watchdog.setSingleShot(True)
+                watchdog.timeout.connect(rescue)
+                watchdog.start(2000)
+                QTimer.singleShot(50, menu.hide)
+                menu.exec(QPoint(100, 100))
+                watchdog.stop()
+                self.assertEqual(stuck, [], "菜单收起后 exec() 没有返回")
+        finally:
+            tray.deleteLater()
+
+    def testTappingTrayWhileMenuIsOpenReopensWithoutNesting(self):
+        cfg.set(cfg.trayLeftClickAction, "ShowMenu")
+        tray = self._createTray()
+        calls = []
+
+        def execMenu(pos):
+            calls.append("exec")
+            if calls.count("exec") == 1:
+                calls.append("tap")
+                tray.onTrayIconClick(tray.ActivationReason.Trigger)
+                calls.append("tap done")
+
+        try:
+            with (
+                patch.object(tray.menu, "exec", side_effect=execMenu),
+                patch.object(tray.menu, "hide", side_effect=lambda: calls.append("hide")),
+            ):
+                tray.onTrayIconClick(tray.ActivationReason.Trigger)
+            self.assertEqual(
+                calls,
+                ["hide", "exec", "tap", "hide", "tap done", "hide", "exec"],
+            )
+            self.assertFalse(tray._menuOpen)
+        finally:
+            tray.deleteLater()
+
+    def testWindows11TouchTapOpensMenuAtTrayIcon(self):
+        cfg.set(cfg.trayLeftClickAction, "ShowMenu")
+        tray = self._createTray()
+        icon = QRect(1800, 1040, 24, 24)
+        cases = (
+            (22631, QPoint(300, 200), icon, icon.center()),
+            (22631, QPoint(1810, 1050), icon, QPoint(1810, 1050)),
+            (22631, QPoint(300, 200), QRect(), QPoint(300, 200)),
+            (19045, QPoint(300, 200), icon, QPoint(300, 200)),
+        )
+        try:
+            for build, cursor, iconRect, expected in cases:
+                with (
+                    patch("app.view.shell.tray.sys") as windows,
+                    patch("app.view.shell.tray.QCursor") as pointer,
+                    patch.object(tray, "geometry", return_value=iconRect),
+                    patch.object(tray.menu, "exec") as showMenu,
+                ):
+                    windows.platform = "win32"
+                    windows.getwindowsversion.return_value.build = build
+                    pointer.pos.return_value = cursor
+                    tray.onTrayIconClick(tray.ActivationReason.Trigger)
+                showMenu.assert_called_once_with(expected)
         finally:
             tray.deleteLater()
 

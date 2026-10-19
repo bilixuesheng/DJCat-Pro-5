@@ -88,7 +88,7 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 
 **Tray Menu 不拥有 Home Card。** 它只根据 HomePage 提供的入口快照重建菜单，并把稳定 key 交回 MainWindow/HomePage 执行。菜单内容由 `app/view/shell/tray.py` 的 `buildTrayMenu()` 一处决定，SystemTrayIcon 只在它建好的动作上接信号；「系统托盘」的 Setting Preview 用同一个函数建菜单，不得另写一份菜单项清单。
 
-Tray Menu 的外观和弹出方式固定恢复为 v5.1.2：右键由注册的 context menu 打开，左键按配置调用菜单；位置调整保留在 `showEvent()`，不再叠加新的展开或定位方案。自定义 AcrylicMenu 在 Windows 10 上统一使用方角窗口和方角边框，一级菜单和主页卡片二级菜单保持一致；Windows 11 继续使用原有系统圆角、亚克力和阴影。该平台差异只属于 Tray Menu，不修改下拉框、输入框右键等 QFluentWidgets 菜单。
+Tray Menu 的外观和弹出方式固定恢复为 v5.1.2：右键由注册的 context menu 打开，左键按配置调用菜单；位置调整保留在 `showEvent()`，不再叠加新的展开或定位方案。左键（含手指轻点）走原生 `QMenu.exec()`，它的事件循环只在 `QMenu.hideEvent` 里退出，而 `RoundMenu.hideEvent` 不调它，所以 AcrylicMenu 的 `hideEvent` 补调一次；少了这一句，一级和二级菜单每打开一次都留下一个退不出去的事件循环，直到重开软件（`tests/test_tray_controls.py` 检查）。Win11 上手指点任务栏既不移动鼠标指针，也不让开着的菜单收起，因此有两条规则。一是只在 Win11：轻点打开时指针不在 Tray Icon 上，就按点了图标正中打开，`QSystemTrayIcon.geometry()` 为空时照旧按指针，之后照旧在 `showEvent()` 里调整，Win10 一律按指针。二是各平台共用、实际只在 Win11 碰到：菜单开着时又轻点托盘，只收起菜单，回到外层的 `exec()` 后按新位置重开，不嵌套第二个 `exec()`。每次从托盘打开菜单都在日志里记下指针、图标和菜单最后摆放的位置，供排查。自定义 AcrylicMenu 在 Windows 10 上统一使用方角窗口和方角边框，一级菜单和主页卡片二级菜单保持一致；Windows 11 继续使用原有系统圆角、亚克力和阴影。该平台差异只属于 Tray Menu，不修改下拉框、输入框右键等 QFluentWidgets 菜单。
 
 **HomePage 按稳定 key 复用 Application Home Card。** 不变快照不得重建卡片或重复发布主页变化；标题、图标和动作更新原有卡片，移除时才释放对应 QWidget。
 
