@@ -1,5 +1,6 @@
+import math
+
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon as FIF
 from qframelesswindow import FramelessWindow
@@ -8,6 +9,7 @@ from app.platform.screens import screenFor
 from app.signal_bus import signalBus
 from app.view.components.frame_rate import trackFrameRate
 from app.view.components.setting_card_group import QWIDGETSIZE_MAX
+from app.view.components.time_text import TimeLabel, timeTextWidth
 from app.view.components.window_background import (
     TIMER_THEME_BACKGROUND,
     WINDOW_SHADOW_MARGIN,
@@ -63,7 +65,7 @@ class TimerWindow(FramelessWindow):
         self._moved = False
 
         self.titleLabel = QLabel(self)
-        self.timeLabel = QLabel(self)
+        self.timeLabel = TimeLabel(self)
         for label in (self.titleLabel, self.timeLabel):
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             label.setStyleSheet("color: white; background: transparent;")
@@ -203,8 +205,8 @@ class TimerWindow(FramelessWindow):
         size = max(32, height * numerator // denominator if self.isWindowed else height * 9 // 40)
         font.setPixelSize(size)
         font.setBold(True)
-        # 超宽时按比例缩小字号到刚好放得下
-        width = QFontMetrics(font).horizontalAdvance(self.timeLabel.text())
+        # 超宽时按比例缩小字号到刚好放得下；按数字格量宽，走秒不改字号
+        width = math.ceil(timeTextWidth(font, self.timeLabel.text()))
         margins = self.vBoxLayout.contentsMargins()
         available = self.contentsRect().width() - margins.left() - margins.right()
         if width > available:

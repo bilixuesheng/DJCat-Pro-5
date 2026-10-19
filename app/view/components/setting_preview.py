@@ -56,6 +56,7 @@ from app.platform.shadow_effect import paintSilhouetteShadow
 from app.signal_bus import signalBus
 from app.view.components.banner_widget import BannerWidget
 from app.view.components.setting_card_group import SettingMaterialCard
+from app.view.components.time_text import paintTimeText, timeTextWidth
 from app.view.components.window_background import (
     TIMER_THEME_BACKGROUND,
     WindowBackground,
@@ -264,17 +265,13 @@ class WindowBackgroundPreview(WindowBackground):
         font.setPixelSize(46)
         font.setWeight(QFont.Weight.DemiBold)
         # 预览宽度随屏幕比例变化，4:3 屏上 46 px 的时间会超出两侧。
-        width = QFontMetricsF(font).horizontalAdvance(text)
+        width = timeTextWidth(font, text)
         available = rect.width() * 0.88
         if width > available:
             font.setPixelSize(max(12, int(46 * available / width)))
         painter.setFont(font)
         painter.setPen(QColor(255, 255, 255, 235))
-        painter.drawText(
-            QRectF(rect.left(), rect.top() + 36, rect.width(), 60),
-            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
-            text,
-        )
+        paintTimeText(painter, QRectF(rect.left(), rect.top() + 36, rect.width(), 60), text)
 
     def _paintActionButtons(self, painter: QPainter) -> None:
         dark = self._darkFurniture()

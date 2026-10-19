@@ -397,8 +397,12 @@ _Avoid_: group（可折叠分组已退役）、页面（它不是导航页面，
 _Avoid_: path（与文件路径混淆）、breadcrumb（那是控件不是数据）
 
 **Setting Card**:
-Setting Section 中的一行设置项，通常绑定一个 `cfg` 配置项或一个动作按钮。部分 Setting Card 只在前置配置取特定值时可见。
+Setting Section 中的一张设置卡片，通常绑定一个 `cfg` 配置项或一个动作按钮，不属于 Linked Setting Cards 时单独成卡。部分 Setting Card 只在前置配置取特定值时可见。
 _Avoid_: 设置项（泛指值本身）、Home Card
+
+**Linked Setting Cards（联动卡片组）**:
+一张控制卡片，加上显隐或取值受它控制、紧排在它后面的 Setting Card，连在同一块底板上。例如背景模式与纯色颜色、背景图片、缩放方式；显示主页横幅与横幅的其余设置。没有这种联动的卡片不连在一起。
+_Avoid_: group、分组（可折叠分组已退役）、卡片列表
 
 **Setting Preview**:
 Setting Section 中目标界面按当前配置等比缩小后的样子，随所在 Section 的配置项变化立即重绘。它照真实的排布、尺寸和用户自己的数据（例如主页上实际存在的 Home Card）来画，而不是孤立地摆一张图片或一段文字。目标是主窗口时，宽高比跟着主窗口当前的宽高比实时变化。只显示状态，不接受输入。只放在叶子 Section 上，每个至多一个；不同叶子可以画同一个目标界面（主页横幅和外观都画主窗口），但同一条 Setting Route 上不重复。

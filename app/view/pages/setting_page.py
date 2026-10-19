@@ -81,6 +81,7 @@ from app.view.components.setting_preview import (
     WindowBackgroundPreview,
 )
 from app.view.components.setting_section import (
+    CARD_SPACING,
     ROOT_SECTION_KEY,
     SLIDE_DURATION_MS,
     SettingCardHighlight,
@@ -165,16 +166,17 @@ class TrayCardShortcutList(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._homeCards = []
+        self._cards = ()
         self.switches = {}
         self.vBoxLayout = QVBoxLayout(self)
-        self.cardList = self._createCardList()
+        self.cardColumn = self._createCardColumn()
 
         self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
-        self.vBoxLayout.addWidget(self.cardList)
+        self.vBoxLayout.addWidget(self.cardColumn)
         cfg.trayHomeCardKeys.valueChanged.connect(self._syncSwitches)
 
     def cards(self) -> tuple[QWidget, ...]:
-        return self.cardList.settingCards()
+        return self._cards
 
     def setHomeCards(self, entries) -> None:
         self._homeCards = []
@@ -186,22 +188,33 @@ class TrayCardShortcutList(QWidget):
             keys.add(key)
             self._homeCards.append(entry)
 
-        oldList = self.cardList
-        self.cardList = self._createCardList()
-        self.vBoxLayout.replaceWidget(oldList, self.cardList)
-        oldList.deleteLater()
+        oldColumn = self.cardColumn
+        self.cardColumn = self._createCardColumn()
+        self.vBoxLayout.replaceWidget(oldColumn, self.cardColumn)
+        oldColumn.deleteLater()
 
-    def _createCardList(self) -> SettingCardList:
-        cardList = SettingCardList(self)
+    def _createCardColumn(self) -> QWidget:
+        column = QWidget(self)
+        layout = QVBoxLayout(column)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(CARD_SPACING)
         self.switches = {}
+        self._cards = tuple(self._createCards())
+        for card in self._cards:
+            cardList = SettingCardList(column)
+            cardList.addSettingCard(card)
+            layout.addWidget(cardList)
+        return column
+
+    def _createCards(self) -> list[QWidget]:
         if not self._homeCards:
-            cardList.addSettingCard(
+            return [
                 SettingCard(
                     FluentIcon.INFO, "暂无主页卡片", "请先在主页添加或恢复卡片"
                 )
-            )
-            return cardList
+            ]
 
+        cards = []
         selected = selectedShortcutKeys(cfg.trayHomeCardKeys.value)
         for entry in self._homeCards:
             key = entry["key"]
@@ -215,8 +228,8 @@ class TrayCardShortcutList(QWidget):
                 )
             )
             self.switches[key] = card
-            cardList.addSettingCard(card)
-        return cardList
+            cards.append(card)
+        return cards
 
     def _setHomeCardEnabled(self, key: str, enabled: bool) -> None:
         selected = selectedShortcutKeys(cfg.trayHomeCardKeys.value)
@@ -1072,7 +1085,7 @@ class SettingPage(QWidget):
             ),
             centered=True,
         )
-        section.addCardList(list(self._backgroundCardSets[prefix]))
+        section.addLinkedSettingCards(list(self._backgroundCardSets[prefix]))
 
     def _addSection(
         self,
@@ -1116,11 +1129,11 @@ class SettingPage(QWidget):
             "整理风格、每日额度和机器码",
             "broadcast",
         )
-        aiMarkdown.addCardList(
+        aiMarkdown.addSettingCards(
             [self.aiStyleCard, self.aiQuotaCard, self.aiMachineCodeCard]
         )
         broadcast.addSubsectionTitle("窗口与显示")
-        broadcast.addCardList(
+        broadcast.addSettingCards(
             [
                 self.broadcastTaskbarCard,
                 self.broadcastTopmostFullscreenCard,
@@ -1129,7 +1142,7 @@ class SettingPage(QWidget):
             ]
         )
         broadcast.addSubsectionTitle("关闭行为")
-        broadcast.addCardList(
+        broadcast.addSettingCards(
             [
                 self.broadcastShowMainWindowCard,
                 self.broadcastConfirmCloseCard,
@@ -1146,7 +1159,7 @@ class SettingPage(QWidget):
         )
         self._addBackgroundSection("countdown", "倒计时窗口的背景、颜色和缩放", COUNTDOWN_CONTENT)
         countdown.addSubsectionTitle("窗口与显示")
-        countdown.addCardList(
+        countdown.addSettingCards(
             [
                 self.countdownTaskbarCard,
                 self.countdownTopmostFullscreenCard,
@@ -1155,7 +1168,7 @@ class SettingPage(QWidget):
             ]
         )
         countdown.addSubsectionTitle("关闭行为")
-        countdown.addCardList(
+        countdown.addSettingCards(
             [
                 self.countdownShowMainWindowCard,
                 self.countdownConfirmCloseCard,
@@ -1172,7 +1185,7 @@ class SettingPage(QWidget):
         )
         self._addBackgroundSection("fullscreenClock", "时钟窗口的背景、颜色和缩放", CLOCK_CONTENT)
         fullscreenClock.addSubsectionTitle("窗口与显示")
-        fullscreenClock.addCardList(
+        fullscreenClock.addSettingCards(
             [
                 self.fullscreenClockTaskbarCard,
                 self.fullscreenClockWindowedCard,
@@ -1182,7 +1195,7 @@ class SettingPage(QWidget):
             ]
         )
         fullscreenClock.addSubsectionTitle("关闭行为")
-        fullscreenClock.addCardList(
+        fullscreenClock.addSettingCards(
             [
                 self.fullscreenClockShowMainWindowCard,
                 self.fullscreenClockConfirmCloseCard,
@@ -1204,7 +1217,7 @@ class SettingPage(QWidget):
             "personalization",
         )
         appearance.addPreview(self._registerHomeCardPreview(MainWindowPreview()))
-        appearance.addCardList(
+        appearance.addSettingCards(
             [
                 self.themeModeCard,
                 self.themeColorCard,
@@ -1222,7 +1235,7 @@ class SettingPage(QWidget):
             "personalization",
         )
         font.addPreview(self._registerHomeCardPreview(MainWindowPreview()))
-        font.addCardList(
+        font.addLinkedSettingCards(
             [self.fontModeCard, self.appFontCard, self.latinFontCard, self.cjkFontCard]
         )
         banner = self._addSection(
@@ -1233,13 +1246,14 @@ class SettingPage(QWidget):
             "personalization",
         )
         banner.addPreview(self._registerHomeCardPreview(MainWindowPreview()))
-        banner.addCardList(
+        # 缩放方式紧跟来源：选预设会当场改掉它。
+        banner.addLinkedSettingCards(
             [
                 self.showBannerCard,
                 self.bannerSourceCard,
                 self.chooseImageCard,
-                self.bannerBrightnessCard,
                 self.bannerScaleCard,
+                self.bannerBrightnessCard,
             ]
         )
         applicationIcon = self._addSection(
@@ -1250,7 +1264,7 @@ class SettingPage(QWidget):
             "personalization",
         )
         applicationIcon.addPreview(self._registerHomeCardPreview(ApplicationIconPreview()))
-        applicationIcon.addCardList(
+        applicationIcon.addLinkedSettingCards(
             [self.applicationIconSourceCard, self.applicationIconCard]
         )
         tray = self._addSection(
@@ -1262,13 +1276,12 @@ class SettingPage(QWidget):
         )
         tray.addPreview(self._registerHomeCardPreview(TrayPreview()))
         tray.addSubsectionTitle("图标与提示")
-        tray.addCardList(
-            [self.trayIconSourceCard, self.trayIconCard, self.trayTooltipCard]
-        )
+        tray.addLinkedSettingCards([self.trayIconSourceCard, self.trayIconCard])
+        tray.addSettingCards([self.trayTooltipCard])
         tray.addSubsectionTitle("点击行为")
-        tray.addCardList([self.trayLeftClickCard])
+        tray.addSettingCards([self.trayLeftClickCard])
         tray.addSubsectionTitle("托盘菜单")
-        tray.addCardList(self.trayMenuCards)
+        tray.addSettingCards(self.trayMenuCards)
         tray.addSubsectionTitle("主页卡片")
         tray.addWidget(self.trayCardShortcutList)
 
@@ -1279,7 +1292,7 @@ class SettingPage(QWidget):
             "启动、更新、存储、缓存、日志和应用市场",
             ROOT_SECTION_KEY,
         )
-        software.addCardList(
+        software.addSettingCards(
             [
                 self.checkUpdateCard,
                 self.autoRunCard,
@@ -1295,7 +1308,7 @@ class SettingPage(QWidget):
             "应用安装位置",
             "software",
         )
-        appStore.addCardList([self.installLocationCard])
+        appStore.addSettingCards([self.installLocationCard])
         developer = self._addSection(
             DEVELOPER_SECTION_KEY,
             "开发人员选项",
@@ -1303,7 +1316,7 @@ class SettingPage(QWidget):
             "触控、帧率和页面懒加载。本选项仅供开发人员调试使用",
             "software",
         )
-        developer.addCardList(
+        developer.addSettingCards(
             [
                 self.disableTouchPressCard,
                 self.disableTunedTouchScrollCard,
@@ -1320,7 +1333,7 @@ class SettingPage(QWidget):
             "版本、支持和项目相关信息",
             ROOT_SECTION_KEY,
         )
-        about.addCardList([self.authorCard, self.aboutCard])
+        about.addSettingCards([self.authorCard, self.aboutCard])
 
     def _initLayout(self) -> None:
         self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
@@ -1361,6 +1374,7 @@ class SettingPage(QWidget):
         cfg.trayIconSource.valueChanged.connect(self._refreshConditionalCards)
         cfg.bannerImageSource.valueChanged.connect(self._onBannerImageSourceChanged)
         cfg.bannerImageSource.valueChanged.connect(self._refreshConditionalCards)
+        cfg.showBanner.valueChanged.connect(self._refreshConditionalCards)
         cfg.aiMarkdownMachineCode.valueChanged.connect(self._onMachineCodeChanged)
         for view in self.sectionStack.views():
             for cardList in view.cardLists():
@@ -1375,13 +1389,19 @@ class SettingPage(QWidget):
 
     def _conditionalCardVisibility(self) -> dict[QWidget, bool]:
         separateFonts = cfg.appFontMode.value == APP_FONT_MODES[1]
+        bannerShown = bool(cfg.showBanner.value)
         visibility = {
             self.appFontCard: not separateFonts,
             self.latinFontCard: separateFonts,
             self.cjkFontCard: separateFonts,
             self.applicationIconCard: cfg.applicationIconSource.value == "自定义",
             self.trayIconCard: cfg.trayIconSource.value == "自定义",
-            self.chooseImageCard: cfg.bannerImageSource.value == "自定义",
+            self.bannerSourceCard: bannerShown,
+            self.chooseImageCard: (
+                bannerShown and cfg.bannerImageSource.value == "自定义"
+            ),
+            self.bannerScaleCard: bannerShown,
+            self.bannerBrightnessCard: bannerShown,
         }
         for prefix, (_modeCard, colorCard, imageCard, scaleCard) in (
             self._backgroundCardSets.items()

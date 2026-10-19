@@ -72,6 +72,8 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 
 **`app/view/components/setting_preview.py` 独占 Setting Preview。** 画主窗口的预览不截取真实页面（会逼 Lazy Page 提前构造，还会截到设置页自己），而是由 `MainWindowReplica` 用真实组件——导航按钮、`BannerWidget`、主页的 `ActionCard`、标题栏按钮——按主窗口当前尺寸摆好，画到目标两倍大小再平滑缩小，结果按尺寸、设备像素比缓存，配置变化时作废。宽高比实时跟随主窗口（监听 `window()` 的尺寸变化），限高 280；复刻在第一次画时才搭。`tests/test_setting_preview.py` 逐项核对复刻和真实主窗口的几何一致，改主窗口或主页的排布时必须同步改复刻。托盘预览的菜单来自 `buildTrayMenu()`，按 `AcrylicMenu`／`RoundMenu` 的定位规则 1:1 摆在任务栏右侧。投送、倒计时和时钟的预览按屏幕比例画全屏，标题、正文和按钮离窗口边的距离照真实窗口的比例；角落按钮用真实图标和 80 × 65 的比例，缩放取屏幕比例与 0.4 中较大的一个，否则图标只剩几个像素；时钟定格在预览出现的那一刻。理由见 `docs/adr/0007-setting-preview-replica.md`。
 
+**Setting Card 默认各自成卡，照 Win11 设置排布。** 相邻两张卡（导航行也一样）隔 4 px，预览、小节标题和其他内容前后隔 10 px。只有 Linked Setting Cards 经 `SettingSectionView.addLinkedSettingCards()` 共用一块底板：控制卡片在前，显隐或取值受它控制的卡片紧随其后，目前是三处背景、主页横幅、字体、软件图标和托盘图标；其余一律 `addSettingCards()`。新卡片只有显隐或取值跟着另一张卡变时才进组（`tests/test_setting_sections.py` 逐组核对）。关掉「显示主页横幅」时横幅的其余卡片隐藏，按条件隐藏的规则不出现在 Setting Suggestion 里。主题色和 AI 整理风格这类展开卡片各自成卡，展开后的子项仍连在一起。
+
 **设置页搜索只产出 Setting Suggestion。** 页面本身不筛选、不折叠、不重排；建议只按 Setting Card 的标题匹配，条件隐藏的卡片不参与，跨 Section 重名的标题才补完整 Route 前缀。`SettingPage` 提供 `searchSuggestions()` 和 `navigateToRoute()`，弹窗由 MainWindow 拥有——搜索框属于标题栏，设置页不得反向持有它。选中建议后清空搜索框、跳到目标 Route、滚动到卡片并描一圈主题色边框，绝不改写用户的前置设置来让隐藏卡片现身。
 
 **每个 Setting Section 各自是一个 `ScrollArea`，各自记住滚动位置。** 返回上一级时停在离开时的位置，触控仲裁沿用 `ScrollArea` 既有实现，页面不另写一套。
@@ -277,6 +279,8 @@ Projection、Exam Countdown 和 Fullscreen Clock 共用的 `WindowBackground` �
 
 背景图片按物理像素缩放后标上设备像素比，缓存键包含设备像素比，与主页横幅同理。解码后的原图先经 `screens.fitToScreens()` 缩到最大屏幕的物理尺寸（仍盖满屏幕），Display Window 和设置里的预览共用模块级的一份，只记最近三张；主页横幅同样只留屏幕大小的一份。Projection、Exam Countdown 与 Fullscreen Clock 的窗口化背景、图片裁剪和边框共用 8 px 圆角；首次显示前启用透明窗口表面，不依赖 Win11 系统圆角。Qt 阴影只附着在背景组件上，四周各留 12 px 透明空间，Exam Countdown 与 Fullscreen Clock 的可见内容仍为 600 × 190，Projection 初始可见尺寸仍为可用屏幕的一半；字体、布局与角落按钮按 `contentsRect()` 定位，不能把阴影空间算进正文尺寸。切回全屏（含保留任务栏模式）时清除透明边距、圆角、边框和阴影，背景重新铺满窗口。Projection 保留窗口化缩放：Windows 命中测试使用消息中的坐标，按 DPI 转为背景局部坐标，在可见圆角边界内侧 12 px、外侧 2 px 的圆角区域判断四边及四角，不将透明阴影外沿作为边框。圆角外的空白和角落按钮不触发缩放；全屏禁用缩放。
 
+**`app/view/components/time_text.py` 独占 Display Window 的时间排字。** Exam Countdown 和 Fullscreen Clock 的时间由 `TimeLabel` 画：每个数字占一格，格宽是当前字体里最宽的数字，数字在格里居中，冒号和空格保持原宽；Setting Preview 画时间用同一个 `paintTimeText()` 和 `timeTextWidth()`。不能退回 `QLabel` 或只开 OpenType `tnum`：比例字体里 "1" 比 "0" 窄，按原宽居中时每走一秒整串都左右晃，而 `tnum` 不是每种系统字体都有。自适应字号同样按数字格量宽，走秒期间字号不变，只随窗口尺寸和全屏／窗口化切换重算。Exam Countdown 的时、分、秒都补成两位，与 Fullscreen Clock 一致。
+
 **`app/view/components/window_transition.py` 独占 Window Transition。** 三个 Display Window 的全屏／窗口化切换，以及 Projection 的 Collapse 和从 Floating Button 恢复，都经 `WindowTransition.run(source, change, target)`；`source`、`target` 返回两端的 `TransitionSurface`，Display Window 一端由 `backgroundSurface()` 给出，Floating Button 一端由它自己的 `transitionSurface()` 给出。顺序不能换：置顶透明层先以全透明的样子显示，确认它已摆上屏幕（之后的 `repaint()` 才是同步刷到屏幕的），切换那一步里才同步画出起点快照、紧接着把真窗口调成全透明并执行 `change`；终点窗口落定（尺寸与系统一致、已 Expose，且连续两个节拍不再收到系统送来的 Expose／Resize／Move：它们晚于切换本身到达）之后，先处理掉排着的排版请求和排队调用，再同步重画整窗、截终点快照。动画进行时真窗口一次也不能重画：它虽然全透明，Qt 照样要画，4K 下整窗重画比整段动画还长，动画就只剩首尾两帧；250 ms `OutCubic` 形变完先画出末帧、再还原真窗口的不透明度、同一步里把透明层刷成全透明再藏。反过来做，任意一步都会闪出桌面或让卡片跳一下；透明层与真窗口同时画着同一张卡时，阴影和圆角边缘会叠深一层，所以两者只在相邻两次调用之间短暂重叠。透明层藏起来前必须先刷成全透明：透明窗口藏起来后仍留着最后一帧，下次显示、还没重画就先亮出来，窗口会在上一次的位置闪一下。透明层的原生窗口在构造时就建好，不让第一次点击多等。`change` 里的每一毫秒都推迟动画开始，切换路径上不要做重复工作（如重设同样的样式表）。快照经 `WindowBackground.grabCard()` 截取，不带阴影：阴影也垫在透明圆角底下，带着截会和动画层自己画的阴影叠成两层。全屏时没有阴影和圆角，直接复制窗口缓冲区里已画好的像素，不再 `grab()` 重新渲染整窗；窗口化才不带阴影地重新渲染，它最多只有四分之一屏。形变两端快照只按矩形裁、阴影也不裁，与真窗口逐像素一致；途中才按插值后的圆角裁。重绘按屏幕刷新率自限，只重画形状经过的区域。过渡期间 Display Window 和 Floating Button 的按钮看 `isRunning()` 直接忽略；开始和关闭 Display Window 不播放过渡，`start*()` 与 `closeEvent()` 调 `cancel()` 丢掉尚未执行的切换。`cfg.windowTransitionEnabled` 关掉时 `run()` 直接执行切换。理由见 `docs/adr/0005-window-transition-snapshot.md`。
 
 **`app/view/components/busy_glow.py` 独占 Busy Glow。** AI Markdown 对话框和 Projection 编辑器内联整理的输入框共用同一个 `BusyGlowOverlay`；它是输入框的兄弟层而不是子控件，不碰输入框的样式表，也不要回到 QSS 渐变边框。光晕启动时用 `dialog_animation.fadeDialogShadow()` 把卡片阴影渐隐、结束时渐回。
@@ -321,6 +325,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/view/components/busy_glow.py` | Busy Glow 的几何、配色和绘制；不知道 AI Markdown 的业务规则 |
 | `app/view/components/update_toast.py` | Update Toast 的三种状态、按钮和底边进度线；不知道下载、版本和安装的规则 |
 | `app/view/components/frame_rate.py` | Frame Rate：数每个登记窗口每秒的重画次数，标在它的左上角 |
+| `app/view/components/time_text.py` | Display Window 的时间：按固定数字格排字，比例字体走秒也不晃 |
 | `app/view/components/window_transition.py` | Window Transition：Display Window 在全屏、窗口化和 Floating Button 之间切换的快照形变、动画层和交接顺序 |
 | `app/view/components/setting_section.py` | Setting Section 的下钻容器、导航行、推移动画和命中高亮 |
 | `app/view/components/setting_preview.py` | Setting Preview：`MainWindowReplica` 用真实组件按主窗口当前尺寸复刻整个主窗口（主页横幅、外观、字体、软件图标四处共用）、托盘菜单与任务栏、投送／倒计时／时钟窗口（标题、正文或大时间、角落按钮） |
@@ -385,7 +390,7 @@ set working directory
 
 App Data Directory 必须在导入 `cfg` 和调用 `qconfig.load` 前由 `app/config/paths.py` 确定。第二个 Windows 实例只通知现有实例显示窗口，然后退出；它不创建 MainWindow。
 
-Super Frame Rate Optimization 读出配置才知道开不开，所以由 `bindDeveloperOptions()` 设置：在 QApplication 创建之后、任何动画启动之前、GUI 主线程上。之后的切换当场生效，正在跑的动画也一样（Qt 换间隔时重启自己的动画驱动）。它只针对项目锁定的 Qt 运行时查找私有符号；找不到符号或动态库时记录一次警告并保留 Qt 默认 16 ms 间隔，不允许加载系统中另一份 Qt 来凑合。
+Super Frame Rate Optimization 读出配置才知道开不开，所以由 `bindDeveloperOptions()` 设置：在 QApplication 创建之后、任何动画启动之前、GUI 主线程上。之后的切换当场生效，正在跑的动画也一样（Qt 换间隔时重启自己的动画驱动）。私有符号只从进程里已经加载的那份 QtCore 取（Windows 用 `GetModuleHandleW`，Linux 用 `RTLD_NOLOAD`，其他平台取不到），不按 `QLibraryInfo` 的路径去找：Nuitka 把 Qt 的 DLL 放在 `djcat.exe` 旁边，PySide6 报的 Prefix 却仍是 `PySide6\`，按路径找在发行版里一次也没找到过。进程里没有 QtCore 或找不到符号时记录一次警告并保留 Qt 默认 16 ms 间隔，不允许加载另一份 Qt 来凑合。
 
 `installTranslators()` 装两份中文翻译：`FluentTranslator` 管 QFluentWidgets 自带文案（开关、输入框右键菜单、颜色对话框），Qt 的 `qtbase_zh_CN.qm` 管原生控件（Markdown 链接的"复制链接地址"等 Qt 自带文案；数字框用的是 QFluentWidgets 的 `LineEditMenu`，归前者）。Nuitka 只在用到 QtWebEngine 时才打包 Qt 的 translations 目录，所以 `deploy.py` 单独把 qtbase 这一份打进 `QT_TRANSLATIONS_DIR`；源码运行时先用 PySide6 自带的目录。
 
@@ -432,7 +437,7 @@ Tray Menu quit → MainWindow.requestQuit()
 - 动画 duration 仍按真实经过时间计算，不能按 tick 次数累计时间。
 - 不读取显示器刷新率，也不按 60/120/160 Hz 切换间隔；机器负载决定实际可处理的 tick 数。
 - 不承诺 Presented Frame 数；DWM、VSync 和绘制耗时仍可限制屏幕实际帧率。
-- Qt 版本或打包布局变化导致私有符号不可用时必须安全退回默认动画驱动；升级 PySide6 时需要在 Windows x64 重新验证导出符号和端到端动画时长。
+- Qt 版本或打包布局变化导致私有符号不可用时必须安全退回默认动画驱动；升级 PySide6 或改打包方式时需要在 Windows x64 重新验证导出符号和端到端动画时长，并且要在打包后的程序上验证（日志里没有"无法解除 Qt 动画帧率限制"）：源码运行时测试全绿，不代表发行版也开得起来。
 
 1 ms 间隔只对改位置和透明度的动画是净收益。凡是每帧要调操作系统或强制同步布局的回调，都必须自己限流，否则 tick 变密等于把这类开销放大十几倍：`setMask` 在顶层菜单上落到 `SetWindowRgn`，`QLayout.activate()` 是不受 `LayoutRequest` 事件压缩保护的同步重排。只打脏标记的调用（`setFixedHeight`、`update()`）由 Qt 自行合并，不要给它们加限流——那只会让控件几何落后于动画值。顶层透明窗口是例外：它的每次重绘都要把位图交给系统合成，Window Transition 的整屏动画层因此按屏幕刷新率自限，Busy Glow 自限 60 Hz。
 
