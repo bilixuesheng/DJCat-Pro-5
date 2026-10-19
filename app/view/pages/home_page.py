@@ -54,6 +54,7 @@ from app.common.home_cards import (
     removeCachedIcon,
 )
 from app.config.cfg import DEFAULT_HOME_CARDS, cfg
+from app.signal_bus import signalBus
 from app.view.components.banner_widget import BannerWidget
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.setting_card_group import LabelElideFilter
@@ -110,9 +111,8 @@ class ActionCard(CardWidget):
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Fixed,
         )
-        self.contentLabel.setFixedHeight(
-            self.contentLabel.fontMetrics().lineSpacing() * 2
-        )
+        self._fitContentHeight()
+        signalBus.appFontChanged.connect(self._fitContentHeight)
         setFluentToolTip(self.contentLabel, content)
         self._titleElideFilter = LabelElideFilter(self, maximumLines=1)
         self._descriptionElideFilter = LabelElideFilter(self, maximumLines=2)
@@ -152,6 +152,9 @@ class ActionCard(CardWidget):
         # FlowLayout uses sizeHint instead of the fixed geometry when it
         # calculates rows; keep the card's compact dimensions authoritative.
         return QSize(210, 120)
+
+    def _fitContentHeight(self) -> None:
+        self.contentLabel.setFixedHeight(self.contentLabel.fontMetrics().lineSpacing() * 2)
 
     def setRemovable(self, removable: bool) -> None:
         self.deleteButton.setEnabled(removable)

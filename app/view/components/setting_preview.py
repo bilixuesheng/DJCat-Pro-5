@@ -53,6 +53,7 @@ from app.config.cfg import cfg
 from app.config.constants import APP_NAME
 from app.platform.background_effect import isWin10
 from app.platform.shadow_effect import paintSilhouetteShadow
+from app.signal_bus import signalBus
 from app.view.components.banner_widget import BannerWidget
 from app.view.components.setting_card_group import SettingMaterialCard
 from app.view.components.window_background import (
@@ -599,6 +600,7 @@ class MainWindowMiniature(QWidget):
         ):
             item.valueChanged.connect(self.invalidate)
         qconfig.themeChanged.connect(self.invalidate)
+        signalBus.appFontChanged.connect(self.invalidate)
 
     def invalidate(self, *_args) -> None:
         self._pixmap = None
@@ -918,6 +920,8 @@ class TrayPreview(SettingPreviewCard):
             item.valueChanged.connect(self._rebuild)
         # 换主题时菜单自己换样式，这里只丢掉截好的图。
         qconfig.themeChanged.connect(self._clearMenuPixmaps)
+        # 换字体时菜单的行高和宽度都变，重建一份。
+        signalBus.appFontChanged.connect(self._rebuild)
         cfg.trayTooltip.valueChanged.connect(self._relayout)
 
     def setHomeCards(self, entries) -> None:

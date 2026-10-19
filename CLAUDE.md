@@ -36,7 +36,11 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 
 Theme Color 由 `cfg.themeColorPreset` 决定：预设取 `THEME_COLOR_PRESETS` 里的颜色，"自定义"取 `cfg.customThemeColor`，统一经 `currentThemeColor()` 解析。`cfg.customThemeColor` 只存 Custom Theme Color，选预设时不得改写它；`cfg.hasCustomThemeColor` 表示它是否存在，旧配置在 `migrateConfig()` 里按当时是否选着"自定义"补上。选色框取消时什么都不变。自绘时，画在软件自己背景上的（进度线、卡片描边、横幅底色）用 QFluentWidgets 推导后的 `themeColor()`，深色主题下与标准控件一样提亮，罗小黑因此显示为白色；Floating Button 和 Corner Button 画在桌面或用户背景上，用原色 `qconfig.themeColor.value`。
 
-**`app/common/app_font.py` 独占 App Font。** QFluentWidgets 的控件经样式表和 `getFont()` 用 `qconfig.fontFamilies`，普通 Qt 控件（主页横幅的"主页"、倒计时和时钟的标题、投送正文、Markdown 正文）不写字体、跟着 QApplication 字体；`applyAppFont()` 把两边设成同一串，`djcat.py` 在创建任何控件之前调用它。少了这一步，Qt 6 在 Windows 上把程序字体取成系统消息字体，用户把它换成只有西文的字体后，Qt 不走 Windows 的字体链接（SystemLink），按自己的候补列表找汉字，简体中文区域排第一的是宋体。页面和 `pyqt_github_markdown` 不得在样式表里写 `font-family`，也不得用带字体名的 `QFont` 改正文字体；只改字号和粗细时用 `QFont()` 或控件自己的 `font()`。代码块的等宽字体例外。
+**`app/common/app_font.py` 独占 App Font。** 设置存在 `cfg.appFontMode`、`cfg.appFont`、`cfg.latinFont` 和 `cfg.cjkFont`，三个字体各存各的，切换 Font Mode 不改写任何一个；值是字体名，或 `DEFAULT_FONT`、`SYSTEM_FONT`（只用于统一和西文那两档）。统一经 `appFontFamilies()` 解析成一串字体：西文在前、中文在后，末尾总补上默认中文字体（微软雅黑），选的字体没装时按默认，配置不改。Qt 给每个字按顺序取第一款含有它的字体，所以只分得出西文和中文两档：单给英文符号的字体会连字母一起抢走。
+
+QFluentWidgets 的控件经样式表和 `getFont()` 用 `qconfig.fontFamilies`，普通 Qt 控件（主页横幅的"主页"、倒计时和时钟的标题、投送正文、Markdown 正文）不写字体、跟着 QApplication 字体；`applyAppFont()` 把两边设成同一串。`djcat.py` 的 `bindAppFont()` 在创建任何控件之前套用一次，之后跟着配置当场换。少了启动这一步，Qt 6 在 Windows 上把程序字体取成系统消息字体，用户把它换成只有西文的字体后，Qt 不走 Windows 的字体链接（SystemLink），按自己的候补列表找汉字，简体中文区域排第一的是宋体。「跟随系统」读的也是这个系统字体，Windows 里改了要下次启动才跟上。当场换的顺序固定：先改 `qconfig.fontFamilies` 和 QApplication 字体，再把自己设过字体、仍是旧那串的控件换掉，重新套用组件库样式表，最后把仍是旧那串、挂着样式表的控件重新 polish（Qt 不把程序字体的变化传给样式表定下的字体，文档也说两者不要混用），全部换完才发 `signalBus.appFontChanged`。按字体量出尺寸或缓存了画面的地方接这个信号重算：主页和应用市场卡片的两行说明、广告文字、倒计时和时钟的字号、Tray Menu、Setting Preview；帧率标签在自己的 `FontChange` 里重算。`tests/test_app_font.py` 检查换完后没有一个控件停在旧字体上。页面和 `pyqt_github_markdown` 不得在样式表里写 `font-family`，也不得用带字体名的 `QFont` 改正文字体；只改字号和粗细时用 `QFont()` 或控件自己的 `font()`。代码块的等宽字体例外。
+
+`app/view/components/font_picker.py` 的字体选择弹窗用一个自绘的 `FontList` 画全部字体，每行用这款字体自己写名字（符号字体改用界面字体），理由与 `IconGrid` 相同；中文字体那一档只列含简体中文的字体，竖排的 `@` 字体一律不列。
 
 Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯黑或纯白（接近的不算），边色与按钮反色、不看背景；纯白时图标和文字用黑色，纯黑纯白的悬停和按下用固定灰阶。这套配色统一经 `window_background.closeButtonColors()` 取，真实窗口和 Setting Preview 共用。细边在 `paintEvent` 里用一条圆角路径画完，不用样式表的 `border`：样式表把直边和圆弧分开画，半透明的边在接头处叠出亮点（`tests/test_theme_color.py` 检查）。Corner Button 从 QFluentWidgets 的样式表登记里注销，自己跟着主题和主题色重设样式；登记着的话，组件库每换一次主题或主题色就把它套回自己的按钮样式。
 
@@ -319,10 +323,11 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/view/components/frame_rate.py` | Frame Rate：数每个登记窗口每秒的重画次数，标在它的左上角 |
 | `app/view/components/window_transition.py` | Window Transition：Display Window 在全屏、窗口化和 Floating Button 之间切换的快照形变、动画层和交接顺序 |
 | `app/view/components/setting_section.py` | Setting Section 的下钻容器、导航行、推移动画和命中高亮 |
-| `app/view/components/setting_preview.py` | Setting Preview：`MainWindowReplica` 用真实组件按主窗口当前尺寸复刻整个主窗口（主页横幅、外观、软件图标三处共用）、托盘菜单与任务栏、投送／倒计时／时钟窗口（标题、正文或大时间、角落按钮） |
+| `app/view/components/setting_preview.py` | Setting Preview：`MainWindowReplica` 用真实组件按主窗口当前尺寸复刻整个主窗口（主页横幅、外观、字体、软件图标四处共用）、托盘菜单与任务栏、投送／倒计时／时钟窗口（标题、正文或大时间、角落按钮） |
 | `app/view/components/color_dialog.py` | QFluentWidgets 颜色选择弹窗换上项目 `ScrollArea`，色板和亮度滑块登记为触控拖动目标 |
+| `app/view/components/font_picker.py` | App Font 的设置卡片和字体选择弹窗：搜索、每行用字体自己写名字、示例文字 |
 | `app/view/components/setting_suggestion_menu.py` | Setting Suggestion 弹窗；选中后交回 Route，不把文本写回搜索框 |
-| `app/common/app_font.py` | App Font：让 QApplication 字体与 QFluentWidgets 的字体是同一串 |
+| `app/common/app_font.py` | App Font：解析字体设置，让 QApplication 字体与 QFluentWidgets 的字体是同一串，并当场换到所有控件上 |
 | `app/common/application_icon.py` | Application Icon 与 Tray Icon 的解析：主窗口、启动页、托盘与 Tray Menu“主页”共用一处 |
 | `app/common/logs.py` | Log 的位置、14 天保留、Cache 中可清理的日志，以及旧 `APP_DIR\Log` 的迁入 |
 | `app/common/error_report.py` | Error Report 的客户端一侧：整理调用栈、去掉安装位置和用户名、同一次运行去重、后台上报 |
@@ -359,7 +364,8 @@ set working directory
   → installTranslators (Qt qtbase + QFluentWidgets Chinese strings)
   → configure logging (adopt legacy APP_DIR\Log, drop logs older than 14 days) and clear stale Client Update files
   → qconfig.load(CONFIG_PATH, cfg)
-  → applyAppFont (QApplication font carries the App Font families, before any widget is created)
+  → bindAppFont (QApplication font and qconfig.fontFamilies carry the App Font before any widget
+    is created, then follow 个性化 › 字体)
   → bindDeveloperOptions (touch press look, touch scroll feel, Super Frame Rate Optimization
     and Frame Rate follow their switches; before any QWidget animation is created)
   → MainWindow(isSilent)

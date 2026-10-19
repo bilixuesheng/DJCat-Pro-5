@@ -5,6 +5,7 @@ from qfluentwidgets import FluentIcon as FIF
 from qframelesswindow import FramelessWindow
 
 from app.platform.screens import screenFor
+from app.signal_bus import signalBus
 from app.view.components.frame_rate import trackFrameRate
 from app.view.components.setting_card_group import QWIDGETSIZE_MAX
 from app.view.components.window_background import (
@@ -54,6 +55,8 @@ class TimerWindow(FramelessWindow):
         self.background.setGeometry(self.contentsRect())
         self.transition = WindowTransition(self)
         trackFrameRate(self)
+        # 换了字体，时间要按新字体的宽度重新缩到放得下。
+        signalBus.appFontChanged.connect(self._fitFonts)
 
         self.isWindowed = False
         self._closeFlyout = None
@@ -208,10 +211,13 @@ class TimerWindow(FramelessWindow):
             font.setPixelSize(max(32, size * available // width))
         self.timeLabel.setFont(font)
 
+    def _fitFonts(self):
+        self._applyFonts(self.contentsRect().height())
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.background.setGeometry(self.contentsRect())
-        self._applyFonts(self.contentsRect().height())
+        self._fitFonts()
         self._updateBtnPosition()
 
     def mousePressEvent(self, event):

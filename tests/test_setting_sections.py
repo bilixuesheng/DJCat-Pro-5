@@ -269,6 +269,26 @@ class SettingSectionTest(TestCase):
         card.comboBox.setCurrentIndex(0)
         self.assertEqual(cfg.backgroundEffect.value, "Acrylic")
 
+    def testFontSectionShowsTheCardsOfTheChosenFontMode(self):
+        isolateCfg(self)
+        page = self.buildPage()
+        view = page.sectionStack.view("personalization.font")
+
+        self.assertEqual(
+            view.settingCards(),
+            (page.fontModeCard, page.appFontCard, page.latinFontCard, page.cjkFontCard),
+        )
+        self.assertEqual(page.routeLabel("personalization.font"), "个性化 › 字体")
+        self.assertFalse(page.appFontCard.isHidden())
+        self.assertTrue(page.latinFontCard.isHidden())
+        self.assertTrue(page.cjkFontCard.isHidden())
+
+        page.fontModeCard.comboBox.setCurrentIndex(1)
+        self.assertEqual(cfg.appFontMode.value, "中西文分开")
+        self.assertTrue(page.appFontCard.isHidden())
+        self.assertFalse(page.latinFontCard.isHidden())
+        self.assertFalse(page.cjkFontCard.isHidden())
+
     def testAppearanceSectionOwnsWindowTitleAndCreditsEntry(self):
         page = self.buildPage()
 
@@ -394,7 +414,7 @@ class SettingSectionTest(TestCase):
         )
         self.assertEqual(
             [card.titleLabel.text() for card in page.sectionStack.view("personalization").navigationCards()],
-            ["外观", "主页横幅", "软件图标", "系统托盘"],
+            ["外观", "字体", "主页横幅", "软件图标", "系统托盘"],
         )
         self.assertEqual(
             [card.titleLabel.text() for card in page.sectionStack.view("broadcast").navigationCards()],

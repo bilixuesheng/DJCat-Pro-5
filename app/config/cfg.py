@@ -22,6 +22,9 @@ THEME_COLOR_PRESETS = (
     ("罗小黑", (0, 0, 0)),
 )
 CUSTOM_THEME_COLOR = "自定义"
+APP_FONT_MODES = ("统一", "中西文分开")
+DEFAULT_FONT = "默认"
+SYSTEM_FONT = "跟随系统"
 BANNER_IMAGE_PRESETS = {
     "预设: 树人门": "home.png",
     "预设: 罗小黑": "luoxiaoheimiao.jpg",
@@ -68,6 +71,14 @@ class GeometrySerializer(ConfigSerializer):
             return QRect()
 
 
+class FontValidator(ConfigValidator):
+    def validate(self, value) -> bool:
+        return isinstance(value, str) and bool(value)
+
+    def correct(self, value) -> str:
+        return value if self.validate(value) else DEFAULT_FONT
+
+
 class Config(QConfig):
     customThemeMode = OptionsConfigItem(
         "Personalization",
@@ -112,6 +123,16 @@ class Config(QConfig):
     showCreditsPage = ConfigItem(
         "Personalization", "ShowCreditsPage", True, BoolValidator()
     )
+    appFontMode = OptionsConfigItem(
+        "Personalization",
+        "AppFontMode",
+        APP_FONT_MODES[0],
+        OptionsValidator(list(APP_FONT_MODES)),
+    )
+    # 三个字体各存各的，切换字体模式不改写任何一个。值是字体名，或 DEFAULT_FONT、SYSTEM_FONT。
+    appFont = ConfigItem("Personalization", "AppFont", DEFAULT_FONT, FontValidator())
+    latinFont = ConfigItem("Personalization", "LatinFont", DEFAULT_FONT, FontValidator())
+    cjkFont = ConfigItem("Personalization", "CjkFont", DEFAULT_FONT, FontValidator())
 
     # 开发人员选项，只供开发人员调试，默认全关。分组名 Experimental 是改名前留下的，
     # 照旧沿用，停用页面懒加载已存的值才不会丢。
