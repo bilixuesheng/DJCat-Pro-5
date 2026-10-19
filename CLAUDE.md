@@ -66,6 +66,8 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 
 **`app/view/components/setting_preview.py` 独占 Setting Preview。** 画主窗口的预览不截取真实页面（会逼 Lazy Page 提前构造，还会截到设置页自己），而是由 `MainWindowReplica` 用真实组件——导航按钮、`BannerWidget`、主页的 `ActionCard`、标题栏按钮——按主窗口当前尺寸摆好，画到目标两倍大小再平滑缩小，结果按尺寸、设备像素比缓存，配置变化时作废。宽高比实时跟随主窗口（监听 `window()` 的尺寸变化），限高 280；复刻在第一次画时才搭。`tests/test_setting_preview.py` 逐项核对复刻和真实主窗口的几何一致，改主窗口或主页的排布时必须同步改复刻。托盘预览的菜单来自 `buildTrayMenu()`，按 `AcrylicMenu`／`RoundMenu` 的定位规则 1:1 摆在任务栏右侧。投送、倒计时和时钟的预览按屏幕比例画全屏，标题、正文和按钮离窗口边的距离照真实窗口的比例；角落按钮用真实图标和 80 × 65 的比例，缩放取屏幕比例与 0.4 中较大的一个，否则图标只剩几个像素；时钟定格在预览出现的那一刻。理由见 `docs/adr/0007-setting-preview-replica.md`。
 
+**Setting Card 默认各自成卡，照 Win11 设置排布。** 相邻两张卡（导航行也一样）隔 4 px，预览、小节标题和其他内容前后隔 10 px。只有 Linked Setting Cards 经 `SettingSectionView.addLinkedSettingCards()` 共用一块底板：控制卡片在前，显隐或取值受它控制的卡片紧随其后，目前是三处背景、主页横幅、软件图标和托盘图标；其余一律 `addSettingCards()`。新卡片只有显隐或取值跟着另一张卡变时才进组（`tests/test_setting_sections.py` 逐组核对）。关掉「显示主页横幅」时横幅的其余卡片隐藏，按条件隐藏的规则不出现在 Setting Suggestion 里。主题色和 AI 整理风格这类展开卡片各自成卡，展开后的子项仍连在一起。
+
 **设置页搜索只产出 Setting Suggestion。** 页面本身不筛选、不折叠、不重排；建议只按 Setting Card 的标题匹配，条件隐藏的卡片不参与，跨 Section 重名的标题才补完整 Route 前缀。`SettingPage` 提供 `searchSuggestions()` 和 `navigateToRoute()`，弹窗由 MainWindow 拥有——搜索框属于标题栏，设置页不得反向持有它。选中建议后清空搜索框、跳到目标 Route、滚动到卡片并描一圈主题色边框，绝不改写用户的前置设置来让隐藏卡片现身。
 
 **每个 Setting Section 各自是一个 `ScrollArea`，各自记住滚动位置。** 返回上一级时停在离开时的位置，触控仲裁沿用 `ScrollArea` 既有实现，页面不另写一套。
