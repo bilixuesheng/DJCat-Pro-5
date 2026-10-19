@@ -14,7 +14,7 @@ can be set: a font for English punctuation alone would also take the letters.
 """
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QWidget
 from qfluentwidgets import qconfig
 from qfluentwidgets.common.style_sheet import updateStyleSheet
@@ -85,26 +85,23 @@ def applyAppFont(*_args) -> None:
 
 
 def _refreshWidgets(oldFamilies: list[str], families: list[str]) -> None:
-    # 用 getFont() 或抄了程序字体再改字号的控件，字体是自己设的，程序字体变了也不跟。
-    for widget in QApplication.allWidgets():
-        font = widget.font()
-        if widget.testAttribute(Qt.WidgetAttribute.WA_SetFont) and font.families() == oldFamilies:
-            font.setFamilies(families)
-            widget.setFont(font)
+    # 组件库样式表里的 --FontFamilies 在套用时才代入。
     updateStyleSheet()
-    # 挂着样式表的控件在 polish 时就按样式表定下字体，程序字体再变也不重算
-    # （Qt 文档也说 QApplication::setFont 不要和样式表混用），只能重新 polish。
-    # 照 Qt 自己换样式表时的做法自上而下只 polish：子控件按父控件的新字体算，
-    # 先 unpolish 在 Windows 上会访问冲突。
+    # 程序字体的变化传不到这些控件：自己设过字体的（getFont()、抄了程序字体再改字号）；挂着
+    # 样式表的（polish 时就按样式表定下字体，Qt 文档也说 QApplication::setFont 不要和样式表
+    # 混用）；以及它们下面的子控件。自上而下处理，父控件先换好：自己设过的只换家族，其余的
+    # 清掉字体让它重新继承，样式表定的字号粗细照旧。不能重新 polish：在 Windows 上从这里
+    # 对控件调用 QStyle.polish 会访问冲突。
     for window in QApplication.topLevelWidgets():
         for widget in (window, *window.findChildren(QWidget)):
-            style = widget.style()
-            if (
-                widget.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)
-                and widget.font().families() == oldFamilies
-                and style.metaObject().className() == "QStyleSheetStyle"
-            ):
-                style.polish(widget)
+            font = widget.font()
+            if font.families() != oldFamilies:
+                continue
+            if widget.testAttribute(Qt.WidgetAttribute.WA_SetFont):
+                font.setFamilies(families)
+            else:
+                font = QFont()
+            widget.setFont(font)
 
 
 def bindAppFont() -> None:
