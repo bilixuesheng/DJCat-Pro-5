@@ -1,6 +1,7 @@
 import threading
 
 from collections import Counter
+from pathlib import Path
 from typing import NamedTuple
 
 from loguru import logger
@@ -41,6 +42,7 @@ from qfluentwidgets import (
     setThemeColor,
 )
 
+from app.common import install_location
 from app.common.ai_markdown import PEAK_HOURS_TEXT, fetchQuota
 from app.common.application_store import (
     ApplicationStoreError,
@@ -263,6 +265,51 @@ class CacheSettingCard(SettingCard):
         text = f"{value:.1f} {unit}" if unit != "B" else f"{size} B"
         self.sizeLabel.setText(text)
         self.clearButton.setEnabled(size > 0)
+
+
+class InstallLocationSettingCard(SettingCard):
+    """Application Install Location：显示当前位置，「更改」选新文件夹，「重置」回默认位置。"""
+
+    changeRequested = Signal()
+    resetRequested = Signal()
+
+    STATE_TEXTS = {
+        install_location.CHECKING: "正在检查…",
+        install_location.RELOCATING: "正在迁移…",
+        install_location.CLEANING: "正在清理旧位置…",
+    }
+
+    def __init__(self, parent=None):
+        super().__init__(FluentIcon.FOLDER, "应用安装位置", "", parent)
+        self.changeButton = PushButton("更改", self)
+        self.resetButton = PushButton("重置", self)
+        self.hBoxLayout.addWidget(self.changeButton)
+        self.hBoxLayout.addSpacing(8)
+        self.hBoxLayout.addWidget(self.resetButton)
+        self.hBoxLayout.addSpacing(16)
+        self.changeButton.clicked.connect(self.changeRequested)
+        self.resetButton.clicked.connect(self.resetRequested)
+        cfg.appInstallLocation.valueChanged.connect(self.refresh)
+        signalBus.installLocationStateChanged.connect(self.refresh)
+        self.refresh()
+
+    def refresh(self, *_args) -> None:
+        state = install_location.relocationState()
+        default = install_location.isDefaultInstallLocation()
+        if state in self.STATE_TEXTS:
+            suffix = f" · {self.STATE_TEXTS[state]}"
+        elif default:
+            suffix = "（默认）"
+        elif not install_location.installLocationAvailable():
+            suffix = "（不可用）"
+        else:
+            suffix = ""
+        self.setContent(
+            f"应用市场安装的应用都放在这里：{install_location.installLocation()}{suffix}"
+        )
+        busy = state != install_location.IDLE
+        self.changeButton.setEnabled(not busy)
+        self.resetButton.setEnabled(not busy and not default)
 
 
 class LocalizedColorSettingCard(FluentColorSettingCard):
@@ -511,6 +558,8 @@ class SettingSuggestion(NamedTuple):
 class SettingPage(QWidget):
     aiQuotaReceived = Signal(int, int, int, object, str)
     appStoreCacheCleared = Signal()
+    # 空字符串表示「重置」回默认位置；之后的检查、确认和迁移都由 MainWindow 负责。
+    installLocationChangeRequested = Signal(str)
 
     MAX_SUGGESTIONS = 8
 
@@ -888,6 +937,7 @@ class SettingPage(QWidget):
             cfg.autoRun,
         )
         self.cacheCard = CacheSettingCard()
+        self.installLocationCard = InstallLocationSettingCard()
         from app.config.paths import APP_DATA_DIR, isPortable
 
         portable = isPortable()
@@ -1197,7 +1247,7 @@ class SettingPage(QWidget):
             "software",
             "应用",
             FluentIcon.SETTING,
-            "启动、更新、存储、缓存和日志",
+            "启动、更新、存储、缓存、日志和应用市场",
             ROOT_SECTION_KEY,
         )
         software.addCardList(
@@ -1209,6 +1259,14 @@ class SettingPage(QWidget):
                 self.logCard,
             ]
         )
+        appStore = self._addSection(
+            "software.appStore",
+            "应用市场",
+            FluentIcon.APPLICATION,
+            "应用安装位置",
+            "software",
+        )
+        appStore.addCardList([self.installLocationCard])
         developer = self._addSection(
             DEVELOPER_SECTION_KEY,
             "开发人员选项",
@@ -1261,6 +1319,12 @@ class SettingPage(QWidget):
         self.aboutCard.clicked.connect(self._onAboutCardClicked)
         self.cacheCard.clicked.connect(self._onClearCache)
         self.storageModeCard.clicked.connect(self._onStorageModeClicked)
+        self.installLocationCard.changeRequested.connect(
+            self._onChangeInstallLocationClicked
+        )
+        self.installLocationCard.resetRequested.connect(
+            lambda: self.installLocationChangeRequested.emit("")
+        )
         self.logCard.clicked.connect(self._onOpenLogClicked)
         self.aiQuotaReceived.connect(self._onAIQuotaReceived)
         cfg.applicationIconSource.valueChanged.connect(self._refreshConditionalCards)
@@ -1393,6 +1457,16 @@ class SettingPage(QWidget):
             logger.exception("修改开机启动设置失败")
             reportError(type(error), error, error.__traceback__)
             signalBus.catchException.emit(str(error))
+
+    def _onChangeInstallLocationClicked(self) -> None:
+        current = install_location.installLocation()
+        path = QFileDialog.getExistingDirectory(
+            self,
+            "选择应用安装位置",
+            str(current if current.is_dir() else Path.home()),
+        )
+        if path:
+            self.installLocationChangeRequested.emit(str(Path(path)))
 
     def _onStorageModeClicked(self) -> None:
         from app.config.paths import (

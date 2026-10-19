@@ -99,6 +99,7 @@ from app.view.components.setting_suggestion_menu import SettingSuggestionMenu
 from app.view.components.update_toast import UpdateToast
 from app.view.pages.home_page import HomePage
 from app.view.shell.tray import SystemTrayIcon
+from app.view.windows.application_relocation import ApplicationRelocation
 
 
 SCHEDULE_CATCH_UP_LIMIT = timedelta(seconds=60)
@@ -250,6 +251,7 @@ class LazyCreditsPage(LazyPage):
 
 class LazySettingPage(LazyPage):
     appStoreCacheCleared = Signal()
+    installLocationChangeRequested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__("SettingPage", parent)
@@ -260,6 +262,9 @@ class LazySettingPage(LazyPage):
 
         page = SettingPage(self)
         page.appStoreCacheCleared.connect(self.appStoreCacheCleared.emit)
+        page.installLocationChangeRequested.connect(
+            self.installLocationChangeRequested.emit
+        )
         page.setHomeCards(self._homeCards)
         return page
 
@@ -319,6 +324,9 @@ class LazyAppStorePage(LazyPage):
 
     def executePinnedCard(self, item):
         self.ensureLoaded().executePinnedCard(item)
+
+    def hasActiveOperations(self):
+        return self.page is not None and self.page.hasActiveOperations()
 
     def shutdown(self):
         if self.page is not None:
@@ -1157,6 +1165,13 @@ class MainWindow(MSFluentWindow):
         self.settingPage.appStoreCacheCleared.connect(
             self._onAppStoreCacheCleared
         )
+        self.applicationRelocation = ApplicationRelocation(
+            self, self.appStorePage.hasActiveOperations
+        )
+        self.settingPage.installLocationChangeRequested.connect(
+            self.applicationRelocation.request
+        )
+        self.applicationRelocation.recoverAtStartup()
         cfg.showCreditsPage.valueChanged.connect(self._setCreditsPageVisible)
         self.homePage.applicationCardClicked.connect(self._onPinnedHomeCardClicked)
         self.homePage.applicationCardRemoved.connect(self._onPinnedHomeCardRemoved)
@@ -1922,6 +1937,8 @@ class MainWindow(MSFluentWindow):
         self._homeCardTaskWorkers.clear()
         if self._downloadWorker is not None:
             self._downloadWorker.cancel()
+        if getattr(self, "applicationRelocation", None) is not None:
+            self.applicationRelocation.shutdown()
 
         self._closeUpdateInfoBar()
         self._closeUpdateCheckInfoBar()

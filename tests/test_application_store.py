@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlparse
 from PIL import Image
 
 from app.common import application_store as applicationStoreModule
+from app.common import install_location
 from app.common.application_store import (
     ApplicationStore,
     ApplicationStoreError,
@@ -30,6 +31,8 @@ from app.common.application_store import (
     isUpdateAvailable,
     validateZip,
 )
+from app.config.cfg import cfg
+from tests.support import isolateCfg
 
 
 _PNG = base64.b64decode(
@@ -122,6 +125,52 @@ class ApplicationStoreTest(TestCase):
 
         self.assertFalse((self.store.programDir / "demo-new").exists())
         self.assertEqual(self.store.installed()[7].installDir, "demo")
+
+    def testMissingCustomLocationIsNotRecreated(self):
+        isolateCfg(self)
+        missing = self.root / "unplugged"
+        cfg.set(cfg.appInstallLocation, str(missing), save=False)
+        store = ApplicationStore(
+            apiBaseUrl="https://api.example.test",
+            cache=ImageCache(self.root / "cache"),
+        )
+        self.addCleanup(store.shutdown)
+
+        self.assertFalse(store.locationAvailable())
+        self.assertEqual(store.installed(), {})
+        with self.assertRaisesRegex(ApplicationStoreError, "不可用"):
+            store.installZip(self._app(), self._zip())
+        self.assertFalse(missing.exists())
+
+    def testSwitchingLocationReadsTheManifestsThere(self):
+        installed = self.store.installZip(self._app(), self._zip())
+        target = self.root / "Elsewhere"
+        target.mkdir()
+        installed.path.rename(target / "demo")
+
+        self.store.setProgramDir(target)
+
+        self.assertEqual(self.store.installed()[7].path, (target / "demo").resolve())
+        self.assertEqual(
+            self.store.installZip(
+                self._app() | {"version": "3.0.0"}, self._zip(content=b"new")
+            ).path,
+            (target / "demo").resolve(),
+        )
+
+    def testApplicationsAreBlockedWhileRelocating(self):
+        installed = self.store.installZip(self._app(), self._zip())
+        self.addCleanup(install_location.setRelocationState, install_location.IDLE)
+        install_location.setRelocationState(install_location.RELOCATING)
+
+        for operation in (
+            lambda: self.store.executeAction(installed),
+            lambda: self.store.uninstall(installed),
+            lambda: self.store.installZip(self._app(), self._zip()),
+        ):
+            with self.assertRaisesRegex(ApplicationStoreError, "正在迁移"):
+                operation()
+        self.assertTrue(installed.path.is_dir())
 
     def testFetchCatalogClosesResponse(self):
         response = Mock()
@@ -791,32 +840,65 @@ class ApplicationStoreTest(TestCase):
         self.assertEqual(set(self.store._activationThreads), {42})
 
     @patch("app.common.application_store.subprocess.Popen")
-    def testRunningApplicationMustExitBeforeUninstall(self, popen):
+    def testUninstallClosesTheRunningApplicationFirst(self, popen):
         app = self._app()
         app["open_action"] = {"type": "program", "target": "app.exe"}
         installed = self.store.installZip(app, self._zip())
-        popen.return_value.poll.return_value = None
+        process = popen.return_value
+        process.poll.return_value = None
         self.store.executeAction(installed)
 
-        with (
-            patch("app.common.application_store.shutil.rmtree") as rmtree,
-            self.assertRaisesRegex(ApplicationStoreError, "仍在运行"),
-        ):
+        def kill():
+            process.poll.return_value = 0
+
+        process.kill.side_effect = kill
+        with patch("app.common.application_store._terminateProcessesUnder") as terminate:
             self.store.uninstall(installed)
 
-        rmtree.assert_not_called()
+        process.kill.assert_called_once()
+        terminate.assert_called_once_with(installed.path)
+        self.assertFalse(installed.path.exists())
 
-    def testExternallyStartedApplicationBlocksUpdateAndUninstall(self):
+    def testExternallyStartedApplicationIsClosedBeforeUpdateAndUninstall(self):
+        installed = self.store.installZip(self._app(), self._zip())
+        executable = installed.path / "app.exe"
+        running = [executable]
+
+        with (
+            patch(
+                "app.common.application_store._runningExecutablesUnder",
+                side_effect=lambda _directory: list(running),
+            ),
+            patch(
+                "app.common.application_store._terminateProcessesUnder",
+                side_effect=lambda _directory: running.clear(),
+            ) as terminate,
+        ):
+            self.store.installZip(
+                self._app() | {"version": "3.0.0"},
+                self._zip(content=b"new"),
+            )
+            self.assertEqual((installed.path / "app.exe").read_bytes(), b"new")
+            running.append(executable)
+            self.store.uninstall(self.store.installed()[7])
+
+        self.assertEqual(terminate.call_count, 2)
+        self.assertFalse(installed.path.exists())
+
+    def testApplicationThatCannotBeClosedBlocksUpdateAndUninstall(self):
         installed = self.store.installZip(self._app(), self._zip())
         executable = installed.path / "app.exe"
 
-        with patch(
-            "app.common.application_store._runningExecutablesUnder",
-            return_value=[executable],
+        with (
+            patch(
+                "app.common.application_store._runningExecutablesUnder",
+                return_value=[executable],
+            ),
+            patch("app.common.application_store._terminateProcessesUnder"),
         ):
-            with self.assertRaisesRegex(ApplicationStoreError, "仍在运行"):
+            with self.assertRaisesRegex(ApplicationStoreError, "无法关闭"):
                 self.store.uninstall(installed)
-            with self.assertRaisesRegex(ApplicationStoreError, "仍在运行"):
+            with self.assertRaisesRegex(ApplicationStoreError, "无法关闭"):
                 self.store.installZip(
                     self._app() | {"version": "3.0.0"},
                     self._zip(content=b"new"),

@@ -48,14 +48,12 @@ def isPortable() -> bool:
     return APP_DATA_DIR == PORTABLE_DATA_DIR
 
 
-def _rebaseConfigPaths(configPath: Path, source: Path, target: Path) -> None:
-    if not configPath.is_file():
-        return
-    with configPath.open("r", encoding="utf-8") as file:
-        data = json.load(file)
+def rebasePaths(value, source: Path, target: Path):
+    """把 value 里位于 source 下的绝对路径换到 target 下；其他文字和外部路径原样保留。"""
     # 配置里的路径由 APP_DATA_DIR 拼出，而它没有被 resolve()：8.3 短名、目录联接和映射
     # 网络盘展开后都是另一串字符，只比展开后的形式会漏掉整份配置。写回时用 target 原样，
-    # 它就是下次启动 paths.py 算出的 APP_DATA_DIR。
+    # 它就是之后读取路径的那一方算出的位置。
+    source = Path(source)
     sources = {str(source), str(source.resolve())}
     targetText = str(target)
 
@@ -75,7 +73,15 @@ def _rebaseConfigPaths(configPath: Path, source: Path, target: Path) -> None:
                 return targetText + value[len(sourceText) :]
         return value
 
-    updated = rebase(data)
+    return rebase(value)
+
+
+def _rebaseConfigPaths(configPath: Path, source: Path, target: Path) -> None:
+    if not configPath.is_file():
+        return
+    with configPath.open("r", encoding="utf-8") as file:
+        data = json.load(file)
+    updated = rebasePaths(data, source, target)
     temporary = configPath.with_suffix(f"{configPath.suffix}.tmp")
     with temporary.open("w", encoding="utf-8") as file:
         json.dump(updated, file, ensure_ascii=False, indent=4)

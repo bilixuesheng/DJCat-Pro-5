@@ -339,6 +339,11 @@ class Config(QConfig):
 
     pinnedHomeCards = ConfigItem("HomePage", "PinnedApplicationCards", [])
 
+    # 空值表示默认的 Application Install Location，随 App Data Directory 走。
+    appInstallLocation = ConfigItem("AppStore", "InstallLocation", "")
+    # 进行中的 Application Relocation；中途退出或断电时，下次启动按它收尾。
+    appRelocation = ConfigItem("AppStore", "Relocation", {})
+
     broadcastTasks = ConfigItem("Schedule", "Tasks", [])
     homeCardTasks = ConfigItem("Schedule", "HomeCardTasks", [])
     shutdownTasks = ConfigItem("Schedule", "ShutdownTasks", [])

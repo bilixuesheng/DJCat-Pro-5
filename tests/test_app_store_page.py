@@ -40,6 +40,7 @@ from qfluentwidgets import (
     setTheme,
 )
 
+from app.common import install_location
 from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
 from app.view.pages.app_store_page import (
@@ -65,6 +66,9 @@ class _Store:
 
     def shutdown(self):
         pass
+
+    def locationAvailable(self):
+        return True
 
 
 class _CancelableWorker(QObject):
@@ -118,6 +122,9 @@ class _BlockingCatalogStore:
     def syncInstalledMetadata(self, _apps):
         return 0
 
+    def locationAvailable(self):
+        return True
+
 
 class _SlowImageStore:
     def __init__(self):
@@ -133,6 +140,9 @@ class _SlowImageStore:
 
     def syncInstalledMetadata(self, _apps):
         return 0
+
+    def locationAvailable(self):
+        return True
 
     def imagePath(self, _url):
         self.imageStarted.set()
@@ -3098,7 +3108,7 @@ class AppStorePageTest(TestCase):
         self.assertEqual(self.page.catalog[0]["icon_url"], "")
         self.assertEqual(self.page.ads[0]["image_url"], "")
 
-    def testUpdateWhileRunningFailsBeforeDownloading(self):
+    def testUpdatingARunningApplicationAsksBeforeDownloading(self):
         app = _apps(1)[0] | {
             "name": "Demo",
             "installed": True,
@@ -3111,19 +3121,90 @@ class AppStorePageTest(TestCase):
         with patch(
             "app.view.pages.app_store_page.downloadWorker",
             return_value=worker,
-        ), patch.object(InfoBar, "error") as showError:
+        ), patch.object(MessageBox, "exec", return_value=0):
+            self.page._onAppAction(app)
+
+        self.page.store.downloadSlots.acquire.assert_not_called()
+        self.assertNotIn(app["id"], self.page._downloadJobs)
+
+        with patch(
+            "app.view.pages.app_store_page.downloadWorker",
+            return_value=worker,
+        ), patch.object(MessageBox, "exec", return_value=1):
             self.page._onAppAction(app)
             deadline = time.monotonic() + 1
-            while app["id"] in self.page._downloadJobs and time.monotonic() < deadline:
+            while not worker.run.called and time.monotonic() < deadline:
                 QTest.qWait(10)
 
-        worker.run.assert_not_called()
-        self.page.store.downloadSlots.release.assert_called_once_with()
-        self.assertEqual(
-            showError.call_args.args[:2],
-            ("更新失败", "软件仍在运行，请完全退出后再更新"),
-        )
-        self.assertNotIn(app["id"], self.page._downloadStates)
+        # 下载期间应用照常可用，替换目录前才由 ApplicationStore 强制关闭。
+        worker.run.assert_called_once_with()
+        self.assertIn(app["id"], self.page._downloadJobs)
+        worker.finished.emit("", "", True)
+        QTest.qWait(20)
+
+    def testUninstallConfirmationWarnsAboutARunningApplication(self):
+        app = _apps(1)[0] | {"name": "Demo", "installed": True}
+        self.page.store.applicationRunning = Mock(return_value=True)
+        boxes = []
+
+        class _Box:
+            def __init__(self, title, content, parent):
+                boxes.append(content)
+
+            def exec(self):
+                return 0
+
+            def deleteLater(self):
+                pass
+
+        with patch("app.view.pages.app_store_page.MessageBox", _Box):
+            self.page._confirmUninstall(app)
+
+        self.assertIn("Demo 正在运行，卸载时会被强制关闭", boxes[0])
+        self.assertNotIn(app["id"], self.page._uninstalling)
+
+    def testApplicationRelocationBlocksEveryApplication(self):
+        app = _apps(1)[0] | {"name": "Demo", "installed": True}
+        self.page._renderGrid(self.page.installedGrid, [app], True)
+        card = self.page.installedGrid.itemAtPosition(0, 0).widget()
+        self.addCleanup(install_location.setRelocationState, install_location.IDLE)
+        failed = []
+        self.page.pinnedCardFailed.connect(lambda: failed.append(True))
+
+        install_location.setRelocationState(install_location.RELOCATING)
+
+        self.assertEqual(card.actionButton.text(), "迁移中")
+        self.assertFalse(card.actionButton.isEnabled())
+        self.assertFalse(card.removeButton.isEnabled())
+        self.assertFalse(self.page.hasActiveOperations())
+        with patch.object(InfoBar, "warning") as warning:
+            self.page.executePinnedCard(
+                {
+                    "app_id": 1,
+                    "preset_id": 0,
+                    "action": {"type": "program", "target": "app.exe"},
+                }
+            )
+        self.assertIn("正在迁移", warning.call_args.args[1])
+        self.assertEqual(failed, [True])
+        self.assertNotIn(1, self.page._launching)
+
+        install_location.setRelocationState(install_location.IDLE)
+
+        self.assertNotEqual(card.actionButton.text(), "迁移中")
+
+    def testUnavailableInstallLocationIsShownAndDownloadsAreDisabled(self):
+        app = _apps(1)[0]
+        self.page.store.locationAvailable = Mock(return_value=False)
+        self.page.store.mergeInstalled = Mock(return_value=[app])
+
+        with patch.object(self.page, "_reloadState") as reloadState:
+            self.page.show()
+            QTest.qWait(20)
+
+        reloadState.assert_called_once_with()
+        self.assertFalse(self.page.locationBar.isHidden())
+        self.assertEqual(self.page._actionState(app, showUpdate=False), ("下载", False))
 
     def testDownloadThreadConstructionFailureRollsBackStartup(self):
         app = _apps(1)[0]

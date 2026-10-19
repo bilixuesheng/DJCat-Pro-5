@@ -1,5 +1,8 @@
 """Update Toast：Client Update 下载期间主窗口右下角始终同一张的卡片。
 
+Relocation Toast 与它外观相同，是同一张卡片去掉按钮：一次 Application Relocation 从开始
+到成功或失败也始终是同一张。
+
 结构借鉴 Ghost Downloader 3 的 `app/view/components/progress_toast.py`
 （XiaoYouChR/Ghost-Downloader-3，commit 13b1565，与本项目同为 GPL-3.0）：继承 InfoBar，
 在卡片底边画一条被圆角裁住的进度线。确定进度的动画和不确定态沿用应用市场按钮进度线的约定。
@@ -38,6 +41,7 @@ INDETERMINATE_PERIOD_MS = 1200
 
 # 与 InfoBar 成功、错误图标的填充色一致，(浅色, 深色)
 SUCCESS_COLORS = (QColor("#0F7B0F"), QColor("#6CCB5F"))
+RELOCATION_SUCCESS_DURATION_MS = 5000
 ERROR_COLORS = (QColor("#C42B1C"), QColor("#FF99A4"))
 
 DOWNLOADING = "downloading"
@@ -149,7 +153,7 @@ class UpdateToast(InfoBar):
         for button in (self.installButton, self.laterButton, self.retryButton):
             button.setVisible(button in buttons)
         self.closeButton.show()
-        self._buttonBox.show()
+        self._buttonBox.setVisible(bool(buttons))
         self._updateBar()
         self._refresh()
 
@@ -261,3 +265,33 @@ class UpdateToast(InfoBar):
     @staticmethod
     def _themeColor(colors):
         return colors[1] if isDarkTheme() else colors[0]
+
+
+class RelocationToast(UpdateToast):
+    """Relocation Toast：进行中没有 ×，成功后自动收起，失败时留着等用户关；都没有按钮。
+
+    失败了不给「重试」：重试要重新确认强制关闭程序，让用户回设置里再来一次。
+    """
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._closeTimer = QTimer(self)
+        self._closeTimer.setSingleShot(True)
+        self._closeTimer.setInterval(RELOCATION_SUCCESS_DURATION_MS)
+        self._closeTimer.timeout.connect(self.close)
+
+    def start(self, title, content, widestContent):
+        # 上一次成功后的卡片还没收起就开始下一次时，不能让它的计时把新进度收掉。
+        self._closeTimer.stop()
+        self.startDownload(title, content, widestContent)
+
+    def setProgress(self, content, progress=None):
+        self.setDownloadProgress(content, progress)
+
+    def succeed(self, title, content):
+        self._finish(COMPLETED, InfoBarIcon.SUCCESS, title, content, ())
+        self._closeTimer.start()
+
+    def fail(self, title, content):
+        self._closeTimer.stop()
+        self._finish(FAILED, InfoBarIcon.ERROR, title, content, ())

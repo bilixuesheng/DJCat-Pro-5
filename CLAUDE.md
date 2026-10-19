@@ -9,6 +9,7 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 - **Application Catalog** 与本机安装清单按稳定 Application ID 合并，形成界面使用的 `installed`、`update_available`、`installed_version` 和架构支持状态。
 - **Admin Console** 维护四种互不替代的 Catalog Order；Application Preset 还按所属 Application 分组，任何服务端顺序都不直接覆盖本机 Home Card 排序。
 - **Application Update** 与首次安装使用同一 Package 下载和安装链路；差别只在目标目录已有受 DJCat 管理的 Installed Application。是否提供 Application Update 只看版本号：服务端的 `manifest_revision` 在改名、改预设、改动作甚至换下载链接时都会递增，客户端用它判断要不要同步，而不是要不要重下。同版本、更高修订号的目录信息由 `ApplicationStore.syncInstalledMetadata()` 在目录加载的后台线程里原子改写进本机清单。
+- **Application Install Location** 是全部 Installed Application 的根文件夹，由 `cfg.appInstallLocation` 决定：空值是默认的 `PROGRAM_DIR`，随 Storage Migration 走；自定义位置存绝对路径，不随它走。**Application Relocation** 在运行中整体搬动应用，全有或全无，进度在 **Relocation Toast** 上；理由见 `docs/adr/0010-application-install-location.md`。
 - **Application Launch** 执行 Installed Application 的 Open Action；Application Store 的卡片和详情页共享同一后台运行状态，不创建第二个并发启动。
 - **Projection** 的纯文本正文由 `QTextEdit` 渲染，Markdown 正文由 `MarkdownView(largeText=True)` 渲染；两者是同一 Projection 的互斥显示方式。
 - Projection 编辑器的标题保存在 `cfg.broadcastTitle`，离开编辑器后仍保留；正文不作为编辑草稿持久化。
@@ -36,6 +37,12 @@ Application Icon 的来源和本地路径由 `cfg.applicationIconSource` 与 `cf
 Theme Color 由 `cfg.themeColorPreset` 决定：预设取 `THEME_COLOR_PRESETS` 里的颜色，"自定义"取 `cfg.customThemeColor`，统一经 `currentThemeColor()` 解析。`cfg.customThemeColor` 只存 Custom Theme Color，选预设时不得改写它；`cfg.hasCustomThemeColor` 表示它是否存在，旧配置在 `migrateConfig()` 里按当时是否选着"自定义"补上。选色框取消时什么都不变。自绘时，画在软件自己背景上的（进度线、卡片描边、横幅底色）用 QFluentWidgets 推导后的 `themeColor()`，深色主题下与标准控件一样提亮，罗小黑因此显示为白色；Floating Button 和 Corner Button 画在桌面或用户背景上，用原色 `qconfig.themeColor.value`。
 
 Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯黑或纯白（接近的不算），边色与按钮反色、不看背景；纯白时图标和文字用黑色，纯黑纯白的悬停和按下用固定灰阶。这套配色统一经 `window_background.closeButtonColors()` 取，真实窗口和 Setting Preview 共用。细边在 `paintEvent` 里用一条圆角路径画完，不用样式表的 `border`：样式表把直边和圆弧分开画，半透明的边在接头处叠出亮点（`tests/test_theme_color.py` 检查）。Corner Button 从 QFluentWidgets 的样式表登记里注销，自己跟着主题和主题色重设样式；登记着的话，组件库每换一次主题或主题色就把它套回自己的按钮样式。
+
+**`app/common/install_location.py` 独占 Application Install Location 与 Application Relocation 的规则。** 其他模块用 `installLocation()` 取位置，不拿 `PROGRAM_DIR` 当安装位置。它管新位置能不能用（`targetProblem()`：程序目录和数据目录里面、与当前位置互相包含、磁盘根目录、网络位置都不行）、能不能写、提权（`grantUsersModify()` 以管理员身份运行 `icacls`，给 Users 组 `S-1-5-32-545` 授继承的"修改"；`Windows` 目录和 `Program Files`、`ProgramData`、`Users` 根目录不提权）、同名冲突、大小与空间、搬动与撤回、迁移记录的收尾，以及提交（`commitInstallLocation()` 一次存盘，搬过应用时按 Storage Migration 的规则改写 `cfg` 里落在旧位置下的绝对路径）。搬动先结束可执行文件在旧位置下的进程；同一个盘逐个改名，跨盘复制进 `.<名>.relocating-<token>` 再改名；任何一步失败都撤回到旧位置。配置里的位置已经是新位置就算提交了：`cfg.appRelocation` 只记旧位置、新位置、文件夹和 token，下次启动由 `recoverRelocation()` 据此收尾到其中一边，旧位置暂时不可用时留着记录下次再试。`relocationState()` 是唯一的进度状态：`RELOCATING` 期间 `applicationsBlocked()` 为真，ApplicationStore 拒绝安装、卸载和打开，应用市场按钮显示"迁移中"。
+
+**`app/view/windows/application_relocation.py` 拥有更改 Application Install Location 的界面流程。** MainWindow 创建它，设置页的「更改」「重置」只发出 `installLocationChangeRequested(路径)`（空字符串为重置）。顺序固定：禁选位置 → 应用市场有进行中的操作就拒绝 → 当前位置不可用先确认 → 后台查写入权限 → 没权限时问是否提权（非空文件夹加一句已有文件也会开放修改；UAC 点「否」等于取消）→ 后台列应用、查冲突，跨盘才量大小和空间 → 没有应用直接改 → 确认框列出会被强制关闭的应用 → 再查一次应用市场是否空闲 → 写迁移记录、开始搬。确认之前任何一步都不碰进程。成功后先提交配置再在后台删旧文件；失败时 Relocation Toast 写明"应用仍在原位置"，不给「重试」。退出时不等待，下次启动 `recoverAtStartup()` 收尾。它不加载 Application Store 页面，只通过 `LazyAppStorePage.hasActiveOperations()` 询问。
+
+**`app/platform/processes.py` 独占按目录查找和强制结束进程。** 判定一律是"可执行文件位于该目录下面"：应用市场判断应用是否在运行、卸载和 Application Update 替换文件前强制关闭应用、Application Relocation 开始前关闭旧位置里运行的程序都用它。只是开着里面文件的别的程序不结束，由文件被占用的失败路径报告。
 
 **`app/platform/animation_timer.py` 独占 Qt 全局 Animation Tick 间隔。** View 和业务模块不直接调用 Qt 私有动画 API；私有符号不可用时保留 Qt 默认行为。Super Frame Rate Optimization 默认开，`setSuperFrameRateEnabled()` 跟着开发人员选项「停用超级帧率优化」（`cfg.disableSuperFrameRate`）在 1 ms 和 Qt 默认的 16 ms 之间当场切换；从启动起就停用时不碰私有符号。
 
@@ -108,8 +115,8 @@ Lazy Page 必须保留外部调用需要的最小接口：
 
 | Lazy Page | 加载前可暂存或转发的状态 |
 |---|---|
-| `LazyAppStorePage` | 搜索文字、固定卡片信号与应用卡片失败信号；清缓存和关闭在未加载时为空操作 |
-| `LazySettingPage` | 缓存清理信号与最新 Home Card 列表（主页卡片开关和画主窗口、托盘的 Setting Preview 都要用）；搜索建议和 Setting Route 导航一律转发给真实页面（导航到设置页必然已 `ensureLoaded()`，搜索框只在该页可见） |
+| `LazyAppStorePage` | 搜索文字、固定卡片信号与应用卡片失败信号；清缓存和关闭在未加载时为空操作，`hasActiveOperations()` 在未加载时为假 |
+| `LazySettingPage` | 缓存清理信号、更改 Application Install Location 的请求信号与最新 Home Card 列表（主页卡片开关和画主窗口、托盘的 Setting Preview 都要用）；搜索建议和 Setting Route 导航一律转发给真实页面（导航到设置页必然已 `ensureLoaded()`，搜索框只在该页可见） |
 | `LazyCreditsPage` | 无业务状态 |
 
 调用方不得直接依赖 `lazyPage.page` 的存在；需要真实页面时调用 `ensureLoaded()`，只做关闭或缓存失效时应保持未加载状态。
@@ -134,7 +141,7 @@ Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence�
 
 **server/app_store.py** 拥有 Application Catalog、Package 配置、Application Download Count 和管理后台写入。桌面端只消费目录和下载重定向，不能自行增加下载次数。
 
-**ApplicationStore** 拥有本机 Application 规则：目录扫描、安装清单、版本合并、ZIP 安全校验、原子覆盖、卸载和 Application Action 执行。它不拥有界面按钮或 InfoBar。
+**ApplicationStore** 拥有本机 Application 规则：目录扫描、安装清单、版本合并、ZIP 安全校验、原子覆盖、卸载和 Application Action 执行。它不拥有界面按钮或 InfoBar。根目录是 Application Install Location，`setProgramDir()` 在运行中换；自定义位置不可用时不重建文件夹，`locationAvailable()` 为假，安装直接失败。卸载和 Application Update 替换目录前由 `_closeApplication()` 强制关闭从该安装目录运行的程序（自己启动的进程和按目录找到的进程），关不掉才失败。
 
 **AppStorePage** 拥有一次 UI 会话中的异步状态：
 
@@ -148,6 +155,8 @@ Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence�
 | `_downloadStates` | 卡片和详情按钮共享的状态文字；下载和安装期间按钮让位给进度环，不显示它 |
 
 下载和安装期间，主按钮照 Ghost-Downloader-3 的 `InstallButton`：文字让位给 16 px 的进度环，环和中间的停止方块在浅色主题为白色、深色主题为黑色，与 Primary 按钮的文字同色。环由按钮自己摆在整数像素上，停止方块按环的矩形画：Ghost 原版交给布局居中、方块按按钮正中画，按钮宽或高为奇数时两者差半个像素。下载有 1–99% 的有效进度时显示确定进度环；刚建立、尚未得到进度或已到 100% 时显示转圈。下载期间两者都带停止方块，按钮保持可用，点按即取消下载：不确认、不提示，由 worker 的 `finished(canceled=True)` 统一复位并释放下载名额；悬停提示首次下载为"取消下载"、Application Update 为"取消更新"。安装是原子替换的提交点，不可取消：转圈不带停止方块，按钮仍保持主题色底（禁用的灰底上看不清转圈），点击由页面忽略，悬停提示"安装中"。页面每次刷新都会重设按钮文字和可用性，进度环显示期间按钮只记下这两项、收起时再还原，不能先禁用再启用——禁用会丢掉正在进行的按压，点下的取消就落空了。确定进度环使用 `ProgressRing` 自带的 150 ms 属性动画（Ghost 关掉了它，这里保留），从当前显示值追到最新目标值，不能瞬间跳变；环收起时直接归零，下次出现不从上次的位置倒退。打开和卸载仍显示状态文字，按钮禁用，底边显示不确定进度线。进度线与 Update Toast 同一画法：高 3 px，轨道和亮段都铺满按钮全宽，只由按钮自己的 5 px 圆角抗锯齿裁切，两端跟着圆弧走；亮段在中间时是平头，不另加圆头；按钮禁用时仍使用当前主题色。卡片和详情页必须从同一组状态读取，不能各自维护进度。
+
+正在运行的应用：点「更新」时先确认一次，下载期间照常可用，替换目录前才强制关闭（下载期间重新打开的也关）；「确认卸载」框补一句会被强制关闭。自定义的 Application Install Location 不可用时，页面顶部一直挂着提示，"下载"按钮置灰，Application Home Card 点开时提示位置不可用，不删除固定。页面在显示时重查可用性，变了才重读安装清单。
 
 Application Launch 在后台线程读取本机安装状态并执行 Open Action；详情页打开预设同样走这条路径并共用 `_launching`，预设打开期间卡片、详情按钮和预设按钮一起禁用。主页的 Application Home Card 和托盘里对应的 Tray Card Shortcut 也一样：`executePinnedCard()` 不返回结果，只在后台读取安装清单并执行，失败时发 `pinnedCardFailed`，由 MainWindow 弹出主窗口；应用正在下载、安装或卸载时直接提示，不去等锁。完成或失败后通过 Qt Signal 在 GUI 线程恢复卡片和详情按钮；线程创建、启动失败和页面关闭也必须清理 `_launching`，不得留下永久禁用的按钮。首次启动不等待或检查可见窗口，无窗口或仅托盘运行的 Application 仍属于正常启动；只有重新打开仍在运行的进程时才尝试唤起已有窗口。
 
@@ -167,7 +176,7 @@ AppStorePage 本身不滚动：选项卡栏固定在顶部，"已安装"和"全�
 
 Client Update 与 Application Store 的 Package 下载共用 `app/common/update_download.py` 中的 `UpdateDownloadWorker`。它只接受全程 HTTPS 的下载，调用方必须传入 `validator`：Client Update 用 `validateClientUpdateZip`，它放在轻量模块里，MainWindow 不能为此提前导入 `application_store`。支持分段的下载默认以 8 个工作线程开始；后续智能扩容和全局并发限制仍由共享下载器统一控制，不能按界面各自复制线程配置。
 
-**`app/view/components/update_toast.py` 独占 Update Toast。** Client Update 下载从开始到完成或失败都由同一张卡片表达，MainWindow 只给标题和正文、接 `installClicked`／`retryClicked`；不用 `StateToolTip`，也不另弹「下载完成」或「下载失败」的 InfoBar。下载中没有 ×；宽度在开始时按最长的进度文字预留一次，进度刷新只换文字不重新量尺寸。没有有效百分比（连接中、服务器不给总大小、重试中）时显示不确定线，确定进度沿用应用市场按钮的 150 ms 属性动画。换状态时先藏起按钮容器再换按钮，并在 `_adjustText()` 之后再 `adjustSize()` 一次，少了任何一步卡片都会停在被撑宽的尺寸；随后照 InfoBarManager 的规则重摆位置，滑入或下落动画还在跑时只改它的终点，不直接 `move()`，否则卡片会被动画拉回按旧宽度算的位置（下载一开始就失败时必然发生）。卡片在场时检查到同一版本不再弹「检测到新版本」。结构借鉴 Ghost Downloader 3 的 `progress_toast.py`，来源见文件头。
+**`app/view/components/update_toast.py` 独占 Update Toast。** Relocation Toast 是同一个组件去掉按钮的子类 `RelocationToast`：进行中没有 ×，成功 5 秒后自动收起，失败留着等用户关。Client Update 下载从开始到完成或失败都由同一张卡片表达，MainWindow 只给标题和正文、接 `installClicked`／`retryClicked`；不用 `StateToolTip`，也不另弹「下载完成」或「下载失败」的 InfoBar。下载中没有 ×；宽度在开始时按最长的进度文字预留一次，进度刷新只换文字不重新量尺寸。没有有效百分比（连接中、服务器不给总大小、重试中）时显示不确定线，确定进度沿用应用市场按钮的 150 ms 属性动画。换状态时先藏起按钮容器再换按钮，并在 `_adjustText()` 之后再 `adjustSize()` 一次，少了任何一步卡片都会停在被撑宽的尺寸；随后照 InfoBarManager 的规则重摆位置，滑入或下落动画还在跑时只改它的终点，不直接 `move()`，否则卡片会被动画拉回按旧宽度算的位置（下载一开始就失败时必然发生）。卡片在场时检查到同一版本不再弹「检测到新版本」。结构借鉴 Ghost Downloader 3 的 `progress_toast.py`，来源见文件头。
 
 Client Update 下载完成后，MainWindow 使用后台 `UpdateApplyWorker` 解压更新 ZIP 到暂存目录并启动 `updater.exe`，期间显示不可取消且只含不确定进度环的蒙层弹窗。确认更新器进程创建成功后才关闭 DJCat；启动失败时关闭蒙层并保留当前进程显示错误，不能在 GUI 线程等待更新器启动。更新包在更新器进程创建成功之后才删除，任何一步失败都还能重来；残留的包由下次启动的 `clearUpdateDirectory()` 清掉。
 
@@ -225,7 +234,7 @@ Catalog Order 由 `server/app_store.py` 按稳定 ID 写入数据库。拖拽和
 
 ### 配置和文件
 
-`app/config/paths.py` 是 App Data Directory 及其所有派生目录的唯一来源。其他模块使用 `CONFIG_PATH`、`LOG_DIR`、`PROGRAM_DIR`、`APP_STORE_CACHE_DIR` 和 `HOME_CARD_ICON_DIR`，不得自行重新拼接另一套根目录。
+`app/config/paths.py` 是 App Data Directory 及其所有派生目录的唯一来源。其他模块使用 `CONFIG_PATH`、`LOG_DIR`、`PROGRAM_DIR`、`APP_STORE_CACHE_DIR` 和 `HOME_CARD_ICON_DIR`，不得自行重新拼接另一套根目录。`PROGRAM_DIR` 只是默认的 Application Install Location，实际位置经 `install_location.installLocation()` 取。`rebasePaths()` 是 Storage Migration 与 Application Relocation 共用的路径改写规则。
 
 Storage Migration 的安全约束：
 
@@ -289,12 +298,15 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/platform/text_rendering.py` | Qt 大字形缓存上限，让投送的大字按位图缓存 |
 | `app/platform/touch_input.py` | 「新触控」：手指按住时给指下的按钮和卡片画上按下态；触控输入本身仍由 Windows 判定 |
 | `app/platform/background_effect.py` | Background Effect：照 Ghost Downloader 给主窗口挂 Windows 透明材质，Win10 的 Acrylic 在窗口移动时暂停模糊 |
+| `app/platform/processes.py` | 按可执行文件所在目录查找和强制结束 Windows 进程 |
 | `app/platform/screens.py` | 取窗口所在屏幕，绕开 PySide 把 QScreen 挂成控件子对象的返回值启发式；把解码的大图缩到最大屏幕的物理尺寸 |
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
+| `app/common/install_location.py` | Application Install Location 与 Application Relocation 的规则：位置、校验、权限、搬动与撤回、迁移记录收尾、提交；不涉及界面 |
 | `app/common/home_card_tasks.py` | Home Card Task schema 归一化、稳定 ID、触发事件和动作常量；不负责计时或 QWidget |
 | `tools/updater/updater.c` | Client Update 的独立更新器：等待进程退出、把暂存目录整目录换名为程序目录（失败时换回备份）、重启 DJCat |
 | `app/view/windows/main_window.py` | 桌面组合根、导航、长期运行任务和 Client Update UI |
+| `app/view/windows/application_relocation.py` | 更改 Application Install Location 的界面流程：检查、提权、确认、后台迁移和 Relocation Toast |
 | `app/view/pages/` | 页面、临时展示窗口和页面级 worker 编排 |
 | `app/view/pages/home_card_task_page.py` | Home Card Task 的懒加载编辑页面；不拥有调度计时器 |
 | `app/view/components/task_page.py` | 三类 Scheduled Task 页面共用的列表页、任务卡片与新建对话框外壳；各页面只提供表单、数据映射和摘要 |
@@ -352,6 +364,7 @@ set working directory
         (all of them, and the task pages, when 停用页面懒加载 is on)
       → restore Application Home Card from cfg.pinnedHomeCards
       → publish the complete Home Card snapshot to the Setting page and Tray Menu
+      → finish an interrupted Application Relocation from cfg.appRelocation in a background thread
       → report Last Seen to the AI Markdown server in a background thread
       → create tray and long-lived timers/workers
       → restore valid active Projection Snapshot only when recovery is enabled
@@ -393,6 +406,7 @@ Tray Menu quit → MainWindow.requestQuit()
   → shutdown HomePage, loaded Application Store page and loaded Projection editor workers
   → cancel running custom Home Card Task workers
   → cancel Client Update download and close InfoBars
+  → stop waiting for an Application Relocation (the next startup finishes it from its journal)
   → optional Storage Migration connected after normal shutdown
   → QApplication exits and releases the single-instance lock
 ```
