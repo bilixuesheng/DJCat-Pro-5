@@ -256,7 +256,9 @@ Storage Migration 的安全约束：
 - 只改写配置值中位于旧 App Data Directory 下的绝对路径，不改写普通文案或外部路径。
 - 每次启动只读取当前 App Data Directory 的 `UserConfig.json`；迁移后的 Installed Application 连同清单和安装目录继续支持打开、更新及卸载，不回退读取旧模式目录。
 
-**ImageCache** 拥有应用图片和临时 Package 所在缓存根目录的清理互斥。设置页「应用」里的「缓存」卡片是 Cache：ImageCache 加上可清理的日志。存在下载或安装操作时整次拒绝，日志也不清；设置页只发出用户意图，显示 `ImageCache.size()` 与 `clearableLogSize()` 之和。
+**ImageCache** 拥有应用图片和临时 Package 所在缓存根目录的清理互斥。设置页「应用」里的「缓存」卡片是 Cache：ImageCache 加上可清理的日志。存在下载或安装操作时整次拒绝，日志也不清；设置页只发出用户意图，显示 `ImageCache.size()` 与 `clearableLogSize()` 之和。点删除按钮先弹「清除缓存」确认框；有下载或安装时直接报错、不弹框，点「清除」后 `clearAppStoreCache()` 仍在锁里再查一次。
+
+Application Home Card 的图片由 MainWindow 的 `_refillPinnedIcons()` 补齐，不等 Application Store 页面加载目录：清理缓存后和每次启动各跑一次，还在的图片刷新修改时间（ImageCache 7 天自动清理只看修改时间，而只有应用市场核对图片时才会碰它），缺了的在后台按卡片自己存的 `icon_url` 补下，已下架的应用也补得回来。图片路径由网址算出，补下的图落回原路径，清理时不清空 `icon_path`；补好后 `HomePage.reloadApplicationIcon()` 按新文件重读，Tray Menu 跟着主页快照换图。只有真缺图时才在后台线程里导入 `application_store`，启动不为此提前加载它。补下失败只记日志、不重试，等下次启动或打开应用市场。
 
 **`app/common/logs.py` 独占 Log。** 日志每天一份，写在 App Data Directory 下的 `LOG_DIR`，因此 Client Update（Portable Mode 的 `DJCatPro` 被改名进新目录，Installed Mode 不碰用户目录）和 Storage Migration 之后都还在；保留 14 天。loguru 设了 `rotation` 后只在跨零点轮转时执行 `retention`，进程退出时不执行，每天开关机的电脑从不触发，所以 `configureLogging()` 启动时先按同一期限自己清一次。更新器的 `updater.log` 留在 `APP_DIR`（它可能以提权身份运行，找不准用户的 App Data Directory），同样按 14 天清、随 Cache 清理。清理 Cache 时跳过最新的一份日志：loguru 正写着它，Windows 上删不掉；显示的大小也不算它，否则清完按钮仍亮着。旧版本留在 `APP_DIR\Log` 的日志在启动时搬进 `LOG_DIR`，同名文件不覆盖。
 
@@ -382,6 +384,7 @@ set working directory
       → register Lazy Pages without constructing their real pages
         (all of them, and the task pages, when 停用页面懒加载 is on)
       → restore Application Home Card from cfg.pinnedHomeCards
+      → refill missing Application Home Card images in a background thread (touch the ones present)
       → publish the complete Home Card snapshot to the Setting page and Tray Menu
       → finish an interrupted Application Relocation from cfg.appRelocation in a background thread
       → report Last Seen to the AI Markdown server in a background thread

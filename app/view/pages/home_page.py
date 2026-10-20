@@ -70,6 +70,11 @@ DEFAULT_CARD_INFO = {
 }
 
 
+def _applicationCardIcon(item):
+    icon = QIcon(item["icon_path"]) if item.get("icon_path") else QIcon()
+    return FIF.APPLICATION if icon.isNull() else icon
+
+
 class ActionCard(CardWidget):
     dragStarted = Signal(object, QPoint)
     dragMoved = Signal(object, QPoint)
@@ -511,9 +516,7 @@ class HomePage(ScrollArea):
             previous = self._applicationCardData.get(key)
             if previous == item:
                 continue
-            icon = QIcon(item["icon_path"]) if item.get("icon_path") else QIcon()
-            if icon.isNull():
-                icon = FIF.APPLICATION
+            icon = _applicationCardIcon(item)
             if key in self.allCards:
                 self.allCards[key].setCardData(
                     icon,
@@ -547,6 +550,17 @@ class HomePage(ScrollArea):
         }
         self._renderCards()
         return cards
+
+    def reloadApplicationIcon(self, iconPath: str) -> None:
+        """图片在原路径上重新下好了：卡片数据没变，按新文件重读用它的 Application Home Card。"""
+        reloaded = False
+        for key, item in self._applicationCardData.items():
+            card = self.allCards.get(key)
+            if card is not None and iconPath and item.get("icon_path") == iconPath:
+                card.iconWidget.setIcon(_applicationCardIcon(item))
+                reloaded = True
+        if reloaded:
+            self.homeCardsChanged.emit(self.homeCardEntries())
 
     def _addCustomCard(self, data, persist=True):
         normalized = normalizeCustomCards([data])

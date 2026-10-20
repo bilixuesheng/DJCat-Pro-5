@@ -1,15 +1,19 @@
+import os
 import time
 from datetime import datetime, timedelta
 from unittest import TestCase
 from unittest.mock import call, patch
 
-from PySide6.QtCore import QEvent
+import requests
+from PySide6.QtCore import QBuffer, QEvent, QIODevice
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import MSFluentWindow
 
+from app.common.application_store import ImageCache, clearAppStoreCache
 from app.config.cfg import (
     BANNER_IMAGE_PRESETS,
     BANNER_PRESET_SCALE_MODES,
@@ -20,6 +24,46 @@ from app.config.paths import ASSET_DIR
 from app.view.pages.setting_page import SettingPage
 from app.view.windows.main_window import MainWindow
 from tests.support import isolateCfg
+
+
+PINNED_ICON_URL = "https://example.test/icon.png"
+
+
+def _png(color):
+    image = QImage(4, 4, QImage.Format.Format_ARGB32)
+    image.fill(QColor(color))
+    buffer = QBuffer()
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    image.save(buffer, "PNG")
+    return bytes(buffer.data())
+
+
+class _ImageResponse:
+    def __init__(self, url, data):
+        self.url = url
+        self.data = data
+        self.headers = {}
+
+    def raise_for_status(self):
+        return None
+
+    def iter_content(self, chunk_size):
+        yield self.data
+
+    def close(self):
+        pass
+
+
+def _serveImage(data):
+    return lambda url, **_kwargs: _ImageResponse(url, data)
+
+
+def _iconImage(icon):
+    return icon.pixmap(4, 4).toImage()
+
+
+def _iconColor(homePage, key):
+    return _iconImage(homePage.homeCardEntry(key)["icon"]).pixelColor(0, 0)
 
 
 # 2026-08-17 是周一（weekday 0），各测试任务都排在这天 08:00:00。
@@ -197,34 +241,108 @@ class SettingSearchTest(TestCase):
         self.assertEqual(cfg.applicationIconSource.value, "自定义")
         self.assertIn("*.ico", picker.call_args.args[3])
 
-    def testClearingStoreCacheDropsPinnedIconPathsAndKeepsFallback(self):
-        item = cfg.pinnedHomeCards
-        oldValue = item.value
-        cachedIcon = self.tempDir / "cached-icon.png"
-        cachedIcon.write_bytes(b"stale")
-        cards = [
-            {
-                "app_id": 7,
-                "preset_id": 0,
-                "title": "Ghost Downloader",
-                "description": "下载工具",
-                "action": {"type": "program", "target": "ghost.exe"},
-                "install_dir": "ghost-downloader",
-                "icon_url": "https://example.test/icon.png",
-                "icon_path": str(cachedIcon),
-            }
-        ]
-        try:
-            cfg.set(item, cards)
-            self.window._setPinnedHomeCards(cards)
+    def _pinnedIconCache(self):
+        cache = ImageCache(self.tempDir / "image-cache")
+        patcher = patch("app.common.application_store.appStoreImageCache", cache)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return cache
 
+    def _pinnedCard(self, iconPath):
+        return {
+            "app_id": 7,
+            "preset_id": 0,
+            "title": "Ghost Downloader",
+            "description": "下载工具",
+            "action": {"type": "program", "target": "ghost.exe"},
+            "install_dir": "ghost-downloader",
+            "icon_url": PINNED_ICON_URL,
+            "icon_path": str(iconPath),
+        }
+
+    def testClearingCacheRefillsPinnedIconsInPlace(self):
+        cache = self._pinnedIconCache()
+        iconPath = cache.pathFor(PINNED_ICON_URL)
+        iconPath.write_bytes(_png("red"))
+        cards = [self._pinnedCard(iconPath)]
+        cfg.set(cfg.pinnedHomeCards, cards)
+        self.window._setPinnedHomeCards(cards)
+        self.assertEqual(_iconColor(self.window.homePage, "app:7:0"), QColor("red"))
+
+        with patch("requests.get", side_effect=_serveImage(_png("green"))):
+            clearAppStoreCache()
             self.window.settingPage.appStoreCacheCleared.emit()
+            self._waitUntil(
+                lambda: _iconColor(self.window.homePage, "app:7:0") == QColor("green")
+            )
 
-            self.assertEqual(cfg.pinnedHomeCards.value[0]["icon_path"], "")
-            stored = next(iter(self.window.homePage._applicationCardData.values()))
-            self.assertEqual(stored["icon_path"], "")
-        finally:
-            cfg.set(item, oldValue)
+        self.assertEqual(cfg.pinnedHomeCards.value[0]["icon_path"], str(iconPath))
+        trayEntries = self.window.tray.setHomeCards.call_args.args[0]
+        trayIcon = next(entry["icon"] for entry in trayEntries if entry["key"] == "app:7:0")
+        self.assertEqual(_iconImage(trayIcon).pixelColor(0, 0), QColor("green"))
+
+    def _startWindow(self):
+        with (
+            patch.object(MainWindow, "_startMachineRegistration"),
+            patch.object(MainWindow, "checkForUpdates"),
+            patch("app.view.windows.main_window.SystemTrayIcon"),
+        ):
+            window = MainWindow(isSilent=True)
+
+        def close():
+            window.tray = None
+            window._shutdownResources()
+            window.deleteLater()
+
+        self.addCleanup(close)
+        return window
+
+    def testStartupRefillsAMissingPinnedIcon(self):
+        cache = self._pinnedIconCache()
+        iconPath = cache.pathFor(PINNED_ICON_URL)
+        cfg.set(cfg.pinnedHomeCards, [self._pinnedCard(iconPath)])
+
+        with patch("requests.get", side_effect=_serveImage(_png("green"))):
+            window = self._startWindow()
+            self._waitUntil(
+                lambda: _iconColor(window.homePage, "app:7:0") == QColor("green")
+            )
+
+        self.assertTrue(iconPath.is_file())
+
+    def testStartupKeepsPinnedIconsAwayFromTheWeeklySweep(self):
+        cache = self._pinnedIconCache()
+        iconPath = cache.pathFor(PINNED_ICON_URL)
+        iconPath.write_bytes(_png("red"))
+        eightDaysAgo = time.time() - 8 * 24 * 60 * 60
+        os.utime(iconPath, (eightDaysAgo, eightDaysAgo))
+        os.utime(cache.marker, (eightDaysAgo, eightDaysAgo))
+        cfg.set(cfg.pinnedHomeCards, [self._pinnedCard(iconPath)])
+
+        with patch("requests.get") as download:
+            self._startWindow()
+            cache.sweepIfDue()
+
+        self.assertTrue(iconPath.is_file())
+        download.assert_not_called()
+
+    def testFailedRefillKeepsTheDefaultIconWithoutRetrying(self):
+        cache = self._pinnedIconCache()
+        iconPath = cache.pathFor(PINNED_ICON_URL)
+        cfg.set(cfg.pinnedHomeCards, [self._pinnedCard(iconPath)])
+
+        with patch(
+            "requests.get", side_effect=requests.ConnectionError("offline")
+        ) as download:
+            window = self._startWindow()
+            self._waitUntil(lambda: download.call_count > 0)
+            QTest.qWait(200)
+
+        self.assertEqual(download.call_count, 1)
+        self.assertEqual(
+            _iconImage(window.homePage.homeCardEntry("app:7:0")["icon"]),
+            _iconImage(FIF.APPLICATION.icon()),
+        )
 
     def testBannerPresetsUseExpectedAssetsAndDefault(self):
         self.assertEqual(

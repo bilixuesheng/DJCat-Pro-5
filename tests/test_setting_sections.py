@@ -13,11 +13,11 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
-from qfluentwidgets import FluentIcon, StrongBodyLabel
+from qfluentwidgets import FluentIcon, MessageBox, StrongBodyLabel
 from shiboken6 import delete
 
 from app.common import install_location
-from app.common.application_store import ApplicationStoreError
+from app.common.application_store import ApplicationStoreError, packageSlots
 from app.config.cfg import BANNER_IMAGE_PRESETS, cfg
 from app.config.constants import APP_NAME
 from app.config.paths import LOG_DIR
@@ -567,7 +567,37 @@ class SettingSectionTest(TestCase):
     @patch("app.view.pages.setting_page.InfoBar")
     @patch("app.view.pages.setting_page.clearLogs")
     @patch("app.view.pages.setting_page.clearAppStoreCache")
-    def testClearingCacheAlsoClearsLogs(self, clearAppStoreCache, clearLogs, infoBar):
+    def testClearingCacheAsksFirstAndCancelKeepsEverything(
+        self, clearAppStoreCache, clearLogs, infoBar
+    ):
+        page = self.buildPage()
+        cleared = []
+        page.appStoreCacheCleared.connect(lambda: cleared.append(True))
+        boxes = []
+
+        class _Cancel(MessageBox):
+            def exec(self):
+                boxes.append(
+                    (self.titleLabel.text(), self.yesButton.text(), self.cancelButton.text())
+                )
+                return 0
+
+        with patch("app.view.pages.setting_page.MessageBox", _Cancel):
+            page.cacheCard.clicked.emit()
+
+        self.assertEqual(boxes, [("清除缓存", "清除", "取消")])
+        clearAppStoreCache.assert_not_called()
+        clearLogs.assert_not_called()
+        self.assertEqual(cleared, [])
+        infoBar.success.assert_not_called()
+
+    @patch("app.view.pages.setting_page.InfoBar")
+    @patch("app.view.pages.setting_page.clearLogs")
+    @patch("app.view.pages.setting_page.clearAppStoreCache")
+    @patch.object(MessageBox, "exec", return_value=1)
+    def testClearingCacheAlsoClearsLogs(
+        self, _confirm, clearAppStoreCache, clearLogs, infoBar
+    ):
         page = self.buildPage()
         cleared = []
         page.appStoreCacheCleared.connect(lambda: cleared.append(True))
@@ -581,11 +611,31 @@ class SettingSectionTest(TestCase):
 
     @patch("app.view.pages.setting_page.InfoBar")
     @patch("app.view.pages.setting_page.clearLogs")
+    def testClearingCacheDuringADownloadFailsWithoutAsking(self, clearLogs, infoBar):
+        page = self.buildPage()
+        cleared = []
+        page.appStoreCacheCleared.connect(lambda: cleared.append(True))
+        packageSlots.acquire()
+        self.addCleanup(packageSlots.release)
+
+        with patch.object(MessageBox, "exec", return_value=1) as confirm:
+            page.cacheCard.clicked.emit()
+
+        confirm.assert_not_called()
+        clearLogs.assert_not_called()
+        self.assertEqual(cleared, [])
+        infoBar.error.assert_called_once()
+
+    @patch("app.view.pages.setting_page.InfoBar")
+    @patch("app.view.pages.setting_page.clearLogs")
     @patch(
         "app.view.pages.setting_page.clearAppStoreCache",
         side_effect=ApplicationStoreError("有应用正在下载或安装，请完成后再清理缓存"),
     )
-    def testRefusedClearLeavesLogsAlone(self, _clearAppStoreCache, clearLogs, infoBar):
+    @patch.object(MessageBox, "exec", return_value=1)
+    def testRefusedClearLeavesLogsAlone(
+        self, _confirm, _clearAppStoreCache, clearLogs, infoBar
+    ):
         page = self.buildPage()
         cleared = []
         page.appStoreCacheCleared.connect(lambda: cleared.append(True))

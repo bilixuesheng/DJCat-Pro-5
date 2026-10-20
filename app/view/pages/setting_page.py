@@ -48,6 +48,7 @@ from app.common.application_store import (
     ApplicationStoreError,
     appStoreImageCache,
     clearAppStoreCache,
+    ensureAppStoreCacheClearable,
 )
 from app.common.logs import clearableLogSize, clearLogs
 from app.config.cfg import (
@@ -1477,17 +1478,31 @@ class SettingPage(QWidget):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(LOG_DIR)))
 
     def _onClearCache(self) -> None:
+        # 正在下载时直接报错：先问再拒绝，用户白点一次。确认之后 clearAppStoreCache() 还会在锁里再查一次。
+        try:
+            ensureAppStoreCacheClearable()
+        except ApplicationStoreError as error:
+            self._showClearCacheError(error)
+            return
+        dialog = MessageBox(
+            "清除缓存",
+            "将删除应用图片、临时安装包和运行日志，日志删除后无法找回。\n\n"
+            "设置和已安装的应用不受影响。",
+            self.window(),
+        )
+        dialog.yesButton.setText("清除")
+        dialog.cancelButton.setText("取消")
+        try:
+            accepted = dialog.exec()
+        finally:
+            dialog.deleteLater()
+        if not accepted:
+            return
         try:
             # 有应用正在下载或安装时这一步就拒绝，日志也留着不动：要么全清，要么不清。
             clearAppStoreCache()
         except (ApplicationStoreError, OSError) as error:
-            InfoBar.error(
-                "清理失败",
-                str(error),
-                duration=4000,
-                position=InfoBarPosition.BOTTOM_RIGHT,
-                parent=self.window(),
-            )
+            self._showClearCacheError(error)
             return
         clearLogs()
         self._refreshCacheSize()
@@ -1496,6 +1511,15 @@ class SettingPage(QWidget):
             "缓存已清理",
             "应用图片、临时安装包和日志已删除。",
             duration=3000,
+            position=InfoBarPosition.BOTTOM_RIGHT,
+            parent=self.window(),
+        )
+
+    def _showClearCacheError(self, error: Exception) -> None:
+        InfoBar.error(
+            "清理失败",
+            str(error),
+            duration=4000,
             position=InfoBarPosition.BOTTOM_RIGHT,
             parent=self.window(),
         )

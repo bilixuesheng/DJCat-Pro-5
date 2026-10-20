@@ -629,12 +629,14 @@ class DownloadSlots:
 packageSlots = DownloadSlots()
 
 
+def ensureAppStoreCacheClearable() -> None:
+    if packageSlots.active:
+        raise ApplicationStoreError("有应用正在下载或安装，请完成后再清理缓存")
+
+
 def clearAppStoreCache() -> None:
     with packageSlots._lock:
-        if packageSlots.active:
-            raise ApplicationStoreError(
-                "有应用正在下载或安装，请完成后再清理缓存"
-            )
+        ensureAppStoreCacheClearable()
         appStoreImageCache.clear()
 
 
