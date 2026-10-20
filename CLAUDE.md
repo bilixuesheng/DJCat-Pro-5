@@ -366,7 +366,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 ### Startup (`djcat.py`)
 
 ```text
-leave APP_DIR as working directory (programs DJCat opens inherit it and would block a Client Update)
+chdir to the user folder, not APP_DIR (programs DJCat opens inherit it and would block a Client Update)
   → cacheLargeGlyphs (QT_MAX_CACHED_GLYPH_SIZE, before QApplication draws any text)
   → SingletonApplication (Windows single instance + IPC)
   → optimizeFluentDialogs + optimizeFluentMenus (before MainWindow or its popups are created)

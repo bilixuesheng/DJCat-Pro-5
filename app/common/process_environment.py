@@ -42,12 +42,9 @@ def externalProcessEnvironment(compiled=None) -> dict[str, str]:
     return environment
 
 
-def programWorkingDirectory(target: str, workingDir: str = "") -> str | None:
-    """启动程序时的工作目录：没填时用程序所在的文件夹，与快捷方式"起始位置"的默认一样。
-
-    只写程序名的跟着电教猫（启动时已离开程序目录）。不能留在程序目录里：Windows 不让
-    给某个进程的工作目录改名，Client Update 就换不了程序目录。
-    """
+def programWorkingDirectory(target: str, workingDir: str) -> str | None:
+    """启动程序时的工作目录：没填时用程序所在的文件夹，与快捷方式"起始位置"的默认一样；
+    只写程序名的跟着电教猫。为什么不能落在程序目录里见 djcat.py 的 main()。"""
     if workingDir:
         return workingDir
     path = Path(target)

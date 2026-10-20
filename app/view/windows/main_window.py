@@ -1865,7 +1865,7 @@ class MainWindow(MSFluentWindow):
     def _installDownloadedUpdate(self):
         if self._downloadedUpdateZip is None:
             return
-        # 便携模式下 Installed Application 装在程序目录里，开着时更新器换不了程序目录。
+        # Portable Mode 的 Installed Application 装在程序目录里，开着时更新器换不了程序目录。
         names = list(dict.fromkeys(path.name for _pid, path in processesUnder(APP_DIR)))
         if names:
             box = MessageBox(
@@ -1895,9 +1895,8 @@ class MainWindow(MSFluentWindow):
             return
 
         self._disposeUpdateToast()
-        # 更新器起来后电教猫就退出；在那之前不能把刚关掉的被守护程序又拉回程序目录里。
-        # 没起来时一分钟后照常守护。
-        self.processGuard.holdLaunches(STARTUP_HOLD_SECONDS)
+        # 刚关掉的被守护程序不能在更新器动手前又被拉回来；更新器没起来时一分钟后照常守护。
+        self.processGuard.holdLaunches(60)
         dialog = InstallerLaunchDialog(self)
         worker = UpdateApplyWorker(zipPath)
         thread = threading.Thread(target=worker.run, daemon=True)
