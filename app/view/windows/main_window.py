@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import subprocess
 import sys
@@ -161,6 +162,41 @@ class MachineRegistrationWorker(QObject):
         from app.common.ai_markdown import registerMachine
 
         self.finished.emit(registerMachine() or "")
+
+
+class PinnedIconWorker(QObject):
+    """补下 Application Home Card 缺了的图片；失败只记日志，等下次启动或打开应用市场再补。"""
+
+    iconLoaded = Signal(str, str)
+    finished = Signal()
+
+    def __init__(self, urls):
+        super().__init__()
+        self.urls = urls
+        self._canceled = threading.Event()
+
+    def cancel(self):
+        self._canceled.set()
+
+    def run(self):
+        try:
+            from app.common.application_store import appStoreImageCache
+
+            for url in self.urls:
+                if self._canceled.is_set():
+                    return
+                try:
+                    path = appStoreImageCache.get(url)
+                except Exception as error:
+                    logger.warning(
+                        "主页应用卡片的图标补下失败（{}）：{}",
+                        QUrl(url).fileName(),
+                        error,
+                    )
+                    continue
+                self.iconLoaded.emit(url, str(path))
+        finally:
+            self.finished.emit()
 
 
 class UpdateApplyWorker(QObject):
@@ -405,6 +441,7 @@ class MainWindow(MSFluentWindow):
         self._quitRequested = False
         self._quitTaskIds = set()
         self.machineRegistrationWorker = None
+        self._pinnedIconJobs = {}
 
         # MSFluentWindow 固定使用弹出式页面栈，快照过渡可避免目标页在动画前闪现。
         oldView = self.stackedWidget.view
@@ -1215,6 +1252,7 @@ class MainWindow(MSFluentWindow):
         self.homePage.applicationCardClicked.connect(self._onPinnedHomeCardClicked)
         self.homePage.applicationCardRemoved.connect(self._onPinnedHomeCardRemoved)
         self._setPinnedHomeCards(cfg.pinnedHomeCards.value)
+        self._refillPinnedIcons()
         self.homePage.homeCardsChanged.connect(self._onHomeCardsChanged)
         self._onHomeCardsChanged(self.homePage.homeCardEntries())
         self._updateSearchEdit()
@@ -1268,15 +1306,47 @@ class MainWindow(MSFluentWindow):
 
     def _onAppStoreCacheCleared(self):
         self.appStorePage.clearCachedImages()
+        # 补下的图片落回原路径（路径由网址算出），卡片记下的路径不用清空。
+        self._refillPinnedIcons()
+
+    def _refillPinnedIcons(self):
+        # 还在的图片刷新修改时间，7 天自动清理就轮不到它；缺了的才在后台补下，
+        # 到那时才导入 application_store，启动不为此提前加载它。
+        missing = []
+        for card in normalizePinnedCards(cfg.pinnedHomeCards.value):
+            if not card["icon_url"]:
+                continue
+            try:
+                os.utime(card["icon_path"])
+            except OSError:
+                missing.append(card["icon_url"])
+        if not missing:
+            return
+        worker = PinnedIconWorker(list(dict.fromkeys(missing)))
+        worker.iconLoaded.connect(self._onPinnedIconLoaded)
+        worker.finished.connect(self._onPinnedIconsFinished)
+        thread = threading.Thread(target=worker.run, daemon=True)
+        self._pinnedIconJobs[worker] = thread
+        thread.start()
+
+    def _onPinnedIconLoaded(self, url, path):
+        if self._resourcesShutdown:
+            return
         cards = normalizePinnedCards(cfg.pinnedHomeCards.value)
         changed = False
         for card in cards:
-            if card.get("icon_path"):
-                card["icon_path"] = ""
+            if card["icon_url"] == url and card["icon_path"] != path:
+                card["icon_path"] = path
                 changed = True
         if changed:
             cfg.set(cfg.pinnedHomeCards, cards)
+        # 路径没变时卡片数据也没变，主页只给还显示默认图标的卡片重读图片。
         self._setPinnedHomeCards(cards)
+
+    def _onPinnedIconsFinished(self):
+        worker = self.sender()
+        self._pinnedIconJobs.pop(worker, None)
+        worker.deleteLater()
 
     def _onPinnedHomeCardClicked(self, item):
         self.appStorePage.executePinnedCard(item)
@@ -1981,6 +2051,13 @@ class MainWindow(MSFluentWindow):
         self._homeCardTaskWorkers.clear()
         if self._downloadWorker is not None:
             self._downloadWorker.cancel()
+        # 补图线程开着缓存里的 .part 文件，Storage Migration 在退出时搬整个 App Data Directory，
+        # 和应用市场的图片线程一样稍等一下。
+        for worker in self._pinnedIconJobs:
+            worker.cancel()
+        deadline = time.monotonic() + 0.5
+        for thread in self._pinnedIconJobs.values():
+            thread.join(max(0, deadline - time.monotonic()))
         if getattr(self, "applicationRelocation", None) is not None:
             self.applicationRelocation.shutdown()
 

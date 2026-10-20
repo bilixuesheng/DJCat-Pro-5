@@ -70,6 +70,11 @@ DEFAULT_CARD_INFO = {
 }
 
 
+def _applicationCardIcon(item):
+    icon = QIcon(item["icon_path"]) if item.get("icon_path") else QIcon()
+    return FIF.APPLICATION if icon.isNull() else icon
+
+
 class ActionCard(CardWidget):
     dragStarted = Signal(object, QPoint)
     dragMoved = Signal(object, QPoint)
@@ -351,6 +356,7 @@ class HomePage(ScrollArea):
         self._dragPosition = QPoint()
         self._applicationCardKeys = set()
         self._applicationCardData = {}
+        self._missingIconKeys = set()
         self._customCardKeys = set()
         self._customCardData = {}
         self._customWorkers = {}
@@ -500,9 +506,12 @@ class HomePage(ScrollArea):
             for item in cards
         }
         if list(updatedCards.items()) == list(self._applicationCardData.items()):
+            if self._loadMissingApplicationIcons():
+                self.homeCardsChanged.emit(self.homeCardEntries())
             return cards
 
         for key in self._applicationCardKeys - updatedCards.keys():
+            self._missingIconKeys.discard(key)
             card = self.allCards.pop(key, None)
             if card is not None:
                 card.hide()
@@ -511,9 +520,11 @@ class HomePage(ScrollArea):
             previous = self._applicationCardData.get(key)
             if previous == item:
                 continue
-            icon = QIcon(item["icon_path"]) if item.get("icon_path") else QIcon()
-            if icon.isNull():
-                icon = FIF.APPLICATION
+            icon = _applicationCardIcon(item)
+            if icon is FIF.APPLICATION:
+                self._missingIconKeys.add(key)
+            else:
+                self._missingIconKeys.discard(key)
             if key in self.allCards:
                 self.allCards[key].setCardData(
                     icon,
@@ -545,8 +556,23 @@ class HomePage(ScrollArea):
         self._applicationCardData = {
             key: dict(item) for key, item in updatedCards.items()
         }
+        self._loadMissingApplicationIcons()
         self._renderCards()
         return cards
+
+    def _loadMissingApplicationIcons(self) -> bool:
+        # 图片可能在卡片数据不变的情况下下回原路径（清理缓存后、启动时补下、应用市场核对），
+        # 显示着默认图标的卡片每收到一次快照就再读一次。
+        loaded = False
+        for key in tuple(self._missingIconKeys):
+            card = self.allCards.get(key)
+            item = self._applicationCardData.get(key)
+            icon = _applicationCardIcon(item) if item is not None else FIF.APPLICATION
+            if card is not None and icon is not FIF.APPLICATION:
+                card.iconWidget.setIcon(icon)
+                self._missingIconKeys.discard(key)
+                loaded = True
+        return loaded
 
     def _addCustomCard(self, data, persist=True):
         normalized = normalizeCustomCards([data])

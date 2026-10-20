@@ -1739,15 +1739,20 @@ class AppStorePage(QWidget):
 
         pinnedCards = normalizePinnedCards(cfg.pinnedHomeCards.value)
         pinnedChanged = pinnedCards != cfg.pinnedHomeCards.value
+        pinnedUsesImage = False
         updatedCards = []
         for item in pinnedCards:
             card = dict(item)
-            if card.get("icon_url") == url and card.get("icon_path") != path:
-                card["icon_path"] = path
-                pinnedChanged = True
+            if card.get("icon_url") == url:
+                pinnedUsesImage = True
+                if card.get("icon_path") != path:
+                    card["icon_path"] = path
+                    pinnedChanged = True
             updatedCards.append(card)
         if pinnedChanged:
             cfg.set(cfg.pinnedHomeCards, updatedCards)
+        # 路径没变也发：图可能刚下回原路径，主页上还显示默认图标的卡片要据此重读。
+        if pinnedChanged or pinnedUsesImage:
             self.pinnedCardsChanged.emit(updatedCards)
 
     def _onCatalogCompleted(self):

@@ -315,7 +315,7 @@ _Avoid_: 便携 ZIP 的文件格式、Application 的安装目录
 _Avoid_: 只复制 `UserConfig.json`、运行中热切换路径；Application Relocation
 
 **Cache（缓存）**:
-DJCat 在本机留下、清理后不影响任何设置或已安装内容的数据：Application Store 的图片和临时 Package，以及除正在写入那一份之外的日志。图片和 Package 清理后会在需要时重新下载，日志删掉就没有了。它属于整个 DJCat，不只属于 Application Store。
+DJCat 在本机留下、清理后不影响任何设置或已安装内容的数据：Application Store 的图片和临时 Package，以及除正在写入那一份之外的日志。图片和 Package 清理后会在需要时重新下载，Application Home Card 正在用的图片清理后马上补下，每次启动时发现缺了也补下，都不等打开 Application Store；日志删掉就没有了。它属于整个 DJCat，不只属于 Application Store。
 _Avoid_: 应用市场缓存（它不再只装 Application Store 的东西）；把 Custom Home Card 的图标当缓存（那是用户数据）
 
 **Log（日志）**:
