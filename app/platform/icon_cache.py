@@ -9,9 +9,12 @@ from PySide6.QtWidgets import QWidget
 from qfluentwidgets.common import icon as _fluentIcon
 from qfluentwidgets.components.widgets import info_bar as _fluentInfoBar
 
+from app.config.paths import ASSET_DIR
+
 # QFluentWidgets 每次绘制图标都新建 QSvgRenderer，把 SVG 从资源里重新读出并解析一遍；
 # 透明背景的页面滚动时每帧都要重绘所有可见图标，解析占了单个图标绘制的八成以上。
-# 只缓存内容不会变的来源：Qt 资源路径和 SVG 源码本身。磁盘文件可能被替换，照旧每次读。
+# 只缓存内容不会变的来源：Qt 资源路径、随程序发布的 app/assets 和 SVG 源码本身。
+# app/assets 只有 Client Update 会替换，换完程序就重启了；其他磁盘文件可能被替换，照旧每次读。
 CACHE_LIMIT = 512
 # 画好的位图另算字节：300% 下一个 16 px 图标就是 48 × 48，滚动时每帧都要重新光栅化。
 PIXMAP_CACHE_BYTES = 16 * 1024 * 1024
@@ -26,6 +29,7 @@ _UNSCALED = (
 )
 _originalDrawSvgIcon = _fluentIcon.drawSvgIcon
 _originalWriteSvg = _fluentIcon.writeSvg
+_ASSET_PREFIX = ASSET_DIR.as_posix() + "/"
 
 
 def _remember(cache: OrderedDict, key, value):
@@ -35,9 +39,13 @@ def _remember(cache: OrderedDict, key, value):
     return value
 
 
+def _unchanging(path) -> bool:
+    return isinstance(path, str) and path.startswith((":/", _ASSET_PREFIX))
+
+
 def _rendererKey(icon):
     if isinstance(icon, str):
-        return icon if icon.startswith(":/") else None
+        return icon if _unchanging(icon) else None
     if isinstance(icon, QByteArray):
         return icon.data()
     if isinstance(icon, (bytes, bytearray)):
@@ -107,7 +115,7 @@ def drawSvgIcon(icon, painter, rect) -> None:
 
 
 def writeSvg(iconPath: str, indexes=None, **attributes) -> str:
-    if not isinstance(iconPath, str) or not iconPath.startswith(":/"):
+    if not _unchanging(iconPath):
         return _originalWriteSvg(iconPath, indexes, **attributes)
     try:
         key = (

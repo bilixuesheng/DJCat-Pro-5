@@ -10,6 +10,7 @@ from qfluentwidgets import FluentIcon
 from qfluentwidgets.common import icon as fluentIcon
 
 from app.platform import icon_cache
+from app.view.components.asset_icon import AssetIcon
 
 
 def _render(icon, **attributes):
@@ -73,6 +74,28 @@ class FluentIconCacheTest(TestCase):
                     painter.end()
 
         self.assertEqual(renderer.call_count, 0)
+
+    def testShippedAssetIconIsParsedOnceAndDrawsTheSame(self):
+        # app/assets 只有 Client Update 会替换，而更新后程序会重启。
+        expected = QPixmap(24, 24)
+        expected.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(expected)
+        icon_cache._originalDrawSvgIcon(
+            AssetIcon.SHIFTS.path(), painter, QRectF(0, 0, 24, 24)
+        )
+        painter.end()
+
+        with patch.object(
+            icon_cache, "QSvgRenderer", wraps=icon_cache.QSvgRenderer
+        ) as renderer:
+            icon_cache._renderers.clear()
+            first = _render(AssetIcon.SHIFTS)
+            for _ in range(5):
+                _render(AssetIcon.SHIFTS)
+                _render(AssetIcon.SHIFTS, fill=QColor("red").name())
+
+        self.assertEqual(renderer.call_count, 2)
+        self.assertEqual(first, expected.toImage())
 
     def testCacheIsBounded(self):
         icon_cache._renderers.clear()

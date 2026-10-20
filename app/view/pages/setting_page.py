@@ -64,6 +64,7 @@ from app.config.constants import APP_NAME, AUTHOR, AUTHOR_URL, VERSION, YEAR
 from app.config.paths import LOG_DIR
 from app.platform.background_effect import BACKGROUND_EFFECTS
 from app.signal_bus import signalBus
+from app.view.components.asset_icon import AssetIcon
 from app.view.components.color_dialog import ColorDialog
 from app.view.components.font_picker import FontSettingCard
 from app.view.components.scroll_area import registerTouchDragTarget
@@ -1153,7 +1154,7 @@ class SettingPage(QWidget):
         countdown = self._addSection(
             "countdown",
             "考试倒计时",
-            FluentIcon.CALENDAR,
+            FluentIcon.STOP_WATCH,
             "倒计时窗口、提醒和重置行为",
             ROOT_SECTION_KEY,
         )
@@ -1179,7 +1180,7 @@ class SettingPage(QWidget):
         fullscreenClock = self._addSection(
             "fullscreenClock",
             "全屏时钟",
-            FluentIcon.STOP_WATCH,
+            AssetIcon.SHIFTS,
             "时钟窗口、操作按钮和关闭行为",
             ROOT_SECTION_KEY,
         )

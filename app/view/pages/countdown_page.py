@@ -1,7 +1,7 @@
 import math
 import time
 
-from PySide6.QtCore import QPropertyAnimation, QSize, Qt, QTime, QTimer, QUrl, Signal
+from PySide6.QtCore import QEvent, QPropertyAnimation, QSize, Qt, QTime, QTimer, QUrl, Signal
 from PySide6.QtMultimedia import QSoundEffect
 from PySide6.QtWidgets import (
     QApplication,
@@ -78,7 +78,10 @@ class CountdownWindow(TimerWindow):
         self._played15 = False
         self._controlsVisible = False
         self._resetFlyout = None
+        self._blankPressed = False
+        self.controlsWidget = None
         super().__init__()
+        self._createControls()
 
         self.btnReset = VerticalButton(FIF.SYNC, "重置", forceDark=True)
         self.btnPause.clicked.connect(self._onPause)
@@ -92,9 +95,10 @@ class CountdownWindow(TimerWindow):
         self.sound = QSoundEffect(self)
 
     def _createControls(self):
+        # Countdown Controls 不进布局、浮在时间下方：占着位置的话，上下的弹性空白会把
+        # 标题和时间顶高，就和全屏时钟不在同一处了。离时间的 20 px 放在控件自身内部。
         self.controlsWidget = QWidget(self)
         controlsLayout = QHBoxLayout(self.controlsWidget)
-        # 全屏模式的控件间距放在控件自身内部；窗口化隐藏控件时会一起折叠
         controlsLayout.setContentsMargins(0, 20, 0, 0)
         controlsLayout.setSpacing(16)
         controlsLayout.addStretch(1)
@@ -134,7 +138,28 @@ class CountdownWindow(TimerWindow):
         self.hideControlsTimer.setSingleShot(True)
         self.hideControlsTimer.setInterval(10_000)
         self.hideControlsTimer.timeout.connect(lambda: self._setControlsVisible(False))
-        return (self.controlsWidget,)
+        self.timeLabel.installEventFilter(self)
+        self._placeControls()
+
+    def _placeControls(self):
+        timeRect = self.timeLabel.geometry()
+        size = self.controlsWidget.sizeHint()
+        self.controlsWidget.setGeometry(
+            timeRect.left() + (timeRect.width() - size.width()) // 2,
+            timeRect.bottom() + 1,
+            size.width(),
+            size.height(),
+        )
+
+    def eventFilter(self, obj, event):
+        # Linux 的 FramelessWindow 装的是应用级过滤器，构造途中就会进来。
+        if (
+            self.controlsWidget is not None
+            and obj is self.timeLabel
+            and event.type() in (QEvent.Type.Move, QEvent.Type.Resize)
+        ):
+            self._placeControls()
+        return super().eventFilter(obj, event)
 
     def _cornerButtons(self):
         return [self.btnReset, *super()._cornerButtons()]
@@ -289,13 +314,22 @@ class CountdownWindow(TimerWindow):
             self.controlsWidget.setEnabled(False)
         self.btnPause.update()
 
+    def mousePressEvent(self, e):
+        # 按钮接住的按下到不了这里，按在空白处或标签上的才到。
+        self._blankPressed = e.button() == Qt.MouseButton.LeftButton
+        super().mousePressEvent(e)
+
     def mouseReleaseEvent(self, e):
+        # 按钮没接住的松开（按住滑出去、触控的按下态被提前复位）也会传到这里，
+        # 按下不在空白处就不算点了画面。
         if (
             not self.isWindowed
             and e.button() == Qt.MouseButton.LeftButton
+            and self._blankPressed
             and not self._moved
         ):
             self._setControlsVisible(not self._controlsVisible)
+        self._blankPressed = False
         super().mouseReleaseEvent(e)
 
     def closeEvent(self, event):

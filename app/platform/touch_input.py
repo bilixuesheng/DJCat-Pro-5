@@ -91,8 +91,12 @@ class _TouchPressFeedback(QObject):
                 self._follow(event)
             elif eventType in (QEvent.Type.TouchEnd, QEvent.Type.TouchCancel):
                 self._end()
-        elif eventType == QEvent.Type.MouseButtonPress and obj is self.target:
-            # Windows 自己的按下到了，按下态从此归控件本身管。
+        elif (
+            eventType in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick)
+            and obj is self.target
+        ):
+            # Windows 自己的按下到了，按下态从此归控件本身管。连点的第二下 Qt 只给控件发
+            # 双击、不发按下；漏掉它的话抬手时按钮被复位，随后的松开就点不中了。
             self.target = None
         return False
 
