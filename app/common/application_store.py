@@ -1296,6 +1296,7 @@ __all__ = [
     "clientArchitecture",
     "clearAppStoreCache",
     "downloadWorker",
+    "ensureAppStoreCacheClearable",
     "isUpdateAvailable",
     "appStoreImageCache",
     "validateZip",

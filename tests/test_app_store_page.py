@@ -2278,6 +2278,27 @@ class AppStorePageTest(TestCase):
         finally:
             setattr(item, "_ConfigItem__value", oldValue)
 
+    def testLoadedImageOfAPinnedCardIsPublishedEvenOnTheSamePath(self):
+        isolateCfg(self)
+        pinned = {
+            "app_id": 1,
+            "preset_id": 0,
+            "title": "Ghost Downloader",
+            "description": "",
+            "action": {"type": "program", "target": "ghost.exe"},
+            "install_dir": "ghost-downloader",
+            "icon_url": "https://example.test/icon.png",
+            "icon_path": "cache/icon.png",
+        }
+        cfg.set(cfg.pinnedHomeCards, [pinned], save=False)
+        published = []
+        self.page.pinnedCardsChanged.connect(published.append)
+
+        self.page._onCatalogImageLoaded("https://example.test/ad.png", "cache/ad.png")
+        self.page._onCatalogImageLoaded("https://example.test/icon.png", "cache/icon.png")
+
+        self.assertEqual(published, [[pinned]])
+
     def testAdsOnlyAdvanceOnVisibleAllAppsPage(self):
         self.page.ads = [{"id": 1, "title": "Ad", "image_url": ""}]
         self.page.show()

@@ -260,26 +260,28 @@ class SettingSearchTest(TestCase):
             "icon_path": str(iconPath),
         }
 
-    def testClearingCacheRefillsPinnedIconsInPlace(self):
+    def testClearingCacheKeepsPinnedIconsAndRefillsThemInPlace(self):
         cache = self._pinnedIconCache()
         iconPath = cache.pathFor(PINNED_ICON_URL)
         iconPath.write_bytes(_png("red"))
         cards = [self._pinnedCard(iconPath)]
         cfg.set(cfg.pinnedHomeCards, cards)
         self.window._setPinnedHomeCards(cards)
-        self.assertEqual(_iconColor(self.window.homePage, "app:7:0"), QColor("red"))
 
-        with patch("requests.get", side_effect=_serveImage(_png("green"))):
+        with patch(
+            "requests.get", side_effect=_serveImage(_png("red"))
+        ) as download:
             clearAppStoreCache()
             self.window.settingPage.appStoreCacheCleared.emit()
-            self._waitUntil(
-                lambda: _iconColor(self.window.homePage, "app:7:0") == QColor("green")
-            )
+            self.assertFalse(iconPath.exists())
+            self._waitUntil(iconPath.is_file)
 
+        self.assertEqual(download.call_args.args[0], PINNED_ICON_URL)
         self.assertEqual(cfg.pinnedHomeCards.value[0]["icon_path"], str(iconPath))
+        self.assertEqual(_iconColor(self.window.homePage, "app:7:0"), QColor("red"))
         trayEntries = self.window.tray.setHomeCards.call_args.args[0]
         trayIcon = next(entry["icon"] for entry in trayEntries if entry["key"] == "app:7:0")
-        self.assertEqual(_iconImage(trayIcon).pixelColor(0, 0), QColor("green"))
+        self.assertEqual(_iconImage(trayIcon).pixelColor(0, 0), QColor("red"))
 
     def _startWindow(self):
         with (
@@ -343,6 +345,26 @@ class SettingSearchTest(TestCase):
             _iconImage(window.homePage.homeCardEntry("app:7:0")["icon"]),
             _iconImage(FIF.APPLICATION.icon()),
         )
+
+    def testStoreImageFillsAPinnedIconThatFailedAtStartup(self):
+        cache = self._pinnedIconCache()
+        iconPath = cache.pathFor(PINNED_ICON_URL)
+        cfg.set(cfg.pinnedHomeCards, [self._pinnedCard(iconPath)])
+        with patch(
+            "requests.get", side_effect=requests.ConnectionError("offline")
+        ) as download:
+            window = self._startWindow()
+            self._waitUntil(lambda: download.call_count > 0)
+            QTest.qWait(50)
+
+        # 应用市场的图片核对把图下回同一路径后，照常发出固定卡片快照。
+        iconPath.write_bytes(_png("green"))
+        window.appStorePage.pinnedCardsChanged.emit(cfg.pinnedHomeCards.value)
+
+        self.assertEqual(_iconColor(window.homePage, "app:7:0"), QColor("green"))
+        trayEntries = window.tray.setHomeCards.call_args.args[0]
+        trayIcon = next(entry["icon"] for entry in trayEntries if entry["key"] == "app:7:0")
+        self.assertEqual(_iconImage(trayIcon).pixelColor(0, 0), QColor("green"))
 
     def testBannerPresetsUseExpectedAssetsAndDefault(self):
         self.assertEqual(

@@ -441,7 +441,7 @@ class MainWindow(MSFluentWindow):
         self._quitRequested = False
         self._quitTaskIds = set()
         self.machineRegistrationWorker = None
-        self._pinnedIconWorkers = set()
+        self._pinnedIconJobs = {}
 
         # MSFluentWindow 固定使用弹出式页面栈，快照过渡可避免目标页在动画前闪现。
         oldView = self.stackedWidget.view
@@ -1325,8 +1325,9 @@ class MainWindow(MSFluentWindow):
         worker = PinnedIconWorker(list(dict.fromkeys(missing)))
         worker.iconLoaded.connect(self._onPinnedIconLoaded)
         worker.finished.connect(self._onPinnedIconsFinished)
-        self._pinnedIconWorkers.add(worker)
-        threading.Thread(target=worker.run, daemon=True).start()
+        thread = threading.Thread(target=worker.run, daemon=True)
+        self._pinnedIconJobs[worker] = thread
+        thread.start()
 
     def _onPinnedIconLoaded(self, url, path):
         if self._resourcesShutdown:
@@ -1339,12 +1340,12 @@ class MainWindow(MSFluentWindow):
                 changed = True
         if changed:
             cfg.set(cfg.pinnedHomeCards, cards)
-            self._setPinnedHomeCards(cards)
-        self.homePage.reloadApplicationIcon(path)
+        # 路径没变时卡片数据也没变，主页只给还显示默认图标的卡片重读图片。
+        self._setPinnedHomeCards(cards)
 
     def _onPinnedIconsFinished(self):
         worker = self.sender()
-        self._pinnedIconWorkers.discard(worker)
+        self._pinnedIconJobs.pop(worker, None)
         worker.deleteLater()
 
     def _onPinnedHomeCardClicked(self, item):
@@ -2050,8 +2051,13 @@ class MainWindow(MSFluentWindow):
         self._homeCardTaskWorkers.clear()
         if self._downloadWorker is not None:
             self._downloadWorker.cancel()
-        for worker in self._pinnedIconWorkers:
+        # 补图线程开着缓存里的 .part 文件，Storage Migration 在退出时搬整个 App Data Directory，
+        # 和应用市场的图片线程一样稍等一下。
+        for worker in self._pinnedIconJobs:
             worker.cancel()
+        deadline = time.monotonic() + 0.5
+        for thread in self._pinnedIconJobs.values():
+            thread.join(max(0, deadline - time.monotonic()))
         if getattr(self, "applicationRelocation", None) is not None:
             self.applicationRelocation.shutdown()
 
