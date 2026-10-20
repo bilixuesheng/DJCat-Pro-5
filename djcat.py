@@ -88,10 +88,12 @@ def installTranslators(app):
 
 
 def main():
-    if getattr(sys, "frozen", False) or "__compiled__" in globals():
-        os.chdir(os.path.dirname(sys.executable))
-    else:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    # 从电教猫打开的程序会继承它的工作目录。留在程序目录里的话，那些程序开着期间 Windows
+    # 不让给程序目录改名，Client Update 就整次退回。资源和配置都按绝对路径取，不依赖它。
+    try:
+        os.chdir(os.path.expanduser("~"))
+    except OSError:
+        pass
 
     from app.platform.application import SingletonApplication, raiseWindow
     from app.platform.text_rendering import cacheLargeGlyphs

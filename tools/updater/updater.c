@@ -61,6 +61,14 @@ enum {
 static FILE *g_log = NULL;
 static wchar_t g_logPath[PATH_BUF];
 
+/* Set when a move gave up because another process still has something in the
+   tree open: a program running from it, or one whose working directory is inside
+   it, which Windows also refuses to rename. Earlier DJCat versions ran with
+   app_dir as their working directory and every program they opened inherited
+   it, so the reason the user sees says what to close. */
+static BOOL g_moveLocked = FALSE;
+#define LOCKED_REASON L"安装目录正被其他程序占用，请先关闭从电教猫打开的程序"
+
 /* _snwprintf does not terminate on truncation; every path goes through here. */
 static void formatPath(wchar_t *out, size_t size, const wchar_t *format, ...) {
     va_list ap;
@@ -178,6 +186,7 @@ static BOOL moveTree(const wchar_t *from, const wchar_t *to) {
     }
     logMsg(L"move \"%ls\" -> \"%ls\" still locked after %d tries",
            from, to, RENAME_RETRIES);
+    g_moveLocked = TRUE;
     return FALSE;
 }
 
@@ -475,7 +484,7 @@ int wmain(int argc, wchar_t *argv[]) {
     /* The staged tree sits under Updata\, inside the directory being renamed. */
     if (!moveTree(stagingDir, stagedDir)) {
         logMsg(L"could not move the staged tree out of the install directory");
-        writeFailureMarker(appDir, L"无法移动更新包");
+        writeFailureMarker(appDir, g_moveLocked ? LOCKED_REASON : L"无法移动更新包");
         closeLog();
         return EXIT_SWAP_FAILED;
     }
@@ -485,7 +494,8 @@ int wmain(int argc, wchar_t *argv[]) {
 
     if (!installed) {
         logMsg(L"install failed, the previous version is untouched");
-        writeFailureMarker(appDir, L"更新安装失败，已保留原版本");
+        writeFailureMarker(appDir, g_moveLocked ? LOCKED_REASON
+                                                : L"更新安装失败，已保留原版本");
         deleteTree(stagedDir);
     } else {
         logMsg(L"installed");

@@ -49,7 +49,7 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 
 **`app/view/windows/application_relocation.py` 拥有更改 Application Install Location 的界面流程。** MainWindow 创建它，设置页的「更改」「重置」只发出 `installLocationChangeRequested(路径)`（空字符串为重置）。顺序固定：禁选位置 → 应用市场有进行中的操作就拒绝 → 当前位置不可用先确认 → 后台查写入权限 → 没权限时问是否提权（非空文件夹加一句已有文件也会开放修改；UAC 点「否」等于取消）→ 后台列应用、查冲突，跨盘才量大小和空间 → 没有应用直接改 → 确认框列出会被强制关闭的应用 → 再查一次应用市场是否空闲 → 写迁移记录、开始搬。确认之前任何一步都不碰进程。成功后先提交配置再在后台删旧文件；失败时 Relocation Toast 写明"应用仍在原位置"，不给「重试」。退出时不等待，下次启动 `recoverAtStartup()` 收尾。它不加载 Application Store 页面，只通过 `LazyAppStorePage.hasActiveOperations()` 询问。
 
-**`app/platform/processes.py` 独占按目录查找和强制结束进程。** 判定一律是"可执行文件位于该目录下面"：应用市场判断应用是否在运行、卸载和 Application Update 替换文件前强制关闭应用、Application Relocation 开始前关闭旧位置里运行的程序都用它。只是开着里面文件的别的程序不结束，由文件被占用的失败路径报告。Process Guard 用 `runningExecutables()` 判断程序在不在运行：只看当前登录会话里的进程；`ProcessIdToSessionId` 要 `PROCESS_QUERY_INFORMATION`，普通权限读不出提权进程的会话，读不出的当作同一会话（别的用户的进程连有限查询都打不开）。
+**`app/platform/processes.py` 独占按目录查找和强制结束进程。** 判定一律是"可执行文件位于该目录下面"：应用市场判断应用是否在运行、卸载和 Application Update 替换文件前强制关闭应用、Application Relocation 开始前关闭旧位置里运行的程序、Client Update 交给更新器前关闭从 `APP_DIR` 运行的程序都用它。只是开着里面文件的别的程序不结束，由文件被占用的失败路径报告。Process Guard 用 `runningExecutables()` 判断程序在不在运行：只看当前登录会话里的进程；`ProcessIdToSessionId` 要 `PROCESS_QUERY_INFORMATION`，普通权限读不出提权进程的会话，读不出的当作同一会话（别的用户的进程连有限查询都打不开）。
 
 **`app/common/process_guard.py` 独占 Process Guard 的规则。** MainWindow 创建 `ProcessGuard`，按 `cfg.homeCardTasks` 和 `cfg.homeCardTasksEnabled` 调 `setRules()`；开机静默启动时先 `holdLaunches(60)` 再 `start()`，60 秒内只看不拉，因为被守护的程序可能也在自启。检查在后台线程里每 3 秒一轮，连续两次没看到才拉起，放过程序自我重启的空档；按可执行文件完整路径认定，不弹 UAC。拉起后撑不过 30 秒、连续 6 次，或者拉起失败（文件不存在、错误 740 需要管理员权限、其他报错），这一条在本次运行内停止并发出 `stopped`：MainWindow 弹一次「自动任务执行失败」，并把 `stoppedReasons()` 交给自动任务页显示在卡片摘要里。没变的规则保留检查进度和停止状态；关掉的规则把停止原因留到重新打开为止，重新打开、关开总开关或换了程序、参数、工作目录都从头开始；同一个程序只守护列表里的第一条。新建对话框拒绝重复、非 `.exe` 和不存在的文件；行内编辑在输完（`editingFinished`）时才存，程序路径按同样的规则校验，不合格就退回原值，边打字边存的话，打到一半的路径会被当成新规则去拉起。`runningExecutables()` 列不出进程时返回 `None`，这一轮跳过，不能当成"都没在运行"。一次拉起从最后确认到 `Popen` 返回都握着 `_launchLock`，`shutdown()` 等它放开。从托盘点「退出」的那一刻、Qt 的 `commitDataRequest`（Windows 关机或注销）、定时关机真正执行时和 `_shutdownResources()` 都调 `shutdown()`，之后不再守护：先退出的程序被拉回来会拖住关机，"电教猫关闭时"的自动任务关掉的程序也不能被拉回来。Application Relocation 期间跳过 Application Install Location 下的程序；卸载和 Application Update 不另外避让，它们关掉程序后几毫秒内就换掉目录，赶不上二次确认，「确认卸载」框经 `guardedUnder()` 补一句守护会停止。
 
@@ -189,11 +189,13 @@ Client Update 与 Application Store 的 Package 下载共用 `app/common/update_
 
 **`app/view/components/update_toast.py` 独占 Update Toast。** Relocation Toast 是同一个组件去掉按钮的子类 `RelocationToast`：进行中没有 ×，成功 5 秒后自动收起，失败留着等用户关。Client Update 下载从开始到完成或失败都由同一张卡片表达，MainWindow 只给标题和正文、接 `installClicked`／`retryClicked`；不用 `StateToolTip`，也不另弹「下载完成」或「下载失败」的 InfoBar。下载中没有 ×；宽度在开始时按最长的进度文字预留一次，进度刷新只换文字不重新量尺寸。没有有效百分比（连接中、服务器不给总大小、重试中）时显示不确定线，确定进度沿用应用市场按钮的 150 ms 属性动画。换状态时先藏起按钮容器再换按钮，并在 `_adjustText()` 之后再 `adjustSize()` 一次，少了任何一步卡片都会停在被撑宽的尺寸；随后照 InfoBarManager 的规则重摆位置，滑入或下落动画还在跑时只改它的终点，不直接 `move()`，否则卡片会被动画拉回按旧宽度算的位置（下载一开始就失败时必然发生）。卡片在场时检查到同一版本不再弹「检测到新版本」。结构借鉴 Ghost Downloader 3 的 `progress_toast.py`，来源见文件头。
 
+**从 DJCat 打开的程序不得在 `APP_DIR` 里运行。** 有进程的工作目录或可执行文件在里面时，Windows 不许给 `APP_DIR` 改名，更新器的整目录换名就整次退回（5.2.2 升 5.2.3 时，主页卡片打开的程序继承了 DJCat 的工作目录，就这样失败过）。所以 `djcat.py` 启动时把工作目录换到用户文件夹，资源和配置一律按绝对路径取；「启动程序」的 Home Action 和 Process Guard 没填工作目录时经 `programWorkingDirectory()` 用程序所在的文件夹，只写程序名的和 Shell 命令跟着 DJCat。点「立即更新」时，可执行文件在 `APP_DIR` 下的进程（Portable Mode 的 Installed Application 就装在 `APP_DIR\DJCatPro\Program`）先列出来确认一次，`UpdateApplyWorker` 在启动更新器前强制关闭；`_applyUpdate()` 先让 Process Guard `holdLaunches()`，刚关掉的被守护程序不会在更新器动手前被拉回来。
+
 Client Update 下载完成后，MainWindow 使用后台 `UpdateApplyWorker` 解压更新 ZIP 到暂存目录并启动 `updater.exe`，期间显示不可取消且只含不确定进度环的蒙层弹窗。确认更新器进程创建成功后才关闭 DJCat；启动失败时关闭蒙层并保留当前进程显示错误，不能在 GUI 线程等待更新器启动。更新包在更新器进程创建成功之后才删除，任何一步失败都还能重来；残留的包由下次启动的 `clearUpdateDirectory()` 清掉。
 
 `updater.exe` 的提交点是整目录换名，不是逐文件复制：更新包换名到 `<APP_DIR>.new`，原目录换名为 `<APP_DIR>.backup`，再把新目录换成 `APP_DIR`；失败时把备份换回去。更新器不能从 `APP_DIR` 里面运行，它先把自己复制到 `%TEMP%\djcat_updater` 再以 `CREATE_NO_WINDOW` 重启；路径比对前把 `/` 规范成 `\`。
 
-Portable Mode 的 `APP_DIR\DJCatPro` 在换名前**改名**进新目录，不是复制。安装目录不可写时申请提权；提权后必须借 `Shell_TrayWnd` 的令牌用 `CreateProcessAsUserW` 降权重启 DJCat。更新失败时更新器在 `APP_DIR` 写 `update-failed.txt`，MainWindow 启动时用 `takeUpdateFailure()` 读走并提示一次。以上理由见 `tools/updater/updater.c` 文件头和各函数注释。
+Portable Mode 的 `APP_DIR\DJCatPro` 在换名前**改名**进新目录，不是复制。安装目录不可写时申请提权；提权后必须借 `Shell_TrayWnd` 的令牌用 `CreateProcessAsUserW` 降权重启 DJCat。更新失败时更新器在 `APP_DIR` 写 `update-failed.txt`，MainWindow 启动时用 `takeUpdateFailure()` 读走并提示一次；换名因为被占用而放弃时，原因写成"安装目录正被其他程序占用，请先关闭从电教猫打开的程序"。以上理由见 `tools/updater/updater.c` 文件头和各函数注释。
 
 `restoreUpdaterBinary()` 只为从旧版本升上来的那一次保留：旧更新器仍会留下 `updater.exe.old`。新更新器不再改名自己。
 
@@ -364,7 +366,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 ### Startup (`djcat.py`)
 
 ```text
-set working directory
+leave APP_DIR as working directory (programs DJCat opens inherit it and would block a Client Update)
   → cacheLargeGlyphs (QT_MAX_CACHED_GLYPH_SIZE, before QApplication draws any text)
   → SingletonApplication (Windows single instance + IPC)
   → optimizeFluentDialogs + optimizeFluentMenus (before MainWindow or its popups are created)

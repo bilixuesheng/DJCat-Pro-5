@@ -30,6 +30,7 @@ from qfluentwidgets import (
     InfoBarIcon,
     InfoBarPosition,
     IndeterminateProgressRing,
+    MessageBox,
     MessageBoxBase,
     MSFluentWindow,
     NavigationItemPosition,
@@ -93,6 +94,7 @@ from app.platform.background_effect import (
     suspendAcrylic,
     suspendsAcrylicDuringMove,
 )
+from app.platform.processes import processesUnder, terminateProcessesUnder
 from app.signal_bus import signalBus
 from app.view.components.frame_rate import trackFrameRate
 from app.view.components.scroll_area import refreshOpaqueScrolling
@@ -194,6 +196,11 @@ class UpdateApplyWorker(QObject):
                 logger.error("updater.exe not found at {}", updaterPath)
                 self.finished.emit(False)
                 return
+
+            # 点「立即更新」时已确认过。还关不掉的交给更新器，它换不了程序目录时会说明被占用。
+            remaining = terminateProcessesUnder(APP_DIR)
+            if remaining:
+                logger.warning("更新前未能关闭 {}", ", ".join(map(str, remaining)))
 
             args = [
                 str(updaterPath),
@@ -1856,8 +1863,26 @@ class MainWindow(MSFluentWindow):
         )
 
     def _installDownloadedUpdate(self):
-        if self._downloadedUpdateZip is not None:
-            self._applyUpdate(self._downloadedUpdateZip)
+        if self._downloadedUpdateZip is None:
+            return
+        # 便携模式下 Installed Application 装在程序目录里，开着时更新器换不了程序目录。
+        names = list(dict.fromkeys(path.name for _pid, path in processesUnder(APP_DIR)))
+        if names:
+            box = MessageBox(
+                "安装更新",
+                "以下程序从电教猫的安装目录运行，安装更新前会被强制关闭，未保存的内容会丢失：\n"
+                + "\n".join(f"· {name}" for name in names),
+                self,
+            )
+            box.yesButton.setText("安装更新")
+            box.cancelButton.setText("取消")
+            try:
+                accepted = box.exec()
+            finally:
+                box.deleteLater()
+            if not accepted:
+                return
+        self._applyUpdate(self._downloadedUpdateZip)
 
     def _applyUpdate(self, zipPath):
         if self._updateApplyWorker is not None:
@@ -1870,6 +1895,9 @@ class MainWindow(MSFluentWindow):
             return
 
         self._disposeUpdateToast()
+        # 更新器起来后电教猫就退出；在那之前不能把刚关掉的被守护程序又拉回程序目录里。
+        # 没起来时一分钟后照常守护。
+        self.processGuard.holdLaunches(STARTUP_HOLD_SECONDS)
         dialog = InstallerLaunchDialog(self)
         worker = UpdateApplyWorker(zipPath)
         thread = threading.Thread(target=worker.run, daemon=True)

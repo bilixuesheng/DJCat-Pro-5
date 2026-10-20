@@ -793,6 +793,20 @@ class HomeCustomCardTest(TestCase):
             env=os.environ,
         )
 
+    @mock.patch("app.common.home_cards.subprocess.Popen")
+    def testProgramWithoutWorkingDirectoryRunsInItsOwnFolder(self, popen):
+        popen.return_value.poll.return_value = 0
+        folder = Path.home() / "Tools"
+        target = str(folder / "demo.exe")
+        executeAction({"type": "program", "target": target}, threading.Event())
+        self.assertEqual(popen.call_args.kwargs["cwd"], str(folder))
+
+        executeAction(
+            {"type": "program", "target": target, "working_dir": str(Path.home())},
+            threading.Event(),
+        )
+        self.assertEqual(popen.call_args.kwargs["cwd"], str(Path.home()))
+
     # creationflags 只在 Windows 上非零，其他平台没有 CREATE_NEW_CONSOLE 可选。
     @unittest.skipUnless(os.name == "nt", "控制台窗口标志是 Windows 专有行为")
     @mock.patch("app.common.home_cards.subprocess.Popen")

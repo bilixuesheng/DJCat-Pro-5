@@ -135,6 +135,23 @@ class StartupTest(TestCase):
 
         self.assertEqual(seen["limit"], str(MAX_CACHED_GLYPH_SIZE))
 
+    def testWorkingDirectoryIsOutsideTheProgramDirectory(self):
+        # 从电教猫打开的程序继承它的工作目录；落在程序目录里，Windows 不让更新器给程序目录改名。
+        class Stop(Exception):
+            pass
+
+        def application(_argv):
+            raise Stop
+
+        with (
+            patch("os.chdir") as chdir,
+            patch("app.platform.application.SingletonApplication", application),
+        ):
+            with self.assertRaises(Stop):
+                djcat.main()
+
+        chdir.assert_called_once_with(os.path.expanduser("~"))
+
     def testGlyphLimitSetByTheEnvironmentIsKept(self):
         with patch.dict(os.environ, {"QT_MAX_CACHED_GLYPH_SIZE": "64"}):
             cacheLargeGlyphs()

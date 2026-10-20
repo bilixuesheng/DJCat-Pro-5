@@ -283,7 +283,7 @@ def createHomeCardTaskForm(
 
     workingDirWrapper, workingDirInput = _pathInput(
         form,
-        "可选，默认为电教猫的工作目录",
+        "可选，默认为程序所在的文件夹",
         lambda owner: QFileDialog.getExistingDirectory(owner, "选择工作目录"),
     )
     workingDirInput.setText(program.get("working_dir", ""))

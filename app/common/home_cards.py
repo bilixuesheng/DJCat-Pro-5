@@ -15,7 +15,10 @@ from PySide6.QtCore import QObject, QProcess, QSize, Signal
 from PySide6.QtGui import QIcon, QImage
 from qfluentwidgets import FluentIcon as FIF
 
-from app.common.process_environment import externalProcessEnvironment
+from app.common.process_environment import (
+    externalProcessEnvironment,
+    programWorkingDirectory,
+)
 from app.config.paths import HOME_CARD_ICON_DIR
 
 
@@ -336,7 +339,7 @@ def executeAction(action: dict, cancel: threading.Event) -> str | None:
             arguments = QProcess.splitCommand(action["arguments"])
             process = subprocess.Popen(
                 [target, *arguments],
-                cwd=workingDir,
+                cwd=programWorkingDirectory(target, workingDir),
                 env=externalProcessEnvironment(globals().get("__compiled__")),
             )
         else:
