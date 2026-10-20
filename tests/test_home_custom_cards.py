@@ -796,10 +796,17 @@ class HomeCustomCardTest(TestCase):
     @mock.patch("app.common.home_cards.subprocess.Popen")
     def testProgramWithoutWorkingDirectoryRunsInItsOwnFolder(self, popen):
         popen.return_value.poll.return_value = 0
-        folder = Path.home() / "Tools"
+        folder = Path(__file__).resolve().parent
         target = str(folder / "demo.exe")
         executeAction({"type": "program", "target": target}, threading.Event())
         self.assertEqual(popen.call_args.kwargs["cwd"], str(folder))
+
+        # 文件夹都不在了就不给工作目录，报错仍是"找不到文件"而不是"目录名称无效"。
+        executeAction(
+            {"type": "program", "target": str(folder / "gone" / "demo.exe")},
+            threading.Event(),
+        )
+        self.assertIsNone(popen.call_args.kwargs["cwd"])
 
         executeAction(
             {"type": "program", "target": target, "working_dir": str(Path.home())},

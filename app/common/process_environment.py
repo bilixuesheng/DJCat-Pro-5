@@ -44,8 +44,11 @@ def externalProcessEnvironment(compiled=None) -> dict[str, str]:
 
 def programWorkingDirectory(target: str, workingDir: str) -> str | None:
     """启动程序时的工作目录：没填时用程序所在的文件夹，与快捷方式"起始位置"的默认一样；
-    只写程序名的跟着电教猫。为什么不能落在程序目录里见 djcat.py 的 main()。"""
+    只写程序名的跟着电教猫。为什么不能落在程序目录里见 djcat.py 的 main()。
+
+    文件夹不在时也跟着电教猫：工作目录无效时 Windows 报"目录名称无效"，盖过"找不到文件"。
+    """
     if workingDir:
         return workingDir
-    path = Path(target)
-    return str(path.parent) if path.is_absolute() else None
+    folder = Path(target).parent
+    return str(folder) if Path(target).is_absolute() and folder.is_dir() else None
