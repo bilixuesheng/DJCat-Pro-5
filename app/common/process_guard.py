@@ -17,7 +17,10 @@ from PySide6.QtCore import QObject, QProcess, Signal
 
 from app.common.home_card_tasks import PROCESS_GUARD_TRIGGER, normalizeHomeCardTasks
 from app.common.install_location import applicationsBlocked, installLocation
-from app.common.process_environment import externalProcessEnvironment
+from app.common.process_environment import (
+    externalProcessEnvironment,
+    programWorkingDirectory,
+)
 from app.platform.processes import runningExecutables
 
 CHECK_INTERVAL = 3
@@ -85,11 +88,11 @@ def launchProgram(program: dict) -> str | None:
     target = os.path.expandvars(program["target"])
     if not Path(target).is_file():
         return MISSING_PROGRAM
-    workingDir = os.path.expandvars(program.get("working_dir", "")) or None
+    workingDir = os.path.expandvars(program.get("working_dir", ""))
     try:
         subprocess.Popen(
             [target, *QProcess.splitCommand(program.get("arguments", ""))],
-            cwd=workingDir,
+            cwd=programWorkingDirectory(target, workingDir),
             env=externalProcessEnvironment(globals().get("__compiled__")),
         )
     except OSError as error:

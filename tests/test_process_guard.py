@@ -354,6 +354,17 @@ class LaunchProgramTest(TestCase):
         )
         self.assertEqual(popen.call_args.kwargs["cwd"], str(self.directory))
 
+    def testEmptyWorkingDirectoryIsTheProgramsOwnFolder(self):
+        # 不能跟着电教猫：从程序目录里拉起的程序会挡住 Client Update 给程序目录改名。
+        elsewhere = self.directory / "Tools"
+        elsewhere.mkdir()
+        self.program = elsewhere / "ClassApp.exe"
+        self.program.write_bytes(b"MZ")
+        with patch.object(process_guard.subprocess, "Popen") as popen:
+            self.assertIsNone(self.launch())
+
+        self.assertEqual(popen.call_args.kwargs["cwd"], str(elsewhere))
+
     def testMissingFileIsReportedWithoutTryingToStartIt(self):
         with patch.object(process_guard.subprocess, "Popen") as popen:
             error = self.launch(target=str(self.directory / "gone.exe"))

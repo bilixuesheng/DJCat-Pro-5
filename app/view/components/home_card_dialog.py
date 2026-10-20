@@ -540,6 +540,7 @@ class ActionEditorDialog(_ResponsiveMessageBox):
         arguments = LineEdit(self)
         arguments.setPlaceholderText("可选，例如 --profile default")
         workingWrapper, workingDir = self._lineWithBrowse("选择工作目录", "All files (*.*)")
+        workingDir.setPlaceholderText("可选，默认为程序所在的文件夹")
         wait = CheckBox("等待程序结束后继续", self)
         form.addRow("程序或命令", targetWrapper)
         form.addRow("参数", arguments)

@@ -33,6 +33,7 @@ from app.common.update_download import (
     validateClientUpdateZip,
 )
 from app.config.cfg import cfg
+from app.config.paths import APP_DIR
 from app.config.constants import (
     DOWNLOAD_URL,
     normalizeReleaseVersion,
@@ -1013,10 +1014,49 @@ class UpdateWindowLifecycleTest(TestCase):
         self.assertFalse(toast.laterButton.isHidden())
         self.assertTrue(toast.retryButton.isHidden())
         self.assertFalse(toast.closeButton.isHidden())
-        with patch.object(self.window, "_applyUpdate") as applyUpdate:
+        # 源码运行时程序目录就是仓库，venv 的 python.exe 启动器就在里面，不替换会弹出确认框卡住。
+        with (
+            patch("app.view.windows.main_window.processesUnder", return_value=[]),
+            patch.object(self.window, "_applyUpdate") as applyUpdate,
+        ):
             toast.installButton.click()
 
         applyUpdate.assert_called_once_with(zipPath)
+
+    def testProgramsRunningFromTheProgramDirectoryAreConfirmedBeforeInstalling(self):
+        # 便携模式下 Installed Application 就装在程序目录里，开着时更新器换不了程序目录。
+        self.window._downloadedUpdateZip = Path(tempfile.gettempdir()) / "update.zip"
+        board = Path("DJCatPro") / "Program" / "Board" / "board.exe"
+        for accepted in (False, True):
+            with (
+                self.subTest(accepted=accepted),
+                patch(
+                    "app.view.windows.main_window.processesUnder",
+                    return_value=[(41, board), (42, board)],
+                ) as running,
+                patch("app.view.windows.main_window.MessageBox") as box,
+                patch.object(self.window, "_applyUpdate") as applyUpdate,
+            ):
+                box.return_value.exec.return_value = accepted
+                self.window._installDownloadedUpdate()
+
+            running.assert_called_once_with(APP_DIR)
+            content = box.call_args.args[1]
+            self.assertEqual(content.count("board.exe"), 1)
+            self.assertIn("强制关闭", content)
+            self.assertEqual(applyUpdate.called, accepted)
+
+    def testNothingToConfirmWhenNoProgramRunsFromTheProgramDirectory(self):
+        self.window._downloadedUpdateZip = Path(tempfile.gettempdir()) / "update.zip"
+        with (
+            patch("app.view.windows.main_window.processesUnder", return_value=[]),
+            patch("app.view.windows.main_window.MessageBox") as box,
+            patch.object(self.window, "_applyUpdate") as applyUpdate,
+        ):
+            self.window._installDownloadedUpdate()
+
+        box.assert_not_called()
+        applyUpdate.assert_called_once_with(self.window._downloadedUpdateZip)
 
     def testMissingPackageTurnsToastIntoRetry(self):
         self.window.show()
@@ -1546,6 +1586,34 @@ class UpdateWindowLifecycleTest(TestCase):
         self.assertIsNone(self.window._updateToast)
         self.assertIsNone(self.window._updateApplyWorker)
         self.assertIsNone(self.window._updateApplyDialog)
+
+    def testProgramsUnderTheProgramDirectoryAreClosedBeforeTheUpdaterStarts(self):
+        order = Mock()
+
+        def terminate(directory):
+            order.terminate(directory)
+            return []
+
+        with (
+            tempfile.TemporaryDirectory() as tempDir,
+            patch(
+                "app.view.windows.main_window.terminateProcessesUnder",
+                side_effect=terminate,
+            ),
+            patch.object(
+                self.window.processGuard,
+                "holdLaunches",
+                side_effect=lambda seconds: order.hold(),
+            ),
+        ):
+            run = self._runApplyUpdate(tempDir, {"djcat.exe": b"MZ"})
+
+        # 进程守护先停手，否则刚关掉的被守护程序可能在更新器动手前又被拉起来。
+        self.assertEqual(
+            [name for name, *_ in order.mock_calls], ["hold", "terminate"]
+        )
+        order.terminate.assert_called_once_with(run.appDir)
+        run.popen.assert_called_once()
 
     def testUpdateApplyFlattensASingleTopLevelDirectory(self):
         with tempfile.TemporaryDirectory() as tempDir:
