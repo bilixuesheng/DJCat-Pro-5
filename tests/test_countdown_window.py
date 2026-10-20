@@ -1,12 +1,14 @@
 from unittest import TestCase
 from unittest.mock import patch
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtGui import QInputDevice, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QScroller, QWidget
 from qfluentwidgets import Flyout, PrimaryPushButton, PushButton
 
 from app.config.cfg import cfg
+from app.platform.touch_input import enableTouchPressFeedback
 from app.view.components.scroll_area import ScrollArea
 from app.view.components.task_picker import TouchTimePicker
 from app.view.components.time_text import timeTextWidth
@@ -38,7 +40,7 @@ class CountdownWindowTest(TestCase):
         self.assertFalse(self.window.controlsWidget.isEnabled())
         self.assertFalse(self.window._controlsVisible)
         self.assertEqual(self.window.contentsRect().size().toTuple(), (600, 190))
-        self.assertEqual(self.window.timeLabel.font().pixelSize(), 95)
+        self.assertEqual(self.window.timeLabel.font().pixelSize(), 85)
 
         self.window.remaining = 3723
         self.window._refreshTime()
@@ -157,6 +159,48 @@ class CountdownWindowTest(TestCase):
         self.app.processEvents()
 
         self.assertFalse(self.window.controlsWidget.isHidden())
+        self.assertTrue(self.window._controlsVisible)
+
+    def testDoubleTappingACountdownControlCountsBothTaps(self):
+        # 真机上连点两下快进：第二下曾经不算数，松开还落到窗口上把控制收了起来。
+        enableTouchPressFeedback(self.app)
+        device = QTest.createTouchDevice(
+            QInputDevice.DeviceType.TouchScreen,
+            QInputDevice.Capability.Position | QInputDevice.Capability.MouseEmulation,
+        )
+        self.window.remaining = 3600
+        self.window._setControlsVisible(True, animated=False)
+        button = self.window.btnForward
+        point = button.rect().center()
+
+        for pressType in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick):
+            QTest.touchEvent(button, device).press(0, point, button).commit()
+            self.app.processEvents()
+            QApplication.sendEvent(
+                button,
+                QMouseEvent(
+                    pressType,
+                    QPointF(point),
+                    QPointF(button.mapToGlobal(point)),
+                    Qt.MouseButton.LeftButton,
+                    Qt.MouseButton.LeftButton,
+                    Qt.KeyboardModifier.NoModifier,
+                ),
+            )
+            QTest.touchEvent(button, device).release(0, point, button).commit()
+            self.app.processEvents()
+            QTest.mouseRelease(button, Qt.MouseButton.LeftButton, pos=point)
+
+        self.assertEqual(self.window.remaining, 3540)
+        self.assertTrue(self.window._controlsVisible)
+
+    def testSlidingOffACountdownControlKeepsThemShown(self):
+        self.window._setControlsVisible(True, animated=False)
+        button = self.window.btnForward
+
+        QTest.mousePress(button, Qt.MouseButton.LeftButton, pos=button.rect().center())
+        QTest.mouseRelease(button, Qt.MouseButton.LeftButton, pos=QPoint(-10, -10))
+
         self.assertTrue(self.window._controlsVisible)
 
     def testPauseButtonKeepsThemeStyleAcrossControlFade(self):

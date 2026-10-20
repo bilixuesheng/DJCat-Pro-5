@@ -26,8 +26,9 @@ from app.view.pages.broadcast_page import (
 class TimerWindow(FramelessWindow):
     """Big white time on a full-screen or 600 × 190 windowed background.
 
-    Exam Countdown and Fullscreen Clock differ only in the cfg items below,
-    the text they show and the extra controls under the time.
+    Exam Countdown and Fullscreen Clock differ only in the cfg items below, the text
+    they show and the Countdown Controls floating under the time; the title and the
+    time sit at the same place and size in both.
     """
 
     backgroundItems = ()
@@ -37,7 +38,6 @@ class TimerWindow(FramelessWindow):
     showTaskbarItem = None
     confirmCloseItem = None
     closeMessage = ""
-    windowedTimeRatio = (1, 2)
 
     closeClicked = Signal()
 
@@ -78,8 +78,6 @@ class TimerWindow(FramelessWindow):
         self.vBoxLayout.addWidget(self.titleLabel)
         self.vBoxLayout.addStretch(1)
         self.vBoxLayout.addWidget(self.timeLabel)
-        for widget in self._createControls():
-            self.vBoxLayout.addWidget(widget)
         self.vBoxLayout.addStretch(2)
 
         self.btnContainer = QWidget(self)
@@ -93,9 +91,6 @@ class TimerWindow(FramelessWindow):
 
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
-
-    def _createControls(self):
-        return ()
 
     def _cornerButtons(self):
         return [self.btnWin, self.btnClose]
@@ -201,8 +196,7 @@ class TimerWindow(FramelessWindow):
         self.titleLabel.setFont(font)
 
         font = self.timeLabel.font()
-        numerator, denominator = self.windowedTimeRatio
-        size = max(32, height * numerator // denominator if self.isWindowed else height * 9 // 40)
+        size = max(32, height * 9 // 20 if self.isWindowed else height * 9 // 40)
         font.setPixelSize(size)
         font.setBold(True)
         # 超宽时按比例缩小字号到刚好放得下；按数字格量宽，走秒不改字号

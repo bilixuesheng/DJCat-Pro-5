@@ -17,7 +17,6 @@ class FullscreenClockWindow(TimerWindow):
     showTaskbarItem = cfg.showTaskbarInFullscreenClock
     confirmCloseItem = cfg.confirmBeforeCloseFullscreenClock
     closeMessage = "关闭当前的全屏时钟？"
-    windowedTimeRatio = (9, 20)
 
     def __init__(self):
         super().__init__()

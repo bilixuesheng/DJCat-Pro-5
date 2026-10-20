@@ -1,7 +1,7 @@
 from unittest import TestCase
 
-from PySide6.QtCore import QPoint, Qt, QTime
-from PySide6.QtGui import QInputDevice
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, QTime
+from PySide6.QtGui import QInputDevice, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
 from qfluentwidgets import CardWidget, LineEdit
@@ -19,6 +19,18 @@ def _windowsTouchScreen():
     return QTest.createTouchDevice(
         QInputDevice.DeviceType.TouchScreen,
         QInputDevice.Capability.Position | QInputDevice.Capability.MouseEmulation,
+    )
+
+
+def _mousePress(pressType, widget, point):
+    """Windows' own left press at point, as Qt hands it to the widget."""
+    return QMouseEvent(
+        pressType,
+        QPointF(point),
+        QPointF(widget.mapToGlobal(point)),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
     )
 
 
@@ -94,6 +106,21 @@ class TouchPressFeedbackTest(TestCase):
         QTest.mouseRelease(button, Qt.MouseButton.LeftButton, pos=point)
 
         self.assertEqual(clicks, [True])
+
+    def testBothTapsOfADoubleTapClick(self):
+        # 连点的第二下 Qt 只给控件发双击、不发按下；它同样是 Windows 自己的按下，
+        # 抬手时不能把按钮复位。
+        button = QPushButton("确定")
+        clicks = self._clicks(button)
+        self._show(button)
+
+        for pressType in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick):
+            point = self._press(button)
+            QApplication.sendEvent(button, _mousePress(pressType, button, point))
+            self._release(button, point)
+            QTest.mouseRelease(button, Qt.MouseButton.LeftButton, pos=point)
+
+        self.assertEqual(clicks, [True, True])
 
     def testCardLooksPressedWhileTheFingerIsDown(self):
         card = CardWidget()

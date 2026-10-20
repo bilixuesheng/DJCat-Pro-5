@@ -125,6 +125,7 @@ uv run python -m pytest
 
 * [PySide6](https://github.com/PySide/pyside-setup) Qt 官方 Python 绑定
 * [PySide6-Fluent-Widgets](https://github.com/zhiyiYo/PyQt-Fluent-Widgets/tree/PySide6) 强大、可扩展、美观的 Fluent Design 风格组件库
+* [Fluent UI System Icons](https://github.com/microsoft/fluentui-system-icons) 组件库里没有的图标（如全屏时钟）
 * [edge-tts](https://github.com/rany2/edge-tts) 定时播报的语音合成
 * [markdown-it-py](https://github.com/executablebooks/markdown-it-py) Markdown 解析
 * [Pygments](https://github.com/pygments/pygments) 代码高亮

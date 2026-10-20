@@ -74,6 +74,10 @@ _Avoid_: 全屏窗口（它也可以窗口化）、主窗口
 Display Window 角落里的那一排按钮：编辑、最小化、窗口化／全屏、重置和关闭，各窗口只有其中几个。关闭按钮用 Theme Color 原色，其余是半透明底。
 _Avoid_: 操作按钮、标题栏按钮（那是主窗口的最小化、最大化、关闭）
 
+**Countdown Controls（倒计时控制）**:
+Exam Countdown 全屏时，点按画面才在时间下方浮现的三个圆形按钮：倒回 10 秒、暂停／继续、快进 30 秒；10 秒没有操作就自动隐去，窗口化时没有。
+_Avoid_: 操作按钮、播放控制、Corner Button
+
 **Collapse（收起）**:
 Projection 的 Display Window 暂时让出屏幕、变成 Floating Button 的操作；按钮文字是"最小化"，但窗口不进任务栏。只有 Projection 能 Collapse。
 _Avoid_: minimize、最小化（仅保留在按钮文字中）、隐藏
