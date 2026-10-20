@@ -1014,7 +1014,11 @@ class UpdateWindowLifecycleTest(TestCase):
         self.assertFalse(toast.laterButton.isHidden())
         self.assertTrue(toast.retryButton.isHidden())
         self.assertFalse(toast.closeButton.isHidden())
-        with patch.object(self.window, "_applyUpdate") as applyUpdate:
+        # 源码运行时程序目录就是仓库，venv 的 python.exe 启动器就在里面，不替换会弹出确认框卡住。
+        with (
+            patch("app.view.windows.main_window.processesUnder", return_value=[]),
+            patch.object(self.window, "_applyUpdate") as applyUpdate,
+        ):
             toast.installButton.click()
 
         applyUpdate.assert_called_once_with(zipPath)
