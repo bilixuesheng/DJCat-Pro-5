@@ -138,9 +138,9 @@ class MarkdownRenderer:
                 children[0].setText(_TASK_RE.sub("", children[0].text()))
             marker = self._taskBox(checked)
         elif ordered:
-            marker = self._markerLabel(f"{number}.")
+            marker = self._markerLabel(f"{number}.", "number")
         else:
-            marker = self._markerLabel("•")
+            marker = self._markerLabel("•", "bullet")
         return ListItem(marker, children)
 
     def buildTable(self, node: SyntaxTreeNode, theme: Theme) -> TableBlock:
@@ -174,9 +174,10 @@ class MarkdownRenderer:
             return inline.children[0]
         return None
 
-    def _markerLabel(self, text: str) -> QLabel:
+    def _markerLabel(self, text: str, kind: str) -> QLabel:
         label = QLabel(text)
         label.setObjectName("list-marker")
+        label.setProperty("kind", kind)
         label.setAlignment(Qt.AlignRight | Qt.AlignTop)
         return label
 

@@ -379,7 +379,7 @@ _Avoid_: 默认颜色
 _Avoid_: 当前主题色（切到预设时两者不同）、上次颜色、颜色历史
 
 **App Font（软件字体）**:
-DJCat 显示文字所用的字体，覆盖主窗口、弹窗、Tray Menu、Display Window 和 Markdown 正文，代码保持等宽字体不跟随。Font Mode 为「统一」时由一款字体决定，中文缺字时用默认中文字体补上；为「中西文分开」时由 Latin Font 和 CJK Font 共同决定。只能选本机已安装的字体，选的字体在这台电脑上没装时显示为默认。
+DJCat 显示文字所用的字体，覆盖主窗口、弹窗、Tray Menu、Display Window 和 Markdown 正文；代码保持等宽字体，Markdown 列表的圆点保持默认字体，都不跟随。Font Mode 为「统一」时由一款字体决定，中文缺字时用默认中文字体补上；为「中西文分开」时由 Latin Font 和 CJK Font 共同决定。只能选本机已安装的字体，选的字体在这台电脑上没装时显示为默认。
 _Avoid_: 全局字体、界面字体（Display Window 也跟随）、系统字体（那是 Windows 的设置，「跟随系统」只是其中一个选项）
 
 **Font Mode（字体模式）**:

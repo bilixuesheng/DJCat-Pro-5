@@ -13,6 +13,7 @@ from app.config.cfg import DEFAULT_FONT, SYSTEM_FONT, cfg
 from app.signal_bus import signalBus
 from app.view.components.banner_widget import BannerWidget
 from app.view.components.font_picker import (
+    ROW_HEIGHT,
     FontPickerDialog,
     FontSettingCard,
     fontChoices,
@@ -177,9 +178,17 @@ class LiveAppFontTest(AppFontCase):
         projection.show()
         markdown = MarkdownView(largeText=True)
         self.addCleanup(markdown.deleteLater)
-        markdown.setMarkdown("# 标题\n\n正文")
+        markdown.setMarkdown("# 标题\n\n正文\n\n- 圆点\n\n1. 编号")
         markdown.show()
         self.app.processEvents()
+        bullet, number = (
+            next(
+                label
+                for label in markdown.findChildren(QLabel, "list-marker")
+                if label.property("kind") == kind
+            )
+            for kind in ("bullet", "number")
+        )
 
         self._change()
 
@@ -192,6 +201,7 @@ class LiveAppFontTest(AppFontCase):
             "投送标题": projection.titleLabel,
             "投送正文": projection.contentEdit,
             "Markdown 段落": markdown.findChild(QLabel, "paragraph"),
+            "Markdown 列表编号": number,
         }
         for name, widget in checked.items():
             with self.subTest(name):
@@ -199,10 +209,12 @@ class LiveAppFontTest(AppFontCase):
         # 字号和粗细是各自定的，换字体不动它们。
         self.assertEqual(projection.contentEdit.font().pointSizeF(), 26.0)
         self.assertTrue(countdown.titleLabel.font().bold())
+        # 列表圆点是渲染器生成的符号，始终用默认字体，换了字体它的大小和高低才不变。
+        self.assertEqual(bullet.font().families(), FLUENT_DEFAULT)
         stale = [
             type(widget).__name__
             for widget in QApplication.allWidgets()
-            if widget.font().families() == FLUENT_DEFAULT
+            if widget.font().families() == FLUENT_DEFAULT and widget.property("kind") != "bullet"
         ]
         self.assertEqual(stale, [])
 
@@ -288,10 +300,10 @@ class FontPickerTest(AppFontCase):
         self.assertEqual(fontDisplayName("KaiTi"), "KaiTi")
         self.assertEqual(fontDisplayName("Gone"), "Gone（未安装，正在使用默认）")
 
-    def _dialog(self, item):
+    def _dialog(self, item, height=700):
         parent = QWidget()
         self.addCleanup(parent.deleteLater)
-        parent.resize(900, 700)
+        parent.resize(900, height)
         parent.show()
         dialog = FontPickerDialog(item, "选择字体", parent)
         dialog.show()
@@ -312,6 +324,25 @@ class FontPickerTest(AppFontCase):
         self.assertEqual(
             dialog.sampleLabel.font().families(),
             ["Inter", "KaiTi", "Microsoft YaHei", "PingFang SC"],
+        )
+
+    def testAShortWindowShrinksTheListInsteadOfOverlappingTheButtons(self):
+        # 主窗口最矮 400：卡片被压矮时由字体列表让出高度，不能压到示例文字和按钮上。
+        for height in (400, 700):
+            with self.subTest(height=height):
+                dialog = self._dialog(cfg.appFont, height)
+                card = dialog.widget.geometry()
+                self.assertTrue(dialog.rect().contains(card))
+                self.assertLessEqual(
+                    dialog.scrollArea.geometry().bottom(), dialog.sampleLabel.geometry().top()
+                )
+                self.assertLessEqual(
+                    dialog.sampleLabel.geometry().bottom(), dialog.buttonGroup.geometry().top()
+                )
+                self.assertGreaterEqual(dialog.scrollArea.height(), ROW_HEIGHT * 2)
+        # 空间够时按内容高度显示，最多 9 行。
+        self.assertEqual(
+            dialog.scrollArea.height(), min(dialog.fontList.height(), ROW_HEIGHT * 9)
         )
 
     def testSearchKeepsOnlyMatchingRows(self):
