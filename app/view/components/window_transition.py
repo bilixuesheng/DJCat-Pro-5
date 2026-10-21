@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import NamedTuple
 
+from loguru import logger
 from PySide6.QtCore import (
     QCoreApplication,
     QElapsedTimer,
@@ -42,6 +43,9 @@ from app.view.components.window_background import (
 )
 
 TRANSITION_DURATION_MS = 250
+# 收起从整屏缩成 60 px 的圆。OutCubic 开头 50 ms 就走完一半，整屏猛地一缩；收起改为两头慢、
+# 中间快，时间也放长一些。
+COLLAPSE_DURATION_MS = 350
 # 动画层显示后要等系统真正把它摆上屏幕，之后的重画才是同步刷到屏幕的；等不到就照常继续。
 _COVER_TIMEOUT_MS = 100
 # 真全屏由系统异步改尺寸，等窗口尺寸落定再截终点快照；等不到就按当时的样子截。
@@ -51,7 +55,7 @@ _QUIET_TICKS = 2
 _WINDOW_NEWS = (QEvent.Type.Expose, QEvent.Type.Resize, QEvent.Type.Move)
 _FALLBACK_REFRESH_RATE = 60.0
 
-_IDLE, _COVERING, _SETTLING, _ANIMATING = range(4)
+_IDLE, _COVERING, _SETTLING, _ANIMATING, _LANDING = range(5)
 
 
 class TransitionSurface(NamedTuple):
@@ -244,8 +248,11 @@ class WindowTransition(QObject):
 
     ``run()`` covers the screen with a snapshot of the source first, applies the
     change underneath once that cover is on screen, keeps the target window
-    transparent while the shape morphs, then hands the screen back to it. Input
-    during a run is the caller's to ignore: check ``isRunning()``.
+    transparent while the shape morphs, then hands the screen back to it.
+    ``collapse()`` is for an end already known before the change (the Floating
+    Button): the shape starts moving as soon as the cover is up and the change is
+    applied under the finished last frame. Input during a run is the caller's to
+    ignore: check ``isRunning()``.
     """
 
     def __init__(self, parent: QObject | None = None):
@@ -254,15 +261,19 @@ class WindowTransition(QObject):
         self._change: Callable[[], None] | None = None
         self._target: Callable[[], TransitionSurface] | None = None
         self._source: _Look | None = None
+        self._ahead: _Look | None = None
+        self._faded: TransitionSurface | None = None
         self._overlay: _TransitionOverlay | None = None
         self._watched: QWindow | None = None
         self._windowNews = 0
         self._quietTicks = 0
+        self._duration = TRANSITION_DURATION_MS
         self._easing = QEasingCurve(QEasingCurve.Type.OutCubic)
         self._clock = QElapsedTimer()
         self._timer = QTimer(self)
         self._timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._timer.timeout.connect(self._onTick)
+        self._trace = _Trace()
         # 第一次显示时才建原生窗口要多花几十毫秒，全落在第一次点击之后；提前建好。
         self._ensureOverlay().winId()
 
@@ -275,31 +286,28 @@ class WindowTransition(QObject):
         change: Callable[[], None],
         target: Callable[[], TransitionSurface],
     ) -> None:
-        self.finish()
-        start = source()
-        if not cfg.windowTransitionEnabled.value or not start.window.isVisible():
-            change()
-            self._rest(target)
-            return
+        self._start(source, change, target, ahead=False)
 
-        self._source = _capture(start)
-        self._change = change
-        self._target = target
-        overlay = self._ensureOverlay()
-        overlay.setGeometry(self._area(start.window, target().window))
-        # 先以全透明的样子摆上屏幕：此时真窗口还在，动画层若已画着起点画面，两者的阴影和
-        # 抗锯齿边缘会叠深一层。
-        overlay.painted = False
-        overlay.show()
-        overlay.raise_()
-        self._phase = _COVERING
-        self._clock.restart()
-        self._timer.start(1)
+    def collapse(
+        self,
+        source: Callable[[], TransitionSurface],
+        change: Callable[[], None],
+        target: Callable[[], TransitionSurface],
+    ) -> None:
+        """Like ``run()``, but ``target`` must already describe the end before ``change``.
+
+        Nothing has to switch or repaint before the shape starts moving, so it moves
+        as soon as the cover is up; the switch happens under the finished last frame,
+        where a pause cannot be seen.
+        """
+        self._start(source, change, target, ahead=True)
 
     def finish(self) -> None:
         """Jump to the end: apply a change still waiting and hand the screen back."""
         if self._phase == _COVERING:
             self._swap()
+        if self._ahead is not None and self._phase == _ANIMATING:
+            self._switchUnder()
         self._stop()
 
     def cancel(self) -> None:
@@ -307,9 +315,42 @@ class WindowTransition(QObject):
         self._change = None
         self._stop()
 
+    def _start(self, source, change, target, ahead: bool) -> None:
+        self.finish()
+        start = source()
+        if not cfg.windowTransitionEnabled.value or not start.window.isVisible():
+            change()
+            self._rest(target)
+            return
+
+        self._trace.begin(start)
+        self._source = _capture(start)
+        self._ahead = _capture(target()) if ahead else None
+        self._faded = start if ahead else None
+        self._change = change
+        self._target = target
+        self._duration = COLLAPSE_DURATION_MS if ahead else TRANSITION_DURATION_MS
+        self._easing = QEasingCurve(
+            QEasingCurve.Type.InOutCubic if ahead else QEasingCurve.Type.OutCubic
+        )
+        overlay = self._ensureOverlay()
+        overlay.setGeometry(self._area(start.window, target().window))
+        # 不透明的直角起点（全屏的展示窗口）第一次显示就带着起点画面：盖在一模一样的真窗口
+        # 上看不出来，到时就不用再整屏重画一遍。有阴影或圆角的起点先以全透明的样子摆上屏幕：
+        # 此时真窗口还在，两者的阴影和抗锯齿边缘会叠深一层。
+        if start.radius == 0 and not start.shadow and start.opacity >= 1:
+            overlay.setFrame(self._source, self._source, 0.0)
+        overlay.painted = False
+        overlay.show()
+        overlay.raise_()
+        self._phase = _COVERING
+        self._clock.restart()
+        self._timer.start(1)
+
     def _stop(self) -> None:
         if self._phase == _IDLE:
             return
+        self._unfade()
         self._rest(self._target)
         self._end()
 
@@ -321,23 +362,38 @@ class WindowTransition(QObject):
             if self._settled() or self._clock.elapsed() >= _SETTLE_TIMEOUT_MS:
                 self._begin()
         elif self._phase == _ANIMATING:
-            elapsed = min(1.0, self._clock.elapsed() / TRANSITION_DURATION_MS)
-            if elapsed >= 1.0:
-                self._reveal()
-                self._end()
-            else:
+            self._trace.frame()
+            elapsed = min(1.0, self._clock.elapsed() / self._duration)
+            if elapsed < 1.0:
                 self._overlay.setFrame(
                     self._overlay.source,
                     self._overlay.target,
                     self._easing.valueForProgress(elapsed),
                 )
+            elif self._ahead is not None:
+                self._land()
+            else:
+                self._reveal()
+                self._trace.report(self._target().window)
+                self._end()
+        elif self._phase == _LANDING:
+            if self._settled() or self._clock.elapsed() >= _SETTLE_TIMEOUT_MS:
+                self._rest(self._target)
+                self._trace.report(self._target().window)
+                self._end()
 
     def _swap(self) -> None:
         # 动画层已经在屏幕上，重画是同步刷上去的：先画出起点画面，紧接着才让真窗口变透明。
         # 两步之间隔不了几微秒，系统合成刚好落在中间也只是叠深一层，不会露出桌面。
         overlay = self._overlay
-        overlay.setFrame(self._source, self._source, 0.0)
-        overlay.repaint()
+        if overlay.source is not self._source or not overlay.painted:
+            overlay.setFrame(self._source, self._source, 0.0)
+            overlay.repaint()
+        self._trace.mark("cover")
+        if self._ahead is not None:
+            self._faded.window.setWindowOpacity(0.0)
+            self._animate(self._ahead)
+            return
         self._target().window.setWindowOpacity(0.0)
         change, self._change = self._change, None
         self._phase = _SETTLING
@@ -396,7 +452,10 @@ class WindowTransition(QObject):
         # 切换后终点窗口整窗都要重画，现在就同步画完：排到动画开始之后，它会一口气占掉
         # 好几帧，4K 下整段动画一帧也画不出来。快照随后直接取这次画好的像素。
         surface.window.repaint()
-        target = _capture(surface)
+        self._animate(_capture(surface))
+
+    def _animate(self, target: _Look) -> None:
+        self._trace.mark("start")
         self._phase = _ANIMATING
         self._clock.restart()
         self._timer.setInterval(self._frameInterval())
@@ -404,6 +463,32 @@ class WindowTransition(QObject):
         # 画面才不被推迟。
         self._overlay.target = target
         self._overlay.progress = 0.0
+
+    def _land(self) -> None:
+        overlay = self._overlay
+        overlay.setFrame(overlay.source, overlay.target, 1.0)
+        overlay.repaint()
+        # 末帧停在屏幕上，底下才换：终点窗口先藏成全透明再显示，等它摆上屏幕才现身。
+        self._switchUnder()
+        self._phase = _LANDING
+        self._clock.restart()
+        self._watch(self._target().window.windowHandle())
+
+    def _switchUnder(self) -> None:
+        change, self._change = self._change, None
+        if change is None:
+            return
+        self._target().window.setWindowOpacity(0.0)
+        try:
+            change()
+        finally:
+            self._unfade()
+
+    def _unfade(self) -> None:
+        # 收起时起点窗口在形变期间是全透明的；切换把它藏起来之后（或者半路取消时）还原。
+        faded, self._faded = self._faded, None
+        if faded is not None and isValid(faded.window):
+            faded.window.setWindowOpacity(faded.opacity)
 
     def _reveal(self) -> None:
         overlay = self._overlay
@@ -420,6 +505,7 @@ class WindowTransition(QObject):
         self._change = None
         self._target = None
         self._source = None
+        self._ahead = None
         overlay = self._overlay
         if overlay is not None:
             overlay.source = overlay.target = None
@@ -455,3 +541,57 @@ class WindowTransition(QObject):
         # 1 ms 的 Animation Tick 下每帧都把透明层交给系统合成太贵，按屏幕刷新率重画。
         rate = screenFor(self._overlay).refreshRate()
         return max(1, int(1000 / (rate if rate > 0 else _FALLBACK_REFRESH_RATE)))
+
+
+class _Trace:
+    """One log line per Window Transition: where the time between click and motion went.
+
+    Only the real machine shows what a 4K Windows desktop costs; the line lets a
+    teacher's log answer it.
+    """
+
+    def __init__(self):
+        self._clock = QElapsedTimer()
+        self._marks: dict[str, int] = {}
+        self._source = ""
+        self._frames = 0
+        self._lastFrame = 0
+        self._longestFrame = 0
+
+    def begin(self, source: TransitionSurface) -> None:
+        self._clock.start()
+        self._marks = {}
+        window = source.window
+        ratio = window.devicePixelRatioF()
+        self._source = (
+            f"{type(window).__name__} {round(source.rect.width() * ratio)}"
+            f"×{round(source.rect.height() * ratio)}"
+        )
+        self._frames = self._lastFrame = self._longestFrame = 0
+
+    def mark(self, name: str) -> None:
+        self._marks[name] = self._clock.elapsed()
+        if name == "start":
+            self._lastFrame = self._marks[name]
+
+    def frame(self) -> None:
+        now = self._clock.elapsed()
+        self._frames += 1
+        self._longestFrame = max(self._longestFrame, now - self._lastFrame)
+        self._lastFrame = now
+
+    def report(self, target: QWidget) -> None:
+        marks = self._marks
+        cover, start = marks.get("cover", 0), marks.get("start", 0)
+        logger.info(
+            "窗口过渡 {} → {}：点击到开始动 {} ms（盖上动画层 {} ms，切换并落定 {} ms），"
+            "形变 {} 帧、最长一帧 {} ms，共 {} ms",
+            self._source,
+            type(target).__name__,
+            start,
+            cover,
+            start - cover,
+            self._frames,
+            self._longestFrame,
+            self._clock.elapsed(),
+        )

@@ -400,13 +400,13 @@ class FloatingMiniWindow(QWidget):
         self._opacity = opacity
         self.setWindowOpacity(opacity)
 
-    def showAt(self, position):
-        # 窗口不透明度交给 WindowTransition：它先把按钮藏成全透明，形变结束才还原到这里记下的值。
+    def placeAt(self, position):
+        # 先摆好不显示：收起的形变要在切换之前就知道终点。窗口不透明度交给 WindowTransition：
+        # 它先把按钮藏成全透明，形变结束才还原到这里记下的值。
         self._hovered = False
         self._opacity = self.IDLE_OPACITY
         self._updateStyle()
         self.move(position)
-        self.show()
 
     def transitionSurface(self):
         return TransitionSurface(
@@ -767,14 +767,6 @@ class BroadcastWindow(FramelessWindow):
     def minimizeToMini(self):
         if self.transition.isRunning():
             return
-        self.transition.run(
-            self._surface,
-            self._collapse,
-            self.miniWindow.transitionSurface,
-        )
-
-    def _collapse(self):
-        self.hide()
         rect = screenFor(self).availableGeometry()
         if cfg.broadcastActionButtonPosition.value == "右下角":
             position = QPoint(
@@ -783,7 +775,16 @@ class BroadcastWindow(FramelessWindow):
             )
         else:
             position = QPoint(rect.left() + 50, rect.top() + rect.height() - 150)
-        self.miniWindow.showAt(position)
+        self.miniWindow.placeAt(position)
+        self.transition.collapse(
+            self._surface,
+            self._collapse,
+            self.miniWindow.transitionSurface,
+        )
+
+    def _collapse(self):
+        self.hide()
+        self.miniWindow.show()
 
     def restoreFromMini(self):
         if self.transition.isRunning():

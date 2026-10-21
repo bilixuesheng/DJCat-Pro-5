@@ -2,7 +2,8 @@ import time
 from unittest import TestCase
 from unittest.mock import patch
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect
+from loguru import logger
+from PySide6.QtCore import QEasingCurve, QEvent, QObject, QPoint, QRect
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import qconfig
@@ -149,7 +150,8 @@ class WindowTransitionTest(TestCase):
                             worst = max(worst, abs(a.red() - b.red()), abs(a.green() - b.green()),
                                         abs(a.blue() - b.blue()))
                 self.assertLessEqual(worst, 2)
-                transition.finish()
+                # 让它自己走完：跳到终点时刚亮出来的悬浮按钮还没画第一帧，下一段的「之前」就不准了。
+                self.pumpUntil(lambda: not transition.isRunning(), "Window Transition never ended")
 
     def testSwitchHappensUnderTheCoverAndWaitsForIt(self):
         window = self.startCountdown()
@@ -273,9 +275,10 @@ class WindowTransitionTest(TestCase):
         self.assertTrue(window.isVisible())
         self.pumpUntilAnimating(transition)
 
-        self.assertFalse(window.isVisible())
-        self.assertTrue(button.isVisible())
-        self.assertEqual(button.windowOpacity(), 0.0)
+        # 终点事先就知道，形变直接开始：真窗口只是变成全透明，按钮还没亮出来。
+        self.assertTrue(window.isVisible())
+        self.assertEqual(window.windowOpacity(), 0.0)
+        self.assertFalse(button.isVisible())
         overlay = transition._overlay
         self.assertEqual(overlay.target.rect.toRect(), button.geometry())
 
@@ -292,9 +295,88 @@ class WindowTransitionTest(TestCase):
             self.assertAlmostEqual(got, want, delta=3)
         self.assertEqual(image.pixelColor(rect.topLeft().toPoint()).alpha(), 0)
 
-        transition.finish()
+        # 末帧停在屏幕上，底下才换：真窗口藏起来、不透明度还原，按钮先以全透明亮出来。
+        self.pumpUntil(
+            lambda: transition._phase != window_transition._ANIMATING,
+            "collapse never landed",
+        )
+        if transition.isRunning():
+            self.assertFalse(window.isVisible())
+            self.assertEqual(window.windowOpacity(), 1.0)
+            self.assertTrue(button.isVisible())
+            self.assertEqual(button.windowOpacity(), 0.0)
+            self.assertTrue(overlay.isVisible())
+        self.pumpUntil(lambda: not transition.isRunning(), "collapse never ended")
+        self.assertFalse(window.isVisible())
+        self.assertEqual(window.windowOpacity(), 1.0)
+        self.assertTrue(button.isVisible())
         self.assertAlmostEqual(button.windowOpacity(), FloatingMiniWindow.IDLE_OPACITY, delta=0.01)
         self.assertFalse(overlay.isVisible())
+
+    def testCollapseEasesInAndOutWhileTheOthersStayQuick(self):
+        window = self.startBroadcast()
+        transition = window.transition
+
+        window.minimizeToMini()
+        self.pumpUntilAnimating(transition)
+        self.assertEqual(transition._duration, window_transition.COLLAPSE_DURATION_MS)
+        # 两头慢：五分之一的时间只走了不到 5%，整屏不会一下子缩掉一半。
+        self.assertLess(transition._easing.valueForProgress(0.2), 0.05)
+        self.assertGreater(transition._easing.valueForProgress(0.8), 0.95)
+        self.pumpUntil(lambda: not transition.isRunning(), "collapse never ended")
+
+        window.restoreFromMini()
+        self.pumpUntilAnimating(transition)
+        self.assertEqual(transition._duration, window_transition.TRANSITION_DURATION_MS)
+        self.assertEqual(transition._easing.type(), QEasingCurve.Type.OutCubic)
+        transition.finish()
+
+    def testCancellingACollapseHalfwayBringsTheWindowBack(self):
+        window = self.startBroadcast()
+        window.minimizeToMini()
+        self.pumpUntilAnimating(window.transition)
+
+        window.startBroadcast()
+
+        self.assertFalse(window.transition.isRunning())
+        self.assertTrue(window.isVisible())
+        self.assertEqual(window.windowOpacity(), 1.0)
+        self.assertFalse(window.miniWindow.isVisible())
+
+    def testFullscreenCoverAlreadyShowsTheSourceSoItIsPaintedOnce(self):
+        window = self.startBroadcast()
+        transition = window.transition
+        paints = _PaintCounter(transition._overlay)
+
+        window.toggleWindowMode()
+        self.pumpUntil(
+            lambda: transition._phase not in (window_transition._COVERING,),
+            "cover never went up",
+        )
+
+        # 全屏的起点不透明、没有圆角和阴影：动画层第一次显示就带着它，交接时不再整屏重画。
+        self.assertEqual(paints.count, 1)
+        transition.finish()
+
+    def testEachFinishedTransitionLogsWhereTheTimeWent(self):
+        lines = []
+        sink = logger.add(lines.append, format="{message}", level="INFO")
+        self.addCleanup(logger.remove, sink)
+        window = self.startBroadcast()
+        transition = window.transition
+
+        window.toggleWindowMode()
+        self.pumpUntil(lambda: not transition.isRunning(), "never ended")
+        window.minimizeToMini()
+        self.pumpUntil(lambda: not transition.isRunning(), "never ended")
+        window.restoreFromMini()
+        transition.finish()
+
+        traces = [line for line in lines if "窗口过渡" in line]
+        self.assertEqual(len(traces), 2)
+        self.assertIn("BroadcastWindow", traces[0])
+        self.assertIn("点击到开始动", traces[0])
+        self.assertIn("FloatingMiniWindow", traces[1])
 
     def testRestoreExpandsFromWhereverTheFloatingButtonWasDragged(self):
         window = self.startBroadcast()

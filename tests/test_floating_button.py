@@ -31,7 +31,8 @@ class FloatingButtonTest(TestCase):
         button = FloatingMiniWindow()
         self.addCleanup(button.deleteLater)
         self.addCleanup(button.hide)
-        button.showAt(QPoint(100, 100))
+        button.placeAt(QPoint(100, 100))
+        button.show()
         self.app.processEvents()
         return button
 
