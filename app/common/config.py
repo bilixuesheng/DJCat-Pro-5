@@ -1,2 +1,2 @@
 # GitHub Actions extracts this assignment as text before importing the app.
-VERSION = "5.2.3"
+VERSION = "5.2.3-kb261021"
