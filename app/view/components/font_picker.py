@@ -284,7 +284,9 @@ class FontPickerDialog(MessageBoxBase):
         self.scrollArea = ScrollArea(self.widget)
         self.scrollArea.setWidgetResizable(True)
         self.scrollArea.enableTransparentBackground()
-        self.scrollArea.setFixedHeight(ROW_HEIGHT * 9)
+        # 窗口矮时卡片被压矮，由字体列表让出高度，不能固定，否则会压到示例文字和按钮上。
+        self.scrollArea.setMinimumHeight(ROW_HEIGHT * 2)
+        self.scrollArea.setMaximumHeight(ROW_HEIGHT * 9)
         self.fontList = FontList(self.scrollArea)
         self.scrollArea.setWidget(self.fontList)
         self.fontList.setChoices(fontChoices(self._item))

@@ -3,6 +3,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QLabel, QWidget
 from qfluentwidgets import SmoothScrollDelegate, isDarkTheme
 
+from app.common.app_font import DEFAULT_CJK_FAMILIES, DEFAULT_LATIN_FAMILIES
 from app.view.components.scroll_area import trackTouchScroller
 from pyqt_github_markdown import DARK, LIGHT, MarkdownWidget, Theme
 
@@ -17,6 +18,10 @@ QLabel#h6 { font-size: 21pt; }
 QLabel#paragraph { font-size: 26pt; }
 QLabel#code-lang { font-size: 19pt; }
 """
+# 列表的圆点是渲染器生成的符号，不跟 App Font：换成别的字体，圆点的大小和高低都跟着变。
+_BULLET_QSS = "QLabel#list-marker[kind=\"bullet\"] { font-family: %s; }" % ", ".join(
+    f'"{family}"' for family in (*DEFAULT_LATIN_FAMILIES, *DEFAULT_CJK_FAMILIES)
+)
 _TRANSPARENT_QSS = """
 #markdown, #markdown QWidget { background: transparent; }
 #markdown #code-block, #markdown QTextEdit#code-editor {
@@ -73,13 +78,12 @@ class MarkdownView(MarkdownWidget):
                     )
 
     def _applyStyleOverrides(self) -> None:
-        overrides = []
+        overrides = [_BULLET_QSS]
         if self._transparentBackground:
             overrides.append(_TRANSPARENT_QSS)
         if self._largeText:
             overrides.append(_LARGE_TEXT_QSS)
-        if overrides:
-            self.setStyleSheet(f"{self.styleSheet()}\n{''.join(overrides)}")
+        self.setStyleSheet(f"{self.styleSheet()}\n{''.join(overrides)}")
 
     @staticmethod
     def _openLink(url: str) -> None:
