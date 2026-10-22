@@ -38,7 +38,8 @@ from app.config.paths import (
     APP_STORE_CACHE_DIR,
     APP_STORE_DOWNLOAD_DIR,
 )
-from app.platform.processes import processesUnder, terminateProcessesUnder
+from app.platform.elevation import ERROR_ELEVATION_REQUIRED, startElevated
+from app.platform.processes import Survivor, processesUnder, terminateProcessesUnder
 
 CATALOG_PATH = "/app-store/catalog"
 MAX_ZIP_COMPRESSED = 2 * 1024 * 1024 * 1024
@@ -92,6 +93,10 @@ class DownloadLimitError(ApplicationStoreError):
     pass
 
 
+class ApplicationLaunchCanceled(ApplicationStoreError):
+    """用户在 UAC 里点了「否」：不算失败，不提示。"""
+
+
 @dataclass(frozen=True)
 class InstalledApplication:
     appId: int
@@ -106,8 +111,8 @@ def _runningExecutablesUnder(directory: Path) -> list[Path]:
     return [executable for _pid, executable in processesUnder(directory)]
 
 
-def _terminateProcessesUnder(directory: Path) -> None:
-    terminateProcessesUnder(directory)
+def _terminateProcessesUnder(directory: Path) -> list[Survivor]:
+    return terminateProcessesUnder(directory)
 
 
 def _manifestRevision(value) -> int:
@@ -763,8 +768,12 @@ class ApplicationStore:
                         process.wait(5)
                     except (OSError, subprocess.TimeoutExpired):
                         pass
-        _terminateProcessesUnder(target)
+        survivors = _terminateProcessesUnder(target)
         if self._applicationRunning(target):
+            if any(survivor.elevated for survivor in survivors):
+                raise ApplicationStoreError(
+                    "软件以管理员身份运行，无法关闭，请手动退出后重试"
+                )
             raise ApplicationStoreError("软件无法关闭，请手动退出后重试")
 
     def _activateProcess(self, process) -> None:
@@ -1234,12 +1243,25 @@ class ApplicationStore:
                     process = processes[-1]
                     self._activateProcess(process)
                     return process
-                process = subprocess.Popen(
-                    [str(programPath), *args],
-                    cwd=installPath,
-                    env=_externalProcessEnvironment(),
-                )
-                processes.append(process)
+                try:
+                    process = subprocess.Popen(
+                        [str(programPath), *args],
+                        cwd=installPath,
+                        env=_externalProcessEnvironment(),
+                    )
+                except OSError as error:
+                    if getattr(error, "winerror", None) != ERROR_ELEVATION_REQUIRED:
+                        raise
+                else:
+                    processes.append(process)
+                    return process
+            # 等 UAC 答复期间不能握着锁，界面线程上的 installed() 会跟着卡住；页面在打开期间
+            # 不允许安装和卸载同一个应用。
+            process = startElevated([str(programPath), *args], cwd=installPath)
+            if process is None:
+                raise ApplicationLaunchCanceled("已取消打开")
+            with self._installedLock:
+                self._launchedProcesses.setdefault(launchKey, []).append(process)
             return process
         if actionType == "url":
             return webbrowser.open(_httpsUrl(target))

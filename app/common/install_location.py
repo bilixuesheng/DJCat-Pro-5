@@ -19,6 +19,7 @@ from pathlib import Path
 
 from app.config.cfg import cfg
 from app.config.paths import APP_DATA_DIR, APP_DIR, PROGRAM_DIR, rebasePaths
+from app.platform.elevation import startElevated
 from app.platform.processes import processesUnder, terminateProcessesUnder
 from app.signal_bus import signalBus
 
@@ -193,75 +194,17 @@ def grantUsersModify(path: Path, window: int | None = None) -> bool | None:
     """
     if os.name != "nt":
         return False
-    import ctypes
-    from ctypes import wintypes
-
-    class ShellExecuteInfo(ctypes.Structure):
-        _fields_ = [
-            ("cbSize", wintypes.DWORD),
-            ("fMask", ctypes.c_ulong),
-            ("hwnd", wintypes.HWND),
-            ("lpVerb", wintypes.LPCWSTR),
-            ("lpFile", wintypes.LPCWSTR),
-            ("lpParameters", wintypes.LPCWSTR),
-            ("lpDirectory", wintypes.LPCWSTR),
-            ("nShow", ctypes.c_int),
-            ("hInstApp", wintypes.HINSTANCE),
-            ("lpIDList", ctypes.c_void_p),
-            ("lpClass", wintypes.LPCWSTR),
-            ("hkeyClass", wintypes.HKEY),
-            ("dwHotKey", wintypes.DWORD),
-            ("hIconOrMonitor", wintypes.HANDLE),
-            ("hProcess", wintypes.HANDLE),
-        ]
-
-    seeMaskNoCloseProcess = 0x00000040
-    seeMaskNoConsole = 0x00008000
-    errorCancelled = 1223
-    infinite = 0xFFFFFFFF
     systemRoot = os.environ.get("SystemRoot") or r"C:\Windows"
-    # 结尾的反斜杠会把后面的引号转义掉；磁盘根目录本来就不能选。
-    target = str(Path(path)).rstrip("\\/")
-    info = ShellExecuteInfo()
-    info.cbSize = ctypes.sizeof(ShellExecuteInfo)
-    info.fMask = seeMaskNoCloseProcess | seeMaskNoConsole
-    info.hwnd = window or None
-    info.lpVerb = "runas"
-    info.lpFile = str(Path(systemRoot) / "System32" / "icacls.exe")
-    info.lpParameters = f'"{target}" /grant *{USERS_SID}:(OI)(CI)M /Q'
-    info.nShow = 0
-
-    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
-    shell32.ShellExecuteExW.argtypes = (ctypes.POINTER(ShellExecuteInfo),)
-    shell32.ShellExecuteExW.restype = wintypes.BOOL
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
-    kernel32.GetExitCodeProcess.argtypes = (
-        wintypes.HANDLE,
-        ctypes.POINTER(wintypes.DWORD),
-    )
-    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-    ole32 = ctypes.windll.ole32
-    # ShellExecuteEx 可能经由 COM 处理，在后台线程里调用前先初始化。
-    initialized = ole32.CoInitializeEx(None, 0x2 | 0x4) >= 0
+    icacls = str(Path(systemRoot) / "System32" / "icacls.exe")
     try:
-        if not shell32.ShellExecuteExW(ctypes.byref(info)):
-            if ctypes.get_last_error() == errorCancelled:
-                return None
-            return False
-        if not info.hProcess:
-            return False
-        try:
-            kernel32.WaitForSingleObject(info.hProcess, infinite)
-            exitCode = wintypes.DWORD()
-            if not kernel32.GetExitCodeProcess(info.hProcess, ctypes.byref(exitCode)):
-                return False
-            return exitCode.value == 0
-        finally:
-            kernel32.CloseHandle(info.hProcess)
-    finally:
-        if initialized:
-            ole32.CoUninitialize()
+        process = startElevated(
+            [icacls, str(Path(path)), "/grant", f"*{USERS_SID}:(OI)(CI)M", "/Q"],
+            window=window,
+            hidden=True,
+        )
+        return None if process is None else process.wait() == 0
+    except OSError:
+        return False
 
 
 def _isLink(path: Path) -> bool:
@@ -441,8 +384,9 @@ def closeRunningApplications(location: Path) -> None:
     """强制结束可执行文件位于 location 下的进程；结束不了就抛出 RelocationError。"""
     remaining = terminateProcessesUnder(Path(location))
     if remaining:
+        reason = "它以管理员身份运行，" if remaining[0].elevated else ""
         raise RelocationError(
-            f"有程序无法关闭：{remaining[0].name}。请手动退出后重试。"
+            f"有程序无法关闭：{remaining[0].executable.name}。{reason}请手动退出后重试。"
         )
 
 

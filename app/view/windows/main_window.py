@@ -240,7 +240,10 @@ class UpdateApplyWorker(QObject):
             # 点「立即更新」时已确认过。还关不掉的交给更新器，它换不了程序目录时会说明被占用。
             remaining = terminateProcessesUnder(APP_DIR)
             if remaining:
-                logger.warning("更新前未能关闭 {}", ", ".join(map(str, remaining)))
+                logger.warning(
+                    "更新前未能关闭 {}",
+                    ", ".join(str(survivor.executable) for survivor in remaining),
+                )
 
             args = [
                 str(updaterPath),
