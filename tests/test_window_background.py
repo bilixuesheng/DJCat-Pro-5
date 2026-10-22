@@ -1,5 +1,6 @@
 import math
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase
@@ -10,6 +11,7 @@ from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QWidget
 from qfluentwidgets import FluentIcon as FIF, Theme, qconfig
 
+from app.common import clock
 from app.config.cfg import WINDOW_BACKGROUND_MODES, WINDOW_BACKGROUND_SCALE_MODES, cfg
 from app.view.components.setting_preview import (
     CLOCK_CONTENT,
@@ -562,10 +564,9 @@ class WindowBackgroundPreviewFurnitureTest(TestCase):
 
     def testClockShowsTheTimeThePreviewAppeared(self):
         preview = self._preview(CLOCK_CONTENT, "fullscreenClock")
-        shown = QTime(9, 24, 30)
-        with patch(
-            "app.view.components.setting_preview.QTime.currentTime", return_value=shown
-        ):
+        # 时钟预览和全屏时钟一样显示 Calibrated Time。
+        shown = datetime(2026, 10, 23, 9, 24, 30).astimezone()
+        with patch.object(clock, "calibratedNow", return_value=shown):
             preview.show()
             self.assertEqual(preview.timerText(), "09 : 24 : 30")
         # 之后的重绘不让秒数跳；下次出现才换成新的时间。
