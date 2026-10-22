@@ -1,9 +1,12 @@
+from datetime import datetime
 from unittest import TestCase
+from unittest.mock import patch
 
 from PySide6.QtCore import QTime
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import Flyout, PushButton
 
+from app.common import clock
 from app.config.cfg import HOME_CARD_SCHEMA_VERSION, cfg, migrateConfig
 from app.view.components.time_text import timeTextWidth
 from app.view.pages.fullscreen_clock import FullscreenClockWindow
@@ -41,6 +44,18 @@ class FullscreenClockTest(TestCase):
             [self.window.btnWin.text(), self.window.btnClose.text()],
             ["窗口化", "关闭"],
         )
+
+    def testShowsCalibratedTimeAndNeverTheTimeOffset(self):
+        cfg.set(cfg.timeOffsetEnabled, True, save=False)
+        cfg.set(cfg.timeOffset, -3.0, save=False)
+        calibrated = datetime(2026, 10, 23, 8, 0, 3, 400_000).astimezone()
+
+        with patch.object(clock, "calibratedNow", return_value=calibrated):
+            self.window._refreshTime()
+
+        self.assertEqual(self.window.timeLabel.text(), "08 : 00 : 03")
+        # 下一次刷新落在 Calibrated Time 的下一个整秒上。
+        self.assertEqual(self.window.timer.interval(), 600)
 
     def testWindowUsesIndependentConfigurationDefaults(self):
         self.assertEqual(

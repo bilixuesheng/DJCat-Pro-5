@@ -49,6 +49,24 @@ DEFAULT_HOME_CARDS = (
     "定时关机",
 )
 HOME_CARD_SCHEMA_VERSION = 3
+TIME_SERVERS = (
+    ("阿里云", "ntp.aliyun.com"),
+    ("腾讯云", "ntp.tencent.com"),
+    ("国家授时中心", "ntp.ntsc.ac.cn"),
+    ("微软", "time.windows.com"),
+)
+CUSTOM_TIME_SERVER = "自定义"
+TIME_SERVER_OPTIONS = [name for name, _ in TIME_SERVERS] + [CUSTOM_TIME_SERVER]
+# 可以设为不偏移的 Scheduled Task 种类：调度循环里的种类名 → 设置页上的名字。
+TIME_OFFSET_KINDS = {
+    "broadcast": "定时播报",
+    "home-card": "自动任务",
+    "shutdown": "定时关机",
+}
+# 偏移不设范围；数值框总得有个边，这里取一个用不到的大数。
+TIME_OFFSET_LIMIT = 999999.9
+TIME_OFFSET_DECIMALS = 3
+DAILY_DRIFT_DECIMALS = 1
 
 
 class GeometryValidator(ConfigValidator):
@@ -77,6 +95,41 @@ class FontValidator(ConfigValidator):
 
     def correct(self, value) -> str:
         return value if self.validate(value) else DEFAULT_FONT
+
+
+class SecondsValidator(ConfigValidator):
+    """Time Offset 和 Daily Drift 的秒数，保留 `decimals` 位小数。"""
+
+    def __init__(self, decimals: int):
+        self.decimals = decimals
+
+    def validate(self, value) -> bool:
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and abs(value) <= TIME_OFFSET_LIMIT
+            and round(value, self.decimals) == value
+        )
+
+    def correct(self, value) -> float:
+        try:
+            seconds = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if seconds != seconds:
+            return 0.0
+        seconds = max(-TIME_OFFSET_LIMIT, min(TIME_OFFSET_LIMIT, seconds))
+        return round(seconds, self.decimals)
+
+
+class TimeOffsetKindsValidator(ConfigValidator):
+    def validate(self, value) -> bool:
+        return isinstance(value, list) and all(kind in TIME_OFFSET_KINDS for kind in value)
+
+    def correct(self, value) -> list:
+        if not isinstance(value, (list, tuple)):
+            return []
+        return [kind for kind in TIME_OFFSET_KINDS if kind in value]
 
 
 class Config(QConfig):
@@ -376,6 +429,27 @@ class Config(QConfig):
     )
     shutdownTasksEnabled = ConfigItem(
         "Schedule", "ShutdownTasksEnabled", True, BoolValidator()
+    )
+    timeSyncEnabled = ConfigItem("Time", "SyncEnabled", True, BoolValidator())
+    timeServer = OptionsConfigItem(
+        "Time",
+        "Server",
+        TIME_SERVERS[0][0],
+        OptionsValidator(TIME_SERVER_OPTIONS),
+    )
+    customTimeServer = ConfigItem("Time", "CustomServer", "")
+    timeOffsetEnabled = ConfigItem("Time", "OffsetEnabled", False, BoolValidator())
+    # TimeOffsetDate 那一天的 Time Offset；开着 Daily Drift 时，之后每过一天再加一次 DailyDrift。
+    timeOffset = ConfigItem(
+        "Time", "Offset", 0.0, SecondsValidator(TIME_OFFSET_DECIMALS)
+    )
+    timeOffsetDate = ConfigItem("Time", "OffsetDate", "")
+    dailyDriftEnabled = ConfigItem("Time", "DailyDriftEnabled", False, BoolValidator())
+    dailyDrift = ConfigItem(
+        "Time", "DailyDrift", 0.0, SecondsValidator(DAILY_DRIFT_DECIMALS)
+    )
+    timeOffsetExemptions = ConfigItem(
+        "Time", "OffsetExemptions", [], TimeOffsetKindsValidator()
     )
 
 

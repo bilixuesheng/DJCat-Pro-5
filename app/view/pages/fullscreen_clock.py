@@ -1,5 +1,6 @@
 from PySide6.QtCore import QTime
 
+from app.common import clock
 from app.config.cfg import cfg
 from app.view.pages.timer_window import TimerWindow
 
@@ -33,7 +34,9 @@ class FullscreenClockWindow(TimerWindow):
         self._applyWindowState()
 
     def _refreshTime(self):
-        now = QTime.currentTime()
+        # 显示 Calibrated Time，从不加 Time Offset：给学生看的是标准时间。
+        moment = clock.calibratedNow()
+        now = QTime(moment.hour, moment.minute, moment.second, moment.microsecond // 1000)
         timeFormat = (
             "HH : mm : ss"
             if self.isWindowed

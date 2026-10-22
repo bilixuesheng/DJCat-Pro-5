@@ -11,7 +11,6 @@ from PySide6.QtCore import (
     QRectF,
     QSize,
     Qt,
-    QTime,
     QTimer,
 )
 from PySide6.QtGui import (
@@ -43,6 +42,7 @@ from qfluentwidgets.components.navigation.navigation_bar import (
 )
 from qframelesswindow.titlebar import CloseButton, MaximizeButton, MinimizeButton
 
+from app.common import clock
 from app.common.application_icon import (
     TRAY_ICON_ITEMS,
     applicationIcon,
@@ -204,8 +204,8 @@ class WindowBackgroundPreview(WindowBackground):
             return "00 : 45 : 00"
         # 时钟定格在预览出现的那一刻，滚动或换主题引起的重绘不让秒数跳。
         if self._shownTime is None:
-            self._shownTime = QTime.currentTime()
-        return self._shownTime.toString("HH : mm : ss")
+            self._shownTime = clock.calibratedNow()
+        return self._shownTime.strftime("%H : %M : %S")
 
     def showEvent(self, event) -> None:
         self._shownTime = None

@@ -23,6 +23,7 @@ from qfluentwidgets import (
 )
 from qfluentwidgets import FluentIcon as FIF
 
+from app.common import clock
 from app.common.edge_tts import DEFAULT_EDGE_VOICE, loadChineseVoices
 from app.config.cfg import cfg
 from app.view.components.scroll_area import registerTouchDragTarget
@@ -111,9 +112,9 @@ def createTaskForm(parentWidget, initialData=None):
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(2)
 
-    defaultTime = QTime.currentTime()
+    defaultTime = clock.scheduledTaskNow("broadcast")
     data = initialData or {
-        "name": "", "time": defaultTime.toString("HH:mm:ss"),
+        "name": "", "time": defaultTime.strftime("%H:%M:%S"),
         "weeks": [0,1,2,3,4,5,6], "type": "预设: 12:30报时",
         "content": "", "file": "", "repeat": 3,
         "voice": DEFAULT_EDGE_VOICE,
@@ -129,7 +130,7 @@ def createTaskForm(parentWidget, initialData=None):
 
     timePicker = TouchTimePicker(form, showSeconds=True)
     timePicker.setColumnFormatter(2, SecondsFormatter())
-    timePicker.setTime(QTime.fromString(data["time"], "HH:mm:ss") if data["time"] else defaultTime)
+    timePicker.setTime(QTime.fromString(data["time"] or defaultTime.strftime("%H:%M:%S"), "HH:mm:ss"))
     layout.addWidget(TaskFormSettingCard(FIF.ALBUM, "播报时间", "设置触发的具体时间(时:分:秒)", timePicker, form))
     widgets['timePicker'] = timePicker
 

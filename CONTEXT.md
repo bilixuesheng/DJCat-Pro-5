@@ -63,7 +63,7 @@ _Avoid_: Projection、editor draft、template
 _Avoid_: timer、Scheduled Task
 
 **Fullscreen Clock**:
-"全屏时钟"显示当前系统时间，默认全屏展示，也可配置为固定大小的窗口。关闭后不保存状态。
+"全屏时钟"显示当前 Calibrated Time，从不加 Time Offset，默认全屏展示，也可配置为固定大小的窗口。关闭后不保存状态。
 _Avoid_: Exam Countdown、timer、Scheduled Task
 
 **Display Window（展示窗口）**:
@@ -90,10 +90,32 @@ _Avoid_: 恢复入口、恢复圆钮、悬浮球、mini window
 Display Window 在全屏、窗口化和 Floating Button 之间切换时，外形从起点连续变到终点的过渡；过渡期间画面是静止的。可在设置里整体关闭，关闭后直接跳到终点。
 _Avoid_: 最大化动画（没有最大化）、缩放动画（圆角和内容也在变）、切页过渡（那是主窗口里的页面切换）
 
+### 时间
+
+**Time Sync（网络校时）**:
+电教猫向用户选定的时间服务器（默认阿里云）询问标准时间，得出本机系统时钟快或慢多少。它只校准电教猫自己用的时间，不改 Windows 系统时钟。
+_Avoid_: 同步系统时间、改系统时间、对时
+
+**Calibrated Time（校准时间）**:
+电教猫认定的标准时间：系统时间加上 Time Sync 测出的偏差；Time Sync 关闭或尚未成功时就是系统时间。Fullscreen Clock 显示它。
+_Avoid_: 网络时间、北京时间、系统时间（只在 Time Sync 没起作用时相同）
+
+**Time Offset（时间偏移）**:
+为对上学校铃声而加在 Calibrated Time 上的秒数，可带小数：负数抵消铃声滞后，正数抵消铃声提前。它与 Time Sync 互不干扰，Time Sync 关闭时照样加在系统时间上。
+_Avoid_: 时差、时区、校准（那是 Time Sync）
+
+**Daily Drift（每天自动偏移）**:
+Time Offset 每过一个日历日自动加上的秒数，用来跟上铃声那台钟每天走快或走慢的量；电脑关着的日子也照算。
+_Avoid_: 每日校准、自动校时
+
+**Bell Time（铃声时间）**:
+Calibrated Time 加上当天的 Time Offset，即电教猫推算的学校铃声那台钟此刻的读数。Scheduled Task 按它匹配，用户设为不偏移的种类改按 Calibrated Time 匹配。
+_Avoid_: 偏移时间、校准时间
+
 ### 定时与自动任务
 
 **Scheduled Task**:
-按对应 Task Master Switch、独立启用状态、星期和精确时间反复匹配的本地规则。Broadcast Task、使用固定时间的 Home Card Task 和 Shutdown Task 属于 Scheduled Task；软件行为触发的 Home Card Task 和 Process Guard 不参与定时匹配。
+按对应 Task Master Switch、独立启用状态，以及 Bell Time 的星期和精确时间反复匹配的本地规则；设为不偏移的种类改用 Calibrated Time。Broadcast Task、使用固定时间的 Home Card Task 和 Shutdown Task 属于 Scheduled Task；软件行为触发的 Home Card Task 和 Process Guard 不参与定时匹配。
 _Avoid_: alarm、job；不加限定地称 task
 
 **Task Master Switch**:
@@ -449,6 +471,9 @@ _Avoid_: 搜索结果（设置页不再有结果列表）、筛选项
 
 > **Dev:** "大屏上滑设置页不跟手。"
 > **Domain expert:** "是 Drag 还是 Fling？手指按着时页面落后于手指，是 Drag；松手后滑得太近、停得太急，是 Fling。两段分开调。"
+
+> **Dev:** "学校的铃比标准时间晚 3 秒，把全屏时钟也调慢 3 秒吧？"
+> **Domain expert:** "全屏时钟显示 Calibrated Time，不跟偏移。把 Time Offset 设成 −3，Bell Time 就慢 3 秒，到点的定时播报和铃同时响。"
 
 > **Dev:** "把主窗口的边框再调宽一点，手指好拖。"
 > **Domain expert:** "你说的是 Resize Band，不是边框。可以加宽，但它在右上角三个按钮上始终让位，按钮上一律是点击。"

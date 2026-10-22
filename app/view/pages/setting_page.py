@@ -56,7 +56,9 @@ from app.config.cfg import (
     BANNER_IMAGE_PRESETS,
     BANNER_PRESET_SCALE_MODES,
     CUSTOM_THEME_COLOR,
+    CUSTOM_TIME_SERVER,
     THEME_COLOR_PRESETS,
+    TIME_SERVER_OPTIONS,
     WINDOW_BACKGROUND_SCALE_MODES,
     cfg,
     currentThemeColor,
@@ -90,6 +92,13 @@ from app.view.components.setting_section import (
     SettingNavigationCard,
     SettingSectionStack,
     SettingSectionView,
+)
+from app.view.components.time_setting_cards import (
+    CurrentTimeCard,
+    DailyDriftSettingCard,
+    TimeOffsetExemptionCard,
+    TimeOffsetSettingCard,
+    TimeSyncStatusCard,
 )
 from app.view.shell.tray import selectedShortcutKeys
 
@@ -957,6 +966,44 @@ class SettingPage(QWidget):
             cfg.confirmBeforeCloseFullscreenClock,
         )
 
+        self.currentTimeCard = CurrentTimeCard()
+        self.timeSyncCard = SwitchSettingCard(
+            FluentIcon.GLOBE,
+            "网络校时",
+            "从时间服务器取标准时间，只校准电教猫自己用的时间，不改 Windows 时间",
+            configItem=cfg.timeSyncEnabled,
+        )
+        self.timeServerCard = ComboBoxSettingCard(
+            cfg.timeServer,
+            FluentIcon.WIFI,
+            "时间服务器",
+            "默认阿里云，同步不上时可以换一个试试",
+            texts=TIME_SERVER_OPTIONS,
+        )
+        self.customTimeServerCard = LineEditSettingCard(
+            FluentIcon.EDIT,
+            "自定义时间服务器",
+            "填写时间服务器的域名或 IP 地址",
+            configItem=cfg.customTimeServer,
+            placeholder="ntp.example.com",
+        )
+        self.timeSyncStatusCard = TimeSyncStatusCard()
+        self.timeOffsetCard = SwitchSettingCard(
+            FluentIcon.RINGER,
+            "时间偏移",
+            "对齐学校铃声：定时任务按校准时间加上偏移执行，全屏时钟不受影响",
+            configItem=cfg.timeOffsetEnabled,
+        )
+        self.timeOffsetValueCard = TimeOffsetSettingCard()
+        self.dailyDriftCard = SwitchSettingCard(
+            FluentIcon.UPDATE,
+            "每天自动偏移",
+            "铃声的钟每天走快或走慢时，让偏移每天自动变化",
+            configItem=cfg.dailyDriftEnabled,
+        )
+        self.dailyDriftValueCard = DailyDriftSettingCard()
+        self.timeOffsetExemptionCard = TimeOffsetExemptionCard()
+
         self.checkUpdateCard = SwitchSettingCard(
             FluentIcon.UPDATE,
             "在应用程序启动时检查更新",
@@ -1204,6 +1251,32 @@ class SettingPage(QWidget):
             ]
         )
 
+        time = self._addSection(
+            "time",
+            "时间",
+            FluentIcon.DATE_TIME,
+            "网络校时和对铃用的时间偏移",
+            ROOT_SECTION_KEY,
+        )
+        time.addSettingCards([self.currentTimeCard])
+        time.addLinkedSettingCards(
+            [
+                self.timeSyncCard,
+                self.timeServerCard,
+                self.customTimeServerCard,
+                self.timeSyncStatusCard,
+            ]
+        )
+        time.addLinkedSettingCards(
+            [
+                self.timeOffsetCard,
+                self.timeOffsetValueCard,
+                self.dailyDriftCard,
+                self.dailyDriftValueCard,
+                self.timeOffsetExemptionCard,
+            ]
+        )
+
         self._addSection(
             "personalization",
             "个性化",
@@ -1377,6 +1450,13 @@ class SettingPage(QWidget):
         cfg.bannerImageSource.valueChanged.connect(self._onBannerImageSourceChanged)
         cfg.bannerImageSource.valueChanged.connect(self._refreshConditionalCards)
         cfg.showBanner.valueChanged.connect(self._refreshConditionalCards)
+        for item in (
+            cfg.timeSyncEnabled,
+            cfg.timeServer,
+            cfg.timeOffsetEnabled,
+            cfg.dailyDriftEnabled,
+        ):
+            item.valueChanged.connect(self._refreshConditionalCards)
         cfg.aiMarkdownMachineCode.valueChanged.connect(self._onMachineCodeChanged)
         for view in self.sectionStack.views():
             for cardList in view.cardLists():
@@ -1392,6 +1472,8 @@ class SettingPage(QWidget):
     def _conditionalCardVisibility(self) -> dict[QWidget, bool]:
         separateFonts = cfg.appFontMode.value == APP_FONT_MODES[1]
         bannerShown = bool(cfg.showBanner.value)
+        timeSync = bool(cfg.timeSyncEnabled.value)
+        timeOffset = bool(cfg.timeOffsetEnabled.value)
         visibility = {
             self.appFontCard: not separateFonts,
             self.latinFontCard: separateFonts,
@@ -1404,6 +1486,15 @@ class SettingPage(QWidget):
             ),
             self.bannerScaleCard: bannerShown,
             self.bannerBrightnessCard: bannerShown,
+            self.timeServerCard: timeSync,
+            self.customTimeServerCard: (
+                timeSync and cfg.timeServer.value == CUSTOM_TIME_SERVER
+            ),
+            self.timeSyncStatusCard: timeSync,
+            self.timeOffsetValueCard: timeOffset,
+            self.dailyDriftCard: timeOffset,
+            self.dailyDriftValueCard: timeOffset and bool(cfg.dailyDriftEnabled.value),
+            self.timeOffsetExemptionCard: timeOffset,
         }
         for prefix, (_modeCard, colorCard, imageCard, scaleCard) in (
             self._backgroundCardSets.items()
@@ -1681,7 +1772,12 @@ class SettingPage(QWidget):
         self.cacheCard.setCacheSize(size + clearableLogSize())
 
     def flushPendingSave(self) -> None:
-        for card in (self.aiStyleCard, self.windowTitleCard, self.trayTooltipCard):
+        for card in (
+            self.aiStyleCard,
+            self.windowTitleCard,
+            self.trayTooltipCard,
+            self.customTimeServerCard,
+        ):
             card.flushPendingSave()
 
     def hideEvent(self, event) -> None:

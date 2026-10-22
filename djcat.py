@@ -122,6 +122,7 @@ def main():
     from qfluentwidgets import qconfig, setThemeColor
 
     from app.common.app_font import bindAppFont
+    from app.common.clock import bindTimeOffset
     from app.common.logs import configureLogging
     from app.common.update_download import clearUpdateDirectory, restoreUpdaterBinary
     from app.config.cfg import cfg, migrateConfig
@@ -160,6 +161,8 @@ def main():
     bindAppFont()
     # 超级帧率优化也在这里，读出配置才知道要不要设 1 ms，仍早于任何动画。
     bindDeveloperOptions(app)
+    # 改 Time Offset 的规则时以今天为新起点，设置页之外改配置也一样。
+    bindTimeOffset()
     setThemeColor(QColor(49, 101, 49))
 
     app.window = startApp(isSilent=isSilent)
