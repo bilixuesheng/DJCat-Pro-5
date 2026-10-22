@@ -6,13 +6,14 @@ Time Sync 成功后，Calibrated Time 从同步那一刻起跟着 `perf_counter`
 
 Time Offset 存的是 TimeOffsetDate 那一天的值，开着 Daily Drift 时按日历天数往后累加，读的时候现算，
 不每天回写配置。规则一改（开关、每日量）就按改之前的规则把今天的值折算出来、以今天为新起点：
-关掉开关时数值冻结，关着的日子不累计，改每日量不回头重算。理由见 docs/adr/0012-djcat-time.md。
+关掉开关时数值冻结，关着的日子不累计，改每日量不回头重算；用户改偏移也以今天为起点。理由见 docs/adr/0012-djcat-time.md。
 """
 
 from __future__ import annotations
 
 import time
 from datetime import date, datetime, timedelta
+from typing import NamedTuple
 
 from app.config.cfg import TIME_OFFSET_DECIMALS, cfg
 
@@ -59,6 +60,19 @@ def calibratedNow() -> datetime:
     return calibratedClock.now()
 
 
+def millisecondsToNextSecond(*moments: datetime) -> int:
+    """到这几个时间里最近的那个整秒还有多少毫秒，多留一点余量。"""
+    wait = min(1_000_000 - moment.microsecond for moment in moments)
+    # 定时器偶尔早到一两毫秒；落在整秒之后一点，才不会把这一秒当成上一秒。
+    return -(-wait // 1000) + 2
+
+
+class _OffsetRules(NamedTuple):
+    enabled: bool
+    driftEnabled: bool
+    drift: float
+
+
 def _anchorDate(day: date) -> date:
     try:
         return date.fromisoformat(cfg.timeOffsetDate.value)
@@ -66,33 +80,39 @@ def _anchorDate(day: date) -> date:
         return day
 
 
-def _rules() -> tuple[bool, bool, float]:
-    return (
+def _currentRules() -> _OffsetRules:
+    return _OffsetRules(
         bool(cfg.timeOffsetEnabled.value),
         bool(cfg.dailyDriftEnabled.value),
         cfg.dailyDrift.value,
     )
 
 
-def _offsetValue(day: date, enabled: bool, driftEnabled: bool, drift: float) -> float:
+def _offsetUnder(rules: _OffsetRules, day: date) -> float:
     value = cfg.timeOffset.value
-    if enabled and driftEnabled:
+    if rules.enabled and rules.driftEnabled:
         days = (day - _anchorDate(day)).days
         if days > 0:
-            value += drift * days
+            value += rules.drift * days
     return round(value, TIME_OFFSET_DECIMALS)
 
 
-def offsetValue(day: date) -> float:
+def configuredTimeOffset(day: date) -> float:
     """这一天的 Time Offset 数值，开关关着时是冻结的那个值；设置页显示它。"""
-    return _offsetValue(day, *_rules())
+    return _offsetUnder(_currentRules(), day)
 
 
 def timeOffset(day: date) -> float:
     """这一天实际生效的 Time Offset，开关关着是 0。"""
     if not cfg.timeOffsetEnabled.value:
         return 0.0
-    return offsetValue(day)
+    return configuredTimeOffset(day)
+
+
+def setTimeOffset(seconds: float) -> None:
+    """用户填的偏移是今天的值：连同今天这个起点一起存，填回原数也要从今天重新算。"""
+    cfg.set(cfg.timeOffset, seconds)
+    cfg.set(cfg.timeOffsetDate, calibratedNow().date().isoformat())
 
 
 def bellTime(calibrated: datetime) -> datetime:
@@ -110,34 +130,21 @@ def scheduledTaskTime(kind: str, calibrated: datetime) -> datetime:
     return bellTime(calibrated)
 
 
-_boundRules: tuple[bool, bool, float] | None = None
-_rewriting = False
+_boundRules: _OffsetRules | None = None
 
 
 def bindTimeOffset() -> None:
-    """规则改动时重新起算；重复调用无害。"""
+    """开关或每日量改动时按改之前的规则折算到今天、以今天为新起点；重复调用无害。"""
     global _boundRules
     if _boundRules is not None:
         return
-    _boundRules = _rules()
+    _boundRules = _currentRules()
     for item in (cfg.timeOffsetEnabled, cfg.dailyDriftEnabled, cfg.dailyDrift):
         item.valueChanged.connect(_onRulesChanged)
-    cfg.timeOffset.valueChanged.connect(_onOffsetEdited)
 
 
 def _onRulesChanged(_value=None) -> None:
-    global _boundRules, _rewriting
-    today = calibratedNow().date()
-    value = _offsetValue(today, *_boundRules)
-    _boundRules = _rules()
-    _rewriting = True
-    try:
-        cfg.set(cfg.timeOffset, value)
-        cfg.set(cfg.timeOffsetDate, today.isoformat())
-    finally:
-        _rewriting = False
-
-
-def _onOffsetEdited(_value=None) -> None:
-    if not _rewriting:
-        cfg.set(cfg.timeOffsetDate, calibratedNow().date().isoformat())
+    global _boundRules
+    value = _offsetUnder(_boundRules, calibratedNow().date())
+    _boundRules = _currentRules()
+    setTimeOffset(value)

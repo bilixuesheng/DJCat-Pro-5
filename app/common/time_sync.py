@@ -12,7 +12,7 @@ import socket
 import struct
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from loguru import logger
@@ -103,10 +103,10 @@ def queryNtp(
         raise NtpError(f"找不到 {host}") from error
     # 不少教室网络没有 IPv6，有 IPv4 地址就先用它。
     addresses.sort(key=lambda entry: entry[0] != socket.AF_INET)
-    family, kind, proto, _, address = addresses[0]
+    family, socketType, proto, _, address = addresses[0]
     best = None
     failure = None
-    with socket.socket(family, kind, proto) as sock:
+    with socket.socket(family, socketType, proto) as sock:
         for _ in range(samples):
             try:
                 sample = _sample(sock, address, host, timeout, counter)
@@ -168,7 +168,7 @@ class TimeSync(QObject):
         self._counter = counter
         self._generation = 0
         self._running = False
-        self._again = False
+        self._resyncPending = False
         self._shutdown = False
         self._lastWatch = (systemTime(), counter())
         self._periodicTimer = QTimer(self)
@@ -201,11 +201,11 @@ class TimeSync(QObject):
         if self._shutdown or not cfg.timeSyncEnabled.value:
             return
         if self._running:
-            self._again = True
+            self._resyncPending = True
             return
         self._running = True
-        self._again = False
-        _setState(TimeSyncState(True, _state.syncedAt, _state.deviation, _state.error))
+        self._resyncPending = False
+        _setState(replace(_state, syncing=True))
         host = timeServerHost()
         threading.Thread(
             target=self._run, args=(self._generation, host), daemon=True
@@ -232,7 +232,7 @@ class TimeSync(QObject):
             return
         if result is None:
             logger.warning("网络校时失败：{}", error)
-            _setState(TimeSyncState(False, _state.syncedAt, _state.deviation, error))
+            _setState(replace(_state, syncing=False, error=error))
         else:
             self._clock.synchronize(result.epoch, result.counter)
             deviation = self._clock.deviation()
@@ -242,7 +242,7 @@ class TimeSync(QObject):
                 result.delay * 1000,
             )
             _setState(TimeSyncState(False, self._clock.now(), deviation, ""))
-        if self._again:
+        if self._resyncPending:
             self.syncNow()
 
     def _onEnabledChanged(self, enabled: bool) -> None:

@@ -110,8 +110,6 @@ from app.view.windows.application_relocation import ApplicationRelocation
 
 SCHEDULE_CATCH_UP_LIMIT = timedelta(seconds=60)
 SHUTDOWN_CATCH_UP_LIMIT = timedelta(seconds=5)
-# 定时器偶尔早到一两毫秒；落在整秒之后一点，到点的任务才不会晚一整秒。
-SCHEDULE_TICK_MARGIN_MS = 2
 # 已执行的定时触发记多久：时间往回跳（改偏移、校时、跨零点）时靠它不重复执行。
 TRIGGERED_SCHEDULE_MEMORY = timedelta(days=1)
 # 主窗口没有返回按钮，qrouter 记下的切页历史从来不会被弹出。
@@ -924,11 +922,9 @@ class MainWindow(MSFluentWindow):
         self.scheduleTimer.start(self._nextScheduleDelay(clock.calibratedNow()))
 
     def _nextScheduleDelay(self, calibrated):
-        wait = min(
-            1_000_000 - clock.scheduledTaskTime(kind, calibrated).microsecond
-            for kind in TIME_OFFSET_KINDS
+        return clock.millisecondsToNextSecond(
+            *(clock.scheduledTaskTime(kind, calibrated) for kind in TIME_OFFSET_KINDS)
         )
-        return -(-wait // 1000) + SCHEDULE_TICK_MARGIN_MS
 
     def _checkScheduleAt(self, calibrated):
         for kind, enabledItem, tasksItem, catchUpLimit, callback in (
@@ -954,7 +950,6 @@ class MainWindow(MSFluentWindow):
                 self._handleShutdownTask,
             ),
         ):
-            # 每一种按自己的时间走：Bell Time，设为不偏移的用 Calibrated Time。
             now = clock.scheduledTaskTime(kind, calibrated)
             previous = self._lastScheduleChecks.get(kind)
             self._lastScheduleChecks[kind] = now

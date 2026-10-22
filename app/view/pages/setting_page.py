@@ -58,7 +58,7 @@ from app.config.cfg import (
     CUSTOM_THEME_COLOR,
     CUSTOM_TIME_SERVER,
     THEME_COLOR_PRESETS,
-    TIME_SERVERS,
+    TIME_SERVER_OPTIONS,
     WINDOW_BACKGROUND_SCALE_MODES,
     cfg,
     currentThemeColor,
@@ -973,13 +973,12 @@ class SettingPage(QWidget):
             "从时间服务器取标准时间，只校准电教猫自己用的时间，不改 Windows 时间",
             configItem=cfg.timeSyncEnabled,
         )
-        timeServers = [name for name, _ in TIME_SERVERS] + [CUSTOM_TIME_SERVER]
         self.timeServerCard = ComboBoxSettingCard(
             cfg.timeServer,
             FluentIcon.WIFI,
             "时间服务器",
             "默认阿里云，同步不上时可以换一个试试",
-            texts=timeServers,
+            texts=TIME_SERVER_OPTIONS,
         )
         self.customTimeServerCard = LineEditSettingCard(
             FluentIcon.EDIT,

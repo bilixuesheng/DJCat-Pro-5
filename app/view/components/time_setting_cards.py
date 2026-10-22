@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, time, timedelta
 
 from PySide6.QtCore import QSignalBlocker, Qt, QTimer
 from PySide6.QtWidgets import QVBoxLayout, QWidget
@@ -29,9 +29,6 @@ from app.config.cfg import (
     cfg,
 )
 from app.signal_bus import signalBus
-
-# 定时器偶尔早到一两毫秒，落在整秒之后一点才不会显示成上一秒。
-TICK_MARGIN_MS = 2
 
 
 def _seconds(value: float) -> str:
@@ -125,12 +122,11 @@ class CurrentTimeCard(SettingCard):
         }
         for key, moment in times.items():
             self._values[key].setText(f"{moment:%H:%M:%S}")
-        wait = min(
-            1_000_000 - moment.microsecond
-            for key, moment in times.items()
-            if not self.blocks[key].isHidden()
+        self.timer.start(
+            clock.millisecondsToNextSecond(
+                *(moment for key, moment in times.items() if not self.blocks[key].isHidden())
+            )
         )
-        self.timer.start(-(-wait // 1000) + TICK_MARGIN_MS)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -204,6 +200,11 @@ class TimeOffsetSettingCard(SecondsSettingCard):
             TIME_OFFSET_DECIMALS,
             parent,
         )
+        # 开着设置页过了零点，每天自动偏移就该加上一天。
+        self.dayTimer = QTimer(self)
+        self.dayTimer.setSingleShot(True)
+        self.dayTimer.setTimerType(Qt.TimerType.PreciseTimer)
+        self.dayTimer.timeout.connect(self.refresh)
         for item in (
             cfg.timeOffset,
             cfg.timeOffsetDate,
@@ -214,11 +215,23 @@ class TimeOffsetSettingCard(SecondsSettingCard):
             item.valueChanged.connect(self.refresh)
         self.refresh()
 
+    def refresh(self, _value=None) -> None:
+        super().refresh()
+        if not self.isVisible():
+            return
+        now = clock.calibratedNow()
+        midnight = datetime.combine(now.date() + timedelta(days=1), time(), now.tzinfo)
+        self.dayTimer.start((midnight - now) // timedelta(milliseconds=1) + 2)
+
     def value(self) -> float:
-        return clock.offsetValue(clock.calibratedNow().date())
+        return clock.configuredTimeOffset(clock.calibratedNow().date())
 
     def save(self, value: float) -> None:
-        cfg.set(cfg.timeOffset, value)
+        clock.setTimeOffset(value)
+
+    def hideEvent(self, event) -> None:
+        self.dayTimer.stop()
+        super().hideEvent(event)
 
 
 class DailyDriftSettingCard(SecondsSettingCard):

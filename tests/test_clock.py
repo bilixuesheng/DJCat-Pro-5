@@ -144,12 +144,20 @@ class TimeOffsetRulesTest(TestCase):
 
     def testEditingTheOffsetStartsCountingFromToday(self):
         self.today = MONDAY
-        self.assertEqual(clock.offsetValue(MONDAY), -4.5)
+        self.assertEqual(clock.configuredTimeOffset(MONDAY), -4.5)
 
-        cfg.set(cfg.timeOffset, -2.0, save=False)
+        clock.setTimeOffset(-2.0)
 
         self.assertEqual(cfg.timeOffsetDate.value, MONDAY.isoformat())
         self.assertEqual(clock.timeOffset(THURSDAY), -3.5)
+
+    def testEnteringTheStoredValueAgainStillStartsFromToday(self):
+        self.today = MONDAY
+
+        clock.setTimeOffset(-3.0)
+
+        self.assertEqual(clock.timeOffset(MONDAY), -3.0)
+        self.assertEqual(clock.timeOffset(THURSDAY), -4.5)
 
     def testTurningDailyDriftOffFreezesTheValueReachedSoFar(self):
         self.today = MONDAY
@@ -167,7 +175,7 @@ class TimeOffsetRulesTest(TestCase):
         cfg.set(cfg.timeOffsetEnabled, False, save=False)
 
         self.assertEqual(clock.timeOffset(THURSDAY), 0)
-        self.assertEqual(clock.offsetValue(THURSDAY), -4.5)
+        self.assertEqual(clock.configuredTimeOffset(THURSDAY), -4.5)
 
         self.today = THURSDAY
         cfg.set(cfg.timeOffsetEnabled, True, save=False)

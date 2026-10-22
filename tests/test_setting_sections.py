@@ -499,13 +499,34 @@ class SettingSectionTest(TestCase):
         self.assertFalse(spinBox.keyboardTracking())
 
         spinBox.setValue(-2.125)
-        self.assertEqual(clock.offsetValue(today), -2.125)
+        self.assertEqual(clock.configuredTimeOffset(today), -2.125)
 
         page.timeOffsetExemptionCard.checkBoxes["shutdown"].setChecked(True)
         self.assertEqual(cfg.timeOffsetExemptions.value, ["shutdown"])
         cfg.set(cfg.timeOffsetExemptions, ["broadcast"])
         self.assertTrue(page.timeOffsetExemptionCard.checkBoxes["broadcast"].isChecked())
         self.assertFalse(page.timeOffsetExemptionCard.checkBoxes["shutdown"].isChecked())
+
+    def testTimeOffsetCardMovesOnToTheNewDayAtMidnight(self):
+        isolateCfg(self)
+        clock.bindTimeOffset()
+        self.now = clock.calibratedNow().replace(hour=23, minute=59, second=59, microsecond=800_000)
+        patcher = patch.object(clock, "calibratedNow", lambda: self.now)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        cfg.set(cfg.timeOffsetEnabled, True)
+        cfg.set(cfg.dailyDriftEnabled, True)
+        cfg.set(cfg.dailyDrift, -0.5)
+        clock.setTimeOffset(-3.0)
+        page = self.buildPage()
+        self.navigate(page, "time")
+        spinBox = page.timeOffsetValueCard.spinBox
+        self.assertEqual(spinBox.value(), -3.0)
+
+        self.now += timedelta(milliseconds=300)
+        QTest.qWait(400)
+
+        self.assertEqual(spinBox.value(), -3.5)
 
     def testTimeSyncStatusDescribesTheLastSyncAndCanSyncNow(self):
         page = self.buildPage()

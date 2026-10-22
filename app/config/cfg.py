@@ -56,6 +56,7 @@ TIME_SERVERS = (
     ("微软", "time.windows.com"),
 )
 CUSTOM_TIME_SERVER = "自定义"
+TIME_SERVER_OPTIONS = [name for name, _ in TIME_SERVERS] + [CUSTOM_TIME_SERVER]
 # 可以设为不偏移的 Scheduled Task 种类：调度循环里的种类名 → 设置页上的名字。
 TIME_OFFSET_KINDS = {
     "broadcast": "定时播报",
@@ -434,7 +435,7 @@ class Config(QConfig):
         "Time",
         "Server",
         TIME_SERVERS[0][0],
-        OptionsValidator([name for name, _ in TIME_SERVERS] + [CUSTOM_TIME_SERVER]),
+        OptionsValidator(TIME_SERVER_OPTIONS),
     )
     customTimeServer = ConfigItem("Time", "CustomServer", "")
     timeOffsetEnabled = ConfigItem("Time", "OffsetEnabled", False, BoolValidator())
