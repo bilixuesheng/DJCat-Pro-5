@@ -56,9 +56,16 @@ class FakeNtpServer:
                 request, address = self.socket.recvfrom(512)
             except OSError:
                 return
-            packet = build(request)
-            if packet is not None:
-                self.socket.sendto(packet, address)
+            packets = build(request)
+            for packet in packets if isinstance(packets, list) else [packets]:
+                if packet is None:
+                    continue
+                try:
+                    self.socket.sendto(packet, address)
+                except OSError:
+                    return
+                if isinstance(packets, list):
+                    time.sleep(0.05)
 
 
 def counterReading(*values):
@@ -104,6 +111,26 @@ class QueryNtpTest(TestCase):
                 server = FakeNtpServer(self, [build])
                 with self.assertRaises(NtpError):
                     self.query(server, counterReading(0.0, 0.1), timeout=0.3)
+
+    def testStrayPacketsDoNotStretchTheWaitPastTheTimeout(self):
+        def stray(request):
+            return reply(SERVER_TIME, originate=bytes(8))(request)
+
+        server = FakeNtpServer(self, [self.flood(stray)])
+        started = time.monotonic()
+
+        with self.assertRaises(NtpError):
+            self.query(server, counterReading(0.0, 0.1), timeout=0.3)
+
+        self.assertLess(time.monotonic() - started, 1.0)
+
+    @staticmethod
+    def flood(build):
+        # 一个请求换来一串不相干的包，每 50 ms 一个，持续 2 秒。
+        def answer(request):
+            return [build(request)] * 40
+
+        return answer
 
     def testSilentServerNamesTheHostItCouldNotReach(self):
         server = FakeNtpServer(self, [lambda request: None])

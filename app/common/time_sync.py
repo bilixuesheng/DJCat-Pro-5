@@ -55,7 +55,7 @@ def _ntpTime(packet: bytes, offset: int) -> float:
     return seconds - NTP_EPOCH_OFFSET + fraction / 2**32
 
 
-def _sample(sock, address, host: str, counter) -> NtpSample:
+def _sample(sock, address, host: str, timeout: float, counter) -> NtpSample:
     request = bytearray(48)
     request[0] = (4 << 3) | 3  # 版本 4，客户端
     # 发送时间填随机数（RFC 9109）：服务器原样抄回，用来认出这一问的回答。
@@ -66,8 +66,11 @@ def _sample(sock, address, host: str, counter) -> NtpSample:
         sock.sendto(request, address)
     except OSError as error:
         raise NtpError(f"连不上 {host}") from error
+    # 别处发来的包不算数，但也不能让它们一个接一个地把等待拖长。
+    deadline = time.monotonic() + timeout
     while True:
         try:
+            sock.settimeout(max(0.0, deadline - time.monotonic()) or 0.001)
             packet, _ = sock.recvfrom(512)
         except OSError as error:
             raise NtpError(f"连不上 {host}") from error
@@ -104,10 +107,9 @@ def queryNtp(
     best = None
     failure = None
     with socket.socket(family, kind, proto) as sock:
-        sock.settimeout(timeout)
         for _ in range(samples):
             try:
-                sample = _sample(sock, address, host, counter)
+                sample = _sample(sock, address, host, timeout, counter)
             except NtpError as error:
                 failure = error
                 continue
