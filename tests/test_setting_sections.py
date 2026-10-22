@@ -1,3 +1,4 @@
+from datetime import timedelta
 from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
@@ -16,11 +17,13 @@ from PySide6.QtWidgets import QApplication, QWidget
 from qfluentwidgets import FluentIcon, MessageBox, StrongBodyLabel
 from shiboken6 import delete
 
-from app.common import install_location
+from app.common import clock, install_location
 from app.common.application_store import ApplicationStoreError, packageSlots
-from app.config.cfg import BANNER_IMAGE_PRESETS, cfg
+from app.common.time_sync import TimeSyncState
+from app.config.cfg import BANNER_IMAGE_PRESETS, CUSTOM_TIME_SERVER, cfg
 from app.config.constants import APP_NAME
 from app.config.paths import LOG_DIR
+from app.signal_bus import signalBus
 from app.view.components.setting_card_group import SettingCardList
 from app.view.components.setting_section import (
     BLOCK_SPACING,
@@ -36,6 +39,7 @@ TOP_LEVEL_SECTIONS = [
     "全屏投送",
     "考试倒计时",
     "全屏时钟",
+    "时间",
     "个性化",
     "应用",
     "关于",
@@ -337,6 +341,19 @@ class SettingSectionTest(TestCase):
             (page.fontModeCard, page.appFontCard, page.latinFontCard, page.cjkFontCard),
             (page.applicationIconSourceCard, page.applicationIconCard),
             (page.trayIconSourceCard, page.trayIconCard),
+            (
+                page.timeSyncCard,
+                page.timeServerCard,
+                page.customTimeServerCard,
+                page.timeSyncStatusCard,
+            ),
+            (
+                page.timeOffsetCard,
+                page.timeOffsetValueCard,
+                page.dailyDriftCard,
+                page.dailyDriftValueCard,
+                page.timeOffsetExemptionCard,
+            ),
         }
 
         shared = {
@@ -417,6 +434,127 @@ class SettingSectionTest(TestCase):
             [item.card for item in page.searchSuggestions("横幅亮度")],
             [page.bannerBrightnessCard],
         )
+
+    def testTimeSectionHidesWhatItsSwitchesTurnOff(self):
+        isolateCfg(self)
+        cfg.set(cfg.timeSyncEnabled, True)
+        cfg.set(cfg.timeServer, "阿里云")
+        cfg.set(cfg.timeOffsetEnabled, False)
+        cfg.set(cfg.dailyDriftEnabled, False)
+        page = self.buildPage()
+        offsetRest = (
+            page.timeOffsetValueCard,
+            page.dailyDriftCard,
+            page.dailyDriftValueCard,
+            page.timeOffsetExemptionCard,
+        )
+        self.assertEqual(page.routeFor("time"), [ROOT_SECTION_KEY, "time"])
+        self.assertFalse(page.timeServerCard.isHidden())
+        self.assertFalse(page.timeSyncStatusCard.isHidden())
+        self.assertTrue(page.customTimeServerCard.isHidden())
+        self.assertTrue(all(card.isHidden() for card in offsetRest))
+        self.assertEqual(page.searchSuggestions("每天偏移"), [])
+
+        cfg.set(cfg.timeServer, CUSTOM_TIME_SERVER)
+        self.assertFalse(page.customTimeServerCard.isHidden())
+        cfg.set(cfg.timeSyncEnabled, False)
+        self.assertTrue(
+            all(
+                card.isHidden()
+                for card in (
+                    page.timeServerCard,
+                    page.customTimeServerCard,
+                    page.timeSyncStatusCard,
+                )
+            )
+        )
+
+        cfg.set(cfg.timeOffsetEnabled, True)
+        self.assertTrue(page.dailyDriftValueCard.isHidden())
+        self.assertFalse(
+            any(card.isHidden() for card in offsetRest if card is not page.dailyDriftValueCard)
+        )
+        cfg.set(cfg.dailyDriftEnabled, True)
+        self.assertFalse(page.dailyDriftValueCard.isHidden())
+        self.assertEqual(
+            [item.card for item in page.searchSuggestions("每天偏移")],
+            [page.dailyDriftValueCard],
+        )
+
+    def testTimeOffsetCardShowsTodaysValueAndSavesEdits(self):
+        isolateCfg(self)
+        # djcat.py 启动时就绑上了：改偏移以今天为新起点。
+        clock.bindTimeOffset()
+        today = clock.calibratedNow().date()
+        cfg.set(cfg.timeOffsetEnabled, True)
+        cfg.set(cfg.dailyDriftEnabled, True)
+        cfg.set(cfg.dailyDrift, -0.5)
+        cfg.set(cfg.timeOffset, -3.0)
+        cfg.set(cfg.timeOffsetDate, (today - timedelta(days=3)).isoformat())
+        page = self.buildPage()
+        spinBox = page.timeOffsetValueCard.spinBox
+
+        self.assertEqual(spinBox.value(), -4.5)
+        self.assertEqual(spinBox.decimals(), 3)
+        self.assertFalse(spinBox.keyboardTracking())
+
+        spinBox.setValue(-2.125)
+        self.assertEqual(clock.offsetValue(today), -2.125)
+
+        page.timeOffsetExemptionCard.checkBoxes["shutdown"].setChecked(True)
+        self.assertEqual(cfg.timeOffsetExemptions.value, ["shutdown"])
+        cfg.set(cfg.timeOffsetExemptions, ["broadcast"])
+        self.assertTrue(page.timeOffsetExemptionCard.checkBoxes["broadcast"].isChecked())
+        self.assertFalse(page.timeOffsetExemptionCard.checkBoxes["shutdown"].isChecked())
+
+    def testTimeSyncStatusDescribesTheLastSyncAndCanSyncNow(self):
+        page = self.buildPage()
+        card = page.timeSyncStatusCard
+        syncedAt = clock.calibratedNow().replace(hour=8, minute=1, second=23)
+        states = {
+            TimeSyncState(): "未同步，正在使用系统时间",
+            TimeSyncState(syncing=True): "正在同步…",
+            TimeSyncState(syncedAt=syncedAt, deviation=2.4): "上次同步 08:01:23，本机时钟慢 2.4 秒",
+            TimeSyncState(syncedAt=syncedAt, deviation=-0.125): "上次同步 08:01:23，本机时钟快 0.125 秒",
+            TimeSyncState(error="连不上 ntp.aliyun.com"): (
+                "同步失败：连不上 ntp.aliyun.com，正在使用系统时间"
+            ),
+            TimeSyncState(syncedAt=syncedAt, deviation=2.4, error="连不上 ntp.aliyun.com"): (
+                "同步失败：连不上 ntp.aliyun.com，继续使用 08:01:23 校准的时间"
+            ),
+        }
+        for state, text in states.items():
+            with self.subTest(text), patch(
+                "app.view.components.time_setting_cards.timeSyncState",
+                return_value=state,
+            ):
+                signalBus.timeSyncStateChanged.emit()
+                self.assertEqual(card.contentLabel.text(), text)
+                self.assertEqual(card.button.isEnabled(), not state.syncing)
+
+        requests = []
+
+        def request():
+            requests.append(True)
+
+        signalBus.timeSyncRequested.connect(request)
+        self.addCleanup(signalBus.timeSyncRequested.disconnect, request)
+        card.button.click()
+        self.assertEqual(requests, [True])
+
+    def testCurrentTimeCardShowsOnlyTheTimesInUse(self):
+        isolateCfg(self)
+        cfg.set(cfg.timeSyncEnabled, True)
+        cfg.set(cfg.timeOffsetEnabled, False)
+        page = self.buildPage()
+        blocks = page.currentTimeCard.blocks
+        shown = lambda: [name for name, block in blocks.items() if not block.isHidden()]
+
+        self.assertEqual(shown(), ["system", "calibrated"])
+        cfg.set(cfg.timeOffsetEnabled, True)
+        self.assertEqual(shown(), ["system", "calibrated", "bell"])
+        cfg.set(cfg.timeSyncEnabled, False)
+        self.assertEqual(shown(), ["system", "bell"])
 
     def testShortSectionListDoesNotStretchToThePageBottom(self):
         page = self.buildPage()

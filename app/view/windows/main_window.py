@@ -55,6 +55,7 @@ if sys.platform == "win32":
     import win32gui
     from qframelesswindow import AcrylicWindow
 
+from app.common import clock
 from app.common.application_icon import applicationIcon
 from app.common.application_version import isUpdateAvailable
 from app.common.home_card_tasks import (
@@ -71,6 +72,7 @@ from app.common.home_card_tasks import (
 )
 from app.common.home_cards import ActionSequenceWorker, normalizePinnedCards
 from app.common.process_guard import STARTUP_HOLD_SECONDS, ProcessGuard, stopMessage
+from app.common.time_sync import TimeSync
 from app.common.update_download import (
     MAX_UPDATE_BYTES,
     UpdateDownloadWorker,
@@ -79,7 +81,7 @@ from app.common.update_download import (
     takeUpdateFailure,
     validateClientUpdateZip,
 )
-from app.config.cfg import cfg, currentThemeColor
+from app.config.cfg import TIME_OFFSET_KINDS, cfg, currentThemeColor
 from app.config.constants import (
     APP_NAME,
     DOWNLOAD_URL,
@@ -108,6 +110,10 @@ from app.view.windows.application_relocation import ApplicationRelocation
 
 SCHEDULE_CATCH_UP_LIMIT = timedelta(seconds=60)
 SHUTDOWN_CATCH_UP_LIMIT = timedelta(seconds=5)
+# 定时器偶尔早到一两毫秒；落在整秒之后一点，到点的任务才不会晚一整秒。
+SCHEDULE_TICK_MARGIN_MS = 2
+# 已执行的定时触发记多久：时间往回跳（改偏移、校时、跨零点）时靠它不重复执行。
+TRIGGERED_SCHEDULE_MEMORY = timedelta(days=1)
 # 主窗口没有返回按钮，qrouter 记下的切页历史从来不会被弹出。
 NAVIGATION_HISTORY_LIMIT = 16
 # Update Toast 下载中的宽度按这个大小的进度文字预留：更新包上限 1 GiB，以 MB 计时数字最长。
@@ -653,9 +659,16 @@ class MainWindow(MSFluentWindow):
 
         signalBus.testAudio.connect(self._playAudioTask)
 
+        self._triggeredScheduleKeys = {}
+        self._lastScheduleChecks = {}
+        # 每次检查后改约到下一个整秒：偏移带小数时，Bell Time 的整秒和 Calibrated Time 的不在同一刻。
         self.scheduleTimer = QTimer(self)
+        self.scheduleTimer.setSingleShot(True)
+        self.scheduleTimer.setTimerType(Qt.TimerType.PreciseTimer)
         self.scheduleTimer.timeout.connect(self._checkSchedule)
-        self.scheduleTimer.start(1000)
+        self.scheduleTimer.start(self._nextScheduleDelay(clock.calibratedNow()))
+        self.timeSync = TimeSync(self)
+        self.timeSync.start()
         self.processGuard = ProcessGuard(self)
         self.processGuard.stopped.connect(self._onProcessGuardStopped)
         self._syncProcessGuard()
@@ -666,9 +679,6 @@ class MainWindow(MSFluentWindow):
         self._downloadProgressTimer = QTimer(self)
         self._downloadProgressTimer.setInterval(100)
         self._downloadProgressTimer.timeout.connect(self._flushDownloadProgress)
-        self._triggeredScheduleDate = ""
-        self._triggeredScheduleKeys = set()
-        self._lastScheduleCheck = None
 
     def _deferredCleanupEdgeSpeech(self):
         from app.common.edge_tts import cleanupEdgeSpeechFiles
@@ -908,44 +918,62 @@ class MainWindow(MSFluentWindow):
             self._finishAudioTask()
 
     def _checkSchedule(self):
-        self._checkScheduleAt(datetime.now().astimezone())
+        if self._resourcesShutdown:
+            return
+        self._checkScheduleAt(clock.calibratedNow())
+        self.scheduleTimer.start(self._nextScheduleDelay(clock.calibratedNow()))
 
-    def _checkScheduleAt(self, now):
-        previous = self._lastScheduleCheck
-        self._lastScheduleCheck = now
-        if previous is None or now <= previous:
-            previous = now - timedelta(seconds=1)
-        else:
-            # A modal dialog or a slow disk operation can block the GUI for
-            # longer than one timer tick. Catch up that bounded interval, but
-            # do not replay an entire multi-day sleep after resume.
-            if now - previous > SCHEDULE_CATCH_UP_LIMIT:
-                previous = now - timedelta(seconds=1)
+    def _nextScheduleDelay(self, calibrated):
+        wait = min(
+            1_000_000 - clock.scheduledTaskTime(kind, calibrated).microsecond
+            for kind in TIME_OFFSET_KINDS
+        )
+        return -(-wait // 1000) + SCHEDULE_TICK_MARGIN_MS
 
-        if cfg.broadcastTasksEnabled.value:
-            self._runDueScheduledTasks(
+    def _checkScheduleAt(self, calibrated):
+        for kind, enabledItem, tasksItem, catchUpLimit, callback in (
+            (
                 "broadcast",
-                cfg.broadcastTasks.value,
-                previous,
-                now,
+                cfg.broadcastTasksEnabled,
+                cfg.broadcastTasks,
+                SCHEDULE_CATCH_UP_LIMIT,
                 self._playAudioTask,
-            )
-        if cfg.homeCardTasksEnabled.value:
-            self._runDueScheduledTasks(
+            ),
+            (
                 "home-card",
-                cfg.homeCardTasks.value,
-                previous,
-                now,
+                cfg.homeCardTasksEnabled,
+                cfg.homeCardTasks,
+                SCHEDULE_CATCH_UP_LIMIT,
                 self._handleHomeCardTask,
-            )
-        if cfg.shutdownTasksEnabled.value:
-            self._runDueScheduledTasks(
+            ),
+            (
                 "shutdown",
-                cfg.shutdownTasks.value,
-                max(previous, now - SHUTDOWN_CATCH_UP_LIMIT),
-                now,
+                cfg.shutdownTasksEnabled,
+                cfg.shutdownTasks,
+                SHUTDOWN_CATCH_UP_LIMIT,
                 self._handleShutdownTask,
-            )
+            ),
+        ):
+            # 每一种按自己的时间走：Bell Time，设为不偏移的用 Calibrated Time。
+            now = clock.scheduledTaskTime(kind, calibrated)
+            previous = self._lastScheduleChecks.get(kind)
+            self._lastScheduleChecks[kind] = now
+            if previous is None or now <= previous:
+                previous = now - timedelta(seconds=1)
+            elif now - previous > SCHEDULE_CATCH_UP_LIMIT:
+                # A modal dialog or a slow disk operation can block the GUI for
+                # longer than one timer tick. Catch up that bounded interval, but
+                # do not replay an entire multi-day sleep after resume.
+                previous = now - timedelta(seconds=1)
+            if enabledItem.value:
+                self._runDueScheduledTasks(
+                    kind,
+                    tasksItem.value,
+                    max(previous, now - catchUpLimit),
+                    now,
+                    callback,
+                )
+            self._forgetTriggeredSchedules(kind, now)
 
     def _runDueScheduledTasks(
         self,
@@ -957,7 +985,6 @@ class MainWindow(MSFluentWindow):
     ):
         if not isinstance(tasks, (list, tuple)):
             return
-        self._prepareScheduleDate(now.date().isoformat())
         taskIdentities = {}
         day = previous.date()
         while day <= now.date():
@@ -986,15 +1013,15 @@ class MainWindow(MSFluentWindow):
                 key = (kind, scheduled.isoformat(), identity)
                 if key in self._triggeredScheduleKeys:
                     continue
-                self._triggeredScheduleKeys.add(key)
+                self._triggeredScheduleKeys[key] = scheduled
                 callback(task)
             day += timedelta(days=1)
 
-    def _prepareScheduleDate(self, dateKey):
-        if dateKey == self._triggeredScheduleDate:
-            return
-        self._triggeredScheduleDate = dateKey
-        self._triggeredScheduleKeys.clear()
+    def _forgetTriggeredSchedules(self, kind, now):
+        expired = now - TRIGGERED_SCHEDULE_MEMORY
+        for key, scheduled in list(self._triggeredScheduleKeys.items()):
+            if key[0] == kind and scheduled < expired:
+                del self._triggeredScheduleKeys[key]
 
     @staticmethod
     def _scheduleTaskIdentity(task, identities):
@@ -2040,6 +2067,7 @@ class MainWindow(MSFluentWindow):
         self.stackedWidget.view._stopAnimation()
         self._navigationTarget = None
         self.scheduleTimer.stop()
+        self.timeSync.shutdown()
         self.processGuard.shutdown()
         self._cancelPendingEdgeTts()
         if self.tts is not None:

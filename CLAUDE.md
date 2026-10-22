@@ -20,6 +20,7 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 - **Custom Home Card** 包含一个 Action Sequence；`ActionSequenceWorker` 每次执行前读取最新动作列表，同一动作 ID 在一次运行中至多执行一次。
 - Custom Home Card 与 Custom 模式的 **Home Card Task** 共享 `ActionSequenceEditor` 和 Home Action 校验规则；两者只共享编辑与执行能力，不共享标题、图标或持久化对象。
 - Broadcast Task、Home Card Task 与 Shutdown Task 持久化在 `cfg`；对应设置页只编辑规则，MainWindow 负责按时间匹配或分发 Application Lifecycle Event。
+- **Scheduled Task** 按 **Bell Time** 匹配，即 **Calibrated Time** 加当天的 **Time Offset**；「不偏移」里勾上的种类按 Calibrated Time。**Fullscreen Clock** 只显示 Calibrated Time。**Time Sync** 和 Time Offset 互不依赖，Time Sync 也不改 Windows 时钟；理由见 `docs/adr/0012-djcat-time.md`。
 - **Process Guard** 是 `trigger` 为 `guard` 的 Home Card Task，和其他自动任务存在同一个 `cfg.homeCardTasks` 里、共用 Task Master Switch 和各条的启用开关；定时匹配和 Application Lifecycle Event 都跳过它。理由见 `docs/adr/0011-process-guard.md`。
 - Existing-card 模式的 **Home Card Task** 只保存稳定 Home Card key、用于失效提示的标题快照和打开／关闭动作；关闭只适用于 Default Home Card。Custom 模式直接拥有 Action Sequence，但不会创建 Custom Home Card。
 - AI Markdown Conversion 使用 Machine Identity 领取和结算 Daily Quota；Machine Code 只是定位该身份的可见别名。
@@ -53,6 +54,10 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 
 **`app/common/process_guard.py` 独占 Process Guard 的规则。** MainWindow 创建 `ProcessGuard`，按 `cfg.homeCardTasks` 和 `cfg.homeCardTasksEnabled` 调 `setRules()`；开机静默启动时先 `holdLaunches(60)` 再 `start()`，60 秒内只看不拉，因为被守护的程序可能也在自启。检查在后台线程里每 3 秒一轮，连续两次没看到才拉起，放过程序自我重启的空档；按可执行文件完整路径认定，不弹 UAC。拉起后撑不过 30 秒、连续 6 次，或者拉起失败（文件不存在、错误 740 需要管理员权限、其他报错），这一条在本次运行内停止并发出 `stopped`：MainWindow 弹一次「自动任务执行失败」，并把 `stoppedReasons()` 交给自动任务页显示在卡片摘要里。没变的规则保留检查进度和停止状态；关掉的规则把停止原因留到重新打开为止，重新打开、关开总开关或换了程序、参数、工作目录都从头开始；同一个程序只守护列表里的第一条。新建对话框拒绝重复、非 `.exe` 和不存在的文件；行内编辑在输完（`editingFinished`）时才存，程序路径按同样的规则校验，不合格就退回原值，边打字边存的话，打到一半的路径会被当成新规则去拉起。`runningExecutables()` 列不出进程时返回 `None`，这一轮跳过，不能当成"都没在运行"。一次拉起从最后确认到 `Popen` 返回都握着 `_launchLock`，`shutdown()` 等它放开。从托盘点「退出」的那一刻、Qt 的 `commitDataRequest`（Windows 关机或注销）、定时关机真正执行时和 `_shutdownResources()` 都调 `shutdown()`，之后不再守护：先退出的程序被拉回来会拖住关机，"电教猫关闭时"的自动任务关掉的程序也不能被拉回来。Application Relocation 期间跳过 Application Install Location 下的程序；卸载和 Application Update 不另外避让，它们关掉程序后几毫秒内就换掉目录，赶不上二次确认，「确认卸载」框经 `guardedUnder()` 补一句守护会停止。
 
+**`app/common/clock.py` 独占"现在几点"。** 读当前时间来决定行为或给人看的地方一律经它：调度循环用 `scheduledTaskTime(kind, calibrated)`，Fullscreen Clock 和它的 Setting Preview 用 `calibratedNow()`，新建任务的默认时间用 `scheduledTaskNow(kind)`，不得再用 `datetime.now()`、`QTime.currentTime()` 取这些时间。日志、Error Report、Cache 和 Log 的过期清理看的是文件时间，托盘预览里的任务栏时钟模仿 Windows，它们仍用系统时间；考试倒计时、Process Guard 和 Shutdown Prompt 的倒数只量经过了多久，校时和偏移都不影响。同步过以后 Calibrated Time 跟着 `perf_counter` 走，不跟系统时钟：Windows 上 Python 3.12 的 `perf_counter` 是 QueryPerformanceCounter，睡眠和休眠期间照样计数，有人改 Windows 时间也不动。Time Offset 在配置里存 `timeOffsetDate` 那一天的值，开着 Daily Drift 时读的时候按日历天数现算，不每天回写；`bindTimeOffset()`（`djcat.py` 启动时绑）在任一开关或每日量改变时按改之前的规则把今天的值折算出来、以今天为新起点，所以关掉时冻结、关着的日子不累计、改每日量不回头重算；手动改偏移也以今天为起点。偏移精确到 0.001 秒，每日量 0.1 秒，都不设范围（数值框的边是 `TIME_OFFSET_LIMIT`）。
+
+**`app/common/time_sync.py` 独占 Time Sync。** 只问 NTP（UDP 123）：每次问 4 遍、取一来一回最快的那次，按回答里抄回的随机发送时间认回答，不收闰秒告警（未同步）、stratum 0 和不是服务器发的回答；有 IPv4 地址先用 IPv4。MainWindow 构造时建好 `TimeSync` 并 `start()`，退出时 `shutdown()`。启动时、每小时、换时间服务器（自定义地址停手 1 秒后）、「立即同步」，以及每 5 秒检查一次，发现系统时钟和计数器走得不一样（有人改了 Windows 时间）或两次检查隔了一分钟以上（睡醒）时都同步一次。失败时保留本次运行里上次成功的结果，从没成功过就是系统时间；结果不存盘（主板电池没电的机器每次开机时钟都被重置，存下的偏差反而更错）。关掉 Time Sync 当场回到系统时间。状态经 `timeSyncState()` 和 `signalBus.timeSyncStateChanged` 给设置页，「立即同步」经 `signalBus.timeSyncRequested` 交回 MainWindow 的 `TimeSync`。测试的 `conftest.py` 把 `queryNtp` 换成离线失败，不去问真的时间服务器。
+
 **`app/platform/animation_timer.py` 独占 Qt 全局 Animation Tick 间隔。** View 和业务模块不直接调用 Qt 私有动画 API；私有符号不可用时保留 Qt 默认行为。Super Frame Rate Optimization 默认开，`setSuperFrameRateEnabled()` 跟着开发人员选项「停用超级帧率优化」（`cfg.disableSuperFrameRate`）在 1 ms 和 Qt 默认的 16 ms 之间当场切换；从启动起就停用时不碰私有符号。
 
 **`app/view/components/frame_rate.py` 独占 Frame Rate 的统计和显示。** 开发人员选项「显示帧率」（`cfg.showFrameRate`）打开时，主窗口、投送、考试倒计时和全屏时钟（构造时 `trackFrameRate(self)`，后两者在共用的 `TimerWindow` 里）在 `contentsRect()` 左上角内缩 8 px 显示"N FPS"，每秒数一次 Qt 投给这个顶层窗口的 `UpdateRequest`，也就是它刷到屏幕上的重画次数；标签自己换数字的那一次不算，静止的窗口才稳在 0。Windows 8.1 起 `DwmGetCompositionTimingInfo` 只接受 NULL，拿不到单个窗口实际显示的帧数，所以数的是重画。标签不接收鼠标和触控；窗口每添一个子控件（蒙层弹窗、InfoBar、启动页），它就把自己抬回最上面，此后自己 `raise_()` 的兄弟控件（角落按钮）仍会盖过它，目前都不在左上角。主窗口的标签落在标题栏里，不盖页面栈，不透明滚动照常平移。Window Transition 的快照带着标签，与真窗口一致。悬浮按钮、Shutdown Prompt、Window Transition 动画层和弹出层不挂标签。
@@ -75,7 +80,7 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 
 **`app/view/components/setting_preview.py` 独占 Setting Preview。** 画主窗口的预览不截取真实页面（会逼 Lazy Page 提前构造，还会截到设置页自己），而是由 `MainWindowReplica` 用真实组件——导航按钮、`BannerWidget`、主页的 `ActionCard`、标题栏按钮——按主窗口当前尺寸摆好，画到目标两倍大小再平滑缩小，结果按尺寸、设备像素比缓存，配置变化时作废。宽高比实时跟随主窗口（监听 `window()` 的尺寸变化），限高 280；复刻在第一次画时才搭。`tests/test_setting_preview.py` 逐项核对复刻和真实主窗口的几何一致，改主窗口或主页的排布时必须同步改复刻。托盘预览的菜单来自 `buildTrayMenu()`，按 `AcrylicMenu`／`RoundMenu` 的定位规则 1:1 摆在任务栏右侧。投送、倒计时和时钟的预览按屏幕比例画全屏，标题、正文和按钮离窗口边的距离照真实窗口的比例；角落按钮用真实图标和 80 × 65 的比例，缩放取屏幕比例与 0.4 中较大的一个，否则图标只剩几个像素；时钟定格在预览出现的那一刻。理由见 `docs/adr/0007-setting-preview-replica.md`。
 
-**Setting Card 默认各自成卡，照 Win11 设置排布。** 相邻两张卡（导航行也一样）隔 4 px，预览、小节标题和其他内容前后隔 10 px。只有 Linked Setting Cards 经 `SettingSectionView.addLinkedSettingCards()` 共用一块底板：控制卡片在前，显隐或取值受它控制的卡片紧随其后，目前是三处背景、主页横幅、字体、软件图标和托盘图标；其余一律 `addSettingCards()`。新卡片只有显隐或取值跟着另一张卡变时才进组（`tests/test_setting_sections.py` 逐组核对）。关掉「显示主页横幅」时横幅的其余卡片隐藏，按条件隐藏的规则不出现在 Setting Suggestion 里。主题色和 AI 整理风格这类展开卡片各自成卡，展开后的子项仍连在一起。
+**Setting Card 默认各自成卡，照 Win11 设置排布。** 相邻两张卡（导航行也一样）隔 4 px，预览、小节标题和其他内容前后隔 10 px。只有 Linked Setting Cards 经 `SettingSectionView.addLinkedSettingCards()` 共用一块底板：控制卡片在前，显隐或取值受它控制的卡片紧随其后，目前是三处背景、主页横幅、字体、软件图标、托盘图标，以及「时间」里的网络校时和时间偏移；其余一律 `addSettingCards()`。新卡片只有显隐或取值跟着另一张卡变时才进组（`tests/test_setting_sections.py` 逐组核对）。关掉「显示主页横幅」时横幅的其余卡片隐藏，按条件隐藏的规则不出现在 Setting Suggestion 里。主题色和 AI 整理风格这类展开卡片各自成卡，展开后的子项仍连在一起。
 
 **设置页搜索只产出 Setting Suggestion。** 页面本身不筛选、不折叠、不重排；建议只按 Setting Card 的标题匹配，条件隐藏的卡片不参与，跨 Section 重名的标题才补完整 Route 前缀。`SettingPage` 提供 `searchSuggestions()` 和 `navigateToRoute()`，弹窗由 MainWindow 拥有——搜索框属于标题栏，设置页不得反向持有它。选中建议后清空搜索框、跳到目标 Route、滚动到卡片并描一圈主题色边框，绝不改写用户的前置设置来让隐藏卡片现身。
 
@@ -144,7 +149,7 @@ Broadcast Task、Home Card Task 和 Shutdown Task 都按各自 `cfg` 列表的�
 
 三类 Scheduled Task 共用表单和 `TaskFormSettingCard`，但展示材质取决于表单宿主：新建对话框中的每个配置项保留独立圆角卡片；已有任务的展开区域只绘制分割线并透出外层材质，避免卡片嵌套。表单交给 ScrollArea 后会被 Qt 重新设置父对象，因此材质模式必须在构造时依据原始宿主确定，不能在绘制阶段沿当前父链判断。修改共享表单时应同时验证三类任务的新建和已有任务两种场景。
 
-MainWindow 的单一调度循环在对应管理页面从未打开时也必须执行 Scheduled Task。Broadcast Task 和固定时间 Home Card Task 最多补偿最近 60 秒内被模态窗口或主线程阻塞错过的触发；Shutdown Task 只补偿最近 5 秒，避免恢复运行后执行过期关机。软件行为 Home Card Task 完全不参与时间匹配。一次定时触发由任务种类、计划时刻和稳定任务 ID 去重。
+MainWindow 的单一调度循环在对应管理页面从未打开时也必须执行 Scheduled Task。Broadcast Task 和固定时间 Home Card Task 最多补偿最近 60 秒内被模态窗口或主线程阻塞错过的触发；Shutdown Task 只补偿最近 5 秒，避免恢复运行后执行过期关机。软件行为 Home Card Task 完全不参与时间匹配。三种任务各按自己的时间（`clock.scheduledTaskTime()`）匹配、各记上一次检查的时刻，往前跳照上面补偿；定时器是单发的 PreciseTimer，每次检查完改约到这几种时间里最近的整秒之后 2 ms，偏移带小数时任务也准点。一次定时触发由任务种类、计划时刻和稳定任务 ID 去重，记一天：时间往回跳（改偏移、校时、零点的 Daily Drift，或两种任务分处零点两侧）时不重复执行。
 
 Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence；任务被删除或切换模式后，尚未开始的动作停止。同一任务仍在运行时跳过新触发，不弹出并发确认框。Existing-card 模式在触发时解析当前 Home Card 快照，不复制源卡片数据；关闭 Projection 时同时识别正常窗口和 Floating Button，关闭未打开的功能不创建页面、不报错。
 
@@ -324,6 +329,8 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/common/install_location.py` | Application Install Location 与 Application Relocation 的规则：位置、校验、权限、搬动与撤回、迁移记录收尾、提交；不涉及界面 |
 | `app/common/home_card_tasks.py` | Home Card Task schema 归一化、稳定 ID、触发事件和动作常量；不负责计时或 QWidget |
 | `app/common/process_guard.py` | Process Guard：守护规则、后台检查、拉起和停止原因；不知道自动任务页和 InfoBar |
+| `app/common/clock.py` | Calibrated Time、Time Offset（含 Daily Drift）和 Bell Time：所有"现在几点"的来源 |
+| `app/common/time_sync.py` | Time Sync：NTP 查询、后台同步、何时重新同步和同步状态；不知道设置页 |
 | `tools/updater/updater.c` | Client Update 的独立更新器：等待进程退出、把暂存目录整目录换名为程序目录（失败时换回备份）、重启 DJCat |
 | `app/view/windows/main_window.py` | 桌面组合根、导航、长期运行任务和 Client Update UI |
 | `app/view/windows/application_relocation.py` | 更改 Application Install Location 的界面流程：检查、提权、确认、后台迁移和 Relocation Toast |
@@ -342,6 +349,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/view/components/asset_icon.py` | `AssetIcon`：QFluentWidgets 没有、随程序发布在 `app/assets/icons/` 的 Fluent 风格图标 |
 | `app/view/components/color_dialog.py` | QFluentWidgets 颜色选择弹窗换上项目 `ScrollArea`，色板和亮度滑块登记为触控拖动目标 |
 | `app/view/components/font_picker.py` | App Font 的设置卡片和字体选择弹窗：搜索、每行用字体自己写名字、示例文字 |
+| `app/view/components/time_setting_cards.py` | 「设置 › 时间」的当前时间、同步状态、偏移秒数和不偏移卡片 |
 | `app/view/components/setting_suggestion_menu.py` | Setting Suggestion 弹窗；选中后交回 Route，不把文本写回搜索框 |
 | `app/common/app_font.py` | App Font：解析字体设置，让 QApplication 字体与 QFluentWidgets 的字体是同一串，并当场换到所有控件上 |
 | `app/common/application_icon.py` | Application Icon 与 Tray Icon 的解析：主窗口、启动页、托盘与 Tray Menu“主页”共用一处 |
@@ -384,6 +392,7 @@ chdir to the user folder, not APP_DIR (programs DJCat opens inherit it and would
     is created, then follow 个性化 › 字体)
   → bindDeveloperOptions (touch press look, touch scroll feel, Super Frame Rate Optimization
     and Frame Rate follow their switches; before any QWidget animation is created)
+  → bindTimeOffset (changing a Time Offset rule restarts the count from today)
   → MainWindow(isSilent)
       → HomePage eagerly
       → register Lazy Pages without constructing their real pages
@@ -394,6 +403,7 @@ chdir to the user folder, not APP_DIR (programs DJCat opens inherit it and would
       → finish an interrupted Application Relocation from cfg.appRelocation in a background thread
       → report Last Seen to the AI Markdown server in a background thread
       → create tray and long-lived timers/workers, including Process Guard (rules from cfg.homeCardTasks)
+      → start Time Sync (asks the time server in a background thread; system time until it answers)
       → restore valid active Projection Snapshot only when recovery is enabled
       → start Process Guard (after silent startup it only watches for the first 60 s)
       → dispatch startup event and, when applicable, silent-startup event
@@ -429,7 +439,7 @@ Tray Menu quit → MainWindow.requestQuit()
   → dispatch application-quit Home Card Tasks
   → wait asynchronously for newly started custom Action Sequences
   → MainWindow._shutdownResources()
-  → stop navigation animation and timers
+  → stop navigation animation, timers and Time Sync
   → cancel Edge TTS and stop audio players
   → flush loaded Setting / Scheduled Task editors
   → shutdown HomePage, loaded Application Store page and loaded Projection editor workers

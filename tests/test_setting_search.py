@@ -530,6 +530,7 @@ class SettingSearchTest(TestCase):
                 "全屏投送",
                 "考试倒计时",
                 "全屏时钟",
+                "时间",
                 "个性化",
                 "应用",
                 "关于",
@@ -733,7 +734,7 @@ class SettingSearchTest(TestCase):
         try:
             for item in items:
                 cfg.set(item, False)
-            self.window._lastScheduleCheck = None
+            self.window._lastScheduleChecks.clear()
             with (
                 patch.object(self.window, "_playAudioTask") as playAudio,
                 patch.object(self.window, "_handleHomeCardTask") as runHomeCard,

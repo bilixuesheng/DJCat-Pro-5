@@ -19,6 +19,7 @@ from qfluentwidgets import (
 )
 from qfluentwidgets import FluentIcon as FIF
 
+from app.common import clock
 from app.common.home_card_tasks import (
     APPLICATION_HOME_CARD_TRIGGER,
     APPLICATION_QUIT_EVENT,
@@ -173,10 +174,10 @@ def createHomeCardTaskForm(
     initialData=None,
     scrollArea=None,
 ):
-    now = QTime.currentTime()
+    now = clock.scheduledTaskNow("home-card")
     data = initialData or {
         "name": "",
-        "time": now.toString("HH:mm:ss"),
+        "time": now.strftime("%H:%M:%S"),
         "weeks": list(range(7)),
         "trigger": SCHEDULED_HOME_CARD_TRIGGER,
         "event": APPLICATION_STARTUP_EVENT,

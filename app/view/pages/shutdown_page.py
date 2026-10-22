@@ -18,6 +18,7 @@ from qfluentwidgets import (
 )
 from qfluentwidgets import FluentIcon as FIF
 
+from app.common import clock
 from app.config.cfg import cfg
 from app.view.components.task_page import (
     ScheduledTaskCard,
@@ -46,10 +47,10 @@ def createShutdownForm(parent, initialData=None):
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(2)
 
-    now = QTime.currentTime()
+    now = clock.scheduledTaskNow("shutdown")
     data = initialData or {
         "name": "",
-        "time": now.toString("HH:mm:ss"),
+        "time": now.strftime("%H:%M:%S"),
         "weeks": [0, 1, 2, 3, 4, 5, 6],
         "notify": True,
         "promptTitle": DEFAULT_PROMPT_TITLE,
