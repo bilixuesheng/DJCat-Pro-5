@@ -67,6 +67,7 @@ from qfluentwidgets import (
 from qfluentwidgets import FluentIcon as FIF
 
 from app.common.application_store import (
+    ApplicationLaunchCanceled,
     ApplicationStore,
     ApplicationStoreError,
     downloadWorker,
@@ -2520,6 +2521,8 @@ class AppStorePage(QWidget):
                 if action is None:
                     raise ApplicationStoreError("请先更新应用，再打开这个预设。")
                 self.store.executeAction(local, action)
+        except ApplicationLaunchCanceled:
+            pass
         except Exception as error:
             errorMessage = str(error)
         finally:
@@ -3072,6 +3075,9 @@ class AppStorePage(QWidget):
             succeeded = bool(result)
         except _PinnedCardNotice as notice:
             level, title, message = notice.level, notice.title, str(notice)
+        except ApplicationLaunchCanceled:
+            # UAC 里点「否」是用户自己取消的，不提示，也不弹出主窗口。
+            succeeded = True
         except (ApplicationStoreError, OSError, ValueError) as error:
             level, title, message = "error", "执行预设失败", str(error)
         except Exception as error:

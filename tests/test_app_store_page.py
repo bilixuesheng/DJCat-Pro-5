@@ -41,6 +41,7 @@ from qfluentwidgets import (
 )
 
 from app.common import install_location
+from app.common.application_store import ApplicationLaunchCanceled
 from app.common.home_card_tasks import PROCESS_GUARD_TRIGGER
 from app.config.cfg import cfg
 from app.view.components.scroll_area import ScrollArea
@@ -1820,6 +1821,27 @@ class AppStorePageTest(TestCase):
         self.assertFalse(self.page.detailAction._lineShown)
         self.assertNotIn(app["id"], self.page._downloadStates)
 
+    def testDecliningUacRestoresButtonsWithoutError(self):
+        app = _apps(1)[0] | {
+            "installed": True,
+            "open_action": {"type": "program", "target": "demo.exe"},
+        }
+        self.page.store.installed = Mock(return_value={0: object()})
+        self.page.store.executeAction = Mock(
+            side_effect=ApplicationLaunchCanceled("已取消打开")
+        )
+        self.page._renderGrid(self.page.installedGrid, [app], True)
+        card = self.page.installedGrid.itemAtPosition(0, 0).widget()
+
+        with patch.object(InfoBar, "error") as showError:
+            self.page._onAppAction(app)
+            self._waitForLaunch()
+
+        showError.assert_not_called()
+        self.assertEqual(card.actionButton.text(), "打开")
+        self.assertTrue(card.actionButton.isEnabled())
+        self.assertNotIn(app["id"], self.page._launching)
+
     def testApplicationLaunchThreadFailureRestoresButtons(self):
         app = _apps(1)[0] | {
             "installed": True,
@@ -2018,6 +2040,30 @@ class AppStorePageTest(TestCase):
         self._waitForLaunch()
 
         self.assertEqual(failed.count(), 1)
+
+    def testDecliningUacFromPinnedCardNeitherWarnsNorShowsMainWindow(self):
+        self.page.store = Mock()
+        self.page.store.installed.return_value = {1: object()}
+        self.page.store.executeAction.side_effect = ApplicationLaunchCanceled(
+            "已取消打开"
+        )
+        failed = QSignalSpy(self.page.pinnedCardFailed)
+
+        with patch.object(self.page, "_showPinnedCardNotice") as notice:
+            self.page.executePinnedCard(
+                {
+                    "app_id": 1,
+                    "preset_id": 0,
+                    "title": "Ghost Downloader",
+                    "description": "下载工具",
+                    "action": {"type": "program", "target": "app.exe"},
+                }
+            )
+            self._waitForLaunch()
+
+        notice.assert_not_called()
+        self.assertEqual(failed.count(), 0)
+        self.assertNotIn(1, self.page._launching)
 
     def testPresetPinnedCardUsesMatchingInstalledPresetAction(self):
         installed = SimpleNamespace(

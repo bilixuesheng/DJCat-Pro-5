@@ -49,7 +49,9 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 
 **`app/view/windows/application_relocation.py` 拥有更改 Application Install Location 的界面流程。** MainWindow 创建它，设置页的「更改」「重置」只发出 `installLocationChangeRequested(路径)`（空字符串为重置）。顺序固定：禁选位置 → 应用市场有进行中的操作就拒绝 → 当前位置不可用先确认 → 后台查写入权限 → 没权限时问是否提权（非空文件夹加一句已有文件也会开放修改；UAC 点「否」等于取消）→ 后台列应用、查冲突，跨盘才量大小和空间 → 没有应用直接改 → 确认框列出会被强制关闭的应用 → 再查一次应用市场是否空闲 → 写迁移记录、开始搬。确认之前任何一步都不碰进程。成功后先提交配置再在后台删旧文件；失败时 Relocation Toast 写明"应用仍在原位置"，不给「重试」。退出时不等待，下次启动 `recoverAtStartup()` 收尾。它不加载 Application Store 页面，只通过 `LazyAppStorePage.hasActiveOperations()` 询问。
 
-**`app/platform/processes.py` 独占按目录查找和强制结束进程。** 判定一律是"可执行文件位于该目录下面"：应用市场判断应用是否在运行、卸载和 Application Update 替换文件前强制关闭应用、Application Relocation 开始前关闭旧位置里运行的程序、Client Update 交给更新器前关闭从 `APP_DIR` 运行的程序都用它。只是开着里面文件的别的程序不结束，由文件被占用的失败路径报告。Process Guard 用 `runningExecutables()` 判断程序在不在运行：只看当前登录会话里的进程；`ProcessIdToSessionId` 要 `PROCESS_QUERY_INFORMATION`，普通权限读不出提权进程的会话，读不出的当作同一会话（别的用户的进程连有限查询都打不开）。
+**`app/platform/processes.py` 独占按目录查找和强制结束进程。** 判定一律是"可执行文件位于该目录下面"：应用市场判断应用是否在运行、卸载和 Application Update 替换文件前强制关闭应用、Application Relocation 开始前关闭旧位置里运行的程序、Client Update 交给更新器前关闭从 `APP_DIR` 运行的程序都用它。只是开着里面文件的别的程序不结束，由文件被占用的失败路径报告。电教猫以普通权限运行，结束不了以管理员身份运行的程序：`terminateProcessesUnder()` 返回结束后仍在的 `Survivor`，打不开（`OpenProcess` 拒绝访问）的标为 `elevated`，卸载、Application Update 和 Application Relocation 的"无法关闭"提示据此说明"以管理员身份运行"。Process Guard 用 `runningExecutables()` 判断程序在不在运行：只看当前登录会话里的进程；`ProcessIdToSessionId` 要 `PROCESS_QUERY_INFORMATION`，普通权限读不出提权进程的会话，读不出的当作同一会话（别的用户的进程连有限查询都打不开）。
+
+**`app/platform/elevation.py` 独占以管理员身份启动程序。** `startElevated()` 用 ShellExecuteEx 的 `runas` 弹 UAC，UAC 里点「否」返回 `None`；它一直等到 UAC 有答复，只能在后台线程里调用。普通权限按进程 ID 打不开管理员进程，`ElevatedProcess` 靠 ShellExecuteEx 给的句柄提供 `poll`／`wait`／`kill`。Application Install Location 的 `grantUsersModify()` 和 Application Launch 都经它；Process Guard 和 Custom Home Card 的「启动程序」Home Action 不弹 UAC（自动任务会在没人时触发）。
 
 **`app/common/process_guard.py` 独占 Process Guard 的规则。** MainWindow 创建 `ProcessGuard`，按 `cfg.homeCardTasks` 和 `cfg.homeCardTasksEnabled` 调 `setRules()`；开机静默启动时先 `holdLaunches(60)` 再 `start()`，60 秒内只看不拉，因为被守护的程序可能也在自启。检查在后台线程里每 3 秒一轮，连续两次没看到才拉起，放过程序自我重启的空档；按可执行文件完整路径认定，不弹 UAC。拉起后撑不过 30 秒、连续 6 次，或者拉起失败（文件不存在、错误 740 需要管理员权限、其他报错），这一条在本次运行内停止并发出 `stopped`：MainWindow 弹一次「自动任务执行失败」，并把 `stoppedReasons()` 交给自动任务页显示在卡片摘要里。没变的规则保留检查进度和停止状态；关掉的规则把停止原因留到重新打开为止，重新打开、关开总开关或换了程序、参数、工作目录都从头开始；同一个程序只守护列表里的第一条。新建对话框拒绝重复、非 `.exe` 和不存在的文件；行内编辑在输完（`editingFinished`）时才存，程序路径按同样的规则校验，不合格就退回原值，边打字边存的话，打到一半的路径会被当成新规则去拉起。`runningExecutables()` 列不出进程时返回 `None`，这一轮跳过，不能当成"都没在运行"。一次拉起从最后确认到 `Popen` 返回都握着 `_launchLock`，`shutdown()` 等它放开。从托盘点「退出」的那一刻、Qt 的 `commitDataRequest`（Windows 关机或注销）、定时关机真正执行时和 `_shutdownResources()` 都调 `shutdown()`，之后不再守护：先退出的程序被拉回来会拖住关机，"电教猫关闭时"的自动任务关掉的程序也不能被拉回来。Application Relocation 期间跳过 Application Install Location 下的程序；卸载和 Application Update 不另外避让，它们关掉程序后几毫秒内就换掉目录，赶不上二次确认，「确认卸载」框经 `guardedUnder()` 补一句守护会停止。
 
@@ -169,7 +171,7 @@ Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence�
 
 正在运行的应用：点「更新」时先确认一次，下载期间照常可用，替换目录前才强制关闭（下载期间重新打开的也关）；「确认卸载」框补一句会被强制关闭。自定义的 Application Install Location 不可用时，页面顶部一直挂着提示，"下载"按钮置灰，Application Home Card 点开时提示位置不可用，不删除固定。页面在显示时重查可用性，变了才重读安装清单。
 
-Application Launch 在后台线程读取本机安装状态并执行 Open Action；详情页打开预设同样走这条路径并共用 `_launching`，预设打开期间卡片、详情按钮和预设按钮一起禁用。主页的 Application Home Card 和托盘里对应的 Tray Card Shortcut 也一样：`executePinnedCard()` 不返回结果，只在后台读取安装清单并执行，失败时发 `pinnedCardFailed`，由 MainWindow 弹出主窗口；应用正在下载、安装或卸载时直接提示，不去等锁。完成或失败后通过 Qt Signal 在 GUI 线程恢复卡片和详情按钮；线程创建、启动失败和页面关闭也必须清理 `_launching`，不得留下永久禁用的按钮。首次启动不等待或检查可见窗口，无窗口或仅托盘运行的 Application 仍属于正常启动；只有重新打开仍在运行的进程时才尝试唤起已有窗口。
+Application Launch 在后台线程读取本机安装状态并执行 Open Action；程序要管理员权限时（`Popen` 报错误 740）才改经 `startElevated()` 弹 UAC，等 UAC 期间不握 `_installedLock`（页面在打开期间不允许安装、卸载同一个应用），拿到的 `ElevatedProcess` 与 `Popen` 一样记进 `_launchedProcesses`，仍在运行时再打开只唤起窗口、不再弹 UAC。UAC 里点「否」抛 `ApplicationLaunchCanceled`：页面不提示，Application Home Card 也不弹出主窗口。详情页打开预设同样走这条路径并共用 `_launching`，预设打开期间卡片、详情按钮和预设按钮一起禁用。主页的 Application Home Card 和托盘里对应的 Tray Card Shortcut 也一样：`executePinnedCard()` 不返回结果，只在后台读取安装清单并执行，失败时发 `pinnedCardFailed`，由 MainWindow 弹出主窗口；应用正在下载、安装或卸载时直接提示，不去等锁。完成或失败后通过 Qt Signal 在 GUI 线程恢复卡片和详情按钮；线程创建、启动失败和页面关闭也必须清理 `_launching`，不得留下永久禁用的按钮。首次启动不等待或检查可见窗口，无窗口或仅托盘运行的 Application 仍属于正常启动；只有重新打开仍在运行的进程时才尝试唤起已有窗口。
 
 Application Store 首次显示前同步计算"已安装"和"全部应用"两个网格的最终列数，避免先按旧宽度单列绘制再重新排列。"首次显示前"包括主窗口切页截快照的那一刻：DrillIn 先把尚未显示的页面缩放到位再 `grab()`，此时 `showEvent` 还没来，所以页面隐藏时收到的尺寸变化必须当场重排，否则过渡里会先看到一张卡片占满一整行。页面可见后的尺寸变化仍由现有布局定时器合并，不为修复首帧闪动持续同步重排。
 
@@ -317,7 +319,8 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/platform/text_rendering.py` | Qt 大字形缓存上限，让投送的大字按位图缓存 |
 | `app/platform/touch_input.py` | 「新触控」：手指按住时给指下的按钮和卡片画上按下态；触控输入本身仍由 Windows 判定 |
 | `app/platform/background_effect.py` | Background Effect：照 Ghost Downloader 给主窗口挂 Windows 透明材质，Win10 的 Acrylic 在窗口移动时暂停模糊 |
-| `app/platform/processes.py` | 按可执行文件所在目录查找和强制结束 Windows 进程；列出当前会话里运行着的可执行文件（Process Guard 用） |
+| `app/platform/processes.py` | 按可执行文件所在目录查找和强制结束 Windows 进程，标出因以管理员身份运行而结束不了的；列出当前会话里运行着的可执行文件（Process Guard 用） |
+| `app/platform/elevation.py` | 经 UAC 以管理员身份启动程序，并靠进程句柄查询、等待和结束它 |
 | `app/platform/screens.py` | 取窗口所在屏幕，绕开 PySide 把 QScreen 挂成控件子对象的返回值启发式；把解码的大图缩到最大屏幕的物理尺寸 |
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
