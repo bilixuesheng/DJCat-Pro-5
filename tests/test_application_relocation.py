@@ -12,6 +12,7 @@ from qfluentwidgets import InfoBar, MessageBox
 from app.common import install_location
 from app.common.install_location import MANIFEST_NAME, relocationJournal
 from app.config.cfg import cfg
+from app.platform.processes import Survivor
 from app.view.components.update_toast import COMPLETED, FAILED
 from app.view.windows.application_relocation import ApplicationRelocation
 from tests.support import isolateCfg
@@ -120,7 +121,7 @@ class ApplicationRelocationTest(TestCase):
     def testFailedRelocationReportsAndKeepsTheOldLocation(self):
         _application(self.source, "alpha")
         install_location.terminateProcessesUnder.return_value = [
-            self.source / "alpha" / "app.exe"
+            Survivor(self.source / "alpha" / "app.exe", False)
         ]
 
         with patch.object(MessageBox, "exec", return_value=1):
@@ -130,7 +131,23 @@ class ApplicationRelocationTest(TestCase):
         self.assertEqual(cfg.appInstallLocation.value, str(self.source))
         self.assertEqual(cfg.appRelocation.value, {})
         self.assertEqual(self.relocation._toast._state, FAILED)
+        self.assertIn("app.exe", self.relocation._toast.content)
+        self.assertNotIn("管理员", self.relocation._toast.content)
         self.assertIn("应用仍在原位置", self.relocation._toast.content)
+
+    def testProgramRunningAsAdministratorIsNamedAsTheReason(self):
+        _application(self.source, "alpha")
+        install_location.terminateProcessesUnder.return_value = [
+            Survivor(self.source / "alpha" / "app.exe", True)
+        ]
+
+        with patch.object(MessageBox, "exec", return_value=1):
+            self.relocation.request(str(self.target))
+            self._waitUntilIdle()
+
+        self.assertEqual(self.relocation._toast._state, FAILED)
+        self.assertIn("它以管理员身份运行", self.relocation._toast.content)
+        self.assertEqual(cfg.appInstallLocation.value, str(self.source))
 
     def testConflictingFoldersStopBeforeAnyQuestion(self):
         _application(self.source, "alpha")

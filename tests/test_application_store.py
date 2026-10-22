@@ -19,6 +19,7 @@ from PIL import Image
 from app.common import application_store as applicationStoreModule
 from app.common import install_location
 from app.common.application_store import (
+    ApplicationLaunchCanceled,
     ApplicationStore,
     ApplicationStoreError,
     DownloadLimitError,
@@ -32,6 +33,7 @@ from app.common.application_store import (
     validateZip,
 )
 from app.config.cfg import cfg
+from app.platform.processes import Survivor
 from tests.support import isolateCfg
 
 
@@ -767,6 +769,101 @@ class ApplicationStoreTest(TestCase):
         popen.assert_called_once()
         activate.assert_called_once()
 
+    def _elevationRequired(self):
+        refused = OSError("请求的操作需要提升。")
+        refused.winerror = 740
+        return refused
+
+    @patch("app.common.application_store._activateProcessWindow")
+    @patch("app.common.application_store.startElevated")
+    @patch("app.common.application_store.subprocess.Popen")
+    def testProgramThatRequiresElevationOpensThroughUacOnce(
+        self, popen, startElevated, activate
+    ):
+        app = self._app()
+        app["open_action"] = {
+            "type": "program",
+            "target": "app.exe",
+            "arguments": {"args": ["--lesson"]},
+        }
+        installed = self.store.installZip(app, self._zip())
+        popen.side_effect = self._elevationRequired()
+        process = Mock(pid=42)
+        process.poll.return_value = None
+        startElevated.return_value = process
+        worker = Mock()
+        worker.is_alive.return_value = True
+        activate.return_value = worker
+
+        self.assertIs(self.store.executeAction(installed), process)
+        self.assertIs(self.store.executeAction(installed), process)
+
+        startElevated.assert_called_once_with(
+            popen.call_args.args[0], cwd=popen.call_args.kwargs["cwd"]
+        )
+        self.assertEqual(popen.call_args.args[0][1:], ["--lesson"])
+        popen.assert_called_once()
+        activate.assert_called_once()
+        self.assertIs(activate.call_args.args[0], process)
+
+    @patch("app.common.application_store.startElevated", return_value=None)
+    @patch("app.common.application_store.subprocess.Popen")
+    def testDecliningUacCancelsTheLaunch(self, popen, startElevated):
+        app = self._app()
+        app["open_action"] = {"type": "program", "target": "app.exe"}
+        installed = self.store.installZip(app, self._zip())
+        popen.side_effect = self._elevationRequired()
+
+        for _attempt in range(2):
+            with self.assertRaises(ApplicationLaunchCanceled):
+                self.store.executeAction(installed)
+
+        self.assertEqual(startElevated.call_count, 2)
+
+    @patch("app.common.application_store.startElevated")
+    @patch("app.common.application_store.subprocess.Popen")
+    def testOtherLaunchFailuresDoNotAskForUac(self, popen, startElevated):
+        app = self._app()
+        app["open_action"] = {"type": "program", "target": "app.exe"}
+        installed = self.store.installZip(app, self._zip())
+        failure = OSError("不是有效的 Win32 应用程序。")
+        failure.winerror = 193
+        popen.side_effect = failure
+
+        with self.assertRaisesRegex(OSError, "Win32"):
+            self.store.executeAction(installed)
+
+        startElevated.assert_not_called()
+
+    @patch("app.common.application_store.startElevated")
+    @patch("app.common.application_store.subprocess.Popen")
+    def testUacPromptDoesNotHoldTheInstalledLock(self, popen, startElevated):
+        # UAC 可能一直开着没人答；握着锁的话，界面线程上的 installed() 会跟着卡住。
+        app = self._app()
+        app["open_action"] = {"type": "program", "target": "app.exe"}
+        installed = self.store.installZip(app, self._zip())
+        popen.side_effect = self._elevationRequired()
+        heldDuringPrompt = []
+
+        def prompt(*_args, **_kwargs):
+            probe = []
+            thread = threading.Thread(
+                target=lambda: probe.append(
+                    self.store._installedLock.acquire(timeout=0.2)
+                    and (self.store._installedLock.release() or True)
+                )
+            )
+            thread.start()
+            thread.join()
+            heldDuringPrompt.append(not probe[0])
+            return Mock(pid=42)
+
+        startElevated.side_effect = prompt
+
+        self.store.executeAction(installed)
+
+        self.assertEqual(heldDuringPrompt, [False])
+
     @patch("app.common.application_store._activateProcessWindow")
     @patch("app.common.application_store.subprocess.Popen")
     def testDifferentProgramArgumentsLaunchSeparateProcesses(
@@ -894,17 +991,39 @@ class ApplicationStoreTest(TestCase):
                 "app.common.application_store._runningExecutablesUnder",
                 return_value=[executable],
             ),
-            patch("app.common.application_store._terminateProcessesUnder"),
+            patch(
+                "app.common.application_store._terminateProcessesUnder",
+                return_value=[Survivor(executable, False)],
+            ),
         ):
-            with self.assertRaisesRegex(ApplicationStoreError, "无法关闭"):
+            with self.assertRaisesRegex(ApplicationStoreError, "^软件无法关闭"):
                 self.store.uninstall(installed)
-            with self.assertRaisesRegex(ApplicationStoreError, "无法关闭"):
+            with self.assertRaisesRegex(ApplicationStoreError, "^软件无法关闭"):
                 self.store.installZip(
                     self._app() | {"version": "3.0.0"},
                     self._zip(content=b"new"),
                 )
 
         self.assertEqual((installed.path / "app.exe").read_bytes(), b"first")
+
+    def testApplicationRunningAsAdministratorIsNamedWhenItCannotBeClosed(self):
+        installed = self.store.installZip(self._app(), self._zip())
+        executable = installed.path / "app.exe"
+
+        with (
+            patch(
+                "app.common.application_store._runningExecutablesUnder",
+                return_value=[executable],
+            ),
+            patch(
+                "app.common.application_store._terminateProcessesUnder",
+                return_value=[Survivor(executable, True)],
+            ),
+        ):
+            with self.assertRaisesRegex(ApplicationStoreError, "以管理员身份运行"):
+                self.store.uninstall(installed)
+
+        self.assertTrue(executable.exists())
 
     def testApplicationRunningChecksTheInstalledCopy(self):
         installed = self.store.installZip(self._app(), self._zip())

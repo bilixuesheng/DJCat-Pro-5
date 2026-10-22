@@ -25,6 +25,7 @@ from app.common.install_location import (
 )
 from app.config.cfg import cfg
 from app.config.paths import APP_DATA_DIR, APP_DIR, PROGRAM_DIR
+from app.platform.processes import Survivor
 from tests.support import isolateCfg
 
 
@@ -202,9 +203,11 @@ class InstallLocationTest(TestCase):
 
     def testApplicationThatCannotBeClosedStopsRelocation(self):
         _application(self.source, "alpha", "Alpha")
-        self.terminate.return_value = [self.source / "alpha" / "app.exe"]
+        self.terminate.return_value = [
+            Survivor(self.source / "alpha" / "app.exe", False)
+        ]
 
-        with self.assertRaisesRegex(RelocationError, "无法关闭"):
+        with self.assertRaisesRegex(RelocationError, "无法关闭：app.exe。请手动退出"):
             relocate(self.source, self.target, ["alpha"], "token")
 
         self.assertTrue((self.source / "alpha").is_dir())
