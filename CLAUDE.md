@@ -68,6 +68,8 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 
 **`app/platform/style_sheet.py` 独占 QFluentWidgets 样式表登记的修补。** `updateStyleSheet()` 把控件已登记的 `StyleSheetCompose` 交回 `register()`，原版会再包一层，每换一次主题或主题色就嵌套一层、自定义 QSS 多重复一遍，永不释放；这里让已登记的组合原样留着。原版还会把内容没变的样式表重新套一遍，Qt 不会跳过，整棵子控件都要重新 polish：主窗口页面栈带的窗口样式表不含主题色，换主题色时却每次把所有已加载页面的一千多个控件重排一遍。比较时忽略末尾换行（首次套用的是单个样式源，换主题时套用的组合末尾多一个换行）。换主题仍然一次全部换完：QFluentWidgets 的 `lazy=True` 靠绘制事件补换，项目里自绘标签的过滤器会吞掉绘制事件，实测有页面颜色换不全，而多个窗口必须同时换好。
 
+**`app/platform/nuitka_signals.py` 独占 Nuitka 信号连接泄漏的修补。** Nuitka 的 PySide6 插件把交给 `connect`、`disconnect` 和 `QTimer.singleShot` 的每个编译版绑定方法追加进模块级的 `_protected`，从不删除（Nuitka/Nuitka#4108，我们用的 4.1.3 就有）；绑定方法拿着接收者，打包版里连过自己方法的控件连同它引用的截图、背景图永远释放不了，源码运行和测试看不出来。`djcat.py` 在导入其他任何模块之前调 `releaseSignalReceivers()`，把 `_protected` 换成只留函数、同一个函数只留一份的列表；按 `getattr(method, "im_func", method)` 取函数，上游修好后交进来的已经是函数也不出错。换 Nuitka 版本时在打包版上反复开关投送，看内存回不回落。
+
 **`app/platform/text_rendering.py` 独占 Qt 的大字形缓存上限。** Qt 光栅引擎只把 64 个设备像素以内的字形缓存成位图，更大的每次按轮廓重填；300% 缩放下投送正文的 26 号字约 104 个设备像素，滚动一帧要四分之一秒。`djcat.py` 在创建 QApplication 之前设 `QT_MAX_CACHED_GLYPH_SIZE=256`（已设置的环境变量不覆盖）。上限不再往上抬：时钟和倒计时的大数字每秒只重画一次，而 Windows 上每个缓存像素要占 4 字节。
 
 **`app/platform/shadow_effect.py` 独占 Silhouette Shadow。** 弹窗卡片（圆角 10）、菜单面板（圆角 9）和 Projection／Exam Countdown／Fullscreen Clock 的窗口化背景（圆角 8）都用它；新的不透明圆角容器要阴影时同样用它，不要再直接挂 `QGraphicsDropShadowEffect`。它是 `QGraphicsDropShadowEffect` 的子类，`color`、`blurRadius`、`offset` 属性和属性动画照常可用；模糊仍交给 Qt 生成，但同一圆角和模糊半径只模糊一次最小尺寸，再按九宫格拉伸到当前尺寸（整窗大的卡片整张模糊一次，300% 下要四分之一秒），画出来与原版逐像素相差不超过 2 个色阶。截图要去掉阴影时用 `setShadowHidden()`，不要 `setEnabled()` 来回切：那会把卡片连同压在上面的控件重画两遍。尺寸逐帧变化的形状（Window Transition 的动画层）用 `paintSilhouetteShadow()` 直接画：同一圆角只模糊一次最小尺寸，按九宫格拉伸，中间那块垫在形状底下不画。
@@ -321,6 +323,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/platform/menu_animation.py` | QFluentWidgets 全局 Menu Reveal 管理器适配，不改变原版展开视觉 |
 | `app/platform/icon_cache.py` | QFluentWidgets SVG 图标的解析和位图缓存，只缓存资源路径和源码 |
 | `app/platform/style_sheet.py` | QFluentWidgets 样式表登记：换主题不再层层嵌套，样式没变的控件不重新套用 |
+| `app/platform/nuitka_signals.py` | 让打包版放开连过信号的控件：Nuitka 永久留着的绑定方法只留函数 |
 | `app/platform/text_rendering.py` | Qt 大字形缓存上限，让投送的大字按位图缓存 |
 | `app/platform/touch_input.py` | 「新触控」：手指按住时给指下的按钮和卡片画上按下态；触控输入本身仍由 Windows 判定 |
 | `app/platform/background_effect.py` | Background Effect：照 Ghost Downloader 给主窗口挂 Windows 透明材质，Win10 的 Acrylic 在窗口移动时暂停模糊 |
@@ -383,6 +386,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 
 ```text
 chdir to the user folder, not APP_DIR (programs DJCat opens inherit it and would block a Client Update)
+  → releaseSignalReceivers (Nuitka keeps functions, not receivers, before anything connects)
   → cacheLargeGlyphs (QT_MAX_CACHED_GLYPH_SIZE, before QApplication draws any text)
   → SingletonApplication (Windows single instance + IPC)
   → optimizeFluentDialogs + optimizeFluentMenus (before MainWindow or its popups are created)
