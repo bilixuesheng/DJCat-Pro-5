@@ -99,6 +99,10 @@ def main():
         except OSError:
             continue
 
+    from app.platform.nuitka_signals import releaseSignalReceivers
+
+    releaseSignalReceivers()
+
     from app.platform.application import SingletonApplication, raiseWindow
     from app.platform.text_rendering import cacheLargeGlyphs
 

@@ -3,11 +3,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
-from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 from qfluentwidgets import isDarkTheme, qconfig
 
+from app.platform.backing_store import paintedImage
 from app.platform.screens import fitToScreens
 from app.platform.shadow_effect import SilhouetteShadowEffect
 
@@ -138,7 +139,7 @@ class WindowBackground(QWidget):
         around it; the card, a quarter of the screen at most, is painted again without.
         """
         if not self._cornerRadius:
-            painted = self._paintedCard()
+            painted = paintedImage(self)
             if painted is not None:
                 return painted
         shadow = self.graphicsEffect() if self.castsShadow() else None
@@ -149,29 +150,6 @@ class WindowBackground(QWidget):
         finally:
             if shadow is not None:
                 shadow.setShadowHidden(False)
-
-    def _paintedCard(self) -> QImage | None:
-        window = self.window()
-        handle = window.windowHandle()
-        store = window.backingStore()
-        if handle is None or not handle.isExposed() or store is None:
-            return None
-        image = store.paintDevice()
-        if not isinstance(image, QImage):
-            return None
-        ratio = image.devicePixelRatio()
-        geometry = self.geometry()
-        rect = QRect(
-            round(geometry.x() * ratio),
-            round(geometry.y() * ratio),
-            round(geometry.width() * ratio),
-            round(geometry.height() * ratio),
-        )
-        if not image.rect().contains(rect):
-            return None
-        card = image.copy(rect)
-        card.setDevicePixelRatio(ratio)
-        return card
 
     def setRoundedWindow(self, enabled: bool, shadow: bool = True) -> None:
         """``shadow=False`` keeps the rounded corners for in-page previews,

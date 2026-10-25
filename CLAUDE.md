@@ -68,6 +68,10 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 
 **`app/platform/style_sheet.py` 独占 QFluentWidgets 样式表登记的修补。** `updateStyleSheet()` 把控件已登记的 `StyleSheetCompose` 交回 `register()`，原版会再包一层，每换一次主题或主题色就嵌套一层、自定义 QSS 多重复一遍，永不释放；这里让已登记的组合原样留着。原版还会把内容没变的样式表重新套一遍，Qt 不会跳过，整棵子控件都要重新 polish：主窗口页面栈带的窗口样式表不含主题色，换主题色时却每次把所有已加载页面的一千多个控件重排一遍。比较时忽略末尾换行（首次套用的是单个样式源，换主题时套用的组合末尾多一个换行）。换主题仍然一次全部换完：QFluentWidgets 的 `lazy=True` 靠绘制事件补换，项目里自绘标签的过滤器会吞掉绘制事件，实测有页面颜色换不全，而多个窗口必须同时换好。
 
+**`app/platform/nuitka_signals.py` 独占 Nuitka 信号连接泄漏的修补。** Nuitka 的 PySide6 插件把交给 `connect`、`disconnect` 和 `QTimer.singleShot` 的每个编译版绑定方法追加进模块级的 `_protected`，从不删除（Nuitka/Nuitka#4108，我们用的 4.1.3 就有）；绑定方法拿着接收者，打包版里连过自己方法的控件连同它引用的截图、背景图永远释放不了，源码运行和测试看不出来。`djcat.py` 在导入其他任何模块之前调 `releaseSignalReceivers()`，把 `_protected` 换成只留函数、同一个函数只留一份的列表；按 `getattr(method, "im_func", method)` 取函数，上游修好后交进来的已经是函数也不出错。换 Nuitka 版本时在打包版上反复开关投送，看内存回不回落。
+
+**`app/platform/backing_store.py` 独占从窗口后备缓冲复制已画好的像素。** `paintedImage(widget)` 给出窗口上一次画在这个控件位置的像素，窗口还没露出、后备缓冲还没分配图像或不是 `QImage` 时返回 `None`（这时读它会崩溃），调用方改为重新渲染；Window Transition 全屏时的快照和蒙层弹窗打开时的底图都用它，不得各写一份。
+
 **`app/platform/text_rendering.py` 独占 Qt 的大字形缓存上限。** Qt 光栅引擎只把 64 个设备像素以内的字形缓存成位图，更大的每次按轮廓重填；300% 缩放下投送正文的 26 号字约 104 个设备像素，滚动一帧要四分之一秒。`djcat.py` 在创建 QApplication 之前设 `QT_MAX_CACHED_GLYPH_SIZE=256`（已设置的环境变量不覆盖）。上限不再往上抬：时钟和倒计时的大数字每秒只重画一次，而 Windows 上每个缓存像素要占 4 字节。
 
 **`app/platform/shadow_effect.py` 独占 Silhouette Shadow。** 弹窗卡片（圆角 10）、菜单面板（圆角 9）和 Projection／Exam Countdown／Fullscreen Clock 的窗口化背景（圆角 8）都用它；新的不透明圆角容器要阴影时同样用它，不要再直接挂 `QGraphicsDropShadowEffect`。它是 `QGraphicsDropShadowEffect` 的子类，`color`、`blurRadius`、`offset` 属性和属性动画照常可用；模糊仍交给 Qt 生成，但同一圆角和模糊半径只模糊一次最小尺寸，再按九宫格拉伸到当前尺寸（整窗大的卡片整张模糊一次，300% 下要四分之一秒），画出来与原版逐像素相差不超过 2 个色阶。截图要去掉阴影时用 `setShadowHidden()`，不要 `setEnabled()` 来回切：那会把卡片连同压在上面的控件重画两遍。尺寸逐帧变化的形状（Window Transition 的动画层）用 `paintSilhouetteShadow()` 直接画：同一圆角只模糊一次最小尺寸，按九宫格拉伸，中间那块垫在形状底下不画。
@@ -88,7 +92,7 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 
 **每个 Setting Section 各自是一个 `ScrollArea`，各自记住滚动位置。** 返回上一级时停在离开时的位置，触控仲裁沿用 `ScrollArea` 既有实现，页面不另写一套。
 
-`ScrollArea` 的触控手势抓取只做一次，不能反复抓了又放：抓放循环留下的残留会在之后创建任意窗口时崩溃。Setting Section 用 `ScrollArea(parent, grabTouch=False)` 构造，首次显示时才 `grabTouchGesture()`；是否已抓由实例自己记账，不能拿 `QScroller.grabbedGesture()` 判断。
+`ScrollArea` 的触控手势抓取只做一次，不能反复抓了又放：抓放循环留下的残留会在之后创建任意窗口时崩溃。Setting Section 用 `ScrollArea(parent, grabTouch=False)` 构造，首次显示时才 `grabTouchGesture()`；是否已抓由实例自己记账，不能拿 `QScroller.grabbedGesture()` 判断。整块要删掉的控件（卸下的 Lazy Page）在删之前调 `releaseTouchGestures()`，把底下有 scroller 的视口各停下、放开一次，和弹窗在 `done()` 里做的一样；没抓过手势的 scroller 放开时 Qt 直接返回。
 
 **`ScrollArea` 统一仲裁单指触控滚动与子控件点击。** 从按钮、下拉框或卡片上起滑时，必须取消该触控序列的按压和释放，不能在滚动结束时触发原控件。「新滑动触控」默认开：页面（`QScroller`）一开始拖动就取消，页面动了就不算点按，没动就算点击，按钮弹起和页面开始滚动在同一刻。开发人员选项「停用新滑动触控」后改回自己量距离：移动达到系统拖动阈值才取消，未达到阈值的短按仍按正常点击处理。页面不得各自复制这套判定。HomePage 进入卡片编辑态时由排序手势独占触控，并依靠卡片拖动的边缘自动滚动跨越视口；退出编辑态后恢复页面触控滚动。
 
@@ -98,7 +102,7 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 
 **`app/view/components/scroll_area.py` 独占触控滚动的手感。** 所有抓了触控手势的 viewport 都经 `trackTouchScroller()`（`ScrollArea.grabTouchGesture()` 自动调用）由它配置 `QScrollerProperties`，别处不得自己设。默认是「新滑动触控」，照 Edge 调：松手速度上限 3 m/s、`OutCubic` 减速（滑行距离 = 2v²/(9a)，甩得越快滑得越远）、拖到头最多拉出视口的 1/4、甩到头最多冲出 1/10 并在 0.3 秒内弹回、保留连续甩动加速；起滑距离仍是 5 mm（红外框有约 ±2 mm 抖动），换成逻辑像素后限制在 3～12 px，防止大屏报给系统的物理尺寸不对。开发人员选项「停用新滑动触控」（`cfg.disableTunedTouchScroll`）后一律用 Qt 的原值，与以前完全相同。`setTunedTouchScrollEnabled()` 当场作用于所有已有 viewport；被抑制的 viewport 保持抑制，解除时恢复当前手感的阈值。
 
-**滚动区的内容不透明，Qt 才平移像素。** `ScrollArea.enableOpaqueScrolling()` 让内容先铺一层身后的颜色（各层 `render()` 在视口四角和中心叠出来的颜色，五处一致且完全不透明才铺），视口在右边让出悬浮滚动条的 13 px，并从内容布局的右边距里还回去；Qt 于是只平移已画好的像素、补画新露出的一条。身后不是一种实色（挂了 Background Effect、渐变、图片）或滚动区藏着时，内容保持透明、照旧整块重画。MainWindow 换主题和 Background Effect 后调 `refreshOpaqueScrolling()`。目前只有 Setting Section 和应用市场两个选项卡开了；主页横幅和特别鸣谢的条目铺到了滚动条下面，不开。开了的滚动区视口上方不要再盖兄弟控件，盖着期间 Qt 退回整块重画。理由见 `docs/adr/0009-opaque-scrolling.md`。
+**滚动区的内容不透明，Qt 才平移像素。** `ScrollArea.enableOpaqueScrolling()` 让内容先铺一层身后的颜色（各层 `render()` 在视口四角和中心叠出来的颜色，五处一致且完全不透明才铺），视口在右边让出悬浮滚动条的 13 px，并从内容布局的右边距里还回去；Qt 于是只平移已画好的像素、补画新露出的一条。平移还要求位移是整物理像素，所以这样的滚动区把滚轮和滚动条的值对齐到整物理像素（滚到底时不对齐）；组件库滚动条把原生滚动条的值原样发回来时不改，触控照旧逐像素跟手。身后不是一种实色（挂了 Background Effect、渐变、图片）或滚动区藏着时，内容保持透明、照旧整块重画。MainWindow 换主题和 Background Effect 后调 `refreshOpaqueScrolling()`。目前只有 Setting Section 和应用市场两个选项卡开了；主页横幅和特别鸣谢的条目铺到了滚动条下面，不开。开了的滚动区视口上方不要再盖兄弟控件，盖着期间 Qt 退回整块重画。理由见 `docs/adr/0009-opaque-scrolling.md`。
 
 需要让出触控的模式调用 `ScrollArea.setTouchScrollSuppressed()`，它把拖动阈值抬到手指够不到的距离，不释放手势；页面不得自己 `QScroller.ungrabGesture()`，也不得对已抓过的 viewport 再调 `QScroller.grabGesture()`（它会先自行 ungrab 再重抓）。不是 `ScrollArea` 的 viewport（Projection 正文的 `QTextEdit`、`MarkdownView`）用 `scroll_area.setTouchScrollSuppressed(viewport, ...)` 做同一件事。Application Store 页面本身不滚动，两个选项卡和详情两栏各自是 `ScrollArea`，进出详情不抑制也不释放任何手势。
 
@@ -123,7 +127,7 @@ Tray Menu 的外观和弹出方式固定恢复为 v5.1.2：右键由注册的 co
 
 MainWindow 的 Resize Band 宽度使用统一 DPI 比例计算，以 300% 缩放下 35 个物理像素为基准，即 `round(35 × devicePixelRatio / 3)`；窗口切换屏幕时重新计算，因此所有缩放比例都按同一规则变化。Resize Band 在最小化、最大化与关闭三个标题栏按钮上让位：组件库给出缩放命中码后，`MainWindow.nativeEvent` 若发现消息坐标落在按钮矩形内就改判 `HTCLIENT`。判断用消息坐标而不是光标位置，触控按下时两者可能不同；Win11 最大化按钮的 `HTMAXBUTTON`（贴靠布局）不是缩放命中码，不受影响。右上角因此没有斜向缩放，这是有意的；调整基准或标题栏布局时不得为了找回它把命中带重新铺到按钮上。
 
-**HomePage** 是唯一随 MainWindow 立即创建的导航页面。Application Store、Credits 和 Setting 使用 Lazy Page；Projection 编辑、Exam Countdown、Broadcast Task、Home Card Task 和 Shutdown Task 页面通过 `_getTaskPage()` 系列方法首次打开时创建。
+**HomePage** 是唯一随 MainWindow 立即创建的导航页面。Application Store、Credits 和 Setting 使用 Lazy Page；Projection 编辑、Exam Countdown、Broadcast Task、Home Card Task 和 Shutdown Task 页面通过 `_getTaskPage()` 系列方法首次打开时创建。不经 `addSubInterface()` 加进页面栈的页面要自己设 `isStackedTransparent`（`_getTaskPage()` 设为假，与主页相同）：少了它，每切过去一次 QFluentWidgets 都对整个页面栈 `setStyle()`，所有已加载页面的控件重新排一遍样式。
 
 只有启用了启动恢复且最近一次 Projection 仍处于活动状态，或启动时触发的 Home Card Task 明确打开 Projection 时，MainWindow 才在启动阶段创建 Projection 编辑页面；仅关闭尚未打开的 Projection 不会破坏懒加载。
 
@@ -133,13 +137,15 @@ Lazy Page 必须保留外部调用需要的最小接口：
 
 | Lazy Page | 加载前可暂存或转发的状态 |
 |---|---|
-| `LazyAppStorePage` | 搜索文字、固定卡片信号与应用卡片失败信号；清缓存和关闭在未加载时为空操作，`hasActiveOperations()` 在未加载时为假 |
+| `LazyAppStorePage` | 搜索文字、固定卡片信号与应用卡片失败信号，以及第一次建页面时建的 `ApplicationStore`（页面卸下再重建时交回同一个）；清缓存在未加载时为空操作，关闭时只停 store，`hasActiveOperations()` 在未加载时为假 |
 | `LazySettingPage` | 缓存清理信号、更改 Application Install Location 的请求信号与最新 Home Card 列表（主页卡片开关和画主窗口、托盘的 Setting Preview 都要用）；搜索建议和 Setting Route 导航一律转发给真实页面（导航到设置页必然已 `ensureLoaded()`，搜索框只在该页可见） |
 | `LazyCreditsPage` | 无业务状态 |
 
 调用方不得直接依赖 `lazyPage.page` 的存在；需要真实页面时调用 `ensureLoaded()`，只做关闭或缓存失效时应保持未加载状态。
 
-开发人员选项「停用页面懒加载」（`cfg.eagerPageLoading`）打开时，MainWindow 当场用 `_loadAllPages()` 建好三个 Lazy Page 和五个任务编辑页，以后每次启动也都建好；关掉只能下次启动生效，已建好的页面不拆。
+**`app/view/windows/memory_release.py` 拥有主窗口藏在托盘时交还内存的时机。** 主窗口关到托盘（`isHidden()`；最小化不算，Windows 那时自己会修剪）满 10 分钟，它调 MainWindow 的 `_unloadIdlePages()` 卸下已加载的设置页和应用市场，`gc.collect()`，再由 `app/platform/memory.py` 的 `trimWorkingSet()` 调 `EmptyWorkingSet`，日志记一行修剪前后的工作集和 private bytes；静默启动后 60 秒、主窗口一直没打开过时也修剪一次。主窗口藏着时有页面建起来（从托盘点 Application Home Card 会建应用市场），十分钟重新算。有页面这次卸不掉就每分钟再试，修剪等最后一页卸下后做一次；Display Window 开着时跳过修剪，页面照卸。卸下（`LazyPage.unload()`）先停页面自己的工作（设置页存盘，应用市场 `shutdown()`），照弹窗的做法把抓过触控手势的视口各放开一次（`releaseTouchGestures()`），再当场 `delete`，不等 `deleteLater`，好让紧接着的 `gc.collect()` 收得到；嵌套事件循环里（`loopLevel() > 1`，弹窗 `exec()` 可能正停在页面里）、应用市场有进行中的操作或目录和图片还在后台加载（迟到的目录同步会和重建的页面抢共用的 store）时 `canUnload()` 为假。主窗口停在要卸的那页时先不带动画切回主页。重建的页面从头开始，Setting Route、选项卡和滚动位置都不恢复，外壳暂存的搜索文字和 Home Card 列表照旧交给它。
+
+开发人员选项「停用页面懒加载」（`cfg.eagerPageLoading`）打开时，MainWindow 当场用 `_loadAllPages()` 建好三个 Lazy Page 和五个任务编辑页，以后每次启动也都建好；关掉只能下次启动生效，已建好的页面不拆。开着时主窗口藏多久都不卸页面，也不修剪内存。
 
 **Developer Option 集中在 Setting Section `应用 › 开发人员选项`（`software.developer`）。** 入口说明写明只供开发人员调试；五张卡（停用新触控、停用新滑动触控、停用超级帧率优化、停用页面懒加载、显示帧率）默认全关，都当场生效（停用页面懒加载关掉时除外），不参与 Setting Suggestion。新增开发人员选项放在这里，同样不参与搜索。
 
@@ -159,7 +165,7 @@ Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence�
 
 **server/app_store.py** 拥有 Application Catalog、Package 配置、Application Download Count 和管理后台写入。桌面端只消费目录和下载重定向，不能自行增加下载次数。
 
-**ApplicationStore** 拥有本机 Application 规则：目录扫描、安装清单、版本合并、ZIP 安全校验、原子覆盖、卸载和 Application Action 执行。它不拥有界面按钮或 InfoBar。根目录是 Application Install Location，`setProgramDir()` 在运行中换；自定义位置不可用时不重建文件夹，`locationAvailable()` 为假，安装直接失败。卸载和 Application Update 替换目录前由 `_closeApplication()` 强制关闭从该安装目录运行的程序（自己启动的进程和按目录找到的进程），关不掉才失败。
+**ApplicationStore** 拥有本机 Application 规则：目录扫描、安装清单、版本合并、ZIP 安全校验、原子覆盖、卸载和 Application Action 执行。它不拥有界面按钮或 InfoBar。根目录是 Application Install Location，`setProgramDir()` 在运行中换；自定义位置不可用时不重建文件夹，`locationAvailable()` 为假，安装直接失败。卸载和 Application Update 替换目录前由 `_closeApplication()` 强制关闭从该安装目录运行的程序（自己启动的进程和按目录找到的进程），关不掉才失败。实例由 `LazyAppStorePage` 持有，不随页面卸下：它记着打开过的进程，再点仍在运行的应用才是唤起而不是再开一份；页面卸下期间换过的安装位置没人通知它，重建的 AppStorePage 按当前位置 `setProgramDir()`，交进来的 store 页面 `shutdown()` 时不停。
 
 **AppStorePage** 拥有一次 UI 会话中的异步状态：
 
@@ -316,16 +322,19 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `djcat.py` | 进程入口、工作目录、单实例应用、日志、配置加载和 MainWindow 创建 |
 | `app/platform/` | Windows 单实例/IPC、唤起窗口、开机启动及 Qt 运行时适配 |
 | `app/platform/animation_timer.py` | Super Frame Rate Optimization：Qt 全局 Animation Tick 间隔的私有 API 适配和安全回退 |
-| `app/platform/dialog_animation.py` | QFluentWidgets 蒙层弹窗的阴影复用和淡入淡出阴影暂停 |
+| `app/platform/dialog_animation.py` | QFluentWidgets 蒙层弹窗的阴影复用，以及只贴两张截图的淡入淡出 |
+| `app/platform/backing_store.py` | 从窗口后备缓冲复制控件位置上已画好的像素，复制不了时返回 `None` |
 | `app/platform/shadow_effect.py` | Silhouette Shadow：按尺寸缓存模糊的圆角矩形投影 |
 | `app/platform/menu_animation.py` | QFluentWidgets 全局 Menu Reveal 管理器适配，不改变原版展开视觉 |
 | `app/platform/icon_cache.py` | QFluentWidgets SVG 图标的解析和位图缓存，只缓存资源路径和源码 |
 | `app/platform/style_sheet.py` | QFluentWidgets 样式表登记：换主题不再层层嵌套，样式没变的控件不重新套用 |
+| `app/platform/nuitka_signals.py` | 让打包版放开连过信号的控件：Nuitka 永久留着的绑定方法只留函数 |
 | `app/platform/text_rendering.py` | Qt 大字形缓存上限，让投送的大字按位图缓存 |
 | `app/platform/touch_input.py` | 「新触控」：手指按住时给指下的按钮和卡片画上按下态；触控输入本身仍由 Windows 判定 |
 | `app/platform/background_effect.py` | Background Effect：照 Ghost Downloader 给主窗口挂 Windows 透明材质，Win10 的 Acrylic 在窗口移动时暂停模糊 |
 | `app/platform/processes.py` | 按可执行文件所在目录查找和强制结束 Windows 进程，标出因以管理员身份运行而结束不了的；列出当前会话里运行着的可执行文件（Process Guard 用） |
 | `app/platform/elevation.py` | 经 UAC 以管理员身份启动程序，并靠进程句柄查询、等待和结束它 |
+| `app/platform/memory.py` | `EmptyWorkingSet` 修剪本进程的工作集，日志记下修剪前后的工作集和 private bytes |
 | `app/platform/screens.py` | 取窗口所在屏幕，绕开 PySide 把 QScreen 挂成控件子对象的返回值启发式；把解码的大图缩到最大屏幕的物理尺寸 |
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
@@ -337,6 +346,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `tools/updater/updater.c` | Client Update 的独立更新器：等待进程退出、把暂存目录整目录换名为程序目录（失败时换回备份）、重启 DJCat |
 | `app/view/windows/main_window.py` | 桌面组合根、导航、长期运行任务和 Client Update UI |
 | `app/view/windows/application_relocation.py` | 更改 Application Install Location 的界面流程：检查、提权、确认、后台迁移和 Relocation Toast |
+| `app/view/windows/memory_release.py` | 主窗口藏在托盘时交还内存的时机：十分钟后卸页面、修剪，静默启动后修剪一次 |
 | `app/view/pages/` | 页面、临时展示窗口和页面级 worker 编排 |
 | `app/view/pages/home_card_task_page.py` | Home Card Task 的懒加载编辑页面；不拥有调度计时器 |
 | `app/view/components/task_page.py` | 三类 Scheduled Task 页面共用的列表页、任务卡片与新建对话框外壳；各页面只提供表单、数据映射和摘要 |
@@ -383,6 +393,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 
 ```text
 chdir to the user folder, not APP_DIR (programs DJCat opens inherit it and would block a Client Update)
+  → releaseSignalReceivers (Nuitka keeps functions, not receivers, before anything connects)
   → cacheLargeGlyphs (QT_MAX_CACHED_GLYPH_SIZE, before QApplication draws any text)
   → SingletonApplication (Windows single instance + IPC)
   → optimizeFluentDialogs + optimizeFluentMenus (before MainWindow or its popups are created)
@@ -406,8 +417,9 @@ chdir to the user folder, not APP_DIR (programs DJCat opens inherit it and would
       → finish an interrupted Application Relocation from cfg.appRelocation in a background thread
       → report Last Seen to the AI Markdown server in a background thread
       → create tray and long-lived timers/workers: the schedule timer, Time Sync (started at once:
-        asks the time server in a background thread, system time until it answers) and
-        Process Guard (rules from cfg.homeCardTasks)
+        asks the time server in a background thread, system time until it answers),
+        Process Guard (rules from cfg.homeCardTasks) and MemoryRelease (after silent startup
+        it trims once at 60 s; hidden for 10 min, the Settings page and Application Store go)
       → restore valid active Projection Snapshot only when recovery is enabled
       → start Process Guard (after silent startup it only watches for the first 60 s)
       → dispatch startup event and, when applicable, silent-startup event
@@ -443,7 +455,7 @@ Tray Menu quit → MainWindow.requestQuit()
   → dispatch application-quit Home Card Tasks
   → wait asynchronously for newly started custom Action Sequences
   → MainWindow._shutdownResources()
-  → stop navigation animation, timers and Time Sync
+  → stop navigation animation, timers, MemoryRelease and Time Sync
   → cancel Edge TTS and stop audio players
   → flush loaded Setting / Scheduled Task editors
   → shutdown HomePage, loaded Application Store page and loaded Projection editor workers
@@ -471,7 +483,7 @@ Tray Menu quit → MainWindow.requestQuit()
 
 Menu Reveal 是另一层独立优化：保留 QFluentWidgets 原始的 250 ms 时长、`OutQuad` 缓动、窗口位移、逐帧遮罩和阴影，只把每次属性变化触发的 viewport 强制刷新合并为动画结束时的一次；悬停状态同步仍逐帧执行。逐帧遮罩只按位移去重，不能改成按时间采样（遮罩滞后于窗口位置会让内容错位）。不能改成只淡入、删除遮罩或阴影，也不能把 `NONE`、`FADE_IN_DROP_DOWN` 等其他管理器替换成下拉实现。
 
-带蒙层的 `MaskDialogBase` 由 `QGraphicsOpacityEffect` 驱动 200 ms 淡入和 100 ms 淡出，期间暂停卡片阴影；淡入结束后移除不透明度效果，阴影 `color` alpha 再以 150 ms / `OutCubic` 从 0 渐变到目标值；淡出直接禁用阴影后开始不透明度动画。不能改用 `setWindowOpacity`：`MaskDialogBase` 去掉窗口标志后，带父窗口时 `isWindow()` 为假，`setWindowOpacity()` 直接返回，动画会静默失效。也不能通过缩短动画、改变蒙层透明度或永久删除阴影换取性能。
+带蒙层的 `MaskDialogBase` 淡入 200 ms（`InSine`）、淡出 100 ms，期间暂停卡片阴影；淡入结束后阴影 `color` alpha 再以 150 ms / `OutCubic` 从 0 渐变到目标值；淡出直接禁用阴影后开始。两段都由盖在弹窗最上面的 `_FadeLayer` 画，只贴两张截图：弹窗底下的画面和弹窗本身（蒙层、卡片和控件，不带阴影），按当前透明度叠起来，与透明度效果的合成方式相同；弹窗这期间声明 `WA_OpaquePaintEvent`，Qt 不再重画它底下的页面。打开时底下的画面直接从窗口后备缓冲复制（弹窗还没画过），弹窗等第一次绘制过后由零延时定时器截，不能在这一层的 `paintEvent` 里截：渲染弹窗会再画一遍这一层，Qt 报递归重画，这次绘制作废；关闭时弹窗已经画在窗口上，底下的画面按祖先链逐层渲染各层自己画的和压在下面的兄弟控件（弹窗可能挂在透明的页面上，只渲染父控件会漏掉窗口底色）。关闭的最后一帧画成弹窗全透明再收掉这一层，紧接着打开的弹窗从后备缓冲复制底图时才不会带上残影；动画途中弹窗尺寸变了（窗口被拉大）就直接走到终点；主窗口从最小化还原时 Qt 补发给弹窗的系统 Show 不再淡入，那时后备缓冲里已经有弹窗。不能改回 `QGraphicsOpacityEffect`：它每帧把整个弹窗离屏重画一遍，半透明蒙层底下的页面也跟着重画。不能改用 `setWindowOpacity`：`MaskDialogBase` 去掉窗口标志后，带父窗口时 `isWindow()` 为假，`setWindowOpacity()` 直接返回，动画会静默失效。也不能通过缩短动画、改变蒙层透明度或永久删除阴影换取性能。
 
 ## Code shape
 

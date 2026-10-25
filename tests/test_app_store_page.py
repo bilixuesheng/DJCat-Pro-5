@@ -1,3 +1,4 @@
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -3525,3 +3526,59 @@ class AppStorePageTest(TestCase):
                 reloadState.assert_called_once_with()
         finally:
             release.set()
+
+
+class _SharedStore(_Store):
+    def __init__(self, programDir):
+        self.programDir = Path(programDir).resolve()
+        self.stopped = False
+        self.movedTo = []
+
+    def setProgramDir(self, programDir, create=True):
+        self.movedTo.append((Path(programDir).resolve(), create))
+        self.programDir = Path(programDir).resolve()
+
+    def shutdown(self):
+        self.stopped = True
+
+
+class SharedApplicationStoreTest(TestCase):
+    """The store outlives an unloaded page, so a rebuilt page gets the same one back."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.qtApp = QApplication.instance()
+
+    def _page(self, store, location):
+        with (
+            patch("app.view.pages.app_store_page.installLocation", return_value=location),
+            patch("app.view.pages.app_store_page.isDefaultInstallLocation", return_value=False),
+        ):
+            page = AppStorePage(store=store)
+        self.addCleanup(self._close, page)
+        return page
+
+    def _close(self, page):
+        page.shutdown()
+        page.deleteLater()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.qtApp.processEvents()
+
+    def testPageUsesTheStoreItIsGivenAndLeavesItRunning(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = _SharedStore(folder)
+            page = self._page(store, folder)
+
+            page.shutdown()
+
+            self.assertIs(page.store, store)
+            self.assertEqual(store.movedTo, [])
+            self.assertFalse(store.stopped)
+
+    def testStoreFollowsALocationChangedWhileNoPageWasLoaded(self):
+        with tempfile.TemporaryDirectory() as old, tempfile.TemporaryDirectory() as new:
+            store = _SharedStore(old)
+
+            self._page(store, new)
+
+            self.assertEqual(store.movedTo, [(Path(new).resolve(), False)])

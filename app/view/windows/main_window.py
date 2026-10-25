@@ -17,13 +17,14 @@ from PySide6.QtCore import (
     QProcess,
     QRect,
     Qt,
+    QThread,
     QTimer,
     QUrl,
     Signal,
 )
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication, QGraphicsOpacityEffect, QVBoxLayout, QWidget
-from shiboken6 import isValid
+from shiboken6 import delete, isValid
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import (
     DrillInTransitionStackedWidget,
@@ -100,12 +101,13 @@ from app.platform.background_effect import (
 from app.platform.processes import processesUnder, terminateProcessesUnder
 from app.signal_bus import signalBus
 from app.view.components.frame_rate import trackFrameRate
-from app.view.components.scroll_area import refreshOpaqueScrolling
+from app.view.components.scroll_area import refreshOpaqueScrolling, releaseTouchGestures
 from app.view.components.setting_suggestion_menu import SettingSuggestionMenu
 from app.view.components.update_toast import UpdateToast
 from app.view.pages.home_page import HomePage
 from app.view.shell.tray import SystemTrayIcon
 from app.view.windows.application_relocation import ApplicationRelocation
+from app.view.windows.memory_release import MemoryRelease
 
 
 SCHEDULE_CATCH_UP_LIMIT = timedelta(seconds=60)
@@ -268,7 +270,14 @@ class UpdateApplyWorker(QObject):
             self.finished.emit(False)
 
 
+def _insideNestedEventLoop() -> bool:
+    # 弹窗 exec() 之类的嵌套事件循环可能正停在页面的某个控件里，这时删掉页面，回退时就落进已删的控件。
+    return QThread.currentThread().loopLevel() > 1
+
+
 class LazyPage(QWidget):
+    loaded = Signal()
+
     def __init__(self, objectName, parent=None):
         super().__init__(parent)
         self.setObjectName(objectName)
@@ -283,7 +292,32 @@ class LazyPage(QWidget):
         if self.page is None:
             self.page = self._createPage()
             self.layout.addWidget(self.page)
+            self.loaded.emit()
         return self.page
+
+    def isLoaded(self) -> bool:
+        return self.page is not None
+
+    def canUnload(self) -> bool:
+        return not _insideNestedEventLoop()
+
+    def unload(self) -> None:
+        """Destroy the real page; it is built again the next time it is needed.
+
+        Call after ``canUnload()``, and not from the page's own event handlers.
+        """
+        page = self.page
+        if page is None:
+            return
+        self.page = None
+        self._releasePage(page)
+        releaseTouchGestures(page)
+        self.layout.removeWidget(page)
+        # 当场删，不等 deleteLater：紧接着回收的 Python 垃圾里才有它留下的对象。
+        delete(page)
+
+    def _releasePage(self, page):
+        pass
 
     def showEvent(self, event):
         self.ensureLoaded()
@@ -341,6 +375,9 @@ class LazySettingPage(LazyPage):
         if self.page is not None:
             self.page.flushPendingSave()
 
+    def _releasePage(self, page):
+        page.flushPendingSave()
+
     @property
     def windowTitleCard(self):
         return self.ensureLoaded().windowTitleCard
@@ -353,11 +390,15 @@ class LazyAppStorePage(LazyPage):
     def __init__(self, parent=None):
         super().__init__("AppStorePage", parent)
         self._searchText = ""
+        # 页面卸下后 store 留着：它记着打开过的应用，再点仍在运行的应用才会唤起而不是再开一份。
+        self._store = None
 
     def _createPage(self):
-        from app.view.pages.app_store_page import AppStorePage
+        from app.view.pages.app_store_page import ApplicationStore, AppStorePage
 
-        page = AppStorePage(self)
+        if self._store is None:
+            self._store = ApplicationStore()
+        page = AppStorePage(self, store=self._store)
         page.pinnedCardsChanged.connect(self.pinnedCardsChanged)
         page.pinnedCardFailed.connect(self.pinnedCardFailed)
         if self._searchText:
@@ -379,9 +420,21 @@ class LazyAppStorePage(LazyPage):
     def hasActiveOperations(self):
         return self.page is not None and self.page.hasActiveOperations()
 
+    def canUnload(self) -> bool:
+        return (
+            super().canUnload()
+            and not self.hasActiveOperations()
+            and not (self.page is not None and self.page.hasCatalogWork())
+        )
+
+    def _releasePage(self, page):
+        page.shutdown()
+
     def shutdown(self):
         if self.page is not None:
             self.page.shutdown()
+        if self._store is not None:
+            self._store.shutdown()
 
 
 class UpdateDialog(MessageBoxBase):
@@ -491,6 +544,9 @@ class MainWindow(MSFluentWindow):
         self.tray.homeCardTriggered.connect(self._executeHomeCard)
         self.tray.quitRequested.connect(self.requestQuit)
         self.tray.show()
+        self.memoryRelease = MemoryRelease(self, self._unloadIdlePages, isSilent)
+        self.settingPage.loaded.connect(self.memoryRelease.onPageLoaded)
+        self.appStorePage.loaded.connect(self.memoryRelease.onPageLoaded)
 
         signalBus.catchException.connect(self._onExceptionCaught)
         if cfg.eagerPageLoading.value:
@@ -1299,6 +1355,24 @@ class MainWindow(MSFluentWindow):
         self._getShutdownPage()
         self._getHomeCardTaskPage()
 
+    def _unloadIdlePages(self):
+        """主窗口藏久了，卸下设置页和应用市场；还有一页这次卸不掉时返回假。"""
+        for page in (self.settingPage, self.appStorePage):
+            if not page.isLoaded() or not page.canUnload():
+                continue
+            if self.stackedWidget.currentWidget() is page:
+                self._showHomeAtOnce()
+            page.unload()
+        return not (self.settingPage.isLoaded() or self.appStorePage.isLoaded())
+
+    def _showHomeAtOnce(self):
+        view = self.stackedWidget.view
+        view.setAnimationEnabled(False)
+        try:
+            self._navToHome()
+        finally:
+            view.setAnimationEnabled(True)
+
     def _onEagerPageLoadingChanged(self, enabled):
         # 打开时当场全部建好；建好的页面没法再变回懒加载，关掉要下次启动才生效。
         if enabled and not self._resourcesShutdown:
@@ -1402,6 +1476,9 @@ class MainWindow(MSFluentWindow):
 
         page = pageClass(self)
         page.setObjectName(objectName)
+        # addSubInterface() 会设这个属性。少了它，页面栈的背景每进一次任务页都要换一次，
+        # 换的时候对整个页面栈 setStyle()，所有已加载页面的控件全部重新排样式。
+        page.setProperty("isStackedTransparent", False)
         page.backSignal.connect(self._navToHome)
         self.stackedWidget.addWidget(page)
         setattr(self, attribute, page)
@@ -2065,6 +2142,8 @@ class MainWindow(MSFluentWindow):
         self.stackedWidget.view._stopAnimation()
         self._navigationTarget = None
         self.scheduleTimer.stop()
+        if getattr(self, "memoryRelease", None) is not None:
+            self.memoryRelease.stop()
         self.timeSync.shutdown()
         self.processGuard.shutdown()
         self._cancelPendingEdgeTts()
