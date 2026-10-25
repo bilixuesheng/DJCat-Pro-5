@@ -186,12 +186,14 @@ class MemoryReleaseTest(TestCase):
     def testSilentStartupTrimsOnceAfterAMinute(self):
         window = self._window(shown=False)
         pages = _Pages()
+        unloadsBeforeEachTrim = []
+        self.trim.side_effect = lambda: unloadsBeforeEachTrim.append(pages.calls)
         self._release(window, pages, isSilent=True)
 
         _waitUntil(lambda: self.trim.called)
 
-        self.trim.assert_called_once_with()
-        self.assertEqual(pages.calls, 0)
+        # 静默启动时主窗口本来就藏着，十分钟那次随后也会来；第一次修剪是启动后那次，还没卸过页面。
+        self.assertEqual(unloadsBeforeEachTrim[0], 0)
 
     def testSilentStartupTrimIsDroppedOnceTheWindowIsShown(self):
         window = self._window(shown=False)
