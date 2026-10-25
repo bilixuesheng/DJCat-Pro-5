@@ -70,6 +70,8 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 
 **`app/platform/nuitka_signals.py` 独占 Nuitka 信号连接泄漏的修补。** Nuitka 的 PySide6 插件把交给 `connect`、`disconnect` 和 `QTimer.singleShot` 的每个编译版绑定方法追加进模块级的 `_protected`，从不删除（Nuitka/Nuitka#4108，我们用的 4.1.3 就有）；绑定方法拿着接收者，打包版里连过自己方法的控件连同它引用的截图、背景图永远释放不了，源码运行和测试看不出来。`djcat.py` 在导入其他任何模块之前调 `releaseSignalReceivers()`，把 `_protected` 换成只留函数、同一个函数只留一份的列表；按 `getattr(method, "im_func", method)` 取函数，上游修好后交进来的已经是函数也不出错。换 Nuitka 版本时在打包版上反复开关投送，看内存回不回落。
 
+**`app/platform/backing_store.py` 独占从窗口后备缓冲复制已画好的像素。** `paintedImage(widget)` 给出窗口上一次画在这个控件位置的像素，窗口还没露出、后备缓冲还没分配图像或不是 `QImage` 时返回 `None`（这时读它会崩溃），调用方改为重新渲染；Window Transition 全屏时的快照和蒙层弹窗打开时的底图都用它，不得各写一份。
+
 **`app/platform/text_rendering.py` 独占 Qt 的大字形缓存上限。** Qt 光栅引擎只把 64 个设备像素以内的字形缓存成位图，更大的每次按轮廓重填；300% 缩放下投送正文的 26 号字约 104 个设备像素，滚动一帧要四分之一秒。`djcat.py` 在创建 QApplication 之前设 `QT_MAX_CACHED_GLYPH_SIZE=256`（已设置的环境变量不覆盖）。上限不再往上抬：时钟和倒计时的大数字每秒只重画一次，而 Windows 上每个缓存像素要占 4 字节。
 
 **`app/platform/shadow_effect.py` 独占 Silhouette Shadow。** 弹窗卡片（圆角 10）、菜单面板（圆角 9）和 Projection／Exam Countdown／Fullscreen Clock 的窗口化背景（圆角 8）都用它；新的不透明圆角容器要阴影时同样用它，不要再直接挂 `QGraphicsDropShadowEffect`。它是 `QGraphicsDropShadowEffect` 的子类，`color`、`blurRadius`、`offset` 属性和属性动画照常可用；模糊仍交给 Qt 生成，但同一圆角和模糊半径只模糊一次最小尺寸，再按九宫格拉伸到当前尺寸（整窗大的卡片整张模糊一次，300% 下要四分之一秒），画出来与原版逐像素相差不超过 2 个色阶。截图要去掉阴影时用 `setShadowHidden()`，不要 `setEnabled()` 来回切：那会把卡片连同压在上面的控件重画两遍。尺寸逐帧变化的形状（Window Transition 的动画层）用 `paintSilhouetteShadow()` 直接画：同一圆角只模糊一次最小尺寸，按九宫格拉伸，中间那块垫在形状底下不画。
@@ -318,7 +320,8 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `djcat.py` | 进程入口、工作目录、单实例应用、日志、配置加载和 MainWindow 创建 |
 | `app/platform/` | Windows 单实例/IPC、唤起窗口、开机启动及 Qt 运行时适配 |
 | `app/platform/animation_timer.py` | Super Frame Rate Optimization：Qt 全局 Animation Tick 间隔的私有 API 适配和安全回退 |
-| `app/platform/dialog_animation.py` | QFluentWidgets 蒙层弹窗的阴影复用和淡入淡出阴影暂停 |
+| `app/platform/dialog_animation.py` | QFluentWidgets 蒙层弹窗的阴影复用，以及只贴两张截图的淡入淡出 |
+| `app/platform/backing_store.py` | 从窗口后备缓冲复制控件位置上已画好的像素，复制不了时返回 `None` |
 | `app/platform/shadow_effect.py` | Silhouette Shadow：按尺寸缓存模糊的圆角矩形投影 |
 | `app/platform/menu_animation.py` | QFluentWidgets 全局 Menu Reveal 管理器适配，不改变原版展开视觉 |
 | `app/platform/icon_cache.py` | QFluentWidgets SVG 图标的解析和位图缓存，只缓存资源路径和源码 |
@@ -475,7 +478,7 @@ Tray Menu quit → MainWindow.requestQuit()
 
 Menu Reveal 是另一层独立优化：保留 QFluentWidgets 原始的 250 ms 时长、`OutQuad` 缓动、窗口位移、逐帧遮罩和阴影，只把每次属性变化触发的 viewport 强制刷新合并为动画结束时的一次；悬停状态同步仍逐帧执行。逐帧遮罩只按位移去重，不能改成按时间采样（遮罩滞后于窗口位置会让内容错位）。不能改成只淡入、删除遮罩或阴影，也不能把 `NONE`、`FADE_IN_DROP_DOWN` 等其他管理器替换成下拉实现。
 
-带蒙层的 `MaskDialogBase` 由 `QGraphicsOpacityEffect` 驱动 200 ms 淡入和 100 ms 淡出，期间暂停卡片阴影；淡入结束后移除不透明度效果，阴影 `color` alpha 再以 150 ms / `OutCubic` 从 0 渐变到目标值；淡出直接禁用阴影后开始不透明度动画。不能改用 `setWindowOpacity`：`MaskDialogBase` 去掉窗口标志后，带父窗口时 `isWindow()` 为假，`setWindowOpacity()` 直接返回，动画会静默失效。也不能通过缩短动画、改变蒙层透明度或永久删除阴影换取性能。
+带蒙层的 `MaskDialogBase` 淡入 200 ms（`InSine`）、淡出 100 ms，期间暂停卡片阴影；淡入结束后阴影 `color` alpha 再以 150 ms / `OutCubic` 从 0 渐变到目标值；淡出直接禁用阴影后开始。两段都由盖在弹窗最上面的 `_FadeLayer` 画，只贴两张截图：弹窗底下的画面和弹窗本身（蒙层、卡片和控件，不带阴影），按当前透明度叠起来，与透明度效果的合成方式相同；弹窗这期间声明 `WA_OpaquePaintEvent`，Qt 不再重画它底下的页面。打开时底下的画面直接从窗口后备缓冲复制（弹窗还没画过），弹窗等第一次绘制过后由零延时定时器截，不能在这一层的 `paintEvent` 里截：渲染弹窗会再画一遍这一层，Qt 报递归重画，这次绘制作废；关闭时弹窗已经画在窗口上，底下的画面按祖先链逐层渲染各层自己画的和压在下面的兄弟控件（弹窗可能挂在透明的页面上，只渲染父控件会漏掉窗口底色）。关闭的最后一帧画成弹窗全透明再收掉这一层，紧接着打开的弹窗从后备缓冲复制底图时才不会带上残影；动画途中弹窗尺寸变了（窗口被拉大）就直接走到终点；主窗口从最小化还原时 Qt 补发给弹窗的系统 Show 不再淡入，那时后备缓冲里已经有弹窗。不能改回 `QGraphicsOpacityEffect`：它每帧把整个弹窗离屏重画一遍，半透明蒙层底下的页面也跟着重画。不能改用 `setWindowOpacity`：`MaskDialogBase` 去掉窗口标志后，带父窗口时 `isWindow()` 为假，`setWindowOpacity()` 直接返回，动画会静默失效。也不能通过缩短动画、改变蒙层透明度或永久删除阴影换取性能。
 
 ## Code shape
 
