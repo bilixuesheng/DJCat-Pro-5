@@ -125,7 +125,7 @@ Tray Menu 的外观和弹出方式固定恢复为 v5.1.2：右键由注册的 co
 
 MainWindow 的 Resize Band 宽度使用统一 DPI 比例计算，以 300% 缩放下 35 个物理像素为基准，即 `round(35 × devicePixelRatio / 3)`；窗口切换屏幕时重新计算，因此所有缩放比例都按同一规则变化。Resize Band 在最小化、最大化与关闭三个标题栏按钮上让位：组件库给出缩放命中码后，`MainWindow.nativeEvent` 若发现消息坐标落在按钮矩形内就改判 `HTCLIENT`。判断用消息坐标而不是光标位置，触控按下时两者可能不同；Win11 最大化按钮的 `HTMAXBUTTON`（贴靠布局）不是缩放命中码，不受影响。右上角因此没有斜向缩放，这是有意的；调整基准或标题栏布局时不得为了找回它把命中带重新铺到按钮上。
 
-**HomePage** 是唯一随 MainWindow 立即创建的导航页面。Application Store、Credits 和 Setting 使用 Lazy Page；Projection 编辑、Exam Countdown、Broadcast Task、Home Card Task 和 Shutdown Task 页面通过 `_getTaskPage()` 系列方法首次打开时创建。
+**HomePage** 是唯一随 MainWindow 立即创建的导航页面。Application Store、Credits 和 Setting 使用 Lazy Page；Projection 编辑、Exam Countdown、Broadcast Task、Home Card Task 和 Shutdown Task 页面通过 `_getTaskPage()` 系列方法首次打开时创建。不经 `addSubInterface()` 加进页面栈的页面要自己设 `isStackedTransparent`（`_getTaskPage()` 设为假，与主页相同）：少了它，每切过去一次 QFluentWidgets 都对整个页面栈 `setStyle()`，所有已加载页面的控件重新排一遍样式。
 
 只有启用了启动恢复且最近一次 Projection 仍处于活动状态，或启动时触发的 Home Card Task 明确打开 Projection 时，MainWindow 才在启动阶段创建 Projection 编辑页面；仅关闭尚未打开的 Projection 不会破坏懒加载。
 

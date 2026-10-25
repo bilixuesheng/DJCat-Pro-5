@@ -1402,6 +1402,9 @@ class MainWindow(MSFluentWindow):
 
         page = pageClass(self)
         page.setObjectName(objectName)
+        # addSubInterface() 会设这个属性。少了它，页面栈的背景每进一次任务页都要换一次，
+        # 换的时候对整个页面栈 setStyle()，所有已加载页面的控件全部重新排样式。
+        page.setProperty("isStackedTransparent", False)
         page.backSignal.connect(self._navToHome)
         self.stackedWidget.addWidget(page)
         setattr(self, attribute, page)
