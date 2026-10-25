@@ -92,7 +92,7 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 
 **每个 Setting Section 各自是一个 `ScrollArea`，各自记住滚动位置。** 返回上一级时停在离开时的位置，触控仲裁沿用 `ScrollArea` 既有实现，页面不另写一套。
 
-`ScrollArea` 的触控手势抓取只做一次，不能反复抓了又放：抓放循环留下的残留会在之后创建任意窗口时崩溃。Setting Section 用 `ScrollArea(parent, grabTouch=False)` 构造，首次显示时才 `grabTouchGesture()`；是否已抓由实例自己记账，不能拿 `QScroller.grabbedGesture()` 判断。
+`ScrollArea` 的触控手势抓取只做一次，不能反复抓了又放：抓放循环留下的残留会在之后创建任意窗口时崩溃。Setting Section 用 `ScrollArea(parent, grabTouch=False)` 构造，首次显示时才 `grabTouchGesture()`；是否已抓由实例自己记账，不能拿 `QScroller.grabbedGesture()` 判断。整块要删掉的控件（卸下的 Lazy Page）在删之前调 `releaseTouchGestures()`，把底下有 scroller 的视口各停下、放开一次，和弹窗在 `done()` 里做的一样；没抓过手势的 scroller 放开时 Qt 直接返回。
 
 **`ScrollArea` 统一仲裁单指触控滚动与子控件点击。** 从按钮、下拉框或卡片上起滑时，必须取消该触控序列的按压和释放，不能在滚动结束时触发原控件。「新滑动触控」默认开：页面（`QScroller`）一开始拖动就取消，页面动了就不算点按，没动就算点击，按钮弹起和页面开始滚动在同一刻。开发人员选项「停用新滑动触控」后改回自己量距离：移动达到系统拖动阈值才取消，未达到阈值的短按仍按正常点击处理。页面不得各自复制这套判定。HomePage 进入卡片编辑态时由排序手势独占触控，并依靠卡片拖动的边缘自动滚动跨越视口；退出编辑态后恢复页面触控滚动。
 
@@ -137,13 +137,15 @@ Lazy Page 必须保留外部调用需要的最小接口：
 
 | Lazy Page | 加载前可暂存或转发的状态 |
 |---|---|
-| `LazyAppStorePage` | 搜索文字、固定卡片信号与应用卡片失败信号；清缓存和关闭在未加载时为空操作，`hasActiveOperations()` 在未加载时为假 |
+| `LazyAppStorePage` | 搜索文字、固定卡片信号与应用卡片失败信号，以及第一次建页面时建的 `ApplicationStore`（页面卸下再重建时交回同一个）；清缓存在未加载时为空操作，关闭时只停 store，`hasActiveOperations()` 在未加载时为假 |
 | `LazySettingPage` | 缓存清理信号、更改 Application Install Location 的请求信号与最新 Home Card 列表（主页卡片开关和画主窗口、托盘的 Setting Preview 都要用）；搜索建议和 Setting Route 导航一律转发给真实页面（导航到设置页必然已 `ensureLoaded()`，搜索框只在该页可见） |
 | `LazyCreditsPage` | 无业务状态 |
 
 调用方不得直接依赖 `lazyPage.page` 的存在；需要真实页面时调用 `ensureLoaded()`，只做关闭或缓存失效时应保持未加载状态。
 
-开发人员选项「停用页面懒加载」（`cfg.eagerPageLoading`）打开时，MainWindow 当场用 `_loadAllPages()` 建好三个 Lazy Page 和五个任务编辑页，以后每次启动也都建好；关掉只能下次启动生效，已建好的页面不拆。
+**`app/view/windows/memory_release.py` 拥有主窗口藏在托盘时交还内存的时机。** 主窗口关到托盘（`isHidden()`；最小化不算，Windows 那时自己会修剪）满 10 分钟，它调 MainWindow 的 `_unloadIdlePages()` 卸下已加载的设置页和应用市场，`gc.collect()`，再由 `app/platform/memory.py` 的 `trimWorkingSet()` 调 `EmptyWorkingSet`，日志记一行修剪前后的工作集和 private bytes；静默启动后 60 秒、主窗口一直没打开过时也修剪一次。主窗口藏着时有页面建起来（从托盘点 Application Home Card 会建应用市场），十分钟重新算。有页面这次卸不掉就每分钟再试，修剪等最后一页卸下后做一次；Display Window 开着时跳过修剪，页面照卸。卸下（`LazyPage.unload()`）先停页面自己的工作（设置页存盘，应用市场 `shutdown()`），照弹窗的做法把抓过触控手势的视口各放开一次（`releaseTouchGestures()`），再当场 `delete`，不等 `deleteLater`，好让紧接着的 `gc.collect()` 收得到；嵌套事件循环里（`loopLevel() > 1`，弹窗 `exec()` 可能正停在页面里）、应用市场有进行中的操作或目录和图片还在后台加载（迟到的目录同步会和重建的页面抢共用的 store）时 `canUnload()` 为假。主窗口停在要卸的那页时先不带动画切回主页。重建的页面从头开始，Setting Route、选项卡和滚动位置都不恢复，外壳暂存的搜索文字和 Home Card 列表照旧交给它。
+
+开发人员选项「停用页面懒加载」（`cfg.eagerPageLoading`）打开时，MainWindow 当场用 `_loadAllPages()` 建好三个 Lazy Page 和五个任务编辑页，以后每次启动也都建好；关掉只能下次启动生效，已建好的页面不拆。开着时主窗口藏多久都不卸页面，也不修剪内存。
 
 **Developer Option 集中在 Setting Section `应用 › 开发人员选项`（`software.developer`）。** 入口说明写明只供开发人员调试；五张卡（停用新触控、停用新滑动触控、停用超级帧率优化、停用页面懒加载、显示帧率）默认全关，都当场生效（停用页面懒加载关掉时除外），不参与 Setting Suggestion。新增开发人员选项放在这里，同样不参与搜索。
 
@@ -163,7 +165,7 @@ Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence�
 
 **server/app_store.py** 拥有 Application Catalog、Package 配置、Application Download Count 和管理后台写入。桌面端只消费目录和下载重定向，不能自行增加下载次数。
 
-**ApplicationStore** 拥有本机 Application 规则：目录扫描、安装清单、版本合并、ZIP 安全校验、原子覆盖、卸载和 Application Action 执行。它不拥有界面按钮或 InfoBar。根目录是 Application Install Location，`setProgramDir()` 在运行中换；自定义位置不可用时不重建文件夹，`locationAvailable()` 为假，安装直接失败。卸载和 Application Update 替换目录前由 `_closeApplication()` 强制关闭从该安装目录运行的程序（自己启动的进程和按目录找到的进程），关不掉才失败。
+**ApplicationStore** 拥有本机 Application 规则：目录扫描、安装清单、版本合并、ZIP 安全校验、原子覆盖、卸载和 Application Action 执行。它不拥有界面按钮或 InfoBar。根目录是 Application Install Location，`setProgramDir()` 在运行中换；自定义位置不可用时不重建文件夹，`locationAvailable()` 为假，安装直接失败。卸载和 Application Update 替换目录前由 `_closeApplication()` 强制关闭从该安装目录运行的程序（自己启动的进程和按目录找到的进程），关不掉才失败。实例由 `LazyAppStorePage` 持有，不随页面卸下：它记着打开过的进程，再点仍在运行的应用才是唤起而不是再开一份；页面卸下期间换过的安装位置没人通知它，重建的 AppStorePage 按当前位置 `setProgramDir()`，交进来的 store 页面 `shutdown()` 时不停。
 
 **AppStorePage** 拥有一次 UI 会话中的异步状态：
 
@@ -332,6 +334,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/platform/background_effect.py` | Background Effect：照 Ghost Downloader 给主窗口挂 Windows 透明材质，Win10 的 Acrylic 在窗口移动时暂停模糊 |
 | `app/platform/processes.py` | 按可执行文件所在目录查找和强制结束 Windows 进程，标出因以管理员身份运行而结束不了的；列出当前会话里运行着的可执行文件（Process Guard 用） |
 | `app/platform/elevation.py` | 经 UAC 以管理员身份启动程序，并靠进程句柄查询、等待和结束它 |
+| `app/platform/memory.py` | `EmptyWorkingSet` 修剪本进程的工作集，日志记下修剪前后的工作集和 private bytes |
 | `app/platform/screens.py` | 取窗口所在屏幕，绕开 PySide 把 QScreen 挂成控件子对象的返回值启发式；把解码的大图缩到最大屏幕的物理尺寸 |
 | `app/config/` | 配置 schema、常量和 App Data Directory |
 | `app/common/` | 不依赖具体页面的 AI、更新下载、应用市场、主页动作和进程环境规则 |
@@ -343,6 +346,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `tools/updater/updater.c` | Client Update 的独立更新器：等待进程退出、把暂存目录整目录换名为程序目录（失败时换回备份）、重启 DJCat |
 | `app/view/windows/main_window.py` | 桌面组合根、导航、长期运行任务和 Client Update UI |
 | `app/view/windows/application_relocation.py` | 更改 Application Install Location 的界面流程：检查、提权、确认、后台迁移和 Relocation Toast |
+| `app/view/windows/memory_release.py` | 主窗口藏在托盘时交还内存的时机：十分钟后卸页面、修剪，静默启动后修剪一次 |
 | `app/view/pages/` | 页面、临时展示窗口和页面级 worker 编排 |
 | `app/view/pages/home_card_task_page.py` | Home Card Task 的懒加载编辑页面；不拥有调度计时器 |
 | `app/view/components/task_page.py` | 三类 Scheduled Task 页面共用的列表页、任务卡片与新建对话框外壳；各页面只提供表单、数据映射和摘要 |
@@ -413,8 +417,9 @@ chdir to the user folder, not APP_DIR (programs DJCat opens inherit it and would
       → finish an interrupted Application Relocation from cfg.appRelocation in a background thread
       → report Last Seen to the AI Markdown server in a background thread
       → create tray and long-lived timers/workers: the schedule timer, Time Sync (started at once:
-        asks the time server in a background thread, system time until it answers) and
-        Process Guard (rules from cfg.homeCardTasks)
+        asks the time server in a background thread, system time until it answers),
+        Process Guard (rules from cfg.homeCardTasks) and MemoryRelease (after silent startup
+        it trims once at 60 s; hidden for 10 min, the Settings page and Application Store go)
       → restore valid active Projection Snapshot only when recovery is enabled
       → start Process Guard (after silent startup it only watches for the first 60 s)
       → dispatch startup event and, when applicable, silent-startup event
@@ -450,7 +455,7 @@ Tray Menu quit → MainWindow.requestQuit()
   → dispatch application-quit Home Card Tasks
   → wait asynchronously for newly started custom Action Sequences
   → MainWindow._shutdownResources()
-  → stop navigation animation, timers and Time Sync
+  → stop navigation animation, timers, MemoryRelease and Time Sync
   → cancel Edge TTS and stop audio players
   → flush loaded Setting / Scheduled Task editors
   → shutdown HomePage, loaded Application Store page and loaded Projection editor workers

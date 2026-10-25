@@ -187,6 +187,19 @@ def setTouchScrollSuppressed(viewport, suppressed: bool, restoreDistance=None):
     return restoreDistance
 
 
+def releaseTouchGestures(widget) -> None:
+    """Let go of every touch-scrolled viewport under ``widget`` that is about to be destroyed.
+
+    The same as dialogs do in ``done()``: each viewport is released once, right before
+    it goes away, and is never grabbed again, so this is not the grab/release cycle
+    that leaves stale targets in Qt's gesture manager.
+    """
+    for child in widget.findChildren(QWidget):
+        if QScroller.hasScroller(child):
+            QScroller.scroller(child).stop()
+            QScroller.ungrabGesture(child)
+
+
 # 自绘多个可按区域的控件（不是 QAbstractButton）登记在这里，起滑时和按钮一样被取消按压。
 _touchPressTargets = weakref.WeakSet()
 

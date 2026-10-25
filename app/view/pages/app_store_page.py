@@ -1049,9 +1049,16 @@ class AppStorePage(QWidget):
     _downloadFinishedSignal = Signal(object, str, str, bool)
     _uninstallFinished = Signal(int, object, str)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, store=None):
         super().__init__(parent)
-        self.store = ApplicationStore()
+        # 主窗口藏久了会卸下这个页面，store 留在 LazyAppStorePage 里：它记着打开过的应用，
+        # 再点仍在运行的应用才是唤起而不是再开一份。卸下期间换过的安装位置没人通知它，这里补上。
+        self._ownsStore = store is None
+        if store is None:
+            store = ApplicationStore()
+        elif store.programDir != Path(installLocation()).resolve():
+            store.setProgramDir(installLocation(), create=isDefaultInstallLocation())
+        self.store = store
         self._catalog = []
         self._mergedCatalog = None
         self.ads = []
@@ -1520,7 +1527,8 @@ class AppStorePage(QWidget):
         if self._globalAdFilterInstalled:
             QApplication.instance().removeEventFilter(self.adOverlay)
             self._globalAdFilterInstalled = False
-        self.store.shutdown()
+        if self._ownsStore:
+            self.store.shutdown()
         self._layoutTimer.stop()
         self._adSyncTimer.stop()
         self._progressTimer.stop()
@@ -2435,6 +2443,10 @@ class AppStorePage(QWidget):
         return bool(
             self._downloadJobs or self._launching or self._installing or self._uninstalling
         )
+
+    def hasCatalogWork(self):
+        """目录或图片还在后台加载：卸下页面要等它们做完，迟到的目录同步不能和重建的页面抢共用的 store。"""
+        return self._catalogLoading or bool(self._imageJobs)
 
     def _onInstallLocationChanged(self, _value=None):
         if self._shuttingDown:

@@ -191,3 +191,29 @@ class TapOrScrollTest(_Feel):
         self.assertGreater(scroll.verticalScrollBar().value(), 0)
         self.assertEqual(clicks, [])
         self.assertFalse(button.isDown())
+
+
+class ReleaseBeforeDestroyTest(_Feel):
+    def testEveryGrabbedViewportIsReleasedOnceAndStopped(self):
+        page = QWidget()
+        self.addCleanup(page.deleteLater)
+        layout = QVBoxLayout(page)
+        grabbed = [ScrollArea(page), ScrollArea(page)]
+        neverShown = ScrollArea(page, grabTouch=False)
+        for area in (*grabbed, neverShown):
+            layout.addWidget(area)
+        text = QTextEdit(page)
+        layout.addWidget(text)
+        QScroller.grabGesture(text.viewport(), QScroller.ScrollerGestureType.TouchGesture)
+
+        with (
+            patch.object(QScroller, "ungrabGesture") as ungrab,
+            patch.object(QScroller, "stop", autospec=True) as stop,
+        ):
+            scroll_area.releaseTouchGestures(page)
+
+        released = [area.viewport() for area in grabbed] + [text.viewport()]
+        self.assertCountEqual([call.args[0] for call in ungrab.call_args_list], released)
+        self.assertEqual(stop.call_count, len(released))
+        # 从没抓过的滚动区不碰，免得为它凭空建出一个 scroller。
+        self.assertFalse(QScroller.hasScroller(neverShown.viewport()))

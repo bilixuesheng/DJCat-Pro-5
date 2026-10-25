@@ -431,7 +431,7 @@ class TrayControlNavigationTest(TestCase):
             pinnedCardsChanged = Signal(object)
             pinnedCardFailed = Signal()
 
-            def __init__(self, parent=None):
+            def __init__(self, parent=None, store=None):
                 super().__init__(parent)
                 self.items = []
 
@@ -442,7 +442,10 @@ class TrayControlNavigationTest(TestCase):
         self.addCleanup(page.deleteLater)
         failures = []
         page.pinnedCardFailed.connect(lambda: failures.append(True))
-        with patch("app.view.pages.app_store_page.AppStorePage", LoadedPage):
+        with (
+            patch("app.view.pages.app_store_page.AppStorePage", LoadedPage),
+            patch("app.view.pages.app_store_page.ApplicationStore"),
+        ):
             page.executePinnedCard({"app_id": 7, "preset_id": 0})
 
         self.assertEqual(page.page.items, [{"app_id": 7, "preset_id": 0}])
