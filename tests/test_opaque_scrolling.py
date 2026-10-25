@@ -1,4 +1,5 @@
 from unittest import TestCase
+from unittest.mock import patch
 
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QColor, QLinearGradient, QPainter
@@ -140,3 +141,35 @@ class OpaqueScrollingTest(TestCase):
         area.show()
         self.app.processEvents()
         self.assertEqual(area._backdropPainter.color, QColor(144, 144, 144))
+
+    def _scrollWithTheWheelBar(self, area, value, ratio):
+        with patch.object(area, "devicePixelRatioF", return_value=ratio):
+            area.delegate.vScrollBar.setValue(value, useAni=False)
+        return area.verticalScrollBar().value()
+
+    def testWheelScrollingMovesByWholeDevicePixels(self):
+        # Qt 只在位移是整物理像素时平移像素（QBackingStore::scroll），否则整块重画。
+        _, area, _ = self._window(opaque=True)
+
+        self.assertEqual(self._scrollWithTheWheelBar(area, 7, 1.25), 4)
+        self.assertEqual(self._scrollWithTheWheelBar(area, 11, 1.5), 10)
+        self.assertEqual(self._scrollWithTheWheelBar(area, 15, 1.75), 12)
+        self.assertEqual(self._scrollWithTheWheelBar(area, 21, 2.0), 21)
+        self.assertEqual(self._scrollWithTheWheelBar(area, 23, 3.0), 23)
+
+    def testWheelScrollingStillReachesTheEnd(self):
+        _, area, _ = self._window(opaque=True)
+        maximum = area.verticalScrollBar().maximum()
+        self.assertNotEqual(maximum % 4, 0)
+
+        self.assertEqual(self._scrollWithTheWheelBar(area, maximum, 1.25), maximum)
+
+    def testTouchAndTransparentAreasKeepEveryPixel(self):
+        _, opaque, _ = self._window(opaque=True)
+        _, plain, _ = self._window(opaque=False)
+
+        # 触控（QScroller）直接设原生滚动条，不对齐，手指下的内容才跟得住手指。
+        with patch.object(opaque, "devicePixelRatioF", return_value=1.25):
+            opaque.verticalScrollBar().setValue(7)
+        self.assertEqual(opaque.verticalScrollBar().value(), 7)
+        self.assertEqual(self._scrollWithTheWheelBar(plain, 7, 1.25), 7)

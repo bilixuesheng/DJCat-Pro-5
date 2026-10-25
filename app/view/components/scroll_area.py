@@ -32,6 +32,11 @@ OVERLAY_SCROLL_BAR_WIDTH = 13
 _opaqueScrollAreas = weakref.WeakSet()
 
 
+def _wholePixelStep(ratio: float) -> int:
+    """The smallest scroll step that is a whole number of physical pixels: 4 at 125%, 2 at 150%."""
+    return next((step for step in (1, 2, 4) if (step * ratio).is_integer()), 1)
+
+
 def refreshOpaqueScrolling() -> None:
     """Look again at what lies behind every opaque-scrolling area.
 
@@ -403,6 +408,23 @@ class ScrollArea(FluentScrollArea):
         self._backdropPainter = _BackdropPainter(self)
         self.widget().installEventFilter(self._backdropPainter)
         _opaqueScrollAreas.add(self)
+        delegate = getattr(self, "delegate", None)
+        if delegate is not None:
+            # 只接管滚轮和滚动条：触控（QScroller）直接设原生滚动条，照旧逐像素跟着手指。
+            bar = delegate.vScrollBar
+            bar.valueChanged.disconnect(self.verticalScrollBar().setValue)
+            bar.valueChanged.connect(self._setWholePixelScrollValue)
+
+    def _setWholePixelScrollValue(self, value: int) -> None:
+        # Qt 只在位移是整物理像素时平移像素（QBackingStore::scroll），125% 下滚 1 px 是
+        # 1.25 个物理像素，就又整块重画了。滚到底时不对齐，否则最后几像素到不了。
+        bar = self.verticalScrollBar()
+        # 原生滚动条一变，组件库的滚动条就把同一个值发回来；那是触控设的，不改。
+        if value == bar.value():
+            return
+        if value < bar.maximum():
+            value -= value % _wholePixelStep(self.devicePixelRatioF())
+        bar.setValue(value)
 
     def _updateBackdrop(self) -> None:
         if self._backdropPainter is None:
