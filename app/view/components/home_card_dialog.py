@@ -57,6 +57,7 @@ ACTION_LABELS = {
     "shell": "执行 Shell 命令",
     "url": "打开网页",
     "path": "打开文件或文件夹",
+    "wallpaper": "设置壁纸",
     "delay": "等待",
 }
 
@@ -116,12 +117,12 @@ class DragHandleButton(ToolButton):
     dragMoved = Signal(QPoint)
     dragFinished = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, toolTip="拖动调整动作顺序"):
         super().__init__(parent)
         self.setIcon(FIF.MOVE)
         self.setFixedSize(44, 44)
-        setFluentToolTip(self, "拖动调整动作顺序")
-        self.setAccessibleName("拖动调整动作顺序")
+        setFluentToolTip(self, toolTip)
+        self.setAccessibleName(toolTip)
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
         self._pressPosition = None
         self._dragging = False
@@ -186,17 +187,55 @@ class DragHandleButton(ToolButton):
         super().mouseReleaseEvent(event)
 
 
-class ActionRow(CardWidget):
-    editRequested = Signal()
-    deleteRequested = Signal()
+class SortableRow(CardWidget):
+    """SortableRowList 里的一行：左侧手柄拖动排序，正文上的手指滑动交给列表滚动。"""
+
     bodyTouchStarted = Signal(QPoint)
     bodyTouchMoved = Signal(QPoint)
     bodyTouchFinished = Signal()
 
+    def __init__(self, parent=None, dragToolTip="拖动调整动作顺序"):
+        super().__init__(parent)
+        self.dragHandle = DragHandleButton(self, dragToolTip)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
+        self._bodyTouching = False
+
+    def mousePressEvent(self, event):
+        event.ignore()
+
+    def event(self, event):
+        if event.type() == QEvent.Type.TouchBegin and event.points():
+            self._bodyTouching = True
+            self.bodyTouchStarted.emit(event.points()[0].globalPosition().toPoint())
+            event.accept()
+            return True
+        if event.type() == QEvent.Type.TouchUpdate and event.points() and self._bodyTouching:
+            self.bodyTouchMoved.emit(event.points()[0].globalPosition().toPoint())
+            event.accept()
+            return True
+        if event.type() in (QEvent.Type.TouchEnd, QEvent.Type.TouchCancel):
+            if self._bodyTouching:
+                self.bodyTouchFinished.emit()
+            self._bodyTouching = False
+            event.accept()
+            return True
+        return super().event(event)
+
+    def mouseMoveEvent(self, event):
+        event.ignore()
+
+    def mouseReleaseEvent(self, event):
+        event.ignore()
+
+
+class ActionRow(SortableRow):
+    editRequested = Signal()
+    deleteRequested = Signal()
+
     def __init__(self, action: dict, parent=None):
         super().__init__(parent)
         self.action = normalizeAction(action) or {"id": newId(), "type": "delay", "seconds": 1}
-        self.dragHandle = DragHandleButton(self)
         self.summary = StrongBodyLabel(self)
         self.detail = CaptionLabel(self)
         self.summary.setWordWrap(False)
@@ -227,9 +266,6 @@ class ActionRow(CardWidget):
         self._layout.addWidget(self.editButton)
         self._layout.addWidget(self.deleteButton)
         self.setMinimumHeight(76)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
-        self._bodyTouching = False
         self.setData(self.action)
 
     def setData(self, action: dict):
@@ -242,43 +278,20 @@ class ActionRow(CardWidget):
             detail = self.action["command"] or "未设置命令"
         elif actionType in {"url", "path"}:
             detail = self.action["target"] or "未设置目标"
+        elif actionType == "wallpaper":
+            detail = self.action["target"] or "未选择图片"
         else:
             detail = f"{self.action['seconds']} 秒"
         self.detail.setText(detail)
         setFluentToolTip(self.detail, detail)
 
-    def mousePressEvent(self, event):
-        event.ignore()
 
-    def event(self, event):
-        if event.type() == QEvent.Type.TouchBegin and event.points():
-            self._bodyTouching = True
-            self.bodyTouchStarted.emit(event.points()[0].globalPosition().toPoint())
-            event.accept()
-            return True
-        if event.type() == QEvent.Type.TouchUpdate and event.points() and self._bodyTouching:
-            self.bodyTouchMoved.emit(event.points()[0].globalPosition().toPoint())
-            event.accept()
-            return True
-        if event.type() in (QEvent.Type.TouchEnd, QEvent.Type.TouchCancel):
-            if self._bodyTouching:
-                self.bodyTouchFinished.emit()
-            self._bodyTouching = False
-            event.accept()
-            return True
-        return super().event(event)
+class SortableRowList(QWidget):
+    """一列可拖动排序的 SortableRow，放在 ScrollArea 里；拖到边缘时自动滚动。"""
 
-    def mouseMoveEvent(self, event):
-        event.ignore()
-
-    def mouseReleaseEvent(self, event):
-        event.ignore()
-
-
-class ActionListWidget(QWidget):
     orderChanged = Signal()
 
-    def __init__(self, actions=None, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
         self.rows = []
         self._dragRow = None
@@ -296,16 +309,11 @@ class ActionListWidget(QWidget):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(8)
-        for action in actions or []:
-            self.addAction(action)
 
     def setScrollArea(self, scrollArea):
         self._scrollArea = scrollArea
 
-    def addAction(self, action):
-        row = ActionRow(action, self)
-        row.editRequested.connect(lambda row=row: self._editRow(row))
-        row.deleteRequested.connect(lambda row=row: self._deleteRow(row))
+    def addRow(self, row):
         row.bodyTouchStarted.connect(self._startBodyScroll)
         row.bodyTouchMoved.connect(self._moveBodyScroll)
         row.bodyTouchFinished.connect(self._finishBodyScroll)
@@ -316,25 +324,21 @@ class ActionListWidget(QWidget):
         self._layout.addWidget(row)
         row.show()
 
-    def actions(self) -> list[dict]:
-        return [deepcopy(row.action) for row in self.rows]
-
-    def _editRow(self, row):
-        dialog = ActionEditorDialog(row.action, _dialogHost(self))
-        try:
-            if not dialog.exec():
-                return
-            action = dialog.getData()
-        finally:
-            _disposeDialog(dialog)
-        row.setData(action)
-        self.orderChanged.emit()
-
-    def _deleteRow(self, row):
+    def removeRow(self, row):
+        if row is self._dragRow:
+            self._finishDrag()
         self.rows.remove(row)
         self._layout.removeWidget(row)
         row.deleteLater()
-        self.orderChanged.emit()
+
+    def moveRow(self, row, index):
+        index = max(0, min(index, len(self.rows) - 1))
+        if self.rows.index(row) == index:
+            return
+        self.rows.remove(row)
+        self.rows.insert(index, row)
+        self._layout.removeWidget(row)
+        self._layout.insertWidget(index, row)
 
     def _startBodyScroll(self, position):
         if self._dragRow is None:
@@ -423,6 +427,37 @@ class ActionListWidget(QWidget):
         self._finishDrag()
         self._finishBodyScroll()
         super().hideEvent(event)
+
+
+class ActionListWidget(SortableRowList):
+    def __init__(self, actions=None, parent=None):
+        super().__init__(parent)
+        for action in actions or []:
+            self.addAction(action)
+
+    def addAction(self, action):
+        row = ActionRow(action, self)
+        row.editRequested.connect(lambda row=row: self._editRow(row))
+        row.deleteRequested.connect(lambda row=row: self._deleteRow(row))
+        self.addRow(row)
+
+    def actions(self) -> list[dict]:
+        return [deepcopy(row.action) for row in self.rows]
+
+    def _editRow(self, row):
+        dialog = ActionEditorDialog(row.action, _dialogHost(self))
+        try:
+            if not dialog.exec():
+                return
+            action = dialog.getData()
+        finally:
+            _disposeDialog(dialog)
+        row.setData(action)
+        self.orderChanged.emit()
+
+    def _deleteRow(self, row):
+        self.removeRow(row)
+        self.orderChanged.emit()
 
 
 def _showError(parent, title, message):
@@ -594,6 +629,17 @@ class ActionEditorDialog(_ResponsiveMessageBox):
         self.stack.addWidget(page)
 
         page, form = self._formPage()
+        wallpaperWrapper, wallpaper = self._lineWithBrowse(
+            "选择壁纸图片", "图片 (*.jpg *.jpeg *.png *.bmp)"
+        )
+        wallpaper.setPlaceholderText("JPG、PNG 或 BMP 图片")
+        form.addRow("图片", wallpaperWrapper)
+        form.addRow("说明", CaptionLabel("换成这一张固定的图，所有屏幕同一张。", self))
+        self._pages["wallpaper"] = page
+        self._widgets["wallpaper"] = (wallpaper,)
+        self.stack.addWidget(page)
+
+        page, form = self._formPage()
         seconds = SpinBox(self)
         seconds.setRange(1, 86400)
         seconds.setSuffix(" 秒")
@@ -632,7 +678,7 @@ class ActionEditorDialog(_ResponsiveMessageBox):
             widgets[1].setText(action["working_dir"])
             widgets[2].setChecked(action["wait"])
             widgets[3].setChecked(action["show_console"])
-        elif actionType in {"url", "path"}:
+        elif actionType in {"url", "path", "wallpaper"}:
             widgets[0].setText(action["target"])
         else:
             widgets[0].setValue(action["seconds"])
@@ -645,7 +691,7 @@ class ActionEditorDialog(_ResponsiveMessageBox):
             return {"id": oldId, "type": actionType, "target": widgets[0].text().strip(), "arguments": widgets[1].text(), "working_dir": widgets[2].text().strip(), "wait": widgets[3].isChecked()}
         if actionType == "shell":
             return {"id": oldId, "type": actionType, "command": widgets[0].toPlainText().strip(), "working_dir": widgets[1].text().strip(), "wait": widgets[2].isChecked(), "show_console": widgets[3].isChecked()}
-        if actionType in {"url", "path"}:
+        if actionType in {"url", "path", "wallpaper"}:
             return {"id": oldId, "type": actionType, "target": widgets[0].text().strip()}
         return {"id": oldId, "type": actionType, "seconds": widgets[0].value()}
 

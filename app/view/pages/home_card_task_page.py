@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from pathlib import Path, PureWindowsPath
 
-from PySide6.QtCore import QDir, QTime
+from PySide6.QtCore import QDate, QDir, QTime
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
@@ -14,6 +15,7 @@ from qfluentwidgets import (
     LineEdit,
     PillPushButton,
     PushButton,
+    SpinBox,
     StrongBodyLabel,
     isDarkTheme,
 )
@@ -27,15 +29,24 @@ from app.common.home_card_tasks import (
     CLOSE_HOME_CARD_ACTION,
     CUSTOM_HOME_CARD_TASK,
     EXISTING_HOME_CARD_TASK,
+    FIXED_WALLPAPER,
     HOME_CARD_TASK_KEY,
+    INTERVAL_HOME_CARD_TRIGGER,
+    INTERVAL_START_FORMAT,
     OPEN_HOME_CARD_ACTION,
     PROCESS_GUARD_TRIGGER,
+    ROTATION_WALLPAPER,
     SCHEDULED_HOME_CARD_TRIGGER,
     SILENT_STARTUP_EVENT,
+    WALLPAPER_HOME_CARD_TASK,
+    homeCardTaskState,
     normalizeHomeCardTasks,
+    wallpaperKey,
 )
 from app.common.home_cards import newId
+from app.common.interval_tasks import INTERVAL_UNIT_LABELS, intervalLabel, nextDue
 from app.common.process_guard import guardRules, isSameProgram, stopLabel
+from app.common.wallpaper import WALLPAPER_FILE_FILTER, isWallpaperImage
 from app.config.cfg import cfg
 from app.view.components.home_card_dialog import ActionSequenceEditor
 from app.view.components.task_page import (
@@ -43,7 +54,12 @@ from app.view.components.task_page import (
     ScheduledTaskDialog,
     ScheduledTaskPage,
 )
-from app.view.components.task_picker import TaskFormSettingCard, TouchTimePicker
+from app.view.components.task_picker import (
+    TaskFormSettingCard,
+    TouchDatePicker,
+    TouchTimePicker,
+)
+from app.view.components.wallpaper_rotation import WallpaperRotationField
 
 SOURCE_LABELS = {
     "custom": "自定义",
@@ -147,6 +163,36 @@ def updateHomeCardOptions(widgets, entries):
     widgets["homeCards"] = {entry["key"]: entry for entry in cards}
 
 
+def _momentText(moment: datetime, now: datetime) -> str:
+    days = (moment.date() - now.date()).days
+    day = {0: "今天", 1: "明天"}.get(days, f"{moment.month}月{moment.day}日")
+    clock = moment.strftime("%H:%M:%S" if moment.second else "%H:%M")
+    return f"{day} {clock}"
+
+
+def intervalSummary(task: dict, now: datetime) -> str:
+    """「每 2 小时 · 下次 今天 10:00」。"""
+    return f"{intervalLabel(task)} · 下次 {_momentText(nextDue(task, now), now)}"
+
+
+def wallpaperSummary(task: dict, state: dict) -> str:
+    wallpaper = task["wallpaper"]
+    if wallpaper["mode"] == FIXED_WALLPAPER:
+        name = PureWindowsPath(wallpaper["fixed"]).name
+        return f"固定 · {name or '未选择图片'}"
+    rotation = wallpaper["rotation"]
+    if not rotation:
+        return "轮换 · 列表为空"
+    current = state.get("wallpaper", "")
+    if not current:
+        return "轮换 · 尚未执行"
+    name = PureWindowsPath(current).name
+    keys = [wallpaperKey(path) for path in rotation]
+    if wallpaperKey(current) in keys:
+        return f"轮换 {keys.index(wallpaperKey(current)) + 1}/{len(rotation)} · {name}"
+    return f"轮换 · {name}"
+
+
 def _pathInput(parent, placeholder, choose):
     wrapper = QWidget(parent)
     row = QHBoxLayout(wrapper)
@@ -187,6 +233,9 @@ def createHomeCardTaskForm(
         "targetTitle": "",
         "actions": [],
         "program": {"target": "", "arguments": "", "working_dir": ""},
+        "interval": {"value": 1, "unit": "day"},
+        "start": now.strftime("%Y-%m-%d 00:00:00"),
+        "wallpaper": {"mode": FIXED_WALLPAPER, "fixed": "", "rotation": []},
     }
     form = QWidget(parent)
     layout = QVBoxLayout(form)
@@ -215,6 +264,7 @@ def createHomeCardTaskForm(
     triggerCombo = ComboBox(form)
     triggerCombo.addItem("固定时间", userData=SCHEDULED_HOME_CARD_TRIGGER)
     triggerCombo.addItem("软件行为", userData=APPLICATION_HOME_CARD_TRIGGER)
+    triggerCombo.addItem("间隔时间", userData=INTERVAL_HOME_CARD_TRIGGER)
     triggerCombo.addItem("进程守护", userData=PROCESS_GUARD_TRIGGER)
     triggerIndex = triggerCombo.findData(data.get("trigger"))
     triggerCombo.setCurrentIndex(triggerIndex if triggerIndex >= 0 else 0)
@@ -223,7 +273,7 @@ def createHomeCardTaskForm(
         TaskFormSettingCard(
             FIF.HISTORY,
             "触发时机",
-            "选择固定时间、软件行为或进程守护",
+            "选择固定时间、软件行为、间隔时间或进程守护",
             triggerCombo,
             form,
         )
@@ -334,16 +384,74 @@ def createHomeCardTaskForm(
     widgets["weekButtons"] = weekButtons
     widgets["weekCard"] = weekCard
 
+    interval = data.get("interval") if isinstance(data.get("interval"), dict) else {}
+    intervalWidget = QWidget(form)
+    intervalLayout = QHBoxLayout(intervalWidget)
+    intervalLayout.setContentsMargins(0, 0, 0, 0)
+    intervalSpin = SpinBox(intervalWidget)
+    intervalSpin.setRange(1, 99999)
+    intervalSpin.setValue(int(interval.get("value", 1)))
+    intervalSpin.setFixedWidth(150)
+    unitCombo = ComboBox(intervalWidget)
+    for unit, label in INTERVAL_UNIT_LABELS.items():
+        unitCombo.addItem(label, userData=unit)
+    unitIndex = unitCombo.findData(interval.get("unit"))
+    unitCombo.setCurrentIndex(unitIndex if unitIndex >= 0 else 2)
+    unitCombo.setFixedWidth(100)
+    intervalLayout.addWidget(intervalSpin)
+    intervalLayout.addWidget(unitCombo)
+    intervalCard = TaskFormSettingCard(
+        FIF.SYNC,
+        "间隔",
+        "每隔多久执行一次",
+        intervalWidget,
+        form,
+    )
+    layout.addWidget(intervalCard)
+    widgets["intervalSpin"] = intervalSpin
+    widgets["unitCombo"] = unitCombo
+    widgets["intervalCard"] = intervalCard
+
+    try:
+        start = datetime.strptime(data.get("start", ""), INTERVAL_START_FORMAT)
+    except (TypeError, ValueError):
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    startDatePicker = TouchDatePicker(form)
+    startDatePicker.setDate(QDate(start.year, start.month, start.day))
+    startDateCard = TaskFormSettingCard(
+        FIF.CALENDAR,
+        "起始日期",
+        "间隔从这一天开始算",
+        startDatePicker,
+        form,
+    )
+    layout.addWidget(startDateCard)
+    startTimePicker = TouchTimePicker(form, showSeconds=True)
+    startTimePicker.setTime(QTime(start.hour, start.minute, start.second))
+    startTimeCard = TaskFormSettingCard(
+        FIF.ALBUM,
+        "起始时间",
+        "没开时错过的，下次打开补一次",
+        startTimePicker,
+        form,
+    )
+    layout.addWidget(startTimeCard)
+    widgets["startDatePicker"] = startDatePicker
+    widgets["startTimePicker"] = startTimePicker
+    widgets["startDateCard"] = startDateCard
+    widgets["startTimeCard"] = startTimeCard
+
     modeCombo = ComboBox(form)
     modeCombo.addItem("已有卡片", userData=EXISTING_HOME_CARD_TASK)
     modeCombo.addItem("自定义", userData=CUSTOM_HOME_CARD_TASK)
+    modeCombo.addItem("更换壁纸", userData=WALLPAPER_HOME_CARD_TASK)
     modeIndex = modeCombo.findData(data.get("mode"))
     modeCombo.setCurrentIndex(modeIndex if modeIndex >= 0 else 0)
     modeCombo.setFixedWidth(180)
     modeCard = TaskFormSettingCard(
         FIF.APPLICATION,
         "任务类型",
-        "执行已有主页卡片，或编排自定义动作",
+        "执行已有主页卡片、编排自定义动作，或更换桌面壁纸",
         modeCombo,
         form,
     )
@@ -409,26 +517,89 @@ def createHomeCardTaskForm(
     widgets["actionEditor"] = actionEditor
     widgets["actionCard"] = actionCard
 
+    wallpaper = data.get("wallpaper") if isinstance(data.get("wallpaper"), dict) else {}
+    wallpaperModeCombo = ComboBox(form)
+    wallpaperModeCombo.addItem("固定", userData=FIXED_WALLPAPER)
+    wallpaperModeCombo.addItem("轮换", userData=ROTATION_WALLPAPER)
+    wallpaperModeIndex = wallpaperModeCombo.findData(wallpaper.get("mode"))
+    wallpaperModeCombo.setCurrentIndex(max(0, wallpaperModeIndex))
+    wallpaperModeCombo.setFixedWidth(180)
+    wallpaperModeCard = TaskFormSettingCard(
+        FIF.PHOTO,
+        "壁纸",
+        "每次都设回同一张，或按列表轮换；所有屏幕同一张",
+        wallpaperModeCombo,
+        form,
+    )
+    layout.addWidget(wallpaperModeCard)
+    widgets["wallpaperModeCombo"] = wallpaperModeCombo
+    widgets["wallpaperModeCard"] = wallpaperModeCard
+
+    fixedWrapper, fixedInput = _pathInput(
+        form,
+        "JPG、PNG 或 BMP 图片",
+        lambda owner: QFileDialog.getOpenFileName(
+            owner, "选择壁纸图片", "", WALLPAPER_FILE_FILTER
+        )[0],
+    )
+    fixedInput.setText(wallpaper.get("fixed", ""))
+    fixedWallpaperCard = TaskFormSettingCard(
+        FIF.PHOTO,
+        "固定壁纸",
+        "每次执行都换成这一张",
+        fixedWrapper,
+        form,
+    )
+    layout.addWidget(fixedWallpaperCard)
+    widgets["fixedWallpaperInput"] = fixedInput
+    widgets["fixedWallpaperCard"] = fixedWallpaperCard
+
+    rotationField = WallpaperRotationField(
+        wallpaper.get("rotation", []),
+        data.get("id", ""),
+        form,
+    )
+    rotationCard = TaskFormSettingCard(
+        FIF.ALBUM,
+        "轮换列表",
+        "每次换下一张，最后一张之后回到第一张",
+        rotationField,
+        form,
+    )
+    layout.addWidget(rotationCard)
+    widgets["rotationField"] = rotationField
+    widgets["rotationCard"] = rotationCard
+
     def updateVisibility(*args):
         trigger = triggerCombo.currentData()
         isGuard = trigger == PROCESS_GUARD_TRIGGER
-        isExisting = modeCombo.currentData() == EXISTING_HOME_CARD_TASK
+        mode = modeCombo.currentData()
+        isExisting = mode == EXISTING_HOME_CARD_TASK
+        isWallpaper = not isGuard and mode == WALLPAPER_HOME_CARD_TASK
         isScheduled = trigger == SCHEDULED_HOME_CARD_TRIGGER
+        isInterval = trigger == INTERVAL_HOME_CARD_TRIGGER
+        isFixed = wallpaperModeCombo.currentData() == FIXED_WALLPAPER
         selected = widgets.get("homeCards", {}).get(homeCardCombo.currentData())
         isDefault = selected is not None and selected.get("source") == "default"
         eventCard.setVisible(trigger == APPLICATION_HOME_CARD_TRIGGER)
         timeCard.setVisible(isScheduled)
         weekCard.setVisible(isScheduled)
+        for card in (intervalCard, startDateCard, startTimeCard):
+            card.setVisible(isInterval)
         for card in (programCard, argumentsCard, workingDirCard):
             card.setVisible(isGuard)
         modeCard.setVisible(not isGuard)
         homeCardCard.setVisible(not isGuard and isExisting)
         operationCard.setVisible(not isGuard and isExisting and isDefault)
-        actionCard.setVisible(not isGuard and not isExisting)
+        actionCard.setVisible(not isGuard and mode == CUSTOM_HOME_CARD_TASK)
+        wallpaperModeCard.setVisible(isWallpaper)
+        fixedWallpaperCard.setVisible(isWallpaper and isFixed)
+        rotationCard.setVisible(isWallpaper and not isFixed)
 
     triggerCombo.currentIndexChanged.connect(updateVisibility)
     modeCombo.currentIndexChanged.connect(updateVisibility)
     homeCardCombo.currentIndexChanged.connect(updateVisibility)
+    wallpaperModeCombo.currentIndexChanged.connect(updateVisibility)
     updateVisibility()
     return form, widgets
 
@@ -475,7 +646,38 @@ def homeCardTaskData(widgets):
             "arguments": widgets["argumentsInput"].text().strip(),
             "working_dir": widgets["workingDirInput"].text().strip(),
         },
+        "interval": {
+            "value": widgets["intervalSpin"].value(),
+            "unit": widgets["unitCombo"].currentData() or "day",
+        },
+        "start": (
+            f"{widgets['startDatePicker'].getDate().toString('yyyy-MM-dd')} "
+            f"{widgets['startTimePicker'].getTime().toString('HH:mm:ss')}"
+        ),
+        "wallpaper": {
+            "mode": widgets["wallpaperModeCombo"].currentData() or FIXED_WALLPAPER,
+            "fixed": widgets["fixedWallpaperInput"].text().strip(),
+            "rotation": widgets["rotationField"].paths(),
+        },
     }
+
+
+def _fixedWallpaperProblem(path):
+    if not path:
+        return "请选择壁纸图片"
+    if not isWallpaperImage(path):
+        return "壁纸只支持 JPG、PNG 或 BMP 图片"
+    if not Path(os.path.expandvars(path)).is_file():
+        return "找不到这张图片"
+    return ""
+
+
+def _wallpaperProblem(wallpaper):
+    if wallpaper["mode"] == FIXED_WALLPAPER:
+        return _fixedWallpaperProblem(wallpaper["fixed"])
+    if not wallpaper["rotation"]:
+        return "轮换列表里还没有图片"
+    return ""
 
 
 def _guardProgramProblem(target, taskId=None):
@@ -516,8 +718,10 @@ class AddHomeCardTaskDialog(ScheduledTaskDialog):
         data = homeCardTaskData(widgets)
         if data["trigger"] == PROCESS_GUARD_TRIGGER:
             problem = _guardProgramProblem(data["program"]["target"])
-        elif data["mode"] != EXISTING_HOME_CARD_TASK:
+        elif data["mode"] == CUSTOM_HOME_CARD_TASK:
             return widgets["actionEditor"].validate(self)
+        elif data["mode"] == WALLPAPER_HOME_CARD_TASK:
+            problem = _wallpaperProblem(data["wallpaper"])
         elif data["targetKey"] in widgets.get("homeCards", {}):
             problem = ""
         else:
@@ -574,6 +778,19 @@ class HomeCardTaskCard(ScheduledTaskCard):
         widgets["programInput"].editingFinished.connect(self._onProgramEdited)
         widgets["argumentsInput"].editingFinished.connect(self._saveData)
         widgets["workingDirInput"].editingFinished.connect(self._saveData)
+        widgets["intervalSpin"].valueChanged.connect(self._saveData)
+        widgets["unitCombo"].currentIndexChanged.connect(self._saveData)
+        widgets["startDatePicker"].dateChanged.connect(self._saveData)
+        widgets["startTimePicker"].timeChanged.connect(self._saveData)
+        widgets["wallpaperModeCombo"].currentIndexChanged.connect(self._saveData)
+        widgets["wallpaperModeCombo"].currentIndexChanged.connect(
+            self._refreshFormHeight
+        )
+        widgets["fixedWallpaperInput"].editingFinished.connect(
+            self._onFixedWallpaperEdited
+        )
+        widgets["rotationField"].changed.connect(self._saveData)
+        cfg.homeCardTaskState.valueChanged.connect(self._onTaskStateChanged)
 
     def _formData(self):
         self.formWidgets["targetTitle"] = self.data.get("targetTitle", "")
@@ -598,6 +815,32 @@ class HomeCardTaskCard(ScheduledTaskCard):
             return
         self._saveData()
 
+    def _onFixedWallpaperEdited(self):
+        fixedInput = self.formWidgets["fixedWallpaperInput"]
+        saved = self.data.get("wallpaper", {}).get("fixed", "")
+        path = fixedInput.text().strip()
+        if path == saved:
+            return
+        problem = _fixedWallpaperProblem(path)
+        if problem:
+            fixedInput.setText(saved)
+            InfoBar.error(
+                "无法保存",
+                problem,
+                duration=3000,
+                position=InfoBarPosition.TOP,
+                parent=self.window(),
+            )
+            return
+        self._saveData()
+
+    def _onTaskStateChanged(self, *args):
+        self.formWidgets["rotationField"].refresh()
+        self.refreshSummary()
+
+    def refreshSummary(self):
+        self.expandCard.card.setContent(self._summary())
+
     def setGuardStop(self, reason):
         if reason == self._guardStop:
             return
@@ -613,6 +856,8 @@ class HomeCardTaskCard(ScheduledTaskCard):
             return summary
         if self.data.get("mode") == CUSTOM_HOME_CARD_TASK:
             target = f"自定义动作：{len(self.data.get('actions', []))} 个"
+        elif self.data.get("mode") == WALLPAPER_HOME_CARD_TASK:
+            target = wallpaperSummary(self.data, homeCardTaskState(self.data["id"]))
         else:
             targetKey = self.data.get("targetKey", "")
             target = self.data.get("targetTitle") or targetKey or "目标卡片"
@@ -625,6 +870,8 @@ class HomeCardTaskCard(ScheduledTaskCard):
                 self.data.get("event"),
                 APPLICATION_EVENT_LABELS[APPLICATION_STARTUP_EVENT],
             )
+        elif self.data.get("trigger") == INTERVAL_HOME_CARD_TRIGGER:
+            trigger = intervalSummary(self.data, clock.scheduledTaskNow("home-card"))
         else:
             trigger = f"触发时间：{self.data['time']}"
         return f"{trigger} · {target}"
@@ -664,6 +911,12 @@ class HomeCardTaskPage(ScheduledTaskPage):
 
     def _normalizeTasks(self, tasks):
         return normalizeHomeCardTasks(tasks)
+
+    def showEvent(self, event):
+        # 「下次」的时刻随时间过去，回到页面时重算。
+        for card in self._cards:
+            card.refreshSummary()
+        super().showEvent(event)
 
     def _createCard(self, task):
         return HomeCardTaskCard(

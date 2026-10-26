@@ -420,6 +420,9 @@ class Config(QConfig):
 
     broadcastTasks = ConfigItem("Schedule", "Tasks", [])
     homeCardTasks = ConfigItem("Schedule", "HomeCardTasks", [])
+    # 按任务 ID 记的运行状态：Interval Task 从何时起算、执行到哪个到点，以及 Current Wallpaper。
+    # 与 HomeCardTasks 分开存，执行一次不必改写任务列表。
+    homeCardTaskState = ConfigItem("Schedule", "HomeCardTaskState", {})
     shutdownTasks = ConfigItem("Schedule", "ShutdownTasks", [])
     broadcastTasksEnabled = ConfigItem(
         "Schedule", "BroadcastTasksEnabled", True, BoolValidator()

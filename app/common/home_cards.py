@@ -20,10 +20,13 @@ from app.common.process_environment import (
     programWorkingDirectory,
 )
 from app.config.paths import HOME_CARD_ICON_DIR
+from app.platform.wallpaper import setDesktopWallpaper
 
 
 DIRECT_APPLICATION_PRESET_ID = 0
-ACTION_TYPES = ("program", "shell", "url", "path", "delay")
+ACTION_TYPES = ("program", "shell", "url", "path", "wallpaper", "delay")
+# Windows 能直接设为壁纸的格式，与 Wallpaper Task 相同。
+WALLPAPER_IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".bmp")
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 
 
@@ -64,7 +67,7 @@ def normalizeAction(value: dict | None) -> dict | None:
                 "show_console": bool(value.get("show_console", False)),
             }
         )
-    elif actionType in {"url", "path"}:
+    elif actionType in {"url", "path", "wallpaper"}:
         action["target"] = _text(value.get("target"))
     else:
         try:
@@ -293,6 +296,11 @@ def validateAction(action: dict) -> str:
             return "网页地址只支持 HTTP 或 HTTPS"
     elif actionType == "path" and not action["target"]:
         return "请输入本地文件或文件夹"
+    elif actionType == "wallpaper":
+        if not action["target"]:
+            return "请选择壁纸图片"
+        if os.path.splitext(action["target"])[1].lower() not in WALLPAPER_IMAGE_SUFFIXES:
+            return "壁纸只支持 JPG、PNG 或 BMP 图片"
     return ""
 
 
@@ -331,6 +339,11 @@ def executeAction(action: dict, cancel: threading.Event) -> str | None:
             return None
         except OSError as error:
             return str(error)
+    if actionType == "wallpaper":
+        target = os.path.expandvars(action["target"])
+        if not os.path.isfile(target):
+            return f"找不到壁纸图片 {action['target']}"
+        return setDesktopWallpaper(target)
 
     workingDir = os.path.expandvars(action.get("working_dir", "")) or None
     try:

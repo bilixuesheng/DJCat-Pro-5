@@ -25,6 +25,7 @@ from qfluentwidgets import (
     SettingCard,
     SwitchButton,
     TimePicker,
+    ZhDatePicker,
     isDarkTheme,
 )
 from qfluentwidgets import FluentIcon as FIF
@@ -66,8 +67,8 @@ class SecondsFormatter(PickerColumnFormatter):
         return int(value[:-1])
 
 
-class TouchTimePicker(TimePicker):
-    """Time picker whose popup columns support touch scrolling."""
+class _TouchPickerPanel:
+    """Picker whose popup columns support touch scrolling."""
 
     def _showPanel(self):
         super()._showPanel()
@@ -112,6 +113,14 @@ class TouchTimePicker(TimePicker):
             return
         column.setCurrentIndex(column.row(item))
         column.scrollToItem(column.currentItem())
+
+
+class TouchTimePicker(_TouchPickerPanel, TimePicker):
+    pass
+
+
+class TouchDatePicker(_TouchPickerPanel, ZhDatePicker):
+    pass
 
 
 class TaskFormSettingCard(SettingCard):
