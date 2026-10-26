@@ -131,7 +131,7 @@ Broadcast Task 要播放的内容来源，分为内置报时或铃声、系统 T
 _Avoid_: Broadcast Type、media type
 
 **Home Card Task**:
-"自动任务"中的本地自动化规则，可按固定时间或 Application Lifecycle Event 触发，也可作为 Process Guard 持续生效。它可以引用现存 Home Card、关闭正在运行的 Default Home Card，或直接拥有一个 Action Sequence。UI 名称"自动任务"不等同于所有 Scheduled Task。
+"自动任务"中的本地自动化规则，可按固定时间、Application Lifecycle Event 或间隔（Interval Task）触发，也可作为 Process Guard 持续生效。它可以引用现存 Home Card、关闭正在运行的 Default Home Card、直接拥有一个 Action Sequence，或更换桌面壁纸（Wallpaper Task）。UI 名称"自动任务"不等同于所有 Scheduled Task。
 _Avoid_: Broadcast Task、Custom Home Card、复制卡片
 
 **Application Lifecycle Event**:
@@ -141,6 +141,26 @@ _Avoid_: Scheduled Task、操作系统关机、主窗口关闭
 **Process Guard（进程守护）**:
 "自动任务"中的一种 Home Card Task：电教猫运行期间持续确保一个指定程序在当前用户的桌面上运行，发现它不在就把它启动起来。程序按可执行文件的完整路径认定，同名但位置不同的程序不算。它不是一次性触发，不参与定时匹配；不判断程序是否未响应，也不阻止别人关闭它。被拉起后反复撑不过 30 秒或根本启动不了时，这一条在本次运行内停止守护，直到重新打开它的开关或下次启动电教猫；Windows 关机或注销时全部停止。
 _Avoid_: 进程保活、看门狗、Application Lifecycle Event（守护不是一次事件）
+
+**Interval Task（间隔任务）**:
+触发时机为间隔的 Home Card Task：从用户定的起点开始，每隔若干分钟、小时或天到点一次，到点时刻只由起点和间隔决定，与上次实际何时执行无关。错过的到点由 Catch-up Run 补上。
+_Avoid_: 周期任务、循环任务、从上次执行起算
+
+**Catch-up Run（补执行）**:
+Interval Task 的到点被错过（电教猫没在运行、电脑在睡眠或主线程被卡住）后，一发现就执行的那一次；错过多少个到点都只补一次。总开关或这一条关着期间错过的不补，固定时间的 Home Card Task 也没有 Catch-up Run。
+_Avoid_: 重试、补偿（固定时间只补最近 60 秒，那不是它）
+
+**Wallpaper Task（换壁纸任务）**:
+任务类型为更换壁纸的 Home Card Task，执行时换掉当前用户的 Windows 桌面壁纸，所有屏幕同一张，契合度沿用 Windows 当前设置。分为固定（每次都设回同一张）和 Wallpaper Rotation 两种。
+_Avoid_: 背景、背景图片（那是电教猫自己窗口的）、主题
+
+**Wallpaper Rotation（壁纸轮换）**:
+Wallpaper Task 的有序图片列表，每执行一次换成 Current Wallpaper 的下一张，最后一张之后回到第一张。
+_Avoid_: 随机壁纸、幻灯片放映（Windows 自带的那个）
+
+**Current Wallpaper（当前壁纸）**:
+Wallpaper Rotation 上一次设上去的那张图。它跟着图片走而不跟着列表位置；之后有人在 Windows 里手动换了壁纸，它也不变。
+_Avoid_: 桌面上现在的壁纸（两者可能不同）
 
 **Shutdown Task**:
 "定时关机"中的 Scheduled Task，在匹配时直接关闭计算机或先进入 Shutdown Prompt。"本次不关机"只跳过当前触发，不会禁用或删除任务。
@@ -462,6 +482,9 @@ _Avoid_: 搜索结果（设置页不再有结果列表）、筛选项
 
 > **Dev:** "后台点了更新，学生机上的 DJCat 也会跟着升级吗？"
 > **Domain expert:** "不会。那是 Server Update，只换服务端，Server Version 从 1.4.8 往上走；DJCat 5.2.0 要等 Client Update。"
+
+> **Dev:** "每天换一张壁纸，周末两天没开机，周一会连换三张吗？"
+> **Domain expert:** "不会。Interval Task 错过多少个到点都只做一次 Catch-up Run，周一开机换一张，Current Wallpaper 往后挪一位。"
 
 > **Dev:** "在设置里搜'背景颜色'，页面会只留下匹配的卡片吗？"
 > **Domain expert:** "不会。设置搜索只弹 Setting Suggestion，点一条才跳到对应的 Setting Route，页面本身从不筛选。"
