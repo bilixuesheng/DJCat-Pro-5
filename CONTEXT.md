@@ -143,7 +143,7 @@ _Avoid_: Scheduled Task、操作系统关机、主窗口关闭
 _Avoid_: 进程保活、看门狗、Application Lifecycle Event（守护不是一次事件）
 
 **Interval Task（间隔任务）**:
-触发时机为「间隔时间」的 Home Card Task：从用户定的起点（日期加时刻）开始，每隔若干分钟、小时或天到点一次，到点时刻只由起点和间隔决定，与上次实际何时执行无关。它按固定时间的 Home Card Task 所用的时间走，但没有星期，不是 Scheduled Task；错过的到点由 Catch-up Run 补上。
+触发时机为「间隔时间」的 Home Card Task：从用户定的起点（日期加时刻）开始，每隔若干分钟、小时或天到点一次，到点时刻只由起点和间隔决定，与上次实际何时执行无关。它按固定时间的 Home Card Task 所用的时间走，但没有星期，不是 Scheduled Task；错过的到点由 Catch-up Run 补上，上次执行还没结束时到的点算已执行。
 _Avoid_: 周期任务、循环任务、从上次执行起算
 
 **Catch-up Run（补执行）**:
@@ -151,7 +151,7 @@ Interval Task 的到点被错过（电教猫没在运行、电脑在睡眠或主
 _Avoid_: 重试、补偿（固定时间只补最近 60 秒，那不是它）
 
 **Wallpaper Task（换壁纸任务）**:
-任务类型为「更换壁纸」的 Home Card Task，执行时换掉当前用户的 Windows 桌面壁纸，所有屏幕同一张，契合度沿用 Windows 当前设置。分为固定（每次都设回同一张）和 Wallpaper Rotation 两种。
+任务类型为「更换壁纸」的 Home Card Task，执行时换掉当前用户的 Windows 桌面壁纸，所有屏幕同一张，契合度沿用 Windows 当前设置。分为固定（每次都设回同一张）和 Wallpaper Rotation 两种，两种各存各的，切换不清空任何一边。
 _Avoid_: 背景、背景图片（那是电教猫自己窗口的）、主题
 
 **Wallpaper Rotation（壁纸轮换）**:
