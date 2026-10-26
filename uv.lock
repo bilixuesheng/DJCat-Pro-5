@@ -205,7 +205,7 @@ wheels = [
 
 [[package]]
 name = "djcat-pro-5"
-version = "5.2.4"
+version = "5.2.6"
 source = { editable = "." }
 dependencies = [
     { name = "edge-tts" },
