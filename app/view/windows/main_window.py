@@ -69,9 +69,13 @@ from app.common.home_card_tasks import (
     HOME_CARD_TASK_KEY,
     SCHEDULED_HOME_CARD_TRIGGER,
     SILENT_STARTUP_EVENT,
+    WALLPAPER_HOME_CARD_TASK,
+    homeCardTaskState,
     normalizeHomeCardTasks,
+    updateHomeCardTaskState,
 )
 from app.common.home_cards import ActionSequenceWorker, normalizePinnedCards
+from app.common.interval_tasks import dueIntervalTasks
 from app.common.process_guard import STARTUP_HOLD_SECONDS, ProcessGuard, stopMessage
 from app.common.time_sync import TimeSync
 from app.common.update_download import (
@@ -82,6 +86,7 @@ from app.common.update_download import (
     takeUpdateFailure,
     validateClientUpdateZip,
 )
+from app.common.wallpaper import WallpaperWorker
 from app.config.cfg import TIME_OFFSET_KINDS, cfg, currentThemeColor
 from app.config.constants import (
     APP_NAME,
@@ -1028,6 +1033,15 @@ class MainWindow(MSFluentWindow):
                     callback,
                 )
             self._forgetTriggeredSchedules(kind, now)
+        self._runDueIntervalTasks(calibrated)
+
+    def _runDueIntervalTasks(self, calibrated):
+        for task in dueIntervalTasks(
+            cfg.homeCardTasks.value,
+            cfg.homeCardTasksEnabled.value,
+            clock.scheduledTaskTime("home-card", calibrated),
+        ):
+            self._handleHomeCardTask(task)
 
     def _runDueScheduledTasks(
         self,
@@ -1148,20 +1162,38 @@ class MainWindow(MSFluentWindow):
                 )
             return
 
+        taskId = task["id"]
+        if task["mode"] == WALLPAPER_HOME_CARD_TASK:
+            if taskId in self._homeCardTaskWorkers:
+                logger.warning("自动任务仍在运行，跳过本次触发: {}", task["name"])
+                return
+            worker = WallpaperWorker(task, homeCardTaskState(taskId))
+            worker.applied.connect(self._onWallpaperApplied)
+            self._startHomeCardTaskWorker(taskId, worker)
+            return
+
         if not task["actions"]:
             self._showHomeCardTaskError(task, "自定义任务没有可执行动作。")
             return
-        taskId = task["id"]
         if taskId in self._homeCardTaskWorkers:
             logger.warning("自动任务仍在运行，跳过本次触发: {}", task["name"])
             return
-        worker = ActionSequenceWorker(taskId, self._getHomeCardTaskActions)
+        self._startHomeCardTaskWorker(
+            taskId,
+            ActionSequenceWorker(taskId, self._getHomeCardTaskActions),
+        )
+
+    def _startHomeCardTaskWorker(self, taskId, worker):
         worker.finished.connect(self._onHomeCardTaskFinished)
         if self._quitRequested:
             self._quitTaskIds.add(taskId)
             worker.finished.connect(self._onQuitHomeCardTaskFinished)
         self._homeCardTaskWorkers[taskId] = worker
         worker.start()
+
+    def _onWallpaperApplied(self, taskId, path):
+        # 换上的这张成为 Current Wallpaper；删掉旧的当前那张时记下的接替者用完了。
+        updateHomeCardTaskState(taskId, wallpaper=path, wallpaperNext=None)
 
     def _runApplicationHomeCardTasks(self, event):
         if not cfg.homeCardTasksEnabled.value:

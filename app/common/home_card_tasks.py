@@ -1,21 +1,38 @@
 from __future__ import annotations
 
+import ntpath
 from datetime import datetime
 
 from app.common.home_cards import newId, normalizeActions
+from app.config.cfg import cfg
 
 EXISTING_HOME_CARD_TASK = "existing"
 CUSTOM_HOME_CARD_TASK = "custom"
+WALLPAPER_HOME_CARD_TASK = "wallpaper"
 HOME_CARD_TASK_KEY = "自动任务"
-HOME_CARD_TASK_MODES = (EXISTING_HOME_CARD_TASK, CUSTOM_HOME_CARD_TASK)
+HOME_CARD_TASK_MODES = (
+    EXISTING_HOME_CARD_TASK,
+    CUSTOM_HOME_CARD_TASK,
+    WALLPAPER_HOME_CARD_TASK,
+)
 SCHEDULED_HOME_CARD_TRIGGER = "time"
 APPLICATION_HOME_CARD_TRIGGER = "application"
 PROCESS_GUARD_TRIGGER = "guard"
+INTERVAL_HOME_CARD_TRIGGER = "interval"
 HOME_CARD_TASK_TRIGGERS = (
     SCHEDULED_HOME_CARD_TRIGGER,
     APPLICATION_HOME_CARD_TRIGGER,
     PROCESS_GUARD_TRIGGER,
+    INTERVAL_HOME_CARD_TRIGGER,
 )
+INTERVAL_UNIT_SECONDS = {"minute": 60, "hour": 3600, "day": 86400}
+DEFAULT_INTERVAL = {"value": 1, "unit": "day"}
+# 起点缺失时的兜底：取一个固定的零点，规范化的结果才不随日子变。
+DEFAULT_INTERVAL_START = "2000-01-01 00:00:00"
+INTERVAL_START_FORMAT = "%Y-%m-%d %H:%M:%S"
+FIXED_WALLPAPER = "fixed"
+ROTATION_WALLPAPER = "rotation"
+WALLPAPER_MODES = (FIXED_WALLPAPER, ROTATION_WALLPAPER)
 APPLICATION_STARTUP_EVENT = "startup"
 SILENT_STARTUP_EVENT = "silent-startup"
 APPLICATION_QUIT_EVENT = "quit"
@@ -68,6 +85,58 @@ def _weeks(value) -> list[int]:
     return weeks
 
 
+def _interval(value) -> dict:
+    value = value if isinstance(value, dict) else {}
+    unit = _text(value.get("unit")).lower()
+    if unit not in INTERVAL_UNIT_SECONDS:
+        unit = DEFAULT_INTERVAL["unit"]
+    count = value.get("value")
+    if isinstance(count, bool):
+        count = None
+    try:
+        count = max(1, int(count))
+    except (OverflowError, TypeError, ValueError):
+        count = DEFAULT_INTERVAL["value"]
+    return {"value": count, "unit": unit}
+
+
+def _start(value) -> str:
+    try:
+        return datetime.strptime(_text(value), INTERVAL_START_FORMAT).strftime(
+            INTERVAL_START_FORMAT
+        )
+    except ValueError:
+        return DEFAULT_INTERVAL_START
+
+
+def wallpaperKey(path: str) -> str:
+    """同一张图的比较键：Windows 路径不分大小写，正反斜杠也是同一个。"""
+    return ntpath.normcase(ntpath.normpath(path)) if path else ""
+
+
+def _wallpaper(value) -> dict:
+    value = value if isinstance(value, dict) else {}
+    mode = _text(value.get("mode")).lower()
+    if mode not in WALLPAPER_MODES:
+        mode = FIXED_WALLPAPER
+    rotation = []
+    keys = set()
+    raw = value.get("rotation")
+    for item in raw if isinstance(raw, list) else []:
+        path = _text(item) if isinstance(item, str) else ""
+        key = wallpaperKey(path)
+        if not path or key in keys:
+            continue
+        keys.add(key)
+        rotation.append(path)
+    fixed = value.get("fixed")
+    return {
+        "mode": mode,
+        "fixed": _text(fixed) if isinstance(fixed, str) else "",
+        "rotation": rotation,
+    }
+
+
 def _program(value) -> dict:
     value = value if isinstance(value, dict) else {}
     return {
@@ -113,7 +182,42 @@ def normalizeHomeCardTasks(value) -> list[dict]:
                 "targetTitle": _text(raw.get("targetTitle"))[:40],
                 "actions": normalizeActions(raw.get("actions", [])),
                 "program": _program(raw.get("program")),
+                "interval": _interval(raw.get("interval")),
+                "start": _start(raw.get("start")),
+                "wallpaper": _wallpaper(raw.get("wallpaper")),
                 "enabled": _enabled(raw.get("enabled", True)),
             }
         )
     return tasks
+
+
+def homeCardTaskStates() -> dict[str, dict]:
+    """`cfg.homeCardTaskState` 的一份副本，坏掉的条目丢掉。"""
+    value = cfg.homeCardTaskState.value
+    return {
+        str(taskId): dict(state)
+        for taskId, state in (value.items() if isinstance(value, dict) else ())
+        if isinstance(state, dict)
+    }
+
+
+def homeCardTaskState(taskId: str) -> dict:
+    return homeCardTaskStates().get(taskId, {})
+
+
+def updateHomeCardTaskState(taskId: str, **changes) -> None:
+    """改一条任务的运行状态；值为 None 的键删掉。"""
+    states = homeCardTaskStates()
+    state = dict(states.get(taskId, {}))
+    for key, value in changes.items():
+        if value is None:
+            state.pop(key, None)
+        else:
+            state[key] = value
+    if state == states.get(taskId, {}):
+        return
+    if state:
+        states[taskId] = state
+    else:
+        states.pop(taskId, None)
+    cfg.set(cfg.homeCardTaskState, states)

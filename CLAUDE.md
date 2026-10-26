@@ -22,6 +22,7 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 - Broadcast Task、Home Card Task 与 Shutdown Task 持久化在 `cfg`；对应设置页只编辑规则，MainWindow 负责按时间匹配或分发 Application Lifecycle Event。
 - **Scheduled Task** 按 **Bell Time** 匹配，即 **Calibrated Time** 加当天的 **Time Offset**；「不偏移」里勾上的种类按 Calibrated Time。**Fullscreen Clock** 只显示 Calibrated Time。**Time Sync** 和 Time Offset 互不依赖，Time Sync 也不改 Windows 时钟；理由见 `docs/adr/0012-djcat-time.md`。
 - **Process Guard** 是 `trigger` 为 `guard` 的 Home Card Task，和其他自动任务存在同一个 `cfg.homeCardTasks` 里、共用 Task Master Switch 和各条的启用开关；定时匹配和 Application Lifecycle Event 都跳过它。理由见 `docs/adr/0011-process-guard.md`。
+- **Interval Task** 是 `trigger` 为 `interval` 的 Home Card Task，**Wallpaper Task** 是 `mode` 为 `wallpaper` 的 Home Card Task，两者可以任意搭配（Process Guard 除外）。Interval Task 的到点只由起点和间隔决定，错过的由 Catch-up Run 补一次；它的起算时刻、执行到的到点和 Wallpaper Task 的 Current Wallpaper 按任务 ID 记在 `cfg.homeCardTaskState`，不写回任务列表。固定壁纸和 Wallpaper Rotation 各存各的；主页的「设置壁纸」Home Action 只设一张固定的图。理由见 `docs/adr/0013-interval-and-wallpaper-tasks.md`。
 - Existing-card 模式的 **Home Card Task** 只保存稳定 Home Card key、用于失效提示的标题快照和打开／关闭动作；关闭只适用于 Default Home Card。Custom 模式直接拥有 Action Sequence，但不会创建 Custom Home Card。
 - AI Markdown Conversion 使用 Machine Identity 领取和结算 Daily Quota；Machine Code 只是定位该身份的可见别名。
 - **Last Seen** 与 **IP Location** 一起改写：服务端收到某个 Machine Identity 的注册、查额度、整理或 Error Report 请求时记下时间和来源 IP 的属地，只存属地文字，不存 IP。客户端每次启动都向 `/register` 报到一次，已有 Machine Code 也一样。
@@ -55,6 +56,12 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 **`app/platform/elevation.py` 独占以管理员身份启动程序。** `startElevated()` 用 ShellExecuteEx 的 `runas` 弹 UAC，UAC 里点「否」返回 `None`；它一直等到 UAC 有答复，只能在后台线程里调用。普通权限按进程 ID 打不开管理员进程，`ElevatedProcess` 靠 ShellExecuteEx 给的句柄提供 `poll`／`wait`／`kill`。Application Install Location 的 `grantUsersModify()` 和 Application Launch 都经它；Process Guard 和 Custom Home Card 的「启动程序」Home Action 不弹 UAC（自动任务会在没人时触发）。
 
 **`app/common/process_guard.py` 独占 Process Guard 的规则。** MainWindow 创建 `ProcessGuard`，按 `cfg.homeCardTasks` 和 `cfg.homeCardTasksEnabled` 调 `setRules()`；开机静默启动时先 `holdLaunches(60)` 再 `start()`，60 秒内只看不拉，因为被守护的程序可能也在自启。检查在后台线程里每 3 秒一轮，连续两次没看到才拉起，放过程序自我重启的空档；按可执行文件完整路径认定，不弹 UAC。拉起后撑不过 30 秒、连续 6 次，或者拉起失败（文件不存在、错误 740 需要管理员权限、其他报错），这一条在本次运行内停止并发出 `stopped`：MainWindow 弹一次「自动任务执行失败」，并把 `stoppedReasons()` 交给自动任务页显示在卡片摘要里。没变的规则保留检查进度和停止状态；关掉的规则把停止原因留到重新打开为止，重新打开、关开总开关或换了程序、参数、工作目录都从头开始；同一个程序只守护列表里的第一条。新建对话框拒绝重复、非 `.exe` 和不存在的文件；行内编辑在输完（`editingFinished`）时才存，程序路径按同样的规则校验，不合格就退回原值，边打字边存的话，打到一半的路径会被当成新规则去拉起。`runningExecutables()` 列不出进程时返回 `None`，这一轮跳过，不能当成"都没在运行"。一次拉起从最后确认到 `Popen` 返回都握着 `_launchLock`，`shutdown()` 等它放开。从托盘点「退出」的那一刻、Qt 的 `commitDataRequest`（Windows 关机或注销）、定时关机真正执行时和 `_shutdownResources()` 都调 `shutdown()`，之后不再守护：先退出的程序被拉回来会拖住关机，"电教猫关闭时"的自动任务关掉的程序也不能被拉回来。Application Relocation 期间跳过 Application Install Location 下的程序；卸载和 Application Update 不另外避让，它们关掉程序后几毫秒内就换掉目录，赶不上二次确认，「确认卸载」框经 `guardedUnder()` 补一句守护会停止。
+
+**`app/common/interval_tasks.py` 独占 Interval Task 的到点与 Catch-up Run。** MainWindow 的调度循环每轮调 `dueIntervalTasks()`，用「自动任务」那一种的时间（`clock.scheduledTaskTime("home-card", …)`）。它在同一次调用里先核对规则、后判断到点：起点、间隔、这一条的开关或总开关一变，就从这一刻起算，所以改完规则不会接着补执行改之前的到点；再取（起算时刻和最近执行的到点中较晚的那个，现在］里最近的到点，错过多少个都只执行一次，上一次还没跑完被跳过的也算执行过。记下的时刻比现在晚一天以上时当作时钟出过错（主板电池没电后又校正），从现在重新起算。状态存在 `cfg.homeCardTaskState` 而不是任务列表里：每执行一次都改写 `cfg.homeCardTasks` 的话，自动任务页会整页重建、展开着的卡片收起来。删掉的任务的状态在这里一并清掉；没有 ID 的任务不记状态（启动时 MainWindow 已经补齐 ID）。
+
+**`app/common/wallpaper.py` 独占 Wallpaper Task 的规则，`app/platform/wallpaper.py` 独占换壁纸的系统调用。** `nextRotationWallpaper()` 取 Current Wallpaper 之后下一张找得到的图，跟着图片走（比较一律经 `home_card_tasks.wallpaperKey()`，按 Windows 规则不分大小写、不分正反斜杠）；Current Wallpaper 被移出列表时从删它时记下的 `wallpaperNext` 开始。`WallpaperWorker` 在后台线程里换（`SystemParametersInfoW` 要转码图片并向所有窗口广播，可能卡住），换成功才发 `applied`，MainWindow 据此改写 Current Wallpaper；它和 `ActionSequenceWorker` 用同样的 `finished(taskId, errors)`，所以运行中跳过新触发、退出时等待和「自动任务执行失败」提示都共用一套。文件夹导入 `scanWallpaperFolder()` 进各层子文件夹，跳过隐藏和系统文件夹与文件，不跟随符号链接和目录联接，按相对路径自然排序。
+
+**`app/view/components/wallpaper_rotation.py` 拥有 Wallpaper Rotation 的编辑。** 自动任务表单里只放一行概要和「编辑」，列表在单独的对话框里：几百张图放进任务表单会把整页撑长，限高又成了滚动区套滚动区。排序复用 `home_card_dialog.SortableRowList`（左侧手柄拖动，正文上的手指滑动交给列表滚动，与动作列表相同），缩略图和"文件不存在"在一个后台线程里按缩小后的尺寸读。保存时删掉了 Current Wallpaper 的，写下原来排在它后面、仍在列表里的那张作为 `wallpaperNext`。
 
 **`app/common/clock.py` 独占"现在几点"。** 读当前时间来决定行为或给人看的地方一律经它：调度循环用 `scheduledTaskTime(kind, calibrated)`，Fullscreen Clock 和它的 Setting Preview 用 `calibratedNow()`，新建任务的默认时间用 `scheduledTaskNow(kind)`，不得再用 `datetime.now()`、`QTime.currentTime()` 取这些时间。日志、Error Report、Cache 和 Log 的过期清理看的是文件时间，托盘预览里的任务栏时钟模仿 Windows，「设置 › 时间」当前时间卡片本来就要并排显示系统时间，它们仍用系统时间；考试倒计时、Process Guard 和 Shutdown Prompt 的倒数只量经过了多久，校时和偏移都不影响。同步过以后 Calibrated Time 跟着 `perf_counter` 走，不跟系统时钟：Windows 上 Python 3.12 的 `perf_counter` 是 QueryPerformanceCounter，睡眠和休眠期间照样计数，有人改 Windows 时间也不动。Time Offset 在配置里存 `timeOffsetDate` 那一天的值，开着 Daily Drift 时读的时候按日历天数现算，不每天回写；`bindTimeOffset()`（`djcat.py` 启动时绑）在任一开关或每日量改变时按改之前的规则把今天的值折算出来、以今天为新起点，所以关掉时冻结、关着的日子不累计、改每日量不回头重算；用户改偏移经 `setTimeOffset()` 连同今天这个起点一起存，填回原数也从今天重新算。设置页开着过零点时偏移卡片自己刷新。偏移精确到 0.001 秒，每日量 0.1 秒，都不设范围（数值框的边是 `TIME_OFFSET_LIMIT`）。
 
@@ -157,7 +164,7 @@ Broadcast Task、Home Card Task 和 Shutdown Task 都按各自 `cfg` 列表的�
 
 三类 Scheduled Task 共用表单和 `TaskFormSettingCard`，但展示材质取决于表单宿主：新建对话框中的每个配置项保留独立圆角卡片；已有任务的展开区域只绘制分割线并透出外层材质，避免卡片嵌套。表单交给 ScrollArea 后会被 Qt 重新设置父对象，因此材质模式必须在构造时依据原始宿主确定，不能在绘制阶段沿当前父链判断。修改共享表单时应同时验证三类任务的新建和已有任务两种场景。
 
-MainWindow 的单一调度循环在对应管理页面从未打开时也必须执行 Scheduled Task。Broadcast Task 和固定时间 Home Card Task 最多补偿最近 60 秒内被模态窗口或主线程阻塞错过的触发；Shutdown Task 只补偿最近 5 秒，避免恢复运行后执行过期关机。软件行为 Home Card Task 完全不参与时间匹配。三种任务各按自己的时间（`clock.scheduledTaskTime()`）匹配、各记上一次检查的时刻，往前跳照上面补偿；定时器是单发的 PreciseTimer，每次检查完改约到这几种时间里最近的整秒之后 2 ms，偏移带小数时任务也准点。一次定时触发由任务种类、计划时刻和稳定任务 ID 去重，记一天：时间往回跳（改偏移、校时、零点的 Daily Drift，或两种任务分处零点两侧）时不重复执行。
+MainWindow 的单一调度循环在对应管理页面从未打开时也必须执行 Scheduled Task；Interval Task 也在这个循环里判断，但不受下面的 60 秒补偿限制，规则见 `app/common/interval_tasks.py`。Broadcast Task 和固定时间 Home Card Task 最多补偿最近 60 秒内被模态窗口或主线程阻塞错过的触发；Shutdown Task 只补偿最近 5 秒，避免恢复运行后执行过期关机。软件行为 Home Card Task 完全不参与时间匹配。三种任务各按自己的时间（`clock.scheduledTaskTime()`）匹配、各记上一次检查的时刻，往前跳照上面补偿；定时器是单发的 PreciseTimer，每次检查完改约到这几种时间里最近的整秒之后 2 ms，偏移带小数时任务也准点。一次定时触发由任务种类、计划时刻和稳定任务 ID 去重，记一天：时间往回跳（改偏移、校时、零点的 Daily Drift，或两种任务分处零点两侧）时不重复执行。
 
 Custom 模式的 Home Card Task 以稳定任务 ID 读取最新 Action Sequence；任务被删除或切换模式后，尚未开始的动作停止。同一任务仍在运行时跳过新触发，不弹出并发确认框。Existing-card 模式在触发时解析当前 Home Card 快照，不复制源卡片数据；关闭 Projection 时同时识别正常窗口和 Floating Button，关闭未打开的功能不创建页面、不报错。
 
@@ -341,6 +348,9 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/common/install_location.py` | Application Install Location 与 Application Relocation 的规则：位置、校验、权限、搬动与撤回、迁移记录收尾、提交；不涉及界面 |
 | `app/common/home_card_tasks.py` | Home Card Task schema 归一化、稳定 ID、触发事件和动作常量；不负责计时或 QWidget |
 | `app/common/process_guard.py` | Process Guard：守护规则、后台检查、拉起和停止原因；不知道自动任务页和 InfoBar |
+| `app/common/interval_tasks.py` | Interval Task：到点、下次到点和 Catch-up Run 的起算核对 |
+| `app/common/wallpaper.py` | Wallpaper Task：轮换取图、文件夹导入和后台换壁纸 |
+| `app/platform/wallpaper.py` | 用 `SystemParametersInfoW` 换当前用户的桌面壁纸 |
 | `app/common/clock.py` | Calibrated Time、Time Offset（含 Daily Drift）和 Bell Time：所有"现在几点"的来源 |
 | `app/common/time_sync.py` | Time Sync：NTP 查询、后台同步、何时重新同步和同步状态；不知道设置页 |
 | `tools/updater/updater.c` | Client Update 的独立更新器：等待进程退出、把暂存目录整目录换名为程序目录（失败时换回备份）、重启 DJCat |
@@ -359,6 +369,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/view/components/window_transition.py` | Window Transition：Display Window 在全屏、窗口化和 Floating Button 之间切换的快照形变、动画层和交接顺序 |
 | `app/view/components/setting_section.py` | Setting Section 的下钻容器、导航行、推移动画和命中高亮 |
 | `app/view/components/setting_preview.py` | Setting Preview：`MainWindowReplica` 用真实组件按主窗口当前尺寸复刻整个主窗口（主页横幅、外观、字体、软件图标四处共用）、托盘菜单与任务栏、投送／倒计时／时钟窗口（标题、正文或大时间、角落按钮） |
+| `app/view/components/wallpaper_rotation.py` | Wallpaper Rotation 的概要行和编辑对话框：加图、文件夹导入、拖动排序、清空 |
 | `app/view/components/asset_icon.py` | `AssetIcon`：QFluentWidgets 没有、随程序发布在 `app/assets/icons/` 的 Fluent 风格图标 |
 | `app/view/components/color_dialog.py` | QFluentWidgets 颜色选择弹窗换上项目 `ScrollArea`，色板和亮度滑块登记为触控拖动目标 |
 | `app/view/components/font_picker.py` | App Font 的设置卡片和字体选择弹窗：搜索、每行用字体自己写名字、示例文字 |
