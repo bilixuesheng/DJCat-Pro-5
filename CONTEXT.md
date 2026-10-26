@@ -19,7 +19,7 @@ _Avoid_: built-in app、system card
 _Avoid_: Application Home Card、Application Preset
 
 **Home Action**:
-Custom Home Card 中的一个本地动作，类型为启动程序、执行 Shell、打开网页、打开本地路径或延时。程序和 Shell 动作可选择是否等待进程结束。
+Custom Home Card 中的一个本地动作，类型为启动程序、执行 Shell、打开网页、打开本地路径、设置壁纸或延时；设置壁纸只设一张固定的图，不轮换。程序和 Shell 动作可选择是否等待进程结束。
 _Avoid_: Application Action、step、command（仅 Shell 类型是命令）
 
 **Action Sequence**:
@@ -115,7 +115,7 @@ _Avoid_: 偏移时间、校准时间
 ### 定时与自动任务
 
 **Scheduled Task**:
-按对应 Task Master Switch、独立启用状态，以及 Bell Time 的星期和精确时间反复匹配的本地规则；设为不偏移的种类改用 Calibrated Time。Broadcast Task、使用固定时间的 Home Card Task 和 Shutdown Task 属于 Scheduled Task；软件行为触发的 Home Card Task 和 Process Guard 不参与定时匹配。
+按对应 Task Master Switch、独立启用状态，以及 Bell Time 的星期和精确时间反复匹配的本地规则；设为不偏移的种类改用 Calibrated Time。Broadcast Task、使用固定时间的 Home Card Task 和 Shutdown Task 属于 Scheduled Task；软件行为触发的 Home Card Task、Interval Task 和 Process Guard 不是 Scheduled Task。
 _Avoid_: alarm、job；不加限定地称 task
 
 **Task Master Switch**:
@@ -143,19 +143,19 @@ _Avoid_: Scheduled Task、操作系统关机、主窗口关闭
 _Avoid_: 进程保活、看门狗、Application Lifecycle Event（守护不是一次事件）
 
 **Interval Task（间隔任务）**:
-触发时机为间隔的 Home Card Task：从用户定的起点开始，每隔若干分钟、小时或天到点一次，到点时刻只由起点和间隔决定，与上次实际何时执行无关。错过的到点由 Catch-up Run 补上。
+触发时机为「间隔时间」的 Home Card Task：从用户定的起点（日期加时刻）开始，每隔若干分钟、小时或天到点一次，到点时刻只由起点和间隔决定，与上次实际何时执行无关。它按固定时间的 Home Card Task 所用的时间走，但没有星期，不是 Scheduled Task；错过的到点由 Catch-up Run 补上。
 _Avoid_: 周期任务、循环任务、从上次执行起算
 
 **Catch-up Run（补执行）**:
-Interval Task 的到点被错过（电教猫没在运行、电脑在睡眠或主线程被卡住）后，一发现就执行的那一次；错过多少个到点都只补一次。总开关或这一条关着期间错过的不补，固定时间的 Home Card Task 也没有 Catch-up Run。
+Interval Task 的到点被错过（电教猫没在运行、电脑在睡眠或主线程被卡住）后，一发现就执行的那一次；错过多少个到点都只补一次。只补这条规则存在、开着且起点和间隔没改过期间的到点；时间往回调后，执行过的到点不再执行。固定时间的 Home Card Task 没有 Catch-up Run。
 _Avoid_: 重试、补偿（固定时间只补最近 60 秒，那不是它）
 
 **Wallpaper Task（换壁纸任务）**:
-任务类型为更换壁纸的 Home Card Task，执行时换掉当前用户的 Windows 桌面壁纸，所有屏幕同一张，契合度沿用 Windows 当前设置。分为固定（每次都设回同一张）和 Wallpaper Rotation 两种。
+任务类型为「更换壁纸」的 Home Card Task，执行时换掉当前用户的 Windows 桌面壁纸，所有屏幕同一张，契合度沿用 Windows 当前设置。分为固定（每次都设回同一张）和 Wallpaper Rotation 两种。
 _Avoid_: 背景、背景图片（那是电教猫自己窗口的）、主题
 
 **Wallpaper Rotation（壁纸轮换）**:
-Wallpaper Task 的有序图片列表，每执行一次换成 Current Wallpaper 的下一张，最后一张之后回到第一张。
+Wallpaper Task 的有序图片列表，每执行一次换成 Current Wallpaper 之后下一张找得到的图，最后一张之后回到第一张。找不到的图跳过但留在列表里。
 _Avoid_: 随机壁纸、幻灯片放映（Windows 自带的那个）
 
 **Current Wallpaper（当前壁纸）**:
