@@ -1,16 +1,17 @@
 from unittest import TestCase
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, QTime
-from PySide6.QtGui import QInputDevice, QMouseEvent
+from PySide6.QtGui import QAction, QIcon, QInputDevice, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
-from qfluentwidgets import CardWidget, LineEdit
+from qfluentwidgets import CardWidget, LineEdit, RoundMenu
 
 from app.platform.touch_input import (
     enableTouchPressFeedback,
     setTouchPressFeedbackEnabled,
 )
 from app.view.components.task_picker import TouchTimePicker
+from app.view.shell.tray import buildTrayMenu
 
 
 def _windowsTouchScreen():
@@ -148,6 +149,44 @@ class TouchPressFeedbackTest(TestCase):
         self._release(panel.yesButton, point)
 
         self.assertFalse(panel.yesButton.isDown())
+
+    def _assertMenuRowLightsUpWhileTheFingerIsDown(self, menu):
+        # 菜单的行不是按钮：鼠标悬停时那一行亮起，手指按住时也一样；只改样子，不触发。
+        # 照真实的样子展开到底：展开途中的遮罩还盖着没露出来的行。
+        RoundMenu.exec(menu, QPoint(200, 200))
+        self.addCleanup(menu.deleteLater)
+        self.addCleanup(menu.close)
+        reveal = menu.aniManager.ani
+        reveal.setCurrentTime(reveal.duration())
+        self.app.processEvents()
+        triggered = []
+        menu.triggered.connect(triggered.append)
+        for action in menu.menuActions():
+            action.triggered.connect(lambda checked=False: triggered.append(True))
+        view = menu.view
+        viewport = view.viewport()
+        row = view.visualItemRect(view.item(0))
+        # 行的底色在左边距之内，避开文字和图标。
+        point = QPoint(row.left() + 9, row.center().y())
+
+        def rowColor():
+            return viewport.grab().toImage().pixelColor(point).rgba()
+
+        idle = rowColor()
+        self._press(viewport, point)
+        self.assertNotEqual(rowColor(), idle)
+        self._release(viewport, point)
+        self.assertEqual(rowColor(), idle)
+        self.assertEqual(triggered, [])
+
+    def testMenuRowLightsUpWhileTheFingerIsDown(self):
+        menu = RoundMenu()
+        for text in ("第一项", "第二项", "第三项"):
+            menu.addAction(QAction(text, menu))
+        self._assertMenuRowLightsUpWhileTheFingerIsDown(menu)
+
+    def testTrayMenuRowLightsUpWhileTheFingerIsDown(self):
+        self._assertMenuRowLightsUpWhileTheFingerIsDown(buildTrayMenu([], QIcon()).menu)
 
     def testMovingTheFingerAwayDropsThePressedLook(self):
         button = QPushButton("确定")
