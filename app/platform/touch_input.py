@@ -11,8 +11,8 @@ ends.
 
 import math
 
-from PySide6.QtCore import QEvent, QObject, Qt
-from PySide6.QtGui import QWindow
+from PySide6.QtCore import QEvent, QObject, QPointF, Qt
+from PySide6.QtGui import QHoverEvent, QWindow
 from PySide6.QtWidgets import (
     QAbstractButton,
     QAbstractItemView,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QLineEdit,
 )
+from qfluentwidgets.components.widgets.menu import MenuActionListWidget
 from shiboken6 import isValid
 
 # 微软的触控规范：手指移动 2.7 mm（目标分辨率下约 10 px）以内仍算轻点。
@@ -50,6 +51,9 @@ def _handlesTouchItself(widget) -> bool:
 def _pressable(widget):
     """The control a mouse press at ``widget`` would push down, if any."""
     while widget is not None:
+        if isinstance(widget, MenuActionListWidget):
+            # 下拉框、右键菜单、托盘菜单和搜索建议的行不是控件，按下的是整个视口。
+            return widget.viewport()
         if isinstance(widget, QAbstractButton):
             if widget.isEnabled() and not widget.autoRepeat():
                 return widget
@@ -62,7 +66,19 @@ def _pressable(widget):
     return None
 
 
-def _showPressed(widget, pressed: bool) -> None:
+def _isMenuViewport(widget) -> bool:
+    return isinstance(widget.parentWidget(), MenuActionListWidget)
+
+
+def _showPressed(widget, pressed: bool, position) -> None:
+    if _isMenuViewport(widget):
+        # 菜单行的样子跟着悬停走：给视口补一个悬停，手指下那一行就和鼠标指着时一样亮。
+        local = QPointF(widget.mapFromGlobal(position))
+        eventType = QEvent.Type.HoverMove if pressed else QEvent.Type.HoverLeave
+        QApplication.sendEvent(
+            widget, QHoverEvent(eventType, local, QPointF(position), local)
+        )
+        return
     if isinstance(widget, QAbstractButton):
         # setDown 只改外观，不发 pressed／clicked。
         widget.setDown(pressed)
@@ -111,7 +127,7 @@ class _TouchPressFeedback(QObject):
             return
         self.target = target
         self.touchStart = position
-        _showPressed(target, True)
+        _showPressed(target, True, position)
 
     def _follow(self, event):
         if not event.points():
@@ -126,7 +142,7 @@ class _TouchPressFeedback(QObject):
         target = self.target
         self.target = None
         if target is not None and isValid(target):
-            _showPressed(target, False)
+            _showPressed(target, False, self.touchStart)
 
 
 def setTouchPressFeedbackEnabled(application, enabled: bool) -> None:
