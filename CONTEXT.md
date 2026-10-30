@@ -253,7 +253,7 @@ _Avoid_: account、license、raw hardware ID
 _Avoid_: Machine Identity、activation code、license key
 
 **Last Seen（最近上线）**:
-服务端最近一次收到某个 Machine Identity 请求的时间：DJCat 每次启动时的报到、查询额度、AI Markdown Conversion 或 Error Report 都算。只记最近一次，不留历史；它不表示这台机器现在仍然开着。
+服务端最近一次收到某个 Machine Identity 请求的时间：DJCat 每次启动后的报到（开机时没联网就过一会儿再报，直到报上）、查询额度、AI Markdown Conversion 或 Error Report 都算。只记最近一次，不留历史；它不表示这台机器现在仍然开着。
 _Avoid_: 最后访问（旧叫法，当时只在 AI 整理时更新）、在线状态
 
 **IP Location（IP 属地）**:

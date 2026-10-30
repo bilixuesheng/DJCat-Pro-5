@@ -274,6 +274,37 @@ class AIMarkdownTest(unittest.TestCase):
         thread.return_value.start.assert_called_once_with()
         self.assertIsInstance(window.machineRegistrationWorker, MachineRegistrationWorker)
 
+    def testFailedStartupReportIsRetriedUntilItGetsThrough(self):
+        # 开机自启时网络常常还没通，报到失败就隔一阵再试，越来越疏，直到成功。
+        with (
+            patch.object(MainWindow, "_startMachineRegistration") as start,
+            patch.object(MainWindow, "checkForUpdates"),
+            patch("app.view.windows.main_window.SystemTrayIcon"),
+        ):
+            window = MainWindow(isSilent=True)
+            self.addCleanup(window.deleteLater)
+            self.addCleanup(window._shutdownResources)
+            retry = window._registrationRetryTimer
+            delays = []
+            for _ in range(7):
+                window._onMachineRegistered("")
+                self.assertTrue(retry.isActive())
+                delays.append(retry.interval() // 1000)
+                retry.stop()
+                retry.timeout.emit()
+            self.assertEqual(delays, [30, 60, 120, 300, 600, 600, 600])
+            self.assertEqual(start.call_count, 1 + 7)
+
+            window._onMachineRegistered("DJ-000777")
+            self.assertFalse(retry.isActive())
+            self.assertEqual(cfg.aiMarkdownMachineCode.value, "DJ-000777")
+
+            window._onMachineRegistered("")
+            window._shutdownResources()
+            self.assertFalse(retry.isActive())
+            window._onMachineRegistered("")
+            self.assertFalse(retry.isActive())
+
     def testClientRegistersMachineOnFirstStartup(self):
         response = MagicMock()
         response.json.return_value = {"machine_code": "DJ-000321"}
