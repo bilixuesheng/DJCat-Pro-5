@@ -168,6 +168,10 @@ class UpdateWorker(QObject):
                     response.close()
 
 
+# 开机自启时网络常常还没通：报到没成功就隔一阵再试，越来越疏，之后每 10 分钟一次。
+MACHINE_REGISTRATION_RETRY_SECONDS = (30, 60, 120, 300, 600)
+
+
 class MachineRegistrationWorker(QObject):
     finished = Signal(str)
 
@@ -513,6 +517,10 @@ class MainWindow(MSFluentWindow):
         self._quitRequested = False
         self._quitTaskIds = set()
         self.machineRegistrationWorker = None
+        self._registrationAttempts = 0
+        self._registrationRetryTimer = QTimer(self)
+        self._registrationRetryTimer.setSingleShot(True)
+        self._registrationRetryTimer.timeout.connect(self._startMachineRegistration)
         self._pinnedIconJobs = {}
 
         # MSFluentWindow 固定使用弹出式页面栈，快照过渡可避免目标页在动画前闪现。
@@ -698,8 +706,16 @@ class MainWindow(MSFluentWindow):
         self.machineRegistrationWorker = None
         if worker is not None:
             worker.deleteLater()
-        if machineCode and not self._resourcesShutdown:
+        if self._resourcesShutdown:
+            return
+        if machineCode:
             cfg.set(cfg.aiMarkdownMachineCode, machineCode)
+            return
+        delays = MACHINE_REGISTRATION_RETRY_SECONDS
+        delay = delays[min(self._registrationAttempts, len(delays) - 1)]
+        self._registrationAttempts += 1
+        logger.info("向服务器报到失败，{} 秒后重试", delay)
+        self._registrationRetryTimer.start(delay * 1000)
 
     def initWindow(self):
         QTimer.singleShot(0, self, self._deferredCleanupEdgeSpeech)
@@ -2174,6 +2190,7 @@ class MainWindow(MSFluentWindow):
         self.stackedWidget.view._stopAnimation()
         self._navigationTarget = None
         self.scheduleTimer.stop()
+        self._registrationRetryTimer.stop()
         if getattr(self, "memoryRelease", None) is not None:
             self.memoryRelease.stop()
         self.timeSync.shutdown()

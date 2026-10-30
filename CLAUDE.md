@@ -25,7 +25,7 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 - **Interval Task** 是 `trigger` 为 `interval` 的 Home Card Task，**Wallpaper Task** 是 `mode` 为 `wallpaper` 的 Home Card Task，两者可以任意搭配（Process Guard 除外）。Interval Task 的到点只由起点和间隔决定，错过的由 Catch-up Run 补一次；它的起算时刻、执行到的到点和 Wallpaper Task 的 Current Wallpaper 按任务 ID 记在 `cfg.homeCardTaskState`，不写回任务列表。固定壁纸和 Wallpaper Rotation 各存各的；主页的「设置壁纸」Home Action 只设一张固定的图。理由见 `docs/adr/0013-interval-and-wallpaper-tasks.md`。
 - Existing-card 模式的 **Home Card Task** 只保存稳定 Home Card key、用于失效提示的标题快照和打开／关闭动作；关闭只适用于 Default Home Card。Custom 模式直接拥有 Action Sequence，但不会创建 Custom Home Card。
 - AI Markdown Conversion 使用 Machine Identity 领取和结算 Daily Quota；Machine Code 只是定位该身份的可见别名。
-- **Last Seen** 与 **IP Location** 一起改写：服务端收到某个 Machine Identity 的注册、查额度、整理或 Error Report 请求时记下时间和来源 IP 的属地，只存属地文字，不存 IP。客户端每次启动都向 `/register` 报到一次，已有 Machine Code 也一样。
+- **Last Seen** 与 **IP Location** 一起改写：服务端收到某个 Machine Identity 的注册、查额度、整理或 Error Report 请求时记下时间和来源 IP 的属地，只存属地文字，不存 IP。客户端每次启动都向 `/register` 报到一次，已有 Machine Code 也一样；没报到成功（开机自启时网络常常还没通）就由 MainWindow 按 30 秒、1、2、5 分钟、之后每 10 分钟重试，直到成功或退出。
 - Projection 编辑器中的"整理并投送"只在 Markdown 模式显示并独立记忆；它复用 AI Markdown Conversion，但启动恢复必须绕过整理流程并原样恢复 Projection Snapshot。已知剩余额度不够本次扣点时，按钮改为"投送（额度不足）"并按原文投送，勾选和配置都不动；查不到额度时照常整理，由服务端判断。
 - **Error Report** 由服务端按 **Error Signature** 归并成组，每组按 Machine Identity 和日期各记一行次数；Machine Code 只是显示用的别名。
 - **Daily Quota** 按 Machine Identity 取：有 **Quota Override** 用它，否则用 **Default Daily Quota**。Quota Override 只改上限，不碰当天已用的点数，也不改扣点规则。
@@ -427,6 +427,7 @@ chdir to the user folder, not APP_DIR (programs DJCat opens inherit it and would
       → publish the complete Home Card snapshot to the Setting page and Tray Menu
       → finish an interrupted Application Relocation from cfg.appRelocation in a background thread
       → report Last Seen to the AI Markdown server in a background thread
+        (retried at 30 s, 1, 2, 5 min, then every 10 min until it gets through)
       → create tray and long-lived timers/workers: the schedule timer, Time Sync (started at once:
         asks the time server in a background thread, system time until it answers),
         Process Guard (rules from cfg.homeCardTasks) and MemoryRelease (after silent startup
