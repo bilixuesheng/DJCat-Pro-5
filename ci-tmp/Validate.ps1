@@ -100,7 +100,7 @@ try {
 $threw = $false
 $tmpExe2 = Join-Path ([IO.Path]::GetTempPath()) ("ci_exe2_{0}.bin" -f ([guid]::NewGuid().ToString('N')))
 [IO.File]::WriteAllBytes($tmpExe2, $U.GetBytes('ProductName..ClassIsland..'))
-try { Set-ProductNameInExe -ExePath $tmpExe2 -Old 'ClassIsland' -New 'TOOLONGNAME' } catch { $threw = $true }
+try { $null = Set-ProductNameInExe -ExePath $tmpExe2 -Old 'ClassIsland' -New 'Short' } catch { $threw = $true }
 Remove-Item -LiteralPath $tmpExe2 -Force -ErrorAction SilentlyContinue
 Check $threw "throws when replacement length differs from original"
 
