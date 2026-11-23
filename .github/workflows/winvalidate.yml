@@ -1,0 +1,37 @@
+name: Win Validate (temp)
+
+# 临时工作流：在真·Windows 上校验 ci-tmp/fix-ClassIsland.ps1。用完随分支一起删。
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Parse with Windows PowerShell 5.1
+        shell: powershell
+        run: .\ci-tmp\Validate.ps1 -Mode Parse
+
+      - name: Parse with PowerShell 7
+        shell: pwsh
+        run: .\ci-tmp\Validate.ps1 -Mode Parse
+
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: .\ci-tmp\Validate.ps1 -Mode Analyze
+
+      - name: Unit tests on Windows PowerShell 5.1
+        shell: powershell
+        run: .\ci-tmp\Validate.ps1 -Mode Unit
+
+      - name: Unit tests on PowerShell 7
+        shell: pwsh
+        run: .\ci-tmp\Validate.ps1 -Mode Unit
