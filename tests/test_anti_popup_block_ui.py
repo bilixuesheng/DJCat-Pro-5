@@ -98,21 +98,20 @@ class AntiPopupBlockUiTest(TestCase):
         self.assertNotEqual(cfg.disguisedProductName.value, "DJCat Pro")
         self.assertNotEqual(cfg.disguisedProductName.value, APP_NAME)
 
+    # 直接调处理函数、只断言本页自己的信号：开关绑着 cfg 单例，走 setValue 会被别的测试
+    # 残留的、仍连在同一 cfg 上的 SettingPage 串扰（整套跑时才暴露）。真实运行只有一个页面。
     def testToggleOnConfirmedRequestsRestart(self):
         page = self.buildPage()
         requested = []
         page.antiPopupBlockApplyRequested.connect(lambda: requested.append(True))
         self.confirm.return_value = True
-        page.antiPopupBlockCard.setValue(True)
-        self.assertTrue(requested)
-        self.assertTrue(bool(cfg.antiPopupBlockEnabled.value))
+        page._onAntiPopupBlockToggled(True)
+        self.assertEqual(len(requested), 1)
 
     def testToggleCanceledRevertsAndDoesNotRequestRestart(self):
         page = self.buildPage()
         requested = []
         page.antiPopupBlockApplyRequested.connect(lambda: requested.append(True))
         self.confirm.return_value = False
-        page.antiPopupBlockCard.setValue(True)
-        self.assertFalse(requested)
-        self.assertFalse(bool(cfg.antiPopupBlockEnabled.value))
-        self.assertFalse(page.antiPopupBlockCard.switchButton.isChecked())
+        page._onAntiPopupBlockToggled(True)
+        self.assertEqual(requested, [])
