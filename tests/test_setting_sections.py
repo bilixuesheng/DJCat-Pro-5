@@ -42,6 +42,7 @@ TOP_LEVEL_SECTIONS = [
     "时间",
     "个性化",
     "应用",
+    "反弹窗拦截",
     "关于",
 ]
 
@@ -354,6 +355,7 @@ class SettingSectionTest(TestCase):
                 page.dailyDriftValueCard,
                 page.timeOffsetExemptionCard,
             ),
+            (page.antiPopupBlockCard, page.disguisedNameCard),
         }
 
         shared = {

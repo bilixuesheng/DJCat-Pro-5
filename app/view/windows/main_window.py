@@ -219,9 +219,12 @@ class PinnedIconWorker(QObject):
 class UpdateApplyWorker(QObject):
     finished = Signal(bool)
 
-    def __init__(self, zipPath):
+    def __init__(self, zipPath, disguiseName=""):
         super().__init__()
         self.zipPath = zipPath
+        # 反弹窗拦截开着时的目标产品名；更新换掉整目录会还原成诚实名，交给更新器在
+        # 重启前顺带重套，省掉一次额外重启。空串表示不改。
+        self.disguiseName = disguiseName
 
     def run(self):
         import os
@@ -263,6 +266,9 @@ class UpdateApplyWorker(QObject):
                 str(Path(sys.executable).resolve()),
                 str(stagingDir),
             ]
+            if self.disguiseName:
+                # 第 6 个参数：换完目录、重启前把产品名重套成反弹窗拦截的目标名。
+                args.append(self.disguiseName)
             subprocess.Popen(
                 args,
                 creationflags=(
@@ -346,6 +352,7 @@ class LazyCreditsPage(LazyPage):
 class LazySettingPage(LazyPage):
     appStoreCacheCleared = Signal()
     installLocationChangeRequested = Signal(str)
+    antiPopupBlockApplyRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__("SettingPage", parent)
@@ -358,6 +365,9 @@ class LazySettingPage(LazyPage):
         page.appStoreCacheCleared.connect(self.appStoreCacheCleared.emit)
         page.installLocationChangeRequested.connect(
             self.installLocationChangeRequested.emit
+        )
+        page.antiPopupBlockApplyRequested.connect(
+            self.antiPopupBlockApplyRequested.emit
         )
         page.setHomeCards(self._homeCards)
         return page
@@ -591,6 +601,8 @@ class MainWindow(MSFluentWindow):
                 position=InfoBarPosition.BOTTOM_RIGHT,
                 parent=self,
             )
+
+        self._checkAntiPopupBlockAtStartup()
 
         if cfg.checkUpdateAtStartUp.value:
             self.checkForUpdates(manual=False)
@@ -1383,6 +1395,9 @@ class MainWindow(MSFluentWindow):
         self.settingPage.installLocationChangeRequested.connect(
             self.applicationRelocation.request
         )
+        self.settingPage.antiPopupBlockApplyRequested.connect(
+            self._applyAntiPopupBlock
+        )
         self.applicationRelocation.recoverAtStartup()
         cfg.showCreditsPage.valueChanged.connect(self._setCreditsPageVisible)
         self.homePage.applicationCardClicked.connect(self._onPinnedHomeCardClicked)
@@ -2118,7 +2133,14 @@ class MainWindow(MSFluentWindow):
         # 刚关掉的被守护程序不能在更新器动手前又被拉回来；更新器没起来时一分钟后照常守护。
         self.processGuard.holdLaunches(60)
         dialog = InstallerLaunchDialog(self)
-        worker = UpdateApplyWorker(zipPath)
+        from app.common import anti_popup_block as apb
+
+        disguise = (
+            apb.desiredProductName(True, cfg.disguisedProductName.value)
+            if cfg.antiPopupBlockEnabled.value
+            else ""
+        )
+        worker = UpdateApplyWorker(zipPath, disguise)
         thread = threading.Thread(target=worker.run, daemon=True)
         self._updateApplyDialog = dialog
         self._updateApplyWorker = worker
@@ -2153,6 +2175,96 @@ class MainWindow(MSFluentWindow):
 
         self._shutdownResources()
         QApplication.quit()
+
+    def _applyAntiPopupBlock(self):
+        """反弹窗拦截开/关/换名：让 updater 在退出后改产品名再重启。"""
+        import os
+
+        from app.common import anti_popup_block as apb
+        from app.common.error_report import isPackaged
+
+        target = apb.desiredProductName(
+            cfg.antiPopupBlockEnabled.value, cfg.disguisedProductName.value
+        )
+        if sys.platform != "win32" or not isPackaged():
+            # 源码运行 / 非 Windows：改不了真 exe（sys.executable 是 python），只存了设置。
+            InfoBar.info(
+                "反弹窗拦截",
+                "设置已保存，将在打包版的电教猫重启后生效。",
+                duration=5000,
+                position=InfoBarPosition.BOTTOM_RIGHT,
+                parent=self,
+            )
+            return
+        updaterPath = APP_DIR / "updater.exe"
+        if not updaterPath.is_file():
+            logger.error("updater.exe not found at {}", updaterPath)
+            InfoBar.error(
+                "反弹窗拦截",
+                "找不到 updater.exe，无法改名生效。",
+                duration=5000,
+                position=InfoBarPosition.BOTTOM_RIGHT,
+                parent=self,
+            )
+            return
+        args = [
+            str(updaterPath),
+            "--stamp-product-name",
+            str(os.getpid()),
+            str(Path(sys.executable).resolve()),
+            target,
+        ]
+        try:
+            subprocess.Popen(
+                args,
+                creationflags=(
+                    subprocess.DETACHED_PROCESS
+                    | subprocess.CREATE_NEW_PROCESS_GROUP
+                ),
+            )
+        except OSError:
+            logger.exception("启动 updater 改产品名失败")
+            InfoBar.error(
+                "反弹窗拦截",
+                "无法启动助手改名，请稍后再试。",
+                duration=5000,
+                position=InfoBarPosition.BOTTOM_RIGHT,
+                parent=self,
+            )
+            return
+        self._shutdownResources()
+        QApplication.quit()
+
+    def _checkAntiPopupBlockAtStartup(self):
+        """被更新/重装还原了产品名时明确提示用户重启恢复（不静默自动重启，免得成环）。"""
+        from app.common import anti_popup_block as apb
+        from app.common.error_report import isPackaged
+
+        if sys.platform != "win32" or not isPackaged():
+            return
+        if not apb.needsReapply(
+            cfg.antiPopupBlockEnabled.value,
+            cfg.disguisedProductName.value,
+            apb.exeProductName(),
+        ):
+            return
+        from qfluentwidgets import InfoBarIcon, PushButton
+
+        bar = InfoBar(
+            InfoBarIcon.WARNING,
+            "反弹窗拦截",
+            "更新或重装后，反弹窗拦截需要重启一次才能恢复。",
+            orient=Qt.Orientation.Horizontal,
+            isClosable=True,
+            duration=-1,
+            position=InfoBarPosition.BOTTOM_RIGHT,
+            parent=self,
+        )
+        button = PushButton("立即恢复", bar)
+        button.clicked.connect(bar.close)
+        button.clicked.connect(self._applyAntiPopupBlock)
+        bar.addWidget(button)
+        bar.show()
 
     def requestQuit(self):
         if self._quitRequested:

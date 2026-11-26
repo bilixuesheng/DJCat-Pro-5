@@ -401,6 +401,18 @@ class Config(QConfig):
         GeometrySerializer(),
     )
 
+    # 反弹窗拦截：开着时伪装 djcat.exe 版本资源里的产品名，躲开按产品名误判的拦截软件。
+    # 见 docs/adr/0014-anti-window-close-productname-disguise.md。
+    antiPopupBlockEnabled = ConfigItem(
+        "Compatibility", "AntiPopupBlock", False, BoolValidator()
+    )
+    disguisedProductName = ConfigItem(
+        "Compatibility", "DisguisedProductName", "DJCat Pro"
+    )
+    antiPopupBlockTipDismissed = ConfigItem(
+        "Compatibility", "AntiPopupBlockTipDismissed", False, BoolValidator()
+    )
+
     homeCardOrder = ConfigItem(
         "HomePage", "CardOrder", list(DEFAULT_HOME_CARDS)
     )
