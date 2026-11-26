@@ -220,6 +220,8 @@ Portable Mode 的 `APP_DIR\DJCatPro` 在换名前**改名**进新目录，不是
 
 `restoreUpdaterBinary()` 只为从旧版本升上来的那一次保留：旧更新器仍会留下 `updater.exe.old`。新更新器不再改名自己。
 
+**`app/common/anti_popup_block.py` 独占反弹窗拦截的规则。** 开着时的伪装产品名默认 `DJCat Pro`，`randomDisguisedName()` 换成英文词拼接加一位 2–9 数字的随机名；`desiredProductName()` 给出目标名（开=伪装名、关=`APP_NAME`），`needsReapply()` 用 `exeProductName()`（只读读取磁盘上现有产品名，读不到返回 None、不触发）比对决定要不要重套，`tipShouldShow()` 决定反拦截提示显隐。它不写文件：运行中的 exe 被锁，改写交给 `updater.exe` 的 `--stamp-product-name` 模式在退出后做——从现有版本资源重建 VS_VERSIONINFO、只换 ProductName/FileDescription、带备份校验和失败回滚，再降权重启（和 Client Update 共用那套等待退出、提权、降权重启）。界面开关、换名按钮和反拦截提示由设置页拥有：提示挂在设置顶层页（面包屑下、内容上，不进根 Section，不破坏「根页只有导航行」），开关所在的「反弹窗拦截」是根下叶子 Section、可被设置搜索搜到。开/关/换名都要重启，由 MainWindow 的 `_applyAntiPopupBlock()` 起 updater 后退出；Client Update 把目标名作第 6 个参数交给 updater，换完目录重启前顺带重套，省一次重启；启动自检 `_checkAntiPopupBlockAtStartup()` 发现被更新或重装还原了就弹一次 InfoBar 让用户「立即恢复」，不静默自动重启以免成环。源码运行和非 Windows 只存设置、不改 exe。理由见 `docs/adr/0014-anti-window-close-productname-disguise.md`。
+
 ### CI
 
 `updater.exe` 由发版流水线在 windows-2022 上用 MSVC 构建，本地不需要环境。`.github/workflows/tests.yml` 在每次推送和 PR 时跑全量测试并用同样的命令构建一次 updater；`main.yml` 发版前通过 `workflow_call` 再调用它。`main.yml` 本身在发版触发路径里，改它合并到 main 时若没改版本号，`prepare` 会因 tag 已存在失败退出，不会发版。工作流里每条原生命令单独占一步；Windows 上的 offscreen 测试需要 `QT_QPA_FONTDIR` 指向系统字体目录。
@@ -239,8 +241,6 @@ IP Location 由 `server/ip_location.py` 查随服务端发布的 ip2region IPv4 
 一台机器的上限一律经 `_dailyQuota(machineId)` 取：先查 `quota_overrides` 表，没有才用 `_defaultDailyQuota()`（设置键仍叫 `daily_limit`）。Quota Override 可以是 0，取上限的地方不能写 `limit or 默认值` 这类真值判断，否则停用的机器会回到默认额度。`/quota`、整理请求的 `X-RateLimit-Limit` 和后台表格都报这台机器自己的上限，所以 Quota Override 只需一次 Server Update，客户端不用跟着升级。
 
 ### Error Report
-
-**`app/common/anti_popup_block.py` 独占反弹窗拦截的规则。** 开着时的伪装产品名默认 `DJCat Pro`，`randomDisguisedName()` 换成英文词拼接加一位 2–9 数字的随机名；`desiredProductName()` 给出目标名（开=伪装名、关=`APP_NAME`），`needsReapply()` 用 `exeProductName()`（只读读取磁盘上现有产品名，读不到返回 None、不触发）比对决定要不要重套，`tipShouldShow()` 决定反拦截提示显隐。它不写文件：运行中的 exe 被锁，改写交给 `updater.exe` 的 `--stamp-product-name` 模式在退出后做——从现有版本资源重建 VS_VERSIONINFO、只换 ProductName/FileDescription、带备份校验和失败回滚，再降权重启。界面开关、换名按钮和反拦截提示由设置页拥有：提示挂在设置顶层页（面包屑下、内容上，不进根 Section，不破坏「根页只有导航行」），开关所在的「反弹窗拦截」是根下叶子 Section、可被设置搜索搜到。开/关/换名都要重启，由 MainWindow 的 `_applyAntiPopupBlock()` 起 updater 后退出；Client Update 把目标名作第 6 个参数交给 updater，换完目录重启前顺带重套，省一次重启；启动自检 `_checkAntiPopupBlockAtStartup()` 发现被更新或重装还原了就弹一次 InfoBar 让用户「立即恢复」，不静默自动重启以免成环。源码运行和非 Windows 只存设置、不改 exe。理由见 `docs/adr/0014-anti-window-close-productname-disguise.md`。
 
 **`app/common/error_report.py` 独占客户端的 Error Report。** `djcat.py` 的 `exceptionHook` 在记日志之后、发 `signalBus.catchException` 之前调用 `reportError()`；另外发 `catchException` 的地方（目前只有设置页的开机启动）也要先调它，因为"软件可能遇到异常"的 InfoBar 告诉用户报错会自动发出。`reportError()` 只在发行版里上报（`isPackaged()`），源码运行和测试不得往线上服务端发；在后台线程里 POST，不跟随跳转，失败只记日志。同一次运行里按异常类型和每一帧的文件、函数、行号去重，最多发 20 份。路径换成相对 `APP_DIR` 的写法、用户目录换成 `~`；不发日志，日志每行都带时间。
 

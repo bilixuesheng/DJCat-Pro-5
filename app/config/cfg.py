@@ -406,6 +406,7 @@ class Config(QConfig):
     antiPopupBlockEnabled = ConfigItem(
         "Compatibility", "AntiPopupBlock", False, BoolValidator()
     )
+    # 默认值与 anti_popup_block.DEFAULT_DISGUISED_NAME 一致（分层所限不便 import，手动对齐）。
     disguisedProductName = ConfigItem(
         "Compatibility", "DisguisedProductName", "DJCat Pro"
     )

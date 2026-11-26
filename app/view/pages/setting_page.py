@@ -1106,7 +1106,8 @@ class SettingPage(QWidget):
             "换一个",
             FluentIcon.SYNC,
             "换一个伪装名称",
-            "随机换成另一个英文名，下次重启生效",
+            # 说明文字（含当前名）由 _updateDisguisedNameCard 填，构造时留空免得两处重复。
+            "",
         )
 
     def _createBackgroundCards(
@@ -1860,7 +1861,7 @@ class SettingPage(QWidget):
             box.deleteLater()
 
     def _onAntiPopupBlockToggled(self, checked: bool) -> None:
-        # 回拨开关会再发一次 checkedChanged，用标志挡掉，免得又弹一次确认。
+        # 取消重启时会回拨开关，下面的还原已挡掉回拨信号；这个标志是多一层重入保护。
         if self._antiBlockApplying:
             return
         action = "开启" if checked else "关闭"

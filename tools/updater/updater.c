@@ -629,7 +629,12 @@ static BOOL stampProductName(const wchar_t *exe, const wchar_t *newName) {
     }
 
     WORD resourceLang = lang;
-    if (!versionResourceLang(exe, &resourceLang)) resourceLang = lang;
+    if (!versionResourceLang(exe, &resourceLang)) {
+        /* 读不到 RT_VERSION 的真实资源语言时退回翻译里的语言；两者不一致会让
+           UpdateResource 新增一条而不是替换，伪装就白改了——极少见，记一行好排查。*/
+        resourceLang = lang;
+        logMsg(L"读不到 RT_VERSION 资源语言，回退用翻译语言 0x%04x", lang);
+    }
 
     wchar_t backup[PATH_BUF];
     formatPath(backup, PATH_BUF, L"%ls.apb-backup", exe);
