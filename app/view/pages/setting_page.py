@@ -66,7 +66,9 @@ from app.config.cfg import (
 from app.config.constants import APP_NAME, AUTHOR, AUTHOR_URL, VERSION, YEAR
 from app.config.paths import LOG_DIR
 from app.platform.background_effect import BACKGROUND_EFFECTS
+from app.common import anti_popup_block
 from app.signal_bus import signalBus
+from app.view.components.anti_block_tip import AntiBlockTip
 from app.view.components.asset_icon import AssetIcon
 from app.view.components.color_dialog import ColorDialog
 from app.view.components.font_picker import FontSettingCard
@@ -108,6 +110,7 @@ PROJECTION_BACKGROUND_MODE_TEXTS = ("跟随主题", "纯色", "图片")
 TIMER_BACKGROUND_MODE_TEXTS = ("默认黑色", "纯色", "图片")
 # 开发人员选项只供开发人员调试，不出现在设置搜索里。
 DEVELOPER_SECTION_KEY = "software.developer"
+ANTI_POPUP_BLOCK_SECTION_KEY = "antiPopupBlock"
 
 
 def _backgroundItems(prefix: str) -> tuple:
@@ -586,6 +589,8 @@ class SettingPage(QWidget):
     appStoreCacheCleared = Signal()
     # 空字符串表示「重置」回默认位置；之后的检查、确认和迁移都由 MainWindow 负责。
     installLocationChangeRequested = Signal(str)
+    # 反弹窗拦截开/关/换名后要重启生效：存好 cfg 后发出，由 MainWindow 交给助手改 exe 再重启。
+    antiPopupBlockApplyRequested = Signal()
 
     MAX_SUGGESTIONS = 8
 
@@ -601,6 +606,11 @@ class SettingPage(QWidget):
         self.breadcrumbBar = BreadcrumbBar(self.breadcrumbWidget)
         self.sectionStack = SettingSectionStack(self)
         self.highlight = SettingCardHighlight(self)
+        self.antiBlockTip = AntiBlockTip(self)
+        # × 只隐藏本次启动；「不再显示」才持久化到 cfg.antiPopupBlockTipDismissed。
+        self._antiBlockTipSessionDismissed = False
+        # 防止取消重启时 setValue 的回拨又触发一次确认。
+        self._antiBlockApplying = False
         self.vBoxLayout = QVBoxLayout(self)
 
         self._initWidget()
@@ -1083,6 +1093,23 @@ class SettingPage(QWidget):
             cfg.showFrameRate,
         )
 
+        self.antiPopupBlockCard = SwitchSettingCard(
+            FluentIcon.HIDE,
+            "反弹窗拦截",
+            "有些「安全防护 / 桌面管理」软件会把电教猫的窗口误当成广告弹窗关掉。开启后，"
+            "电教猫在 Windows 里显示的产品名称会换成一个普通英文名，这类软件就不再误认、"
+            "也不再关它的窗口——只改电教猫自己在文件属性里的名字，不动任何其它软件，"
+            "界面里显示的仍是「电教猫 Pro 5」。开启或关闭都需要重启电教猫才生效。",
+            cfg.antiPopupBlockEnabled,
+        )
+        self.disguisedNameCard = PushSettingCard(
+            "换一个",
+            FluentIcon.SYNC,
+            "换一个伪装名称",
+            # 说明文字（含当前名）由 _updateDisguisedNameCard 填，构造时留空免得两处重复。
+            "",
+        )
+
     def _createBackgroundCards(
         self,
         prefix: str,
@@ -1401,6 +1428,18 @@ class SettingPage(QWidget):
             ]
         )
 
+        antiPopupBlock = self._addSection(
+            ANTI_POPUP_BLOCK_SECTION_KEY,
+            "反弹窗拦截",
+            FluentIcon.HIDE,
+            "被弹窗拦截软件误关窗口时的兼容开关",
+            ROOT_SECTION_KEY,
+        )
+        # 换名按钮的显隐跟着开关，连在同一块底板上。
+        antiPopupBlock.addLinkedSettingCards(
+            [self.antiPopupBlockCard, self.disguisedNameCard]
+        )
+
         about = self._addSection(
             "about",
             "关于",
@@ -1417,6 +1456,12 @@ class SettingPage(QWidget):
         breadcrumbLayout.setContentsMargins(30, 20, 30, 10)
         breadcrumbLayout.addWidget(self.breadcrumbBar)
         self.vBoxLayout.addWidget(self.breadcrumbWidget)
+        # 反拦截提示在面包屑下、内容上，左右对齐 Section 里的卡片；只在顶层页显示。
+        self.antiBlockTipContainer = QWidget(self)
+        tipLayout = QVBoxLayout(self.antiBlockTipContainer)
+        tipLayout.setContentsMargins(11, 0, 11, 4)
+        tipLayout.addWidget(self.antiBlockTip)
+        self.vBoxLayout.addWidget(self.antiBlockTipContainer)
         self.vBoxLayout.addWidget(self.sectionStack, 1)
 
     def _bind(self) -> None:
@@ -1458,11 +1503,26 @@ class SettingPage(QWidget):
         ):
             item.valueChanged.connect(self._refreshConditionalCards)
         cfg.aiMarkdownMachineCode.valueChanged.connect(self._onMachineCodeChanged)
+        self.antiPopupBlockCard.checkedChanged.connect(self._onAntiPopupBlockToggled)
+        self.disguisedNameCard.clicked.connect(self._onRerollDisguisedName)
+        self.antiBlockTip.goRequested.connect(self._onAntiBlockTipGo)
+        self.antiBlockTip.dismissedForNow.connect(self._onAntiBlockTipDismissForNow)
+        self.antiBlockTip.dismissedForever.connect(self._onAntiBlockTipDismissForever)
+        cfg.antiPopupBlockEnabled.valueChanged.connect(self._refreshConditionalCards)
+        # valueChanged 会把新值传进来，这两个槽不收参数，用 lambda 吞掉。
+        cfg.antiPopupBlockEnabled.valueChanged.connect(
+            lambda _=None: self._updateAntiBlockTip()
+        )
+        cfg.disguisedProductName.valueChanged.connect(
+            lambda _=None: self._updateDisguisedNameCard()
+        )
         for view in self.sectionStack.views():
             for cardList in view.cardLists():
                 for card in cardList.settingCards():
                     self._cardLists[card] = cardList
         self._refreshConditionalCards()
+        self._updateDisguisedNameCard()
+        self._updateAntiBlockTip()
 
     def _onBannerImageSourceChanged(self, source: str) -> None:
         scaleMode = BANNER_PRESET_SCALE_MODES.get(source)
@@ -1495,6 +1555,7 @@ class SettingPage(QWidget):
             self.dailyDriftCard: timeOffset,
             self.dailyDriftValueCard: timeOffset and bool(cfg.dailyDriftEnabled.value),
             self.timeOffsetExemptionCard: timeOffset,
+            self.disguisedNameCard: bool(cfg.antiPopupBlockEnabled.value),
         }
         for prefix, (_modeCard, colorCard, imageCard, scaleCard) in (
             self._backgroundCardSets.items()
@@ -1694,6 +1755,11 @@ class SettingPage(QWidget):
         isBack = current is not None and key in self.routeFor(current)
         self.highlight.clear()
         self._updateBreadcrumb(key)
+        # 先按目标页更新提示、再同步把 stack 调整到位，最后才切页：提示显隐会改变 stack
+        # 的高度，若留到切页后由延迟重排触发，resizeEvent 里的 stopAnimations 会把滑动动画
+        # 当场掐断。activate() 让这次重排在动画开始前同步做完。
+        self._updateAntiBlockTip(key)
+        self.vBoxLayout.activate()
         self.sectionStack.setCurrentView(key, isBack=isBack, animated=animated)
         if highlightCard is None:
             return
@@ -1762,7 +1828,79 @@ class SettingPage(QWidget):
     def showEvent(self, event) -> None:
         self._refreshCacheSize()
         self._refreshAIQuota()
+        self._updateAntiBlockTip()
         super().showEvent(event)
+
+    def _updateAntiBlockTip(self, currentKey: "str | None" = None) -> None:
+        if currentKey is None:
+            currentKey = self.sectionStack.currentKey()
+        visible = (
+            currentKey == ROOT_SECTION_KEY
+            and anti_popup_block.tipShouldShow(
+                bool(cfg.antiPopupBlockEnabled.value),
+                bool(cfg.antiPopupBlockTipDismissed.value),
+                self._antiBlockTipSessionDismissed,
+            )
+        )
+        self.antiBlockTipContainer.setVisible(visible)
+
+    def _updateDisguisedNameCard(self) -> None:
+        current = (cfg.disguisedProductName.value or "").strip()
+        current = current or anti_popup_block.DEFAULT_DISGUISED_NAME
+        self.disguisedNameCard.setContent(
+            f"随机换成另一个英文名，下次重启生效（当前：{current}）"
+        )
+
+    def _confirmAntiBlockRestart(self, content: str) -> bool:
+        box = MessageBox("反弹窗拦截", content, self.window())
+        box.yesButton.setText("立即重启")
+        box.cancelButton.setText("取消")
+        try:
+            return bool(box.exec())
+        finally:
+            box.deleteLater()
+
+    def _onAntiPopupBlockToggled(self, checked: bool) -> None:
+        # 取消重启时会回拨开关，下面的还原已挡掉回拨信号；这个标志是多一层重入保护。
+        if self._antiBlockApplying:
+            return
+        action = "开启" if checked else "关闭"
+        if self._confirmAntiBlockRestart(
+            f"{action}反弹窗拦截需要重启电教猫才能生效，现在重启？"
+        ):
+            self.antiPopupBlockApplyRequested.emit()
+            return
+        # 回拨开关会再发 checkedChanged；挡掉信号免得又进一次确认（连带 cfg 回拨的递归）。
+        self._antiBlockApplying = True
+        try:
+            with QSignalBlocker(self.antiPopupBlockCard.switchButton):
+                self.antiPopupBlockCard.setValue(not checked)
+        finally:
+            self._antiBlockApplying = False
+
+    def _onRerollDisguisedName(self) -> None:
+        newName = anti_popup_block.randomDisguisedName(
+            exclude=(cfg.disguisedProductName.value or "").strip()
+        )
+        if not self._confirmAntiBlockRestart(
+            f"把伪装名称换成「{newName}」并重启电教猫生效？"
+        ):
+            return
+        cfg.set(cfg.disguisedProductName, newName)
+        self.antiPopupBlockApplyRequested.emit()
+
+    def _onAntiBlockTipGo(self) -> None:
+        self.navigateToRoute(
+            ANTI_POPUP_BLOCK_SECTION_KEY, highlightCard=self.antiPopupBlockCard
+        )
+
+    def _onAntiBlockTipDismissForNow(self) -> None:
+        self._antiBlockTipSessionDismissed = True
+        self._updateAntiBlockTip()
+
+    def _onAntiBlockTipDismissForever(self) -> None:
+        cfg.set(cfg.antiPopupBlockTipDismissed, True)
+        self._updateAntiBlockTip()
 
     def _refreshCacheSize(self) -> None:
         try:

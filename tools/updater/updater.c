@@ -403,7 +403,358 @@ static BOOL installStagedTree(const wchar_t *appDir, const wchar_t *stagedDir,
     return TRUE;
 }
 
+/*
+ * 反弹窗拦截：把 djcat.exe 版本资源里的 ProductName 和 FileDescription 改成伪装名。
+ *
+ * 不做"按字符串等长覆盖字节"——伪装名长度任意。而是读出现有版本资源，用它从头重建
+ * 一份 VS_VERSIONINFO，只把这两个字符串换掉，其余（公司名、版本号、翻译、固定信息）
+ * 原样保留，再用 BeginUpdateResource/UpdateResource/EndUpdateResource 写回。
+ * 改坏了 exe 就起不来，所以先备份、写完校验，不通过就还原。
+ */
+
+#define APB_VS_VERSION_INFO_ID 1
+
+typedef struct {
+    BYTE *data;
+    size_t len;
+    size_t cap;
+    BOOL failed;
+} ByteBuf;
+
+static void bufBytes(ByteBuf *b, const void *src, size_t n) {
+    if (b->failed) return;
+    if (b->len + n > b->cap) {
+        size_t cap = b->cap ? b->cap : 256;
+        while (cap < b->len + n) cap *= 2;
+        BYTE *grown = (BYTE *)realloc(b->data, cap);
+        if (!grown) { b->failed = TRUE; return; }
+        b->data = grown;
+        b->cap = cap;
+    }
+    memcpy(b->data + b->len, src, n);
+    b->len += n;
+}
+
+static void bufU16(ByteBuf *b, WORD value) { bufBytes(b, &value, sizeof(value)); }
+
+static void bufWStr(ByteBuf *b, const wchar_t *text) {
+    bufBytes(b, text, (wcslen(text) + 1) * sizeof(wchar_t));
+}
+
+/* VS_VERSIONINFO 的每个节点都从 32 位边界开始。*/
+static void bufAlign(ByteBuf *b) {
+    BYTE zero = 0;
+    while (!b->failed && (b->len & 3) != 0) bufBytes(b, &zero, 1);
+}
+
+/* 写节点头（wLength 先占位）+ key + 对齐；返回起始偏移供 blockEnd 回填 wLength。*/
+static size_t blockBegin(ByteBuf *b, WORD valueLength, WORD type,
+                         const wchar_t *key) {
+    size_t start = b->len;
+    bufU16(b, 0);
+    bufU16(b, valueLength);
+    bufU16(b, type);
+    bufWStr(b, key);
+    bufAlign(b);
+    return start;
+}
+
+/* wLength 只到节点内容结束，不含为对齐下一个兄弟而补的填充。*/
+static void blockEnd(ByteBuf *b, size_t start) {
+    if (b->failed) return;
+    WORD length = (WORD)(b->len - start);
+    memcpy(b->data + start, &length, sizeof(length));
+}
+
+static const wchar_t *readVersionString(const void *info, WORD lang, WORD cp,
+                                        const wchar_t *key) {
+    wchar_t path[128];
+    formatPath(path, 128, L"\\StringFileInfo\\%04x%04x\\%ls", lang, cp, key);
+    void *value = NULL;
+    UINT length = 0;
+    if (VerQueryValueW((void *)info, path, &value, &length) && length)
+        return (const wchar_t *)value;
+    return NULL;
+}
+
+/* 保留的字符串键；ProductName 和 FileDescription 换成伪装名，其余照抄。*/
+static const wchar_t *const VERSION_STRING_KEYS[] = {
+    L"CompanyName", L"FileDescription", L"FileVersion", L"InternalName",
+    L"LegalCopyright", L"LegalTrademarks", L"OriginalFilename",
+    L"ProductName", L"ProductVersion", L"Comments",
+};
+
+static BOOL readFileVersionInfo(const wchar_t *exe, void **outInfo, DWORD *outSize) {
+    DWORD ignored = 0;
+    DWORD size = GetFileVersionInfoSizeW(exe, &ignored);
+    if (!size) return FALSE;
+    void *info = malloc(size);
+    if (!info) return FALSE;
+    if (!GetFileVersionInfoW(exe, 0, size, info)) {
+        free(info);
+        return FALSE;
+    }
+    *outInfo = info;
+    *outSize = size;
+    return TRUE;
+}
+
+static BOOL buildVersionBlob(const void *info, WORD lang, WORD cp,
+                             const wchar_t *newName, BYTE **outBlob,
+                             DWORD *outLen) {
+    void *fixed = NULL;
+    UINT fixedLen = 0;
+    if (!VerQueryValueW((void *)info, L"\\", &fixed, &fixedLen) || !fixedLen)
+        return FALSE;
+
+    ByteBuf b = {0};
+    size_t root = blockBegin(&b, (WORD)fixedLen, 0, L"VS_VERSION_INFO");
+    bufBytes(&b, fixed, fixedLen);
+    bufAlign(&b);
+
+    size_t stringInfo = blockBegin(&b, 0, 1, L"StringFileInfo");
+    wchar_t tableKey[9];
+    formatPath(tableKey, 9, L"%04x%04x", lang, cp);
+    size_t table = blockBegin(&b, 0, 1, tableKey);
+    for (size_t i = 0; i < sizeof(VERSION_STRING_KEYS) / sizeof(*VERSION_STRING_KEYS);
+         i++) {
+        const wchar_t *key = VERSION_STRING_KEYS[i];
+        const wchar_t *value =
+            (wcscmp(key, L"ProductName") == 0 || wcscmp(key, L"FileDescription") == 0)
+                ? newName
+                : readVersionString(info, lang, cp, key);
+        if (!value) continue;
+        bufAlign(&b);
+        WORD chars = (WORD)(wcslen(value) + 1);  /* String 的 wValueLength 以字符计 */
+        size_t node = blockBegin(&b, chars, 1, key);
+        bufWStr(&b, value);
+        blockEnd(&b, node);
+    }
+    blockEnd(&b, table);
+    blockEnd(&b, stringInfo);
+
+    bufAlign(&b);
+    size_t varInfo = blockBegin(&b, 0, 1, L"VarFileInfo");
+    size_t translation = blockBegin(&b, 4, 0, L"Translation");
+    WORD pair[2] = {lang, cp};
+    bufBytes(&b, pair, sizeof(pair));
+    blockEnd(&b, translation);
+    blockEnd(&b, varInfo);
+
+    blockEnd(&b, root);
+
+    if (b.failed) {
+        free(b.data);
+        return FALSE;
+    }
+    *outBlob = b.data;
+    *outLen = (DWORD)b.len;
+    return TRUE;
+}
+
+static BOOL readProductName(const wchar_t *exe, wchar_t *out, size_t outCount) {
+    void *info = NULL;
+    DWORD size = 0;
+    if (!readFileVersionInfo(exe, &info, &size)) return FALSE;
+    void *translation = NULL;
+    UINT length = 0;
+    BOOL ok = FALSE;
+    if (VerQueryValueW(info, L"\\VarFileInfo\\Translation", &translation, &length) &&
+        length >= 4) {
+        WORD *pair = (WORD *)translation;
+        const wchar_t *value = readVersionString(info, pair[0], pair[1], L"ProductName");
+        if (value) {
+            wcsncpy(out, value, outCount - 1);
+            out[outCount - 1] = L'\0';
+            ok = TRUE;
+        }
+    }
+    free(info);
+    return ok;
+}
+
+/* RT_VERSION 资源在 PE 里的语言，未必等于翻译里的 langID；用它更新才替换而不是新增一条。*/
+static WORD g_versionResourceLang;
+static BOOL g_versionResourceLangFound;
+
+static BOOL CALLBACK enumVersionLangProc(HMODULE module, LPCWSTR type, LPCWSTR name,
+                                         WORD lang, LONG_PTR param) {
+    (void)module;
+    (void)type;
+    (void)name;
+    (void)param;
+    g_versionResourceLang = lang;
+    g_versionResourceLangFound = TRUE;
+    return FALSE;  /* 第一个就够 */
+}
+
+static BOOL versionResourceLang(const wchar_t *exe, WORD *outLang) {
+    HMODULE module = LoadLibraryExW(exe, NULL, LOAD_LIBRARY_AS_DATAFILE);
+    if (!module) return FALSE;
+    g_versionResourceLangFound = FALSE;
+    g_versionResourceLang = 0;
+    EnumResourceLanguagesW(module, RT_VERSION,
+                           MAKEINTRESOURCEW(APB_VS_VERSION_INFO_ID),
+                           enumVersionLangProc, 0);
+    FreeLibrary(module);
+    if (!g_versionResourceLangFound) return FALSE;
+    *outLang = g_versionResourceLang;
+    return TRUE;
+}
+
+static BOOL stampProductName(const wchar_t *exe, const wchar_t *newName) {
+    void *info = NULL;
+    DWORD size = 0;
+    if (!readFileVersionInfo(exe, &info, &size)) {
+        logMsg(L"读不到现有版本资源，放弃改名");
+        return FALSE;
+    }
+    void *translation = NULL;
+    UINT translationLen = 0;
+    if (!VerQueryValueW(info, L"\\VarFileInfo\\Translation", &translation,
+                        &translationLen) || translationLen < 4) {
+        logMsg(L"读不到翻译信息，放弃改名");
+        free(info);
+        return FALSE;
+    }
+    WORD lang = ((WORD *)translation)[0];
+    WORD codepage = ((WORD *)translation)[1];
+    BYTE *blob = NULL;
+    DWORD blobLen = 0;
+    BOOL built = buildVersionBlob(info, lang, codepage, newName, &blob, &blobLen);
+    free(info);
+    if (!built) {
+        logMsg(L"重建版本资源失败");
+        return FALSE;
+    }
+
+    WORD resourceLang = lang;
+    if (!versionResourceLang(exe, &resourceLang)) {
+        /* 读不到 RT_VERSION 的真实资源语言时退回翻译里的语言；两者不一致会让
+           UpdateResource 新增一条而不是替换，伪装就白改了——极少见，记一行好排查。*/
+        resourceLang = lang;
+        logMsg(L"读不到 RT_VERSION 资源语言，回退用翻译语言 0x%04x", lang);
+    }
+
+    wchar_t backup[PATH_BUF];
+    formatPath(backup, PATH_BUF, L"%ls.apb-backup", exe);
+    DeleteFileW(backup);
+    if (!CopyFileW(exe, backup, FALSE)) {
+        logMsg(L"无法备份 \"%ls\"，放弃改名 (err %lu)", exe, GetLastError());
+        free(blob);
+        return FALSE;
+    }
+
+    BOOL ok = FALSE;
+    HANDLE update = BeginUpdateResourceW(exe, FALSE);
+    if (update) {
+        BOOL wrote = UpdateResourceW(update, RT_VERSION,
+                                     MAKEINTRESOURCEW(APB_VS_VERSION_INFO_ID),
+                                     resourceLang, blob, blobLen);
+        if (!EndUpdateResourceW(update, !wrote)) wrote = FALSE;
+        if (wrote) {
+            wchar_t check[256];
+            ok = readProductName(exe, check, 256) && wcscmp(check, newName) == 0;
+            if (!ok) logMsg(L"改名后校验不通过");
+        } else {
+            logMsg(L"写入版本资源失败 (err %lu)", GetLastError());
+        }
+    } else {
+        logMsg(L"BeginUpdateResource 失败 (err %lu)", GetLastError());
+    }
+    free(blob);
+
+    if (ok) {
+        DeleteFileW(backup);
+    } else if (CopyFileW(backup, exe, FALSE)) {
+        DeleteFileW(backup);
+        logMsg(L"已从备份还原 exe");
+    } else {
+        logMsg(L"还原失败，备份留在 \"%ls\"", backup);
+    }
+    return ok;
+}
+
+/* 用登录用户的身份重启 DJCat（提权时经 Explorer 令牌降权），返回是否起来了。*/
+static BOOL relaunchApp(const wchar_t *exePath, const wchar_t *workingDir) {
+    logMsg(L"launching \"%ls\"", exePath);
+    if (isElevated() && startAppAsUser(exePath, workingDir)) {
+        logMsg(L"relaunched DJCat with the logged-in user's token");
+        return TRUE;
+    }
+    STARTUPINFOW startup = {.cb = sizeof(startup)};
+    PROCESS_INFORMATION process = {0};
+    if (CreateProcessW(exePath, NULL, NULL, NULL, FALSE, 0, NULL, workingDir,
+                       &startup, &process)) {
+        CloseHandle(process.hProcess);
+        CloseHandle(process.hThread);
+        return TRUE;
+    }
+    logMsg(L"CreateProcess failed (err %lu), falling back to ShellExecute",
+           GetLastError());
+    if ((INT_PTR)ShellExecuteW(NULL, L"open", exePath, NULL, workingDir,
+                               SW_SHOWNORMAL) <= 32) {
+        logMsg(L"could not relaunch DJCat");
+        return FALSE;
+    }
+    return TRUE;
+}
+
+/*
+ * 反弹窗拦截模式：等 DJCat 退出 → 改 exe 的产品名 → 降权重启。
+ * 只改一个文件、不动目录，所以不必像更新那样把自己挪出 app_dir。
+ * Usage: updater.exe --stamp-product-name <pid> <exe_path> <product_name>
+ */
+static int stampMode(int argc, wchar_t **argv) {
+    if (argc < 5) {
+        fwprintf(stderr,
+                 L"Usage: updater.exe --stamp-product-name <pid> <exe> <name>\n");
+        return EXIT_BAD_ARGS;
+    }
+    DWORD pid = (DWORD)_wtoi(argv[2]);
+    wchar_t exe[PATH_BUF], name[PATH_BUF], dir[PATH_BUF];
+    formatPath(exe, PATH_BUF, L"%ls", argv[3]);
+    formatPath(name, PATH_BUF, L"%ls", argv[4]);
+    normalizeSeparators(exe);
+    formatPath(dir, PATH_BUF, L"%ls", exe);
+    directoryOf(dir);
+
+    openLog(dir);
+    logMsg(L"=== stamp-product-name pid=%lu exe=\"%ls\" name=\"%ls\" ===", pid, exe,
+           name);
+
+    waitForProcess(pid);
+
+    if (!canWriteDir(dir)) {
+        if (!isElevated()) {
+            logMsg(L"\"%ls\" 不可写，请求提权", dir);
+            closeLog();
+            if (restartElevated(argc, argv)) return EXIT_OK;
+            openLog(dir);
+            logMsg(L"提权被拒或无法启动");
+        } else {
+            logMsg(L"提权后仍不可写");
+        }
+        /* 改不了也要把 DJCat 拉回来，别让用户以为软件没了。*/
+        relaunchApp(exe, dir);
+        closeLog();
+        return EXIT_NOT_WRITABLE;
+    }
+
+    if (stampProductName(exe, name))
+        logMsg(L"产品名已改为 \"%ls\"", name);
+    else
+        logMsg(L"改名失败，exe 保持原样");
+
+    relaunchApp(exe, dir);
+    logMsg(L"=== stamp finished ===\n");
+    closeLog();
+    return EXIT_OK;
+}
+
 int wmain(int argc, wchar_t *argv[]) {
+    if (argc >= 2 && wcscmp(argv[1], L"--stamp-product-name") == 0)
+        return stampMode(argc, argv);
     if (argc < 5) {
         fwprintf(stderr,
                  L"Usage: updater.exe <pid> <app_dir> <exe_path> <staging_dir>\n");
@@ -504,25 +855,16 @@ int wmain(int argc, wchar_t *argv[]) {
                    backupDir);
     }
 
-    logMsg(L"launching \"%ls\"", exePath);
-    STARTUPINFOW startup = { .cb = sizeof(startup) };
-    PROCESS_INFORMATION process = {0};
-    int status = installed ? EXIT_OK : EXIT_SWAP_FAILED;
-    if (isElevated() && startAppAsUser(exePath, appDir)) {
-        logMsg(L"relaunched DJCat with the logged-in user's token");
-    } else if (CreateProcessW(exePath, NULL, NULL, NULL, FALSE, 0, NULL, appDir,
-                              &startup, &process)) {
-        CloseHandle(process.hProcess);
-        CloseHandle(process.hThread);
-    } else {
-        logMsg(L"CreateProcess failed (err %lu), falling back to ShellExecute",
-               GetLastError());
-        if ((INT_PTR)ShellExecuteW(NULL, L"open", exePath, NULL, appDir,
-                                   SW_SHOWNORMAL) <= 32) {
-            logMsg(L"could not relaunch DJCat");
-            status = EXIT_LAUNCH_FAILED;
-        }
+    /* 反弹窗拦截开着时，换完整目录后产品名又成了诚实名；重启前顺带重套，省一次重启。*/
+    if (installed && argc > 5 && argv[5][0] != L'\0') {
+        logMsg(L"反弹窗拦截：更新后把产品名重套为 \"%ls\"", argv[5]);
+        if (!stampProductName(exePath, argv[5]))
+            logMsg(L"重套产品名失败，产品名保持为新版本默认值");
     }
+
+    int status = installed ? EXIT_OK : EXIT_SWAP_FAILED;
+    if (!relaunchApp(exePath, appDir) && status == EXIT_OK)
+        status = EXIT_LAUNCH_FAILED;
 
     logMsg(L"=== updater finished (exit %d) ===\n", status);
     closeLog();

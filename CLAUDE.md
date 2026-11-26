@@ -30,6 +30,7 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 - **Error Report** 由服务端按 **Error Signature** 归并成组，每组按 Machine Identity 和日期各记一行次数；Machine Code 只是显示用的别名。
 - **Daily Quota** 按 Machine Identity 取：有 **Quota Override** 用它，否则用 **Default Daily Quota**。Quota Override 只改上限，不碰当天已用的点数，也不改扣点规则。
 - **Setting Section** 按 Setting Route 组成一棵树；根只有导航行，其他有子 Section 的节点可以在导航行之外放 Setting Card，但 Setting Preview 只在叶子上、每个至多一份，同一条 Route 上不重复（`tests/test_setting_sections.py` 检查）。Setting Suggestion 指向卡片及其 Route，不改变任何页面内容。
+- **反弹窗拦截** 开着时把 `djcat.exe` 版本资源里的 ProductName 改成伪装产品名，躲开按产品名误判的「弹窗拦截 / 桌面管理」类软件；关着写回「电教猫 Pro 5」。它只改电教猫自身呈现，不碰任何第三方软件。界面里显示的标题仍是 `APP_NAME`／`cfg.windowTitle`，与版本资源无关。开关在根下的「反弹窗拦截」叶子 Section，反拦截提示挂在设置顶层页（不进根 Section）。理由见 `docs/adr/0014-anti-window-close-productname-disguise.md`。
 
 ## Ownership rules
 
@@ -219,6 +220,8 @@ Portable Mode 的 `APP_DIR\DJCatPro` 在换名前**改名**进新目录，不是
 
 `restoreUpdaterBinary()` 只为从旧版本升上来的那一次保留：旧更新器仍会留下 `updater.exe.old`。新更新器不再改名自己。
 
+**`app/common/anti_popup_block.py` 独占反弹窗拦截的规则。** 开着时的伪装产品名默认 `DJCat Pro`，`randomDisguisedName()` 换成英文词拼接加一位 2–9 数字的随机名；`desiredProductName()` 给出目标名（开=伪装名、关=`APP_NAME`），`needsReapply()` 用 `exeProductName()`（只读读取磁盘上现有产品名，读不到返回 None、不触发）比对决定要不要重套，`tipShouldShow()` 决定反拦截提示显隐。它不写文件：运行中的 exe 被锁，改写交给 `updater.exe` 的 `--stamp-product-name` 模式在退出后做——从现有版本资源重建 VS_VERSIONINFO、只换 ProductName/FileDescription、带备份校验和失败回滚，再降权重启（和 Client Update 共用那套等待退出、提权、降权重启）。界面开关、换名按钮和反拦截提示由设置页拥有：提示挂在设置顶层页（面包屑下、内容上，不进根 Section，不破坏「根页只有导航行」），开关所在的「反弹窗拦截」是根下叶子 Section、可被设置搜索搜到。开/关/换名都要重启，由 MainWindow 的 `_applyAntiPopupBlock()` 起 updater 后退出；Client Update 把目标名作第 6 个参数交给 updater，换完目录重启前顺带重套，省一次重启；启动自检 `_checkAntiPopupBlockAtStartup()` 发现被更新或重装还原了就弹一次 InfoBar 让用户「立即恢复」，不静默自动重启以免成环。源码运行和非 Windows 只存设置、不改 exe。理由见 `docs/adr/0014-anti-window-close-productname-disguise.md`。
+
 ### CI
 
 `updater.exe` 由发版流水线在 windows-2022 上用 MSVC 构建，本地不需要环境。`.github/workflows/tests.yml` 在每次推送和 PR 时跑全量测试并用同样的命令构建一次 updater；`main.yml` 发版前通过 `workflow_call` 再调用它。`main.yml` 本身在发版触发路径里，改它合并到 main 时若没改版本号，`prepare` 会因 tag 已存在失败退出，不会发版。工作流里每条原生命令单独占一步；Windows 上的 offscreen 测试需要 `QT_QPA_FONTDIR` 指向系统字体目录。
@@ -353,7 +356,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/platform/wallpaper.py` | 用 `SystemParametersInfoW` 换当前用户的桌面壁纸 |
 | `app/common/clock.py` | Calibrated Time、Time Offset（含 Daily Drift）和 Bell Time：所有"现在几点"的来源 |
 | `app/common/time_sync.py` | Time Sync：NTP 查询、后台同步、何时重新同步和同步状态；不知道设置页 |
-| `tools/updater/updater.c` | Client Update 的独立更新器：等待进程退出、把暂存目录整目录换名为程序目录（失败时换回备份）、重启 DJCat |
+| `tools/updater/updater.c` | Client Update 的独立更新器：等待进程退出、把暂存目录整目录换名为程序目录（失败时换回备份）、重启 DJCat；另有 `--stamp-product-name` 模式供反弹窗拦截改写版本资源里的产品名（重建 VS_VERSIONINFO、备份校验回滚） |
 | `app/view/windows/main_window.py` | 桌面组合根、导航、长期运行任务和 Client Update UI |
 | `app/view/windows/application_relocation.py` | 更改 Application Install Location 的界面流程：检查、提权、确认、后台迁移和 Relocation Toast |
 | `app/view/windows/memory_release.py` | 主窗口藏在托盘时交还内存的时机：十分钟后卸页面、修剪，静默启动后修剪一次 |
@@ -379,6 +382,8 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/common/application_icon.py` | Application Icon 与 Tray Icon 的解析：主窗口、启动页、托盘与 Tray Menu“主页”共用一处 |
 | `app/common/logs.py` | Log 的位置、14 天保留、Cache 中可清理的日志，以及旧 `APP_DIR\Log` 的迁入 |
 | `app/common/error_report.py` | Error Report 的客户端一侧：整理调用栈、去掉安装位置和用户名、同一次运行去重、后台上报 |
+| `app/common/anti_popup_block.py` | 反弹窗拦截的规则：伪装产品名的取值与随机换名、只读读出磁盘上现有产品名、启动自检与提示显隐；不写 exe、不碰 Qt |
+| `app/view/components/anti_block_tip.py` | 反拦截提示横幅：文案、× 本次隐藏、「前往开启」与「不再显示」三个信号；显隐与持久化由设置页决定 |
 | `pyqt_github_markdown/` | 项目内置 Markdown 渲染器；不承载 DJCat 业务规则 |
 
 `app/common/application_version.py` 只包含架构和版本比较等纯函数，允许 MainWindow 在启动阶段导入。重量较大的 `app/common/application_store.py`、Custom Home Card 编辑器和 Markdown 渲染器分别在对应页面、编辑操作或更新日志首次需要时导入；`edge_tts` 依赖只在实际查询音色或合成语音时导入。
