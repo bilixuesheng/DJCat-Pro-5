@@ -32,6 +32,10 @@ from qfluentwidgets.components.settings.expand_setting_card import (
 
 QWIDGETSIZE_MAX = (1 << 24) - 1
 
+# QFluentWidgets 的 Setting Card 有说明时高 70，没有说明时高 50。
+SETTING_CARD_HEIGHT = 70
+SETTING_CARD_HEIGHT_WITHOUT_CONTENT = 50
+
 
 def setRevealPainting(widget: QWidget, enabled: bool) -> None:
     if enabled:
@@ -168,6 +172,64 @@ class SettingMaterialCard(CardWidget):
         return paintFilter
 
 
+class ContentWrapFilter(QObject):
+    """Wraps a Setting Card's description onto as many lines as it needs.
+
+    One line keeps QFluentWidgets' card height; each further line adds its own
+    height, so the space above the title and below the description never changes.
+    """
+
+    def wrap(self, card: SettingCard) -> None:
+        content = card.contentLabel
+        content.setWordWrap(True)
+        # setSizePolicy 会覆盖 setWordWrap 打开的按宽算高，要自己带上。
+        policy = QSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        policy.setHeightForWidth(True)
+        content.setSizePolicy(policy)
+        # 带垂直对齐的布局把高度截到 sizeHint，而 QLabel 的 sizeHint 是按它自己估的宽度
+        # 排的行：说明一换行就被截短。所以两层都不再对齐：文字列靠上下边距正好撑满卡片，
+        # 其余控件各自按 sizeHint 居中。
+        card.hBoxLayout.setAlignment(Qt.AlignmentFlag(0))
+        for index in range(card.hBoxLayout.count()):
+            item = card.hBoxLayout.itemAt(index)
+            if item.layout() is card.vBoxLayout or item.spacerItem() is not None:
+                continue
+            item.setAlignment(item.alignment() | Qt.AlignmentFlag.AlignVCenter)
+        card.hBoxLayout.invalidate()
+        card.vBoxLayout.setAlignment(Qt.AlignmentFlag(0))
+        card.setMaximumHeight(QWIDGETSIZE_MAX)
+        card.titleLabel.installEventFilter(self)
+        content.installEventFilter(self)
+        self._fit(card)
+
+    @staticmethod
+    def _fit(card: SettingCard) -> None:
+        title, content = card.titleLabel, card.contentLabel
+        # 组件库只在构造时按有没有说明定高，之后 setContent 换上说明也不变。
+        if content.isHidden():
+            height = SETTING_CARD_HEIGHT_WITHOUT_CONTENT
+            block = title.fontMetrics().height()
+        else:
+            height = SETTING_CARD_HEIGHT
+            # 过滤器先于标签自己收到 FontChange，sizeHint 还是旧字体的缓存，直接量字体。
+            block = title.fontMetrics().height() + content.fontMetrics().height()
+        # 向下取整：一行时文字列比卡片矮不到 1 px，由最小高度补齐，卡片不变高。
+        margin = max(0, (height - block) // 2)
+        card.vBoxLayout.setContentsMargins(0, margin, 0, margin)
+        card.setMinimumHeight(height)
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() in (
+            QEvent.Type.FontChange,
+            QEvent.Type.ShowToParent,
+            QEvent.Type.HideToParent,
+        ):
+            card = obj.parent()
+            if isinstance(card, SettingCard):
+                self._fit(card)
+        return False
+
+
 class CollapsibleSettingCard(QWidget):
     def __init__(self, icon, title: str, content: str | None = None, parent=None):
         super().__init__(parent)
@@ -194,9 +256,9 @@ class CollapsibleSettingCard(QWidget):
 
         self.expandAnimation.setDuration(200)
         self.expandAnimation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        # 高度由布局给：表头的说明可能换行，展开区跟着 view 的 maximumHeight 动画走。
         self.view.setMaximumHeight(0)
         setRevealPainting(self.viewContent, False)
-        self.setFixedHeight(self.card.height())
         self.view.setObjectName("view")
 
         FluentStyleSheet.EXPAND_SETTING_CARD.apply(self.card)
@@ -262,9 +324,7 @@ class CollapsibleSettingCard(QWidget):
         self._onExpandValueChanged(height)
 
     def _onExpandValueChanged(self, height) -> None:
-        height = int(height)
-        self.setFixedHeight(self.card.height() + height)
-        setRevealPainting(self.viewContent, height > 0)
+        setRevealPainting(self.viewContent, int(height) > 0)
 
     def _onExpandClicked(self) -> None:
         self.setExpand(not self.isExpand)
@@ -331,6 +391,7 @@ class SettingCardList(SettingMaterialCard):
         self.cardLayout = QVBoxLayout(self)
         self.cardPaintFilter = CardPaintFilter(self)
         self.labelElideFilter = LabelElideFilter(self)
+        self.contentWrapFilter = ContentWrapFilter(self)
         self._settingCards = []
         self._itemSeparators = []
 
@@ -361,14 +422,16 @@ class SettingCardList(SettingMaterialCard):
         for widget in targets:
             widget.installEventFilter(self.cardPaintFilter)
             if isinstance(widget, SettingCard):
+                # 标题一行放不下时省略；说明从不省略，放不下就换行。
+                widget.titleLabel.setWordWrap(False)
+                widget.titleLabel.setSizePolicy(
+                    QSizePolicy.Policy.Ignored,
+                    QSizePolicy.Policy.Preferred,
+                )
+                widget.titleLabel.installEventFilter(self.labelElideFilter)
                 for label in (widget.titleLabel, widget.contentLabel):
-                    label.setWordWrap(False)
-                    label.setSizePolicy(
-                        QSizePolicy.Policy.Ignored,
-                        QSizePolicy.Policy.Preferred,
-                    )
                     widget.vBoxLayout.setAlignment(label, Qt.AlignmentFlag.AlignVCenter)
-                    label.installEventFilter(self.labelElideFilter)
+                self.contentWrapFilter.wrap(widget)
                 widget.hBoxLayout.setStretchFactor(widget.vBoxLayout, 1 << 16)
 
     def addSettingCards(self, cards: list[QWidget]) -> None:

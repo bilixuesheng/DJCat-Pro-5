@@ -14,7 +14,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
-from qfluentwidgets import FluentIcon, MessageBox, StrongBodyLabel
+from qfluentwidgets import FluentIcon, MessageBox, SettingCard, StrongBodyLabel
 from shiboken6 import delete
 
 from app.common import clock, install_location
@@ -24,7 +24,11 @@ from app.config.cfg import BANNER_IMAGE_PRESETS, CUSTOM_TIME_SERVER, cfg
 from app.config.constants import APP_NAME
 from app.config.paths import LOG_DIR
 from app.signal_bus import signalBus
-from app.view.components.setting_card_group import SettingCardList
+from app.view.components.setting_card_group import (
+    SETTING_CARD_HEIGHT,
+    SETTING_CARD_HEIGHT_WITHOUT_CONTENT,
+    SettingCardList,
+)
 from app.view.components.setting_section import (
     BLOCK_SPACING,
     CARD_SPACING,
@@ -90,10 +94,16 @@ class SettingSectionTest(TestCase):
         page = self.buildPage()
         root = page.sectionStack.view(ROOT_SECTION_KEY)
         layout = root.vBoxLayout
-        rootWidgets = [layout.itemAt(i).widget() for i in range(layout.count())]
+        rootWidgets = [
+            layout.itemAt(i).widget()
+            for i in range(layout.count())
+            if layout.itemAt(i).widget() is not None
+        ]
 
+        # 根只放导航行，以及排在它们前面的反拦截提示。
+        self.assertIs(rootWidgets[0], page.antiBlockTipContainer)
         self.assertTrue(
-            all(isinstance(widget, SettingNavigationCard) for widget in rootWidgets)
+            all(isinstance(widget, SettingNavigationCard) for widget in rootWidgets[1:])
         )
         for view in page.sectionStack.views():
             with self.subTest(section=view.key):
@@ -579,6 +589,74 @@ class SettingSectionTest(TestCase):
         cfg.set(cfg.timeSyncEnabled, False)
         self.assertEqual(shown(), ["system", "bell"])
 
+    def eachVisibleSettingCard(self, page):
+        for view in page.sectionStack.views():
+            page.navigateToRoute(view.key, animated=False)
+            self.app.processEvents()
+            for card in view.settingCards():
+                for settingCard in [card, *card.findChildren(SettingCard)]:
+                    if isinstance(settingCard, SettingCard) and settingCard.isVisibleTo(page):
+                        yield view.key, settingCard
+
+    def testLongDescriptionWrapsInsteadOfBeingCutOff(self):
+        page = self.buildPage()
+        self.navigate(page, "antiPopupBlock")
+        card = page.antiPopupBlockCard
+        label = card.contentLabel
+
+        self.assertTrue(label.wordWrap())
+        # 折成几行看字体：Windows 的微软雅黑在这个宽度是两行，别的字体可能是三行。
+        self.assertGreater(label.height(), label.fontMetrics().height())
+        self.assertEqual(label.height(), label.heightForWidth(label.width()))
+        self.assertGreater(card.height(), SETTING_CARD_HEIGHT)
+
+    def testWrappedCardKeepsTheMarginsOfAOneLineCard(self):
+        page = self.buildPage()
+
+        def margins(card):
+            top = card.titleLabel.geometry().top()
+            bottom = card.height() - card.contentLabel.geometry().bottom() - 1
+            return top, bottom
+
+        self.navigate(page, "software.developer")
+        oneLine = page.showFrameRateCard
+        self.assertEqual(oneLine.height(), SETTING_CARD_HEIGHT)
+        expected = margins(oneLine)
+
+        self.navigate(page, "antiPopupBlock")
+        for actual, wanted in zip(margins(page.antiPopupBlockCard), expected):
+            self.assertLessEqual(abs(actual - wanted), 1)
+
+    def testNoDescriptionIsSqueezedAtAnyWidth(self):
+        page = self.buildPage()
+        # 650 约是主窗口最窄时设置页的宽度；更窄的 400 让说明比 QLabel 自己估的排版宽度
+        # 还窄，卡片和它外面带对齐的布局都不能把它截短。
+        for width in (650, 400):
+            page.resize(width, 640)
+            for key, card in self.eachVisibleSettingCard(page):
+                label = card.contentLabel
+                if label.isHidden():
+                    continue
+                with self.subTest(width=width, section=key, card=card.titleLabel.text()):
+                    self.assertGreaterEqual(
+                        label.height(), label.heightForWidth(label.width())
+                    )
+
+    def testOneLineDescriptionsKeepTheCardHeight(self):
+        page = self.buildPage()
+        page.resize(1600, 640)
+        for key, card in self.eachVisibleSettingCard(page):
+            label = card.contentLabel
+            if not label.isHidden() and label.height() > label.fontMetrics().height():
+                continue
+            with self.subTest(section=key, card=card.titleLabel.text()):
+                self.assertEqual(
+                    card.height(),
+                    SETTING_CARD_HEIGHT_WITHOUT_CONTENT
+                    if label.isHidden()
+                    else SETTING_CARD_HEIGHT,
+                )
+
     def testShortSectionListDoesNotStretchToThePageBottom(self):
         page = self.buildPage()
         page.resize(900, 1200)
@@ -587,7 +665,7 @@ class SettingSectionTest(TestCase):
         while not isinstance(cardList, SettingCardList):
             cardList = cardList.parentWidget()
 
-        self.assertEqual(cardList.height(), cardList.sizeHint().height())
+        self.assertEqual(cardList.height(), cardList.heightForWidth(cardList.width()))
         self.assertLess(
             cardList.geometry().bottom(),
             page.sectionStack.view("broadcast.aiMarkdown").viewport().height() - 100,

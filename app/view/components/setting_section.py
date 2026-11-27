@@ -267,6 +267,7 @@ class SettingSectionView(ScrollArea):
         self._cardLists = []
         self._navigationCards = []
         self._previews = []
+        self._hasBlocks = False
         self._lastIsCard = False
 
         self._initWidget()
@@ -279,8 +280,18 @@ class SettingSectionView(ScrollArea):
         self.enableTransparentBackground()
         self.vBoxLayout.setContentsMargins(11, 4, 11, 36)
         self.vBoxLayout.setSpacing(CARD_SPACING)
-        self.vBoxLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        # 内容比视口矮时多出的高度交给末尾的弹簧。AlignTop 在 Section 里有竖向可伸展的
+        # 预览时不起作用，原先靠列表的 Maximum 把它卡在 sizeHint；Setting Card 的高度
+        # 跟着宽度变以后 sizeHint 按最窄的宽度算，卡不住了，列表的底板会被拉到页底。
+        self.vBoxLayout.addStretch(1)
         self.enableOpaqueScrolling()
+
+    def _insertBeforeStretch(self, widget: QWidget, alignment=None) -> None:
+        index = self.vBoxLayout.count() - 1
+        if alignment is None:
+            self.vBoxLayout.insertWidget(index, widget)
+        else:
+            self.vBoxLayout.insertWidget(index, widget, 0, alignment)
 
     def _addBlock(
         self,
@@ -289,14 +300,27 @@ class SettingSectionView(ScrollArea):
         alignment: Qt.AlignmentFlag | None = None,
     ) -> None:
         # QBoxLayout 的间距只算在非空项之间，垫块两侧不另加：4 + 6 正好是 10。
-        if self.vBoxLayout.count() and not (isCard and self._lastIsCard):
-            self.vBoxLayout.addSpacing(BLOCK_SPACING - CARD_SPACING)
+        if self._hasBlocks and not (isCard and self._lastIsCard):
+            self.vBoxLayout.insertSpacing(
+                self.vBoxLayout.count() - 1, BLOCK_SPACING - CARD_SPACING
+            )
         widget.setParent(self.container)
-        if alignment is None:
-            self.vBoxLayout.addWidget(widget)
-        else:
-            self.vBoxLayout.addWidget(widget, 0, alignment)
+        self._insertBeforeStretch(widget, alignment)
+        self._hasBlocks = True
         self._lastIsCard = isCard
+
+    def addTip(self, tip: QWidget) -> QWidget:
+        """A tip above everything else in the Section. It brings its own gap to the
+        next block, so hiding it (the returned holder) leaves no empty space."""
+        holder = QWidget(self.container)
+        layout = QVBoxLayout(holder)
+        layout.setContentsMargins(0, 0, 0, BLOCK_SPACING - CARD_SPACING)
+        layout.addWidget(tip)
+        self._insertBeforeStretch(holder)
+        # 下一张卡与它之间只剩布局的 4 px，加上自带的 6 px 正好 10。
+        self._hasBlocks = True
+        self._lastIsCard = True
+        return holder
 
     def addPreview(self, widget: QWidget, centered: bool = False) -> QWidget:
         """``centered`` is for fixed-size previews; stretchy ones would shrink to
@@ -355,7 +379,22 @@ class SettingSectionView(ScrollArea):
 
     def scrollToCard(self, card: QWidget) -> None:
         top = card.mapTo(self.container, QPoint()).y()
-        value = max(0, top - self.vBoxLayout.contentsMargins().top())
+        self._scrollTo(max(0, top - self.vBoxLayout.contentsMargins().top()))
+
+    def scrollCardIntoView(self, card: QWidget) -> None:
+        """Scroll only as far as it takes to show the whole card; a card already in
+        full view stays where it is."""
+        margin = self.vBoxLayout.contentsMargins().top()
+        top = card.mapTo(self.container, QPoint()).y() - margin
+        bottom = top + card.height() + 2 * margin
+        current = self.verticalScrollBar().value()
+        viewportHeight = self.viewport().height()
+        if top < current:
+            self._scrollTo(max(0, top))
+        elif bottom > current + viewportHeight:
+            self._scrollTo(min(top, bottom - viewportHeight))
+
+    def _scrollTo(self, value: int) -> None:
         delegate = getattr(self, "delegate", None)
         scrollBar = getattr(delegate, "vScrollBar", None)
         if scrollBar is None:
