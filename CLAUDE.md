@@ -220,7 +220,7 @@ Portable Mode 的 `APP_DIR\DJCatPro` 在换名前**改名**进新目录，不是
 
 `restoreUpdaterBinary()` 只为从旧版本升上来的那一次保留：旧更新器仍会留下 `updater.exe.old`。新更新器不再改名自己。
 
-**`app/common/anti_popup_block.py` 独占反弹窗拦截的规则。** 开着时的伪装产品名默认 `DJCat Pro`，`randomDisguisedName()` 换成英文词拼接加一位 2–9 数字的随机名；`desiredProductName()` 给出目标名（开=伪装名、关=`APP_NAME`），`needsReapply()` 用 `exeProductName()`（只读读取磁盘上现有产品名，读不到返回 None、不触发）比对决定要不要重套，`tipShouldShow()` 决定反拦截提示显隐。它不写文件：运行中的 exe 被锁，改写交给 `updater.exe` 的 `--stamp-product-name` 模式在退出后做——从现有版本资源重建 VS_VERSIONINFO、只换 ProductName/FileDescription、带备份校验和失败回滚，再降权重启（和 Client Update 共用那套等待退出、提权、降权重启）。界面开关、换名按钮和反拦截提示由设置页拥有：提示挂在设置顶层页（面包屑下、内容上，不进根 Section，不破坏「根页只有导航行」），开关所在的「反弹窗拦截」是根下叶子 Section、可被设置搜索搜到。开/关/换名都要重启，由 MainWindow 的 `_applyAntiPopupBlock()` 起 updater 后退出；Client Update 把目标名作第 6 个参数交给 updater，换完目录重启前顺带重套，省一次重启；启动自检 `_checkAntiPopupBlockAtStartup()` 发现被更新或重装还原了就弹一次 InfoBar 让用户「立即恢复」，不静默自动重启以免成环。源码运行和非 Windows 只存设置、不改 exe。理由见 `docs/adr/0014-anti-window-close-productname-disguise.md`。
+**`app/common/anti_popup_block.py` 独占反弹窗拦截的规则。** 开着时的伪装产品名默认 `DJCat Pro`，`randomDisguisedName()` 换成英文词拼接加一位 2–9 数字的随机名；`desiredProductName()` 给出目标名（开=伪装名、关=`APP_NAME`），`needsReapply()` 用 `exeProductName()`（只读读取磁盘上现有产品名，读不到返回 None、不触发）比对决定要不要重套，`tipShouldShow()` 决定反拦截提示显隐。它不写文件：运行中的 exe 被锁，改写交给 `updater.exe` 的 `--stamp-product-name` 模式在退出后做——从现有版本资源重建 VS_VERSIONINFO、只换 ProductName/FileDescription、带备份校验和失败回滚，再降权重启（和 Client Update 共用那套等待退出、提权、降权重启）。界面开关、换名按钮和反拦截提示由设置页拥有：提示挂在设置顶层页（面包屑下、内容上，不进根 Section，不破坏「根页只有导航行」），开关所在的「反弹窗拦截」是根下叶子 Section、可被设置搜索搜到。开/关/换名都要重启，由 MainWindow 的 `_applyAntiPopupBlock(silent=)` 起 updater 后退出；Client Update 把目标名作第 6 个参数交给 updater，换完目录重启前顺带重套，省一次重启；启动自检 `_checkAntiPopupBlockAtStartup()` 发现被更新或重装还原了就弹一次 InfoBar 让用户「立即恢复」，不静默自动重启以免成环。源码运行和非 Windows 只存设置、不改 exe。管理模式分自动/手动（`cfg.antiPopupBlockMode`，默认自动）：手动管理用 `randomDisguisedName()` 随机换名或 `normalizeCustomName()` 校验过的自定义名（最低校验：非空、不等于诚实名，不拦中文）；自动管理按 `cfg.antiPopupBlockRotateDays`（默认 3，1–30）在**启动时**经 `startupRotationPlan()` 判到点，由 MainWindow 的 `_maybeAutoRotateDisguise()` 换随机名重启，**先把 `cfg.antiPopupBlockRotatedOn`（上次换名日期）落定再重启**以防改名失败时成环；到点语义与 `interval_tasks` 同形（经 `clock.py`、错过只补一次、基线落未来当时钟错）。切模式、改间隔不重启。开机静默启动时轮换重启必须仍静默：`_applyAntiPopupBlock(silent=True)` 给 updater 传静默标志，updater 重启带 `--silence`，否则主窗口会在教室投影上凭空弹出。理由见 `docs/adr/0014-anti-window-close-productname-disguise.md`。
 
 ### CI
 
@@ -356,7 +356,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/platform/wallpaper.py` | 用 `SystemParametersInfoW` 换当前用户的桌面壁纸 |
 | `app/common/clock.py` | Calibrated Time、Time Offset（含 Daily Drift）和 Bell Time：所有"现在几点"的来源 |
 | `app/common/time_sync.py` | Time Sync：NTP 查询、后台同步、何时重新同步和同步状态；不知道设置页 |
-| `tools/updater/updater.c` | Client Update 的独立更新器：等待进程退出、把暂存目录整目录换名为程序目录（失败时换回备份）、重启 DJCat；另有 `--stamp-product-name` 模式供反弹窗拦截改写版本资源里的产品名（重建 VS_VERSIONINFO、备份校验回滚） |
+| `tools/updater/updater.c` | Client Update 的独立更新器：等待进程退出、把暂存目录整目录换名为程序目录（失败时换回备份）、重启 DJCat；另有 `--stamp-product-name` 模式供反弹窗拦截改写版本资源里的产品名（重建 VS_VERSIONINFO、备份校验回滚），可带静默标志，重启时透传 `--silence`，供开机静默启动的自动轮换用 |
 | `app/view/windows/main_window.py` | 桌面组合根、导航、长期运行任务和 Client Update UI |
 | `app/view/windows/application_relocation.py` | 更改 Application Install Location 的界面流程：检查、提权、确认、后台迁移和 Relocation Toast |
 | `app/view/windows/memory_release.py` | 主窗口藏在托盘时交还内存的时机：十分钟后卸页面、修剪，静默启动后修剪一次 |

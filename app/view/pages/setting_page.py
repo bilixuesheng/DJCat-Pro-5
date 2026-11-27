@@ -66,7 +66,12 @@ from app.config.cfg import (
 from app.config.constants import APP_NAME, AUTHOR, AUTHOR_URL, VERSION, YEAR
 from app.config.paths import LOG_DIR
 from app.platform.background_effect import BACKGROUND_EFFECTS
-from app.common import anti_popup_block
+from app.common import anti_popup_block, clock
+from app.view.components.anti_block_cards import (
+    AntiBlockModeCard,
+    CustomNameDialog,
+    RotateDaysCard,
+)
 from app.signal_bus import signalBus
 from app.view.components.anti_block_tip import AntiBlockTip
 from app.view.components.asset_icon import AssetIcon
@@ -1102,12 +1107,20 @@ class SettingPage(QWidget):
             "界面里显示的仍是「电教猫 Pro 5」。开启或关闭都需要重启电教猫才生效。",
             cfg.antiPopupBlockEnabled,
         )
+        self.antiBlockModeCard = AntiBlockModeCard(self)
+        self.rotateDaysCard = RotateDaysCard(self)
         self.disguisedNameCard = PushSettingCard(
             "换一个",
             FluentIcon.SYNC,
             "换一个伪装名称",
             # 说明文字（含当前名）由 _updateDisguisedNameCard 填，构造时留空免得两处重复。
             "",
+        )
+        self.customNameCard = PushSettingCard(
+            "自定义",
+            FluentIcon.EDIT,
+            "自定义伪装名称",
+            "手动填一个英文软件名，下次重启生效",
         )
 
     def _createBackgroundCards(
@@ -1435,9 +1448,15 @@ class SettingPage(QWidget):
             "被弹窗拦截软件误关窗口时的兼容开关",
             ROOT_SECTION_KEY,
         )
-        # 换名按钮的显隐跟着开关，连在同一块底板上。
+        # 模式、间隔、换名/自定义都随开关（及模式）显隐，连在同一块底板上。
         antiPopupBlock.addLinkedSettingCards(
-            [self.antiPopupBlockCard, self.disguisedNameCard]
+            [
+                self.antiPopupBlockCard,
+                self.antiBlockModeCard,
+                self.rotateDaysCard,
+                self.disguisedNameCard,
+                self.customNameCard,
+            ]
         )
 
         about = self._addSection(
@@ -1505,10 +1524,12 @@ class SettingPage(QWidget):
         cfg.aiMarkdownMachineCode.valueChanged.connect(self._onMachineCodeChanged)
         self.antiPopupBlockCard.checkedChanged.connect(self._onAntiPopupBlockToggled)
         self.disguisedNameCard.clicked.connect(self._onRerollDisguisedName)
+        self.customNameCard.clicked.connect(self._onSetCustomName)
         self.antiBlockTip.goRequested.connect(self._onAntiBlockTipGo)
         self.antiBlockTip.dismissedForNow.connect(self._onAntiBlockTipDismissForNow)
         self.antiBlockTip.dismissedForever.connect(self._onAntiBlockTipDismissForever)
         cfg.antiPopupBlockEnabled.valueChanged.connect(self._refreshConditionalCards)
+        cfg.antiPopupBlockMode.valueChanged.connect(self._refreshConditionalCards)
         # valueChanged 会把新值传进来，这两个槽不收参数，用 lambda 吞掉。
         cfg.antiPopupBlockEnabled.valueChanged.connect(
             lambda _=None: self._updateAntiBlockTip()
@@ -1555,7 +1576,19 @@ class SettingPage(QWidget):
             self.dailyDriftCard: timeOffset,
             self.dailyDriftValueCard: timeOffset and bool(cfg.dailyDriftEnabled.value),
             self.timeOffsetExemptionCard: timeOffset,
-            self.disguisedNameCard: bool(cfg.antiPopupBlockEnabled.value),
+            self.antiBlockModeCard: bool(cfg.antiPopupBlockEnabled.value),
+            self.rotateDaysCard: (
+                bool(cfg.antiPopupBlockEnabled.value)
+                and cfg.antiPopupBlockMode.value == anti_popup_block.MODE_AUTO
+            ),
+            self.disguisedNameCard: (
+                bool(cfg.antiPopupBlockEnabled.value)
+                and cfg.antiPopupBlockMode.value == anti_popup_block.MODE_MANUAL
+            ),
+            self.customNameCard: (
+                bool(cfg.antiPopupBlockEnabled.value)
+                and cfg.antiPopupBlockMode.value == anti_popup_block.MODE_MANUAL
+            ),
         }
         for prefix, (_modeCard, colorCard, imageCard, scaleCard) in (
             self._backgroundCardSets.items()
@@ -1860,6 +1893,10 @@ class SettingPage(QWidget):
         finally:
             box.deleteLater()
 
+    def _stampBaselineToday(self) -> None:
+        # 换名即把「上次换名日期」设成今天，自动轮换的到点从这里起算。
+        cfg.set(cfg.antiPopupBlockRotatedOn, clock.calibratedNow().date().isoformat())
+
     def _onAntiPopupBlockToggled(self, checked: bool) -> None:
         # 取消重启时会回拨开关，下面的还原已挡掉回拨信号；这个标志是多一层重入保护。
         if self._antiBlockApplying:
@@ -1868,6 +1905,16 @@ class SettingPage(QWidget):
         if self._confirmAntiBlockRestart(
             f"{action}反弹窗拦截需要重启电教猫才能生效，现在重启？"
         ):
+            if checked:
+                # 自动管理首次开启立即随机，不停留在所有机器共享的 DJCat Pro。
+                if cfg.antiPopupBlockMode.value == anti_popup_block.MODE_AUTO:
+                    cfg.set(
+                        cfg.disguisedProductName,
+                        anti_popup_block.randomDisguisedName(
+                            exclude=(cfg.disguisedProductName.value or "").strip()
+                        ),
+                    )
+                self._stampBaselineToday()
             self.antiPopupBlockApplyRequested.emit()
             return
         # 回拨开关会再发 checkedChanged；挡掉信号免得又进一次确认（连带 cfg 回拨的递归）。
@@ -1887,6 +1934,22 @@ class SettingPage(QWidget):
         ):
             return
         cfg.set(cfg.disguisedProductName, newName)
+        self._stampBaselineToday()
+        self.antiPopupBlockApplyRequested.emit()
+
+    def _onSetCustomName(self) -> None:
+        current = (cfg.disguisedProductName.value or "").strip()
+        dialog = CustomNameDialog(
+            current or anti_popup_block.DEFAULT_DISGUISED_NAME, self.window()
+        )
+        # 对话框的「确定并重启」本身就是确认，不再二次确认；校验在 dialog.validate 里。
+        if not dialog.exec():
+            return
+        name = dialog.name()
+        if not name or name == current:
+            return
+        cfg.set(cfg.disguisedProductName, name)
+        self._stampBaselineToday()
         self.antiPopupBlockApplyRequested.emit()
 
     def _onAntiBlockTipGo(self) -> None:

@@ -532,6 +532,8 @@ class MainWindow(MSFluentWindow):
         self._registrationRetryTimer.setSingleShot(True)
         self._registrationRetryTimer.timeout.connect(self._startMachineRegistration)
         self._pinnedIconJobs = {}
+        # 记下本次是不是开机静默启动：自动轮换要重启时据此让重启回来仍静默。
+        self._isSilent = isSilent
 
         # MSFluentWindow 固定使用弹出式页面栈，快照过渡可避免目标页在动画前闪现。
         oldView = self.stackedWidget.view
@@ -603,6 +605,8 @@ class MainWindow(MSFluentWindow):
             )
 
         self._checkAntiPopupBlockAtStartup()
+        # 自动管理到点时静默换名并重启；放进事件循环里做，这样退出重启走得干净。
+        QTimer.singleShot(0, self, self._maybeAutoRotateDisguise)
 
         if cfg.checkUpdateAtStartUp.value:
             self.checkForUpdates(manual=False)
@@ -2176,8 +2180,47 @@ class MainWindow(MSFluentWindow):
         self._shutdownResources()
         QApplication.quit()
 
-    def _applyAntiPopupBlock(self):
-        """反弹窗拦截开/关/换名：让 updater 在退出后改产品名再重启。"""
+    def _maybeAutoRotateDisguise(self):
+        """自动管理：启动时到点就静默换一个随机伪装名并重启。
+
+        先把「上次换名日期」落定再重启——即使改名失败，下次启动也不会因为同一个到点
+        反复重启成环。开机静默启动时，重启也保持静默（经 ``_applyAntiPopupBlock`` 的
+        ``silent`` 透传给 updater）。
+        """
+        if self._resourcesShutdown:
+            return
+        from app.common import anti_popup_block as apb
+        from app.common.error_report import isPackaged
+
+        if sys.platform != "win32" or not isPackaged():
+            # 源码运行 / 非 Windows 改不了真 exe，不轮换、也不打扰。
+            return
+        today = clock.calibratedNow().date()
+        rotate, baseline = apb.startupRotationPlan(
+            bool(cfg.antiPopupBlockEnabled.value),
+            cfg.antiPopupBlockMode.value,
+            int(cfg.antiPopupBlockRotateDays.value),
+            cfg.antiPopupBlockRotatedOn.value,
+            today,
+        )
+        if not rotate:
+            if baseline is not None:
+                cfg.set(cfg.antiPopupBlockRotatedOn, baseline.isoformat())
+            return
+        newName = apb.randomDisguisedName(
+            exclude=(cfg.disguisedProductName.value or "").strip()
+        )
+        cfg.set(cfg.disguisedProductName, newName)
+        cfg.set(cfg.antiPopupBlockRotatedOn, baseline.isoformat())
+        logger.info("反弹窗拦截：自动轮换伪装名为 {}（静默={}）", newName, self._isSilent)
+        self._applyAntiPopupBlock(silent=self._isSilent)
+
+    def _applyAntiPopupBlock(self, silent: bool = False):
+        """反弹窗拦截开/关/换名：让 updater 在退出后改产品名再重启。
+
+        ``silent`` 为真时让 updater 带 ``--silence`` 重启——仅自动轮换在开机静默启动时
+        用；用户在设置里开/关/换名都是可见会话，照常显示窗口。
+        """
         import os
 
         from app.common import anti_popup_block as apb
@@ -2213,6 +2256,7 @@ class MainWindow(MSFluentWindow):
             str(os.getpid()),
             str(Path(sys.executable).resolve()),
             target,
+            "1" if silent else "0",
         ]
         try:
             subprocess.Popen(
