@@ -605,7 +605,8 @@ class SettingSectionTest(TestCase):
         label = card.contentLabel
 
         self.assertTrue(label.wordWrap())
-        self.assertGreater(label.height(), 2 * label.fontMetrics().height())
+        # 折成几行看字体：Windows 的微软雅黑在这个宽度是两行，别的字体可能是三行。
+        self.assertGreater(label.height(), label.fontMetrics().height())
         self.assertEqual(label.height(), label.heightForWidth(label.width()))
         self.assertGreater(card.height(), SETTING_CARD_HEIGHT)
 
