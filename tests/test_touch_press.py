@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from qfluentwidgets import CardWidget
+from qfluentwidgets import CardWidget, ComboBox
 
 from app.view.components import scroll_area
 from app.view.components.scroll_area import ScrollArea, setTunedTouchScrollEnabled
@@ -90,6 +90,26 @@ class TouchPressInScrollAreaTest(TestCase):
         self.assertGreater(scroll.verticalScrollBar().value(), 0)
         self.assertEqual(clicks, [])
         self.assertFalse(button.isDown())
+
+    def testScrollLetsTheDropDownArrowSpringBackWithoutOpeningIt(self):
+        # 起滑时 Windows 补发的按下让箭头下沉；起滑后的松开被吞掉，复位只能由起滑取消来做。
+        combo = ComboBox()
+        combo.addItems(["每天", "每周"])
+        scroll = self._scrollArea(combo)
+        device = QTest.createTouchDevice(QInputDevice.DeviceType.TouchScreen)
+        sank = []
+        self._dragUp(
+            scroll,
+            combo,
+            device,
+            lambda step: sank.append(combo.arrowAni.ani.endValue() == combo.arrowAni.maxOffset),
+        )
+
+        self.assertGreater(scroll.verticalScrollBar().value(), 0)
+        self.assertTrue(sank[0])
+        self.assertFalse(combo.isPressed)
+        self.assertEqual(combo.arrowAni.ani.endValue(), 0)
+        self.assertIsNone(QApplication.activePopupWidget())
 
     def testScrollCancelsPressedCardWithoutClickingIt(self):
         card = CardWidget()

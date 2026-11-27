@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
 
 from qfluentwidgets import CardWidget
 
+from app.platform.touch_input import dropPressedLook
+
 if sys.platform == "darwin":
     from qfluentwidgets import ScrollArea as FluentScrollArea
 else:
@@ -262,14 +264,11 @@ class _TouchScrollGuard(QObject):
 
     @staticmethod
     def _cancelPresses(scrollArea):
+        # 卡片的按下态、下拉框下沉的箭头都只有松开能复位，而起滑后的那次松开会被这里吞掉。
         for button in scrollArea.findChildren(QAbstractButton):
-            if button.isDown():
-                button.setDown(False)
-        # 卡片的按下态只有松开能复位，而起滑后的那次松开会被这里吞掉。
+            dropPressedLook(button)
         for card in scrollArea.findChildren(CardWidget):
-            if card.isPressed:
-                card.isPressed = False
-                card._updateBackgroundColor()
+            dropPressedLook(card)
         for target in tuple(_touchPressTargets):
             try:
                 if scrollArea.isAncestorOf(target):
