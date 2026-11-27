@@ -1,14 +1,19 @@
 from unittest import TestCase
 from unittest.mock import patch
 
+from PySide6.QtCore import QPoint
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from shiboken6 import delete
 
 from app.config.cfg import cfg
 from app.config.constants import APP_NAME
-from app.view.components.setting_section import ROOT_SECTION_KEY, SLIDE_DURATION_MS
-from app.view.pages.setting_page import ANTI_POPUP_BLOCK_SECTION_KEY, SettingPage
+from app.view.components.setting_section import (
+    BLOCK_SPACING,
+    ROOT_SECTION_KEY,
+    SLIDE_DURATION_MS,
+)
+from app.view.pages.setting_page import SettingPage
 from tests.support import isolateCfg
 
 
@@ -46,7 +51,23 @@ class AntiPopupBlockUiTest(TestCase):
         self.app.processEvents()
 
     def tipHidden(self, page):
-        return page.antiBlockTipContainer.isHidden()
+        # 提示在根 Section 里：根页被推走时它跟着藏起来，自己的显隐标志不变。
+        return not page.antiBlockTip.isVisibleTo(page)
+
+    def rootView(self, page):
+        return page.sectionStack.view(ROOT_SECTION_KEY)
+
+    def antiPopupBlockRow(self, page):
+        return next(
+            card
+            for card in self.rootView(page).navigationCards()
+            if card.titleLabel.text() == "反弹窗拦截"
+        )
+
+    def rowInView(self, page, row):
+        view = self.rootView(page)
+        top = row.mapTo(view.viewport(), QPoint()).y()
+        return top >= 0 and top + row.height() <= view.viewport().height()
 
     def testTipShowsOnRootWhenDisabledAndUndismissed(self):
         page = self.buildPage()
@@ -81,12 +102,60 @@ class AntiPopupBlockUiTest(TestCase):
         self.assertTrue(self.tipHidden(page))
         self.assertTrue(bool(cfg.antiPopupBlockTipDismissed.value))
 
-    def testGoDrillsIntoTheSectionAndHighlightsTheSwitch(self):
+    def testTipIsTheFirstBlockOfTheRootAndScrollsWithIt(self):
         page = self.buildPage()
-        page._onAntiBlockTipGo()
-        QTest.qWait(SLIDE_DURATION_MS + 80)
+        view = self.rootView(page)
+        self.assertTrue(view.container.isAncestorOf(page.antiBlockTip))
+        self.assertLess(
+            page.antiBlockTipContainer.y(), view.navigationCards()[0].y()
+        )
+
+        before = page.antiBlockTip.mapTo(page, QPoint()).y()
+        view.verticalScrollBar().setValue(40)
         self.app.processEvents()
-        self.assertEqual(page.currentRouteKey(), ANTI_POPUP_BLOCK_SECTION_KEY)
+        self.assertEqual(page.antiBlockTip.mapTo(page, QPoint()).y(), before - 40)
+
+    def testHiddenTipLeavesNoGapAboveTheRows(self):
+        page = self.buildPage()
+        firstRow = self.rootView(page).navigationCards()[0]
+        tip = page.antiBlockTipContainer
+        # 提示和第一行之间照"其他内容前后隔 10 px"。
+        self.assertEqual(
+            firstRow.y() - tip.y() - page.antiBlockTip.height(), BLOCK_SPACING
+        )
+
+        page._onAntiBlockTipDismissForNow()
+        self.app.processEvents()
+        layout = self.rootView(page).vBoxLayout
+        self.assertEqual(firstRow.y(), layout.contentsMargins().top())
+
+    def testGoStaysOnRootAndScrollsTheRowIntoView(self):
+        page = self.buildPage()
+        row = self.antiPopupBlockRow(page)
+        self.assertFalse(self.rowInView(page, row))
+
+        page._onAntiBlockTipGo()
+        QTest.qWait(SLIDE_DURATION_MS + 500)
+        self.app.processEvents()
+
+        self.assertEqual(page.currentRouteKey(), ROOT_SECTION_KEY)
+        self.assertTrue(self.rowInView(page, row))
+        self.assertIs(page.highlight.parentWidget(), row)
+        self.assertTrue(page.highlight.isVisible())
+
+    def testGoOnlyHighlightsARowAlreadyInView(self):
+        page = self.buildPage()
+        page.resize(900, 1200)
+        self.app.processEvents()
+        row = self.antiPopupBlockRow(page)
+        self.assertTrue(self.rowInView(page, row))
+
+        page._onAntiBlockTipGo()
+        QTest.qWait(SLIDE_DURATION_MS + 500)
+        self.app.processEvents()
+
+        self.assertEqual(self.rootView(page).verticalScrollBar().value(), 0)
+        self.assertIs(page.highlight.parentWidget(), row)
 
     def testRerollChangesNameAndRequestsRestart(self):
         page = self.buildPage()
