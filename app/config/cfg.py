@@ -413,6 +413,19 @@ class Config(QConfig):
     antiPopupBlockTipDismissed = ConfigItem(
         "Compatibility", "AntiPopupBlockTipDismissed", False, BoolValidator()
     )
+    # 管理模式与轮换间隔；取值与 anti_popup_block.MODE_*/DEFAULT_ROTATE_DAYS 对齐
+    # （分层所限不便 import，手动对齐）。首次开启默认自动管理。
+    antiPopupBlockMode = OptionsConfigItem(
+        "Compatibility", "AntiPopupBlockMode", "auto",
+        OptionsValidator(["auto", "manual"]),
+    )
+    antiPopupBlockRotateDays = RangeConfigItem(
+        "Compatibility", "AntiPopupBlockRotateDays", 3, RangeValidator(1, 30)
+    )
+    # 上次换名日期（ISO，如 2026-11-27）；空串表示还没有基线，启动时据此建立。
+    antiPopupBlockRotatedOn = ConfigItem(
+        "Compatibility", "AntiPopupBlockRotatedOn", ""
+    )
 
     homeCardOrder = ConfigItem(
         "HomePage", "CardOrder", list(DEFAULT_HOME_CARDS)

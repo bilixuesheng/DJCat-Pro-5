@@ -1,5 +1,6 @@
 import re
 import sys
+from datetime import date
 
 import pytest
 
@@ -7,6 +8,8 @@ from app.common import anti_popup_block as apb
 from app.config.constants import APP_NAME
 
 NAME_PATTERN = re.compile(r"^[A-Za-z]+ [2-9]$")
+TODAY = date(2026, 11, 27)
+AUTO, MANUAL = apb.MODE_AUTO, apb.MODE_MANUAL
 
 
 def testRandomNameLooksLikeASoftwareName():
@@ -59,6 +62,53 @@ def testTipVisibilityWhenDisabled():
     assert apb.tipShouldShow(False, False, True) is False
     # 永久「不再显示」。
     assert apb.tipShouldShow(False, True, False) is False
+
+
+def testCustomNameTrimsAndRejectsEmptyOrHonest():
+    assert apb.normalizeCustomName("  SmartClass 4  ") == "SmartClass 4"
+    assert apb.normalizeCustomName("") is None
+    assert apb.normalizeCustomName("   ") is None
+    # 等于诚实名（含去空格后相等）→ 不合格。
+    assert apb.normalizeCustomName("电教猫 Pro 5") is None
+    assert apb.normalizeCustomName("  电教猫 Pro 5 ") is None
+    # 最低校验：不拦中文，填含中文的名字是用户自担的选择。
+    assert apb.normalizeCustomName("电教猫Helper") == "电教猫Helper"
+
+
+def testNoRotationWhenDisabledOrManual():
+    assert apb.startupRotationPlan(False, AUTO, 3, "2026-01-01", TODAY) == (False, None)
+    assert apb.startupRotationPlan(True, MANUAL, 3, "2026-01-01", TODAY) == (False, None)
+
+
+def testMissingBaselineIsEstablishedWithoutRotating():
+    # 旧配置/首次没有基线：只建立基线、本次不换，免得升级后立刻轮换。
+    assert apb.startupRotationPlan(True, AUTO, 3, "", TODAY) == (False, TODAY)
+    assert apb.startupRotationPlan(True, AUTO, 3, "garbage", TODAY) == (False, TODAY)
+
+
+def testRotatesOnlyWhenIntervalElapsed():
+    # 未到点不动。
+    assert apb.startupRotationPlan(True, AUTO, 3, "2026-11-25", TODAY) == (False, None)
+    # 当天即基线 → 未到点。
+    assert apb.startupRotationPlan(True, AUTO, 3, "2026-11-27", TODAY) == (False, None)
+    # 刚好到点、超期都换，并把基线重设为今天。
+    assert apb.startupRotationPlan(True, AUTO, 3, "2026-11-24", TODAY) == (True, TODAY)
+    # 错过多个周期也只换一次（返回单个 today）。
+    assert apb.startupRotationPlan(True, AUTO, 3, "2026-10-01", TODAY) == (True, TODAY)
+    # 带时间戳的 ISO 也能解析。
+    assert apb.startupRotationPlan(
+        True, AUTO, 3, "2026-11-24T08:00:00", TODAY
+    ) == (True, TODAY)
+
+
+def testBaselineInFutureIsTreatedAsClockResetAndRotates():
+    # 主板电池没电、时钟被重置 → 立即换并重设基线。
+    assert apb.startupRotationPlan(True, AUTO, 3, "2027-01-01", TODAY) == (True, TODAY)
+
+
+def testIntervalFallsBackToOneDayWhenNonPositive():
+    assert apb.startupRotationPlan(True, AUTO, 0, "2026-11-26", TODAY) == (True, TODAY)
+    assert apb.startupRotationPlan(True, AUTO, -5, "2026-11-26", TODAY) == (True, TODAY)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="仅在非 Windows 上验证安全回退")

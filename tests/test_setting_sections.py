@@ -365,7 +365,13 @@ class SettingSectionTest(TestCase):
                 page.dailyDriftValueCard,
                 page.timeOffsetExemptionCard,
             ),
-            (page.antiPopupBlockCard, page.disguisedNameCard),
+            (
+                page.antiPopupBlockCard,
+                page.antiBlockModeCard,
+                page.rotateDaysCard,
+                page.disguisedNameCard,
+                page.customNameCard,
+            ),
         }
 
         shared = {

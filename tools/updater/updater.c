@@ -251,7 +251,8 @@ static BOOL restartElevated(int argc, wchar_t **argv) {
  * administrator, so the next ordinary run cannot read its own data. That is a
  * worse and far more confusing failure than the one elevation fixes.
  */
-static BOOL startAppAsUser(const wchar_t *exePath, const wchar_t *workingDir) {
+static BOOL startAppAsUser(const wchar_t *exePath, const wchar_t *workingDir,
+                           BOOL silent) {
     HWND tray = FindWindowW(L"Shell_TrayWnd", NULL);
     if (!tray) return FALSE;
     DWORD shellPid = 0;
@@ -269,7 +270,9 @@ static BOOL startAppAsUser(const wchar_t *exePath, const wchar_t *workingDir) {
                          TOKEN_ADJUST_DEFAULT | TOKEN_ADJUST_SESSIONID,
                          NULL, SecurityImpersonation, TokenPrimary, &userToken)) {
         wchar_t command[PATH_BUF];
-        formatPath(command, PATH_BUF, L"\"%ls\"", exePath);
+        /* 静默轮换时沿用 --silence，否则开机静默启动的会话重启回来会弹窗。*/
+        formatPath(command, PATH_BUF, silent ? L"\"%ls\" --silence" : L"\"%ls\"",
+                   exePath);
         STARTUPINFOW startup = { .cb = sizeof(startup) };
         PROCESS_INFORMATION process = {0};
         if (CreateProcessAsUserW(userToken, NULL, command, NULL, NULL, FALSE,
@@ -675,16 +678,24 @@ static BOOL stampProductName(const wchar_t *exe, const wchar_t *newName) {
     return ok;
 }
 
-/* 用登录用户的身份重启 DJCat（提权时经 Explorer 令牌降权），返回是否起来了。*/
-static BOOL relaunchApp(const wchar_t *exePath, const wchar_t *workingDir) {
-    logMsg(L"launching \"%ls\"", exePath);
-    if (isElevated() && startAppAsUser(exePath, workingDir)) {
+/*
+ * 用登录用户的身份重启 DJCat（提权时经 Explorer 令牌降权），返回是否起来了。
+ * silent 为真时带上 --silence：开机静默启动的会话若因自动轮换换名而重启，
+ * 必须仍然静默，否则主窗口会在教室投影上凭空弹出。
+ */
+static BOOL relaunchApp(const wchar_t *exePath, const wchar_t *workingDir,
+                        BOOL silent) {
+    logMsg(L"launching \"%ls\"%ls", exePath, silent ? L" --silence" : L"");
+    if (isElevated() && startAppAsUser(exePath, workingDir, silent)) {
         logMsg(L"relaunched DJCat with the logged-in user's token");
         return TRUE;
     }
+    wchar_t command[PATH_BUF];
+    formatPath(command, PATH_BUF, silent ? L"\"%ls\" --silence" : L"\"%ls\"",
+               exePath);
     STARTUPINFOW startup = {.cb = sizeof(startup)};
     PROCESS_INFORMATION process = {0};
-    if (CreateProcessW(exePath, NULL, NULL, NULL, FALSE, 0, NULL, workingDir,
+    if (CreateProcessW(exePath, command, NULL, NULL, FALSE, 0, NULL, workingDir,
                        &startup, &process)) {
         CloseHandle(process.hProcess);
         CloseHandle(process.hThread);
@@ -692,7 +703,8 @@ static BOOL relaunchApp(const wchar_t *exePath, const wchar_t *workingDir) {
     }
     logMsg(L"CreateProcess failed (err %lu), falling back to ShellExecute",
            GetLastError());
-    if ((INT_PTR)ShellExecuteW(NULL, L"open", exePath, NULL, workingDir,
+    if ((INT_PTR)ShellExecuteW(NULL, L"open", exePath,
+                               silent ? L"--silence" : NULL, workingDir,
                                SW_SHOWNORMAL) <= 32) {
         logMsg(L"could not relaunch DJCat");
         return FALSE;
@@ -703,15 +715,17 @@ static BOOL relaunchApp(const wchar_t *exePath, const wchar_t *workingDir) {
 /*
  * 反弹窗拦截模式：等 DJCat 退出 → 改 exe 的产品名 → 降权重启。
  * 只改一个文件、不动目录，所以不必像更新那样把自己挪出 app_dir。
- * Usage: updater.exe --stamp-product-name <pid> <exe_path> <product_name>
+ * Usage: updater.exe --stamp-product-name <pid> <exe_path> <product_name> [silent]
+ *   silent 为 "1" 时重启带 --silence（开机静默启动的会话自动轮换换名用）。
  */
 static int stampMode(int argc, wchar_t **argv) {
     if (argc < 5) {
         fwprintf(stderr,
-                 L"Usage: updater.exe --stamp-product-name <pid> <exe> <name>\n");
+                 L"Usage: updater.exe --stamp-product-name <pid> <exe> <name> [silent]\n");
         return EXIT_BAD_ARGS;
     }
     DWORD pid = (DWORD)_wtoi(argv[2]);
+    BOOL silent = (argc > 5 && argv[5][0] == L'1');
     wchar_t exe[PATH_BUF], name[PATH_BUF], dir[PATH_BUF];
     formatPath(exe, PATH_BUF, L"%ls", argv[3]);
     formatPath(name, PATH_BUF, L"%ls", argv[4]);
@@ -720,8 +734,8 @@ static int stampMode(int argc, wchar_t **argv) {
     directoryOf(dir);
 
     openLog(dir);
-    logMsg(L"=== stamp-product-name pid=%lu exe=\"%ls\" name=\"%ls\" ===", pid, exe,
-           name);
+    logMsg(L"=== stamp-product-name pid=%lu exe=\"%ls\" name=\"%ls\" silent=%d ===",
+           pid, exe, name, silent);
 
     waitForProcess(pid);
 
@@ -736,7 +750,7 @@ static int stampMode(int argc, wchar_t **argv) {
             logMsg(L"提权后仍不可写");
         }
         /* 改不了也要把 DJCat 拉回来，别让用户以为软件没了。*/
-        relaunchApp(exe, dir);
+        relaunchApp(exe, dir, silent);
         closeLog();
         return EXIT_NOT_WRITABLE;
     }
@@ -746,7 +760,7 @@ static int stampMode(int argc, wchar_t **argv) {
     else
         logMsg(L"改名失败，exe 保持原样");
 
-    relaunchApp(exe, dir);
+    relaunchApp(exe, dir, silent);
     logMsg(L"=== stamp finished ===\n");
     closeLog();
     return EXIT_OK;
@@ -863,7 +877,8 @@ int wmain(int argc, wchar_t *argv[]) {
     }
 
     int status = installed ? EXIT_OK : EXIT_SWAP_FAILED;
-    if (!relaunchApp(exePath, appDir) && status == EXIT_OK)
+    /* Client Update 由用户点「立即更新」触发，重启照常显示窗口。*/
+    if (!relaunchApp(exePath, appDir, FALSE) && status == EXIT_OK)
         status = EXIT_LAUNCH_FAILED;
 
     logMsg(L"=== updater finished (exit %d) ===\n", status);

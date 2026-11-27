@@ -184,3 +184,86 @@ class AntiPopupBlockUiTest(TestCase):
         self.confirm.return_value = False
         page._onAntiPopupBlockToggled(True)
         self.assertEqual(requested, [])
+
+    def testCardsAllHiddenWhenDisabled(self):
+        page = self.buildPage()
+        vis = page._conditionalCardVisibility()
+        for card in (
+            page.antiBlockModeCard,
+            page.rotateDaysCard,
+            page.disguisedNameCard,
+            page.customNameCard,
+        ):
+            self.assertFalse(vis[card])
+
+    def testAutoModeShowsIntervalAndHidesManualControls(self):
+        page = self.buildPage()
+        self.confirm.return_value = True
+        cfg.set(cfg.antiPopupBlockEnabled, True)
+        cfg.set(cfg.antiPopupBlockMode, "auto")
+        vis = page._conditionalCardVisibility()
+        self.assertTrue(vis[page.antiBlockModeCard])
+        self.assertTrue(vis[page.rotateDaysCard])
+        self.assertFalse(vis[page.disguisedNameCard])
+        self.assertFalse(vis[page.customNameCard])
+
+    def testManualModeShowsNameControlsAndHidesInterval(self):
+        page = self.buildPage()
+        self.confirm.return_value = True
+        cfg.set(cfg.antiPopupBlockEnabled, True)
+        cfg.set(cfg.antiPopupBlockMode, "manual")
+        vis = page._conditionalCardVisibility()
+        self.assertFalse(vis[page.rotateDaysCard])
+        self.assertTrue(vis[page.disguisedNameCard])
+        self.assertTrue(vis[page.customNameCard])
+
+    def testFirstEnableInAutoRollsRandomNameAndStampsBaseline(self):
+        page = self.buildPage()
+        requested = []
+        page.antiPopupBlockApplyRequested.connect(lambda: requested.append(True))
+        self.confirm.return_value = True
+        cfg.set(cfg.antiPopupBlockMode, "auto")
+        page._onAntiPopupBlockToggled(True)
+        self.assertEqual(len(requested), 1)
+        self.assertNotEqual(cfg.disguisedProductName.value, "DJCat Pro")
+        self.assertNotEqual(cfg.disguisedProductName.value, APP_NAME)
+        self.assertTrue(cfg.antiPopupBlockRotatedOn.value)
+
+    def testFirstEnableInManualKeepsDefaultNameButStampsBaseline(self):
+        page = self.buildPage()
+        self.confirm.return_value = True
+        cfg.set(cfg.antiPopupBlockMode, "manual")
+        page._onAntiPopupBlockToggled(True)
+        # 手动管理开启不自动换名，仍是默认名；基线照样落定。
+        self.assertEqual(cfg.disguisedProductName.value, "DJCat Pro")
+        self.assertTrue(cfg.antiPopupBlockRotatedOn.value)
+
+    def testCustomNameAppliesAndRequestsRestart(self):
+        page = self.buildPage()
+        requested = []
+        page.antiPopupBlockApplyRequested.connect(lambda: requested.append(True))
+        with patch("app.view.pages.setting_page.CustomNameDialog") as Dialog:
+            instance = Dialog.return_value
+            instance.exec.return_value = True
+            instance.name.return_value = "SmartClass 4"
+            page._onSetCustomName()
+        self.assertEqual(cfg.disguisedProductName.value, "SmartClass 4")
+        self.assertEqual(len(requested), 1)
+        self.assertTrue(cfg.antiPopupBlockRotatedOn.value)
+
+    def testCustomNameCanceledDoesNothing(self):
+        page = self.buildPage()
+        requested = []
+        page.antiPopupBlockApplyRequested.connect(lambda: requested.append(True))
+        with patch("app.view.pages.setting_page.CustomNameDialog") as Dialog:
+            Dialog.return_value.exec.return_value = False
+            page._onSetCustomName()
+        self.assertEqual(requested, [])
+
+    def testChangingIntervalDoesNotRequestRestart(self):
+        page = self.buildPage()
+        requested = []
+        page.antiPopupBlockApplyRequested.connect(lambda: requested.append(True))
+        page.rotateDaysCard.spinBox.setValue(7)
+        self.assertEqual(cfg.antiPopupBlockRotateDays.value, 7)
+        self.assertEqual(requested, [])
