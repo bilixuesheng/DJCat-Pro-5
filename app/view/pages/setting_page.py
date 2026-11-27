@@ -604,6 +604,7 @@ class SettingPage(QWidget):
         self._aiQuotaLoading = False
         self._sectionTitles = {}
         self._sectionParents = {}
+        self._navigationCards = {}
         self._cardLists = {}
         self._suggestions = []
         self._homeCardPreviews = []
@@ -1193,6 +1194,7 @@ class SettingPage(QWidget):
             card = SettingNavigationCard(icon, title, content, parentView.container)
             card.activated.connect(lambda k=key: self.navigateToRoute(k))
             parentView.addNavigationCard(card)
+            self._navigationCards[key] = card
         return view
 
     def _registerHomeCardPreview(self, preview):
@@ -1201,7 +1203,9 @@ class SettingPage(QWidget):
         return preview
 
     def _initSections(self) -> None:
-        self._addSection(ROOT_SECTION_KEY, "设置")
+        root = self._addSection(ROOT_SECTION_KEY, "设置")
+        # 反拦截提示是根 Section 的第一块内容，随根页一起滚动、一起被推走。
+        self.antiBlockTipContainer = root.addTip(self.antiBlockTip)
 
         broadcast = self._addSection(
             "broadcast",
@@ -1475,12 +1479,6 @@ class SettingPage(QWidget):
         breadcrumbLayout.setContentsMargins(30, 20, 30, 10)
         breadcrumbLayout.addWidget(self.breadcrumbBar)
         self.vBoxLayout.addWidget(self.breadcrumbWidget)
-        # 反拦截提示在面包屑下、内容上，左右对齐 Section 里的卡片；只在顶层页显示。
-        self.antiBlockTipContainer = QWidget(self)
-        tipLayout = QVBoxLayout(self.antiBlockTipContainer)
-        tipLayout.setContentsMargins(11, 0, 11, 4)
-        tipLayout.addWidget(self.antiBlockTip)
-        self.vBoxLayout.addWidget(self.antiBlockTipContainer)
         self.vBoxLayout.addWidget(self.sectionStack, 1)
 
     def _bind(self) -> None:
@@ -1788,11 +1786,6 @@ class SettingPage(QWidget):
         isBack = current is not None and key in self.routeFor(current)
         self.highlight.clear()
         self._updateBreadcrumb(key)
-        # 先按目标页更新提示、再同步把 stack 调整到位，最后才切页：提示显隐会改变 stack
-        # 的高度，若留到切页后由延迟重排触发，resizeEvent 里的 stopAnimations 会把滑动动画
-        # 当场掐断。activate() 让这次重排在动画开始前同步做完。
-        self._updateAntiBlockTip(key)
-        self.vBoxLayout.activate()
         self.sectionStack.setCurrentView(key, isBack=isBack, animated=animated)
         if highlightCard is None:
             return
@@ -1864,18 +1857,14 @@ class SettingPage(QWidget):
         self._updateAntiBlockTip()
         super().showEvent(event)
 
-    def _updateAntiBlockTip(self, currentKey: "str | None" = None) -> None:
-        if currentKey is None:
-            currentKey = self.sectionStack.currentKey()
-        visible = (
-            currentKey == ROOT_SECTION_KEY
-            and anti_popup_block.tipShouldShow(
+    def _updateAntiBlockTip(self) -> None:
+        self.antiBlockTipContainer.setVisible(
+            anti_popup_block.tipShouldShow(
                 bool(cfg.antiPopupBlockEnabled.value),
                 bool(cfg.antiPopupBlockTipDismissed.value),
                 self._antiBlockTipSessionDismissed,
             )
         )
-        self.antiBlockTipContainer.setVisible(visible)
 
     def _updateDisguisedNameCard(self) -> None:
         current = (cfg.disguisedProductName.value or "").strip()
@@ -1953,9 +1942,10 @@ class SettingPage(QWidget):
         self.antiPopupBlockApplyRequested.emit()
 
     def _onAntiBlockTipGo(self) -> None:
-        self.navigateToRoute(
-            ANTI_POPUP_BLOCK_SECTION_KEY, highlightCard=self.antiPopupBlockCard
-        )
+        # 不替用户进去：提示只在根页上，把根页上的那一行指给他，由他自己点。
+        card = self._navigationCards[ANTI_POPUP_BLOCK_SECTION_KEY]
+        self.sectionStack.view(ROOT_SECTION_KEY).scrollCardIntoView(card)
+        self.highlight.showOn(card)
 
     def _onAntiBlockTipDismissForNow(self) -> None:
         self._antiBlockTipSessionDismissed = True

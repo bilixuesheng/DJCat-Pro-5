@@ -29,8 +29,8 @@ DJCat Pro 5 的实现规则和架构约束。领域术语见 `CONTEXT.md`。
 - Projection 编辑器中的"整理并投送"只在 Markdown 模式显示并独立记忆；它复用 AI Markdown Conversion，但启动恢复必须绕过整理流程并原样恢复 Projection Snapshot。已知剩余额度不够本次扣点时，按钮改为"投送（额度不足）"并按原文投送，勾选和配置都不动；查不到额度时照常整理，由服务端判断。
 - **Error Report** 由服务端按 **Error Signature** 归并成组，每组按 Machine Identity 和日期各记一行次数；Machine Code 只是显示用的别名。
 - **Daily Quota** 按 Machine Identity 取：有 **Quota Override** 用它，否则用 **Default Daily Quota**。Quota Override 只改上限，不碰当天已用的点数，也不改扣点规则。
-- **Setting Section** 按 Setting Route 组成一棵树；根只有导航行，其他有子 Section 的节点可以在导航行之外放 Setting Card，但 Setting Preview 只在叶子上、每个至多一份，同一条 Route 上不重复（`tests/test_setting_sections.py` 检查）。Setting Suggestion 指向卡片及其 Route，不改变任何页面内容。
-- **反弹窗拦截** 开着时把 `djcat.exe` 版本资源里的 ProductName 改成伪装产品名，躲开按产品名误判的「弹窗拦截 / 桌面管理」类软件；关着写回「电教猫 Pro 5」。它只改电教猫自身呈现，不碰任何第三方软件。界面里显示的标题仍是 `APP_NAME`／`cfg.windowTitle`，与版本资源无关。开关在根下的「反弹窗拦截」叶子 Section，反拦截提示挂在设置顶层页（不进根 Section）。理由见 `docs/adr/0014-anti-window-close-productname-disguise.md`。
+- **Setting Section** 按 Setting Route 组成一棵树；根只有导航行和排在它们前面的反拦截提示，其他有子 Section 的节点可以在导航行之外放 Setting Card，但 Setting Preview 只在叶子上、每个至多一份，同一条 Route 上不重复（`tests/test_setting_sections.py` 检查）。Setting Suggestion 指向卡片及其 Route，不改变任何页面内容。
+- **反弹窗拦截** 开着时把 `djcat.exe` 版本资源里的 ProductName 改成伪装产品名，躲开按产品名误判的「弹窗拦截 / 桌面管理」类软件；关着写回「电教猫 Pro 5」。它只改电教猫自身呈现，不碰任何第三方软件。界面里显示的标题仍是 `APP_NAME`／`cfg.windowTitle`，与版本资源无关。开关在根下的「反弹窗拦截」叶子 Section，反拦截提示是根 Section 的第一块内容，随根页滚动。理由见 `docs/adr/0014-anti-window-close-productname-disguise.md`。
 
 ## Ownership rules
 
@@ -95,6 +95,8 @@ Corner Button 只有关闭按钮可能带细边，条件是主题色恰好是纯
 **`app/view/components/setting_preview.py` 独占 Setting Preview。** 画主窗口的预览不截取真实页面（会逼 Lazy Page 提前构造，还会截到设置页自己），而是由 `MainWindowReplica` 用真实组件——导航按钮、`BannerWidget`、主页的 `ActionCard`、标题栏按钮——按主窗口当前尺寸摆好，画到目标两倍大小再平滑缩小，结果按尺寸、设备像素比缓存，配置变化时作废。宽高比实时跟随主窗口（监听 `window()` 的尺寸变化），限高 280；复刻在第一次画时才搭。`tests/test_setting_preview.py` 逐项核对复刻和真实主窗口的几何一致，改主窗口或主页的排布时必须同步改复刻。托盘预览的菜单来自 `buildTrayMenu()`，按 `AcrylicMenu`／`RoundMenu` 的定位规则 1:1 摆在任务栏右侧。投送、倒计时和时钟的预览按屏幕比例画全屏，标题、正文和按钮离窗口边的距离照真实窗口的比例；角落按钮用真实图标和 80 × 65 的比例，缩放取屏幕比例与 0.4 中较大的一个，否则图标只剩几个像素；时钟定格在预览出现的那一刻。理由见 `docs/adr/0007-setting-preview-replica.md`。
 
 **Setting Card 默认各自成卡，照 Win11 设置排布。** 相邻两张卡（导航行也一样）隔 4 px，预览、小节标题和其他内容前后隔 10 px。只有 Linked Setting Cards 经 `SettingSectionView.addLinkedSettingCards()` 共用一块底板：控制卡片在前，显隐或取值受它控制的卡片紧随其后，目前是三处背景、主页横幅、字体、软件图标、托盘图标，以及「时间」里的网络校时和时间偏移；其余一律 `addSettingCards()`。新卡片只有显隐或取值跟着另一张卡变时才进组（`tests/test_setting_sections.py` 逐组核对）。关掉「显示主页横幅」时横幅的其余卡片隐藏，按条件隐藏的规则不出现在 Setting Suggestion 里。主题色和 AI 整理风格这类展开卡片各自成卡，展开后的子项仍连在一起。
+
+**Setting Card 的说明放不下就换行，从不省略；标题仍是一行，放不下时省略。** `SettingCardList` 加卡时经 `ContentWrapFilter` 让说明按宽度算高：有说明的卡片一行时仍高 70、没有说明的仍高 50（组件库只在构造时按有没有说明定高，之后 `setContent` 补上说明的卡片也按 70），每多一行就长高一行，文字列上下的留白和一行时相同，字体变了当场重算。卡片的两层布局都不能带垂直对齐：带对齐的布局把高度截到 sizeHint，而 QLabel 的 sizeHint 是按它自己估的宽度排的行，说明一换行就被截短；文字列靠上下边距撑满卡片，右侧控件各自按 sizeHint 居中。`SettingSectionView` 用末尾的弹簧而不是 AlignTop 接走内容比视口矮时多出的高度：Section 里有竖向可伸展的预览时 AlignTop 不起作用，原先靠列表的 Maximum 卡在 sizeHint，卡片按宽度算高以后 sizeHint 按最窄的宽度算，卡不住了。`CollapsibleSettingCard` 的高度也由布局给（表头 + 跟着 `maximumHeight` 动画的展开区），不再固定。导航行不换行，固定高 70。
 
 **设置页搜索只产出 Setting Suggestion。** 页面本身不筛选、不折叠、不重排；建议只按 Setting Card 的标题匹配，条件隐藏的卡片不参与，跨 Section 重名的标题才补完整 Route 前缀。`SettingPage` 提供 `searchSuggestions()` 和 `navigateToRoute()`，弹窗由 MainWindow 拥有——搜索框属于标题栏，设置页不得反向持有它。选中建议后清空搜索框、跳到目标 Route、滚动到卡片并描一圈主题色边框，绝不改写用户的前置设置来让隐藏卡片现身。
 
@@ -220,7 +222,7 @@ Portable Mode 的 `APP_DIR\DJCatPro` 在换名前**改名**进新目录，不是
 
 `restoreUpdaterBinary()` 只为从旧版本升上来的那一次保留：旧更新器仍会留下 `updater.exe.old`。新更新器不再改名自己。
 
-**`app/common/anti_popup_block.py` 独占反弹窗拦截的规则。** 开着时的伪装产品名默认 `DJCat Pro`，`randomDisguisedName()` 换成英文词拼接加一位 2–9 数字的随机名；`desiredProductName()` 给出目标名（开=伪装名、关=`APP_NAME`），`needsReapply()` 用 `exeProductName()`（只读读取磁盘上现有产品名，读不到返回 None、不触发）比对决定要不要重套，`tipShouldShow()` 决定反拦截提示显隐。它不写文件：运行中的 exe 被锁，改写交给 `updater.exe` 的 `--stamp-product-name` 模式在退出后做——从现有版本资源重建 VS_VERSIONINFO、只换 ProductName/FileDescription、带备份校验和失败回滚，再降权重启（和 Client Update 共用那套等待退出、提权、降权重启）。界面开关、换名按钮和反拦截提示由设置页拥有：提示挂在设置顶层页（面包屑下、内容上，不进根 Section，不破坏「根页只有导航行」），开关所在的「反弹窗拦截」是根下叶子 Section、可被设置搜索搜到。开/关/换名都要重启，由 MainWindow 的 `_applyAntiPopupBlock(silent=)` 起 updater 后退出；Client Update 把目标名作第 6 个参数交给 updater，换完目录重启前顺带重套，省一次重启；启动自检 `_checkAntiPopupBlockAtStartup()` 发现被更新或重装还原了就弹一次 InfoBar 让用户「立即恢复」，不静默自动重启以免成环。源码运行和非 Windows 只存设置、不改 exe。管理模式分自动/手动（`cfg.antiPopupBlockMode`，默认自动）：手动管理用 `randomDisguisedName()` 随机换名或 `normalizeCustomName()` 校验过的自定义名（最低校验：非空、不等于诚实名，不拦中文）；自动管理按 `cfg.antiPopupBlockRotateDays`（默认 3，1–30）在**启动时**经 `startupRotationPlan()` 判到点，由 MainWindow 的 `_maybeAutoRotateDisguise()` 换随机名重启，**先把 `cfg.antiPopupBlockRotatedOn`（上次换名日期）落定再重启**以防改名失败时成环；到点语义与 `interval_tasks` 同形（经 `clock.py`、错过只补一次、基线落未来当时钟错）。切模式、改间隔不重启。开机静默启动时轮换重启必须仍静默：`_applyAntiPopupBlock(silent=True)` 给 updater 传静默标志，updater 重启带 `--silence`，否则主窗口会在教室投影上凭空弹出。理由见 `docs/adr/0014-anti-window-close-productname-disguise.md`。
+**`app/common/anti_popup_block.py` 独占反弹窗拦截的规则。** 开着时的伪装产品名默认 `DJCat Pro`，`randomDisguisedName()` 换成英文词拼接加一位 2–9 数字的随机名；`desiredProductName()` 给出目标名（开=伪装名、关=`APP_NAME`），`needsReapply()` 用 `exeProductName()`（只读读取磁盘上现有产品名，读不到返回 None、不触发）比对决定要不要重套，`tipShouldShow()` 决定反拦截提示显隐。它不写文件：运行中的 exe 被锁，改写交给 `updater.exe` 的 `--stamp-product-name` 模式在退出后做——从现有版本资源重建 VS_VERSIONINFO、只换 ProductName/FileDescription、带备份校验和失败回滚，再降权重启（和 Client Update 共用那套等待退出、提权、降权重启）。界面开关、换名按钮和反拦截提示由设置页拥有：提示经 `SettingSectionView.addTip()` 放在根 Section 最前面，随根页滚动、随根页一起被推走，藏起来时连同它和第一行之间的间距一起收掉；配色照 InfoBar 的 Warning 档，黄色只为醒目。「前往开启」不替用户进去：只在根页把「反弹窗拦截」导航行描边（与 Setting Suggestion 同一个 `SettingCardHighlight`），看不全时才经 `scrollCardIntoView()` 滚到露出来。开关所在的「反弹窗拦截」是根下叶子 Section、可被设置搜索搜到。开/关/换名都要重启，由 MainWindow 的 `_applyAntiPopupBlock(silent=)` 起 updater 后退出；Client Update 把目标名作第 6 个参数交给 updater，换完目录重启前顺带重套，省一次重启；启动自检 `_checkAntiPopupBlockAtStartup()` 发现被更新或重装还原了就弹一次 InfoBar 让用户「立即恢复」，不静默自动重启以免成环。源码运行和非 Windows 只存设置、不改 exe。管理模式分自动/手动（`cfg.antiPopupBlockMode`，默认自动）：手动管理用 `randomDisguisedName()` 随机换名或 `normalizeCustomName()` 校验过的自定义名（最低校验：非空、不等于诚实名，不拦中文）；自动管理按 `cfg.antiPopupBlockRotateDays`（默认 3，1–30）在**启动时**经 `startupRotationPlan()` 判到点，由 MainWindow 的 `_maybeAutoRotateDisguise()` 换随机名重启，**先把 `cfg.antiPopupBlockRotatedOn`（上次换名日期）落定再重启**以防改名失败时成环；到点语义与 `interval_tasks` 同形（经 `clock.py`、错过只补一次、基线落未来当时钟错）。切模式、改间隔不重启。开机静默启动时轮换重启必须仍静默：`_applyAntiPopupBlock(silent=True)` 给 updater 传静默标志，updater 重启带 `--silence`，否则主窗口会在教室投影上凭空弹出。理由见 `docs/adr/0014-anti-window-close-productname-disguise.md`。
 
 ### CI
 
@@ -383,7 +385,7 @@ Projection 编辑器只在自己可见且处于整理模式时查额度：显示
 | `app/common/logs.py` | Log 的位置、14 天保留、Cache 中可清理的日志，以及旧 `APP_DIR\Log` 的迁入 |
 | `app/common/error_report.py` | Error Report 的客户端一侧：整理调用栈、去掉安装位置和用户名、同一次运行去重、后台上报 |
 | `app/common/anti_popup_block.py` | 反弹窗拦截的规则：伪装产品名的取值与随机换名、只读读出磁盘上现有产品名、启动自检与提示显隐；不写 exe、不碰 Qt |
-| `app/view/components/anti_block_tip.py` | 反拦截提示横幅：文案、× 本次隐藏、「前往开启」与「不再显示」三个信号；显隐与持久化由设置页决定 |
+| `app/view/components/anti_block_tip.py` | 反拦截提示：InfoBar Warning 配色的黄色卡片，文案、× 本次隐藏、「前往开启」与「不再显示」三个信号；显隐与持久化由设置页决定 |
 | `pyqt_github_markdown/` | 项目内置 Markdown 渲染器；不承载 DJCat 业务规则 |
 
 `app/common/application_version.py` 只包含架构和版本比较等纯函数，允许 MainWindow 在启动阶段导入。重量较大的 `app/common/application_store.py`、Custom Home Card 编辑器和 Markdown 渲染器分别在对应页面、编辑操作或更新日志首次需要时导入；`edge_tts` 依赖只在实际查询音色或合成语音时导入。
