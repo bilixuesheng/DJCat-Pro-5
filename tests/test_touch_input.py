@@ -1,15 +1,26 @@
 from unittest import TestCase
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, QTime
-from PySide6.QtGui import QAction, QIcon, QInputDevice, QMouseEvent
+from PySide6.QtGui import QAction, QHoverEvent, QIcon, QInputDevice, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
-from qfluentwidgets import CardWidget, LineEdit, RoundMenu
+from qfluentwidgets import (
+    CardWidget,
+    ComboBox,
+    LineEdit,
+    RoundMenu,
+    Theme,
+    qconfig,
+    setTheme,
+)
+from qfluentwidgets import FluentIcon as FIF
 
 from app.platform.touch_input import (
     enableTouchPressFeedback,
     setTouchPressFeedbackEnabled,
 )
+from app.view.components.font_picker import FontChoice, FontList
+from app.view.components.icon_grid import TOOLTIP_DELAY_MS, IconGrid, IconGridItem
 from app.view.components.task_picker import TouchTimePicker
 from app.view.shell.tray import buildTrayMenu
 
@@ -150,43 +161,221 @@ class TouchPressFeedbackTest(TestCase):
 
         self.assertFalse(panel.yesButton.isDown())
 
-    def _assertMenuRowLightsUpWhileTheFingerIsDown(self, menu):
-        # 菜单的行不是按钮：鼠标悬停时那一行亮起，手指按住时也一样；只改样子，不触发。
+    def _mousePressLook(self, widget, point):
+        """What ``widget`` shows under a mouse held down at ``point``: hovered and pressed."""
+        local = QPointF(point)
+        QApplication.sendEvent(
+            widget,
+            QHoverEvent(
+                QEvent.Type.HoverMove, local, QPointF(widget.mapToGlobal(point)), local
+            ),
+        )
+        QTest.mousePress(widget, Qt.MouseButton.LeftButton, pos=point)
+        return widget.grab().toImage()
+
+    def _openMenu(self, menu, popup=None):
         # 照真实的样子展开到底：展开途中的遮罩还盖着没露出来的行。
-        RoundMenu.exec(menu, QPoint(200, 200))
+        if popup is None:
+            RoundMenu.exec(menu, QPoint(200, 200))
+        menu = popup or menu
         self.addCleanup(menu.deleteLater)
         self.addCleanup(menu.close)
         reveal = menu.aniManager.ani
         reveal.setCurrentTime(reveal.duration())
         self.app.processEvents()
+        return menu
+
+    def _triggered(self, menu):
         triggered = []
-        menu.triggered.connect(triggered.append)
         for action in menu.menuActions():
             action.triggered.connect(lambda checked=False: triggered.append(True))
+        return triggered
+
+    def _actionRows(self, menu):
+        view = menu.view
+        return [
+            row
+            for row in range(view.count())
+            if view.item(row).flags() & Qt.ItemFlag.ItemIsSelectable
+        ]
+
+    def _rowPoint(self, menu, row):
+        return menu.view.visualItemRect(menu.view.item(row)).center()
+
+    def _assertMenuRowLooksPressedWhileTheFingerIsDown(self, menu):
+        # 菜单的行不是按钮：鼠标按住时那一行变成选中，底色变深、文字变淡；手指按住时
+        # 一模一样，只是不触发。
+        menu = self._openMenu(menu)
+        triggered = self._triggered(menu)
+        viewport = menu.view.viewport()
+        point = self._rowPoint(menu, self._actionRows(menu)[1])
+        idle = viewport.grab().toImage()
+
+        self._press(viewport, point)
+        held = viewport.grab().toImage()
+        self._release(viewport, point)
+
+        self.assertEqual(viewport.grab().toImage(), idle)
+        self.assertEqual(triggered, [])
+        self.assertEqual(held, self._mousePressLook(viewport, point))
+
+    def _themes(self):
+        self.addCleanup(setTheme, qconfig.themeMode.value)
+        for theme in (Theme.LIGHT, Theme.DARK):
+            setTheme(theme)
+            self.app.processEvents()
+            yield theme
+
+    def testMenuRowLooksPressedWhileTheFingerIsDown(self):
+        for theme in self._themes():
+            with self.subTest(theme=theme):
+                menu = RoundMenu()
+                for text in ("第一项", "第二项", "第三项"):
+                    menu.addAction(QAction(text, menu))
+                self._assertMenuRowLooksPressedWhileTheFingerIsDown(menu)
+
+    def testTrayMenuRowLooksPressedWhileTheFingerIsDown(self):
+        for theme in self._themes():
+            with self.subTest(theme=theme):
+                self._assertMenuRowLooksPressedWhileTheFingerIsDown(
+                    buildTrayMenu([], QIcon()).menu
+                )
+
+    def _openDropDown(self, *texts):
+        combo = ComboBox()
+        combo.addItems(list(texts))
+        combo.setCurrentIndex(0)
+        self._show(combo)
+        combo._showComboMenu()
+        return combo, self._openMenu(None, QApplication.activePopupWidget())
+
+    def testDropDownIndicatorFollowsTheFingerAndGoesBackWhenItSlidesOff(self):
+        # 鼠标按住下拉菜单的一行时，主题色竖条从当前选项跳到这一行；手指也一样。
+        # 手指挪开就不算点按，竖条回到当前选项。
+        combo, menu = self._openDropDown("每天", "每周", "每月")
         view = menu.view
         viewport = view.viewport()
-        row = view.visualItemRect(view.item(0))
-        # 行的底色在左边距之内，避开文字和图标。
-        point = QPoint(row.left() + 9, row.center().y())
+        point = self._rowPoint(menu, 2)
+        idle = viewport.grab().toImage()
 
-        def rowColor():
-            return viewport.grab().toImage().pixelColor(point).rgba()
-
-        idle = rowColor()
         self._press(viewport, point)
-        self.assertNotEqual(rowColor(), idle)
-        self._release(viewport, point)
-        self.assertEqual(rowColor(), idle)
-        self.assertEqual(triggered, [])
+        self.assertEqual(view.currentRow(), 2)
+        held = viewport.grab().toImage()
+        moved = point + QPoint(0, 15)
+        QTest.touchEvent(viewport, self.device).move(0, moved, viewport).commit()
+        self.app.processEvents()
 
-    def testMenuRowLightsUpWhileTheFingerIsDown(self):
+        self.assertEqual(view.currentRow(), 0)
+        self.assertEqual([view.row(item) for item in view.selectedItems()], [0])
+        self.assertEqual(viewport.grab().toImage(), idle)
+        self._release(viewport, moved)
+        self.assertEqual(combo.currentIndex(), 0)
+        self.assertEqual(held, self._mousePressLook(viewport, point))
+
+    def testWindowsTapOnAMenuRowTriggersItOnce(self):
         menu = RoundMenu()
-        for text in ("第一项", "第二项", "第三项"):
+        for text in ("第一项", "第二项"):
             menu.addAction(QAction(text, menu))
-        self._assertMenuRowLightsUpWhileTheFingerIsDown(menu)
+        menu = self._openMenu(menu)
+        triggered = self._triggered(menu)
+        viewport = menu.view.viewport()
+        point = self._rowPoint(menu, 1)
 
-    def testTrayMenuRowLightsUpWhileTheFingerIsDown(self):
-        self._assertMenuRowLightsUpWhileTheFingerIsDown(buildTrayMenu([], QIcon()).menu)
+        self._press(viewport, point)
+        self._release(viewport, point)
+        QTest.mouseClick(viewport, Qt.MouseButton.LeftButton, pos=point)
+
+        self.assertEqual(triggered, [True])
+
+    def testWindowsPressBeforeTheLiftKeepsTheMenuRowPressed(self):
+        menu = RoundMenu()
+        for text in ("第一项", "第二项"):
+            menu.addAction(QAction(text, menu))
+        menu = self._openMenu(menu)
+        triggered = self._triggered(menu)
+        viewport = menu.view.viewport()
+        point = self._rowPoint(menu, 1)
+
+        self._press(viewport, point)
+        QTest.mousePress(viewport, Qt.MouseButton.LeftButton, pos=point)
+        self._release(viewport, point)
+        self.assertEqual(menu.view.currentRow(), 1)
+        QTest.mouseRelease(viewport, Qt.MouseButton.LeftButton, pos=point)
+
+        self.assertEqual(triggered, [True])
+
+    def testDropDownArrowSinksWhileTheFingerIsDownAndSpringsBack(self):
+        combo = ComboBox()
+        combo.addItems(["每天", "每周"])
+        self._show(combo)
+        arrow = combo.arrowAni
+
+        point = self._press(combo)
+        QTest.qWait(arrow.ani.duration() + 50)
+        self.assertEqual(arrow.y, arrow.maxOffset)
+        self._release(combo, point)
+
+        # 和鼠标松开一样弹回去。
+        self.assertEqual(arrow.ani.endValue(), 0)
+        QTest.qWait(arrow.ani.duration() + 50)
+        self.assertEqual(arrow.y, 0)
+        self.assertFalse(combo.isPressed)
+        self.assertIsNone(QApplication.activePopupWidget())
+
+    def testWindowsPressBeforeTheLiftKeepsTheDropDownArrowDown(self):
+        combo = ComboBox()
+        combo.addItems(["每天", "每周"])
+        self._show(combo)
+        arrow = combo.arrowAni
+
+        point = self._press(combo)
+        QTest.mousePress(combo, Qt.MouseButton.LeftButton, pos=point)
+        self._release(combo, point)
+
+        self.assertEqual(arrow.ani.endValue(), arrow.maxOffset)
+        self.assertTrue(combo.isPressed)
+        QTest.mouseRelease(combo, Qt.MouseButton.LeftButton, pos=point)
+        popup = QApplication.activePopupWidget()
+        self.assertIsNotNone(popup)
+        popup.close()
+
+    def testFontRowLooksPressedWhileTheFingerIsDown(self):
+        fonts = FontList()
+        fonts.setChoices([FontChoice(str(index), f"字体 {index}", ()) for index in range(3)])
+        fonts.setFixedWidth(300)
+        clicks = []
+        fonts.choiceClicked.connect(clicks.append)
+        self._show(fonts)
+        point = fonts.rowRect(1).center()
+        idle = fonts.grab().toImage()
+
+        self._press(fonts, point)
+        held = fonts.grab().toImage()
+        self._release(fonts, point)
+
+        self.assertEqual(fonts.grab().toImage(), idle)
+        self.assertEqual(clicks, [])
+        self.assertEqual(held, self._mousePressLook(fonts, point))
+
+    def testIconCellLooksPressedWhileTheFingerIsDownWithoutATooltip(self):
+        grid = IconGrid()
+        grid.setItems([IconGridItem(str(index), FIF.ADD, "添加") for index in range(6)])
+        grid.setFixedWidth(300)
+        clicks = []
+        grid.iconClicked.connect(clicks.append)
+        self._show(grid)
+        point = grid.cellRect(1).center()
+        idle = grid.grab().toImage()
+
+        self._press(grid, point)
+        QTest.qWait(TOOLTIP_DELAY_MS + 50)
+        self.assertEqual(grid.toolTipText(), "")
+        held = grid.grab().toImage()
+        self._release(grid, point)
+
+        self.assertEqual(grid.grab().toImage(), idle)
+        self.assertEqual(clicks, [])
+        self.assertEqual(held, self._mousePressLook(grid, point))
 
     def testMovingTheFingerAwayDropsThePressedLook(self):
         button = QPushButton("确定")

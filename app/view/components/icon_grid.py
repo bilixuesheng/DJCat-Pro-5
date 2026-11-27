@@ -256,11 +256,22 @@ class IconGrid(QWidget):
         self._icons[key] = pixmap
         return pixmap
 
+    def showTouchPress(self, position: QPoint) -> None:
+        self._press(self.indexAt(position))
+
     def cancelTouchPress(self) -> None:
-        if self._pressed is None:
-            return
-        self._pressed = None
-        self.update()
+        # 手指不会悬停：按下的样子收回时，按下时带上的悬停一起收回。
+        pressed, self._pressed = self._pressed, None
+        self._setHover(None)
+        if pressed is not None:
+            self.update(self.cellRect(pressed))
+
+    def _press(self, index: int | None) -> None:
+        self._pressed = index
+        self._setHover(index)
+        self._hideToolTip()
+        if index is not None:
+            self.update(self.cellRect(index))
 
     def _setHover(self, index: int | None) -> None:
         if index == self._hover:
@@ -289,12 +300,7 @@ class IconGrid(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(event)
             return
-        index = self.indexAt(event.position().toPoint())
-        self._pressed = index
-        self._setHover(index)
-        self._hideToolTip()
-        if index is not None:
-            self.update(self.cellRect(index))
+        self._press(self.indexAt(event.position().toPoint()))
         event.accept()
 
     def mouseReleaseEvent(self, event) -> None:

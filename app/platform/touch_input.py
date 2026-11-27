@@ -5,13 +5,21 @@ press-and-hold, so a control under a still finger shows nothing until the lift. 
 Qt synthesize the press at touch-down instead (``nomousefromtouch``) bypassed Windows'
 own handling and broke press-and-hold menus, text selection, title-bar moves and popup
 buttons; see docs/adr/0008. So the input stays Windows', and this only paints the
-control under the finger as pressed until Windows' own press takes over or the touch
-ends.
+control under the finger the way a held mouse button would, until Windows' own press
+takes over or the touch ends.
 """
 
 import math
 
-from PySide6.QtCore import QEvent, QObject, QPointF, Qt
+from PySide6.QtCore import (
+    QEvent,
+    QItemSelection,
+    QItemSelectionModel,
+    QObject,
+    QPersistentModelIndex,
+    QPointF,
+    Qt,
+)
 from PySide6.QtGui import QHoverEvent, QWindow
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -22,6 +30,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QLineEdit,
 )
+from qfluentwidgets.common.animation import TranslateYAnimation
 from qfluentwidgets.components.widgets.menu import MenuActionListWidget
 from shiboken6 import isValid
 
@@ -48,12 +57,21 @@ def _handlesTouchItself(widget) -> bool:
     return False
 
 
+def _paintsItsOwnPress(widget) -> bool:
+    # 自绘多个可按区域的控件（字体列表、图标格）自己知道手指下是哪一格。
+    return callable(getattr(widget, "showTouchPress", None)) and callable(
+        getattr(widget, "cancelTouchPress", None)
+    )
+
+
 def _pressable(widget):
-    """The control a mouse press at ``widget`` would push down, if any."""
+    """The widget a mouse press at ``widget`` would land on and push down, if any."""
     while widget is not None:
         if isinstance(widget, MenuActionListWidget):
-            # 下拉框、右键菜单、托盘菜单和搜索建议的行不是控件，按下的是整个视口。
+            # 下拉框、右键菜单、托盘菜单和搜索建议的行不是控件，鼠标按下落在整个视口上。
             return widget.viewport()
+        if _paintsItsOwnPress(widget):
+            return widget if widget.isEnabled() else None
         if isinstance(widget, QAbstractButton):
             if widget.isEnabled() and not widget.autoRepeat():
                 return widget
@@ -70,30 +88,155 @@ def _isMenuViewport(widget) -> bool:
     return isinstance(widget.parentWidget(), MenuActionListWidget)
 
 
-def _showPressed(widget, pressed: bool, position) -> None:
-    if _isMenuViewport(widget):
-        # 菜单行的样子跟着悬停走：给视口补一个悬停，手指下那一行就和鼠标指着时一样亮。
-        local = QPointF(widget.mapFromGlobal(position))
-        eventType = QEvent.Type.HoverMove if pressed else QEvent.Type.HoverLeave
-        QApplication.sendEvent(
-            widget, QHoverEvent(eventType, local, QPointF(position), local)
-        )
-        return
-    if isinstance(widget, QAbstractButton):
-        # setDown 只改外观，不发 pressed／clicked。
-        widget.setDown(pressed)
-    if isinstance(getattr(widget, "isPressed", None), bool):
-        widget.isPressed = pressed
-        if hasattr(widget, "_updateBackgroundColor"):
-            widget._updateBackgroundColor()
+def _arrow(widget):
+    # 下拉框和下拉按钮的箭头跟着鼠标按下、松开下沉和弹回，不看 isDown／isPressed。
+    arrow = getattr(widget, "arrowAni", None)
+    return arrow if isinstance(arrow, TranslateYAnimation) else None
+
+
+def _repaintPressed(widget) -> None:
+    if hasattr(widget, "_updateBackgroundColor"):
+        widget._updateBackgroundColor()
+    else:
+        widget.update()
+
+
+def dropPressedLook(widget) -> None:
+    """Take back a button's or card's pressed look as its release would; idempotent.
+
+    For a press whose release will never reach the widget, such as a touch that the
+    scroll area turned into a scroll after Windows had already sent the press.
+    """
+    if isinstance(widget, QAbstractButton) and widget.isDown():
+        widget.setDown(False)
+    if getattr(widget, "isPressed", None) is True:
+        widget.isPressed = False
+        _repaintPressed(widget)
+    arrow = _arrow(widget)
+    if arrow is not None and arrow.ani.endValue() == arrow.maxOffset:
+        arrow._onRelease(None)
+
+
+def _sendHover(viewport, eventType, local, position) -> None:
+    QApplication.sendEvent(
+        viewport, QHoverEvent(eventType, QPointF(local), QPointF(position), QPointF(local))
+    )
+
+
+def _withoutAutoScroll(view, change) -> None:
+    # 鼠标按下选中一行时 Qt 同样关掉自动滚动，按住的行不会被挪走；还原时也不能把
+    # 列表滚回原来那一项。
+    autoScroll = view.hasAutoScroll()
+    view.setAutoScroll(False)
+    try:
+        change()
+    finally:
+        view.setAutoScroll(autoScroll)
+
+
+def _clickFocusTarget(widget):
+    # 鼠标按下时 Qt 把焦点交给按下处往外第一个接受点击焦点的控件。
+    while widget is not None:
+        if widget.isEnabled() and (
+            widget.focusPolicy().value & Qt.FocusPolicy.ClickFocus.value
+        ):
+            return widget
+        if widget.isWindow():
+            return None
+        widget = widget.parentWidget()
+    return None
+
+
+def _takeClickFocus(widget):
+    """Move focus as a mouse press on ``widget`` would; returns what gives it back."""
+    target = _clickFocusTarget(widget)
+    if target is None or target.hasFocus():
+        return lambda: None
+    previous = QApplication.focusWidget()
+    target.setFocus(Qt.FocusReason.MouseFocusReason)
+
+    def giveBack():
+        if not isValid(target) or not target.hasFocus():
+            return
+        # 别的窗口里的焦点不能趁弹出菜单开着时抢回去，菜单关闭时 Qt 自己会还给它。
+        if previous is not None and isValid(previous) and previous.window() is target.window():
+            previous.setFocus(Qt.FocusReason.OtherFocusReason)
         else:
-            widget.update()
+            target.clearFocus()
+
+    return giveBack
+
+
+def _pressMenuRow(viewport, position):
+    view = viewport.parentWidget()
+    local = viewport.mapFromGlobal(position)
+    # 鼠标按住一行时，它既是悬停的那一行，也是被按下选中的那一行：底色变深，列表拿到
+    # 焦点后文字变淡，下拉框的主题色竖条也跳过来。
+    _sendHover(viewport, QEvent.Type.HoverMove, local, position)
+    giveBackFocus = _takeClickFocus(viewport)
+    selection = view.selectionModel()
+    index = view.indexAt(local)
+    previous = None
+    enabled = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+    if index.isValid() and (index.flags() & enabled) == enabled:
+        previous = (
+            QItemSelection(selection.selection()),
+            QPersistentModelIndex(selection.currentIndex()),
+        )
+
+        def select():
+            selection.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.NoUpdate)
+            selection.select(
+                index,
+                QItemSelectionModel.SelectionFlag.ClearAndSelect
+                | QItemSelectionModel.SelectionFlag.Rows,
+            )
+
+        _withoutAutoScroll(view, select)
+
+    def release():
+        if not isValid(view):
+            return
+        if previous is not None:
+            selected, current = previous
+
+            def restore():
+                selection.select(selected, QItemSelectionModel.SelectionFlag.ClearAndSelect)
+                selection.setCurrentIndex(current, QItemSelectionModel.SelectionFlag.NoUpdate)
+
+            _withoutAutoScroll(view, restore)
+        giveBackFocus()
+        _sendHover(viewport, QEvent.Type.HoverLeave, local, position)
+
+    return release
+
+
+def _press(widget, position):
+    """Paint ``widget`` as a held mouse button at the global ``position`` would.
+
+    Returns what takes the look back. Nothing here emits pressed or clicked.
+    """
+    if _isMenuViewport(widget):
+        return _pressMenuRow(widget, position)
+    if _paintsItsOwnPress(widget):
+        widget.showTouchPress(widget.mapFromGlobal(position))
+        return widget.cancelTouchPress
+    if isinstance(widget, QAbstractButton):
+        widget.setDown(True)
+    if isinstance(getattr(widget, "isPressed", None), bool):
+        widget.isPressed = True
+        _repaintPressed(widget)
+    arrow = _arrow(widget)
+    if arrow is not None:
+        arrow._onPress(None)
+    return lambda: dropPressedLook(widget)
 
 
 class _TouchPressFeedback(QObject):
     def __init__(self, application):
         super().__init__(application)
         self.target = None
+        self.release = None
         self.touchStart = None
         application.installEventFilter(self)
 
@@ -113,7 +256,7 @@ class _TouchPressFeedback(QObject):
         ):
             # Windows 自己的按下到了，按下态从此归控件本身管。连点的第二下 Qt 只给控件发
             # 双击、不发按下；漏掉它的话抬手时按钮被复位，随后的松开就点不中了。
-            self.target = None
+            self.target = self.release = None
         return False
 
     def _begin(self, event):
@@ -127,7 +270,7 @@ class _TouchPressFeedback(QObject):
             return
         self.target = target
         self.touchStart = position
-        _showPressed(target, True, position)
+        self.release = _press(target, position)
 
     def _follow(self, event):
         if not event.points():
@@ -139,10 +282,10 @@ class _TouchPressFeedback(QObject):
             self._end()
 
     def _end(self):
-        target = self.target
-        self.target = None
+        target, release = self.target, self.release
+        self.target = self.release = None
         if target is not None and isValid(target):
-            _showPressed(target, False, self.touchStart)
+            release()
 
 
 def setTouchPressFeedbackEnabled(application, enabled: bool) -> None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontMetrics, QPainter
 from PySide6.QtWidgets import QLabel, QScroller, QSizePolicy, QWidget
 from qfluentwidgets import (
@@ -204,11 +204,21 @@ class FontList(QWidget):
         )
         painter.drawText(textRect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
 
+    def showTouchPress(self, position: QPoint) -> None:
+        self._press(self.indexAt(position.y()))
+
     def cancelTouchPress(self) -> None:
-        if self._pressed is None:
-            return
+        # 手指不会悬停：按下的样子收回时，按下时带上的悬停一起收回。
         pressed, self._pressed = self._pressed, None
-        self.update(self.rowRect(pressed))
+        self._setHover(None)
+        if pressed is not None:
+            self.update(self.rowRect(pressed))
+
+    def _press(self, index: int | None) -> None:
+        self._pressed = index
+        self._setHover(index)
+        if index is not None:
+            self.update(self.rowRect(index))
 
     def _setHover(self, index: int | None) -> None:
         if index == self._hover:
@@ -226,11 +236,7 @@ class FontList(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(event)
             return
-        index = self.indexAt(event.position().y())
-        self._pressed = index
-        self._setHover(index)
-        if index is not None:
-            self.update(self.rowRect(index))
+        self._press(self.indexAt(event.position().y()))
         event.accept()
 
     def mouseReleaseEvent(self, event) -> None:
